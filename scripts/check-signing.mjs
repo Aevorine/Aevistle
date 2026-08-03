@@ -38,6 +38,23 @@ const run = (cmd, args, opts = {}) =>
 
 console.log('\n  Release signature')
 
+/*
+ * Resolved before anything else touches the network.
+ *
+ * It sat below the GitHub call in an earlier version, which hid a worse
+ * mistake: the constant was never declared at all, so `run(GPG, …)` further
+ * down was a ReferenceError waiting on the one code path that only runs once a
+ * release *is* signed. It would have appeared the first time the feature
+ * worked, which is the least useful moment for a defect to surface.
+ */
+const GPG = findGpg()
+if (!GPG) {
+  // Not a failure of the release — this machine simply cannot check it.
+  console.log(`  ⚠ ${GPG_HINT}`)
+  console.log('    The signature was NOT verified this run.\n')
+  process.exit(0)
+}
+
 const latest = run('gh', ['release', 'view', '--repo', REPO, '--json', 'tagName,assets'])
 if (latest.status !== 0) {
   console.log('  ⚠ Could not reach GitHub. The release was NOT checked this run.')
