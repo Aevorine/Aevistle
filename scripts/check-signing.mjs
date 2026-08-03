@@ -21,7 +21,7 @@
  */
 
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { findGpg, GPG_HINT } from './gpg-path.mjs'
@@ -94,7 +94,19 @@ try {
     }
   }
 
+  /*
+   * A throwaway home for the verification.
+   *
+   * Not the signing home and not the user's: this check exists to reproduce
+   * what a stranger can do with nothing but the published files, and running
+   * it against a keyring that already holds the key would confirm almost
+   * nothing. The empty common.conf is what stops Git for Windows' gpg writing
+   * `use-keyboxd` here and then failing to start the daemon.
+   */
+  writeFileSync(path.join(dir, 'common.conf'), '')
   const verified = run(GPG, [
+    '--homedir',
+    dir,
     '--no-default-keyring',
     '--keyring',
     path.join(dir, 'aevistle-public-key.asc'),

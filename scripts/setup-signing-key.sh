@@ -26,6 +26,7 @@
 set -euo pipefail
 
 HOME_DIR="$HOME/.aevistle"
+GNUPG_DIR="$HOME_DIR/gnupg"
 PROPS="$HOME_DIR/gpg.properties"
 NAME="Aevistle Release Signing"
 EMAIL="199806313+Fusheng201@users.noreply.github.com"
@@ -48,6 +49,20 @@ command -v gpg >/dev/null 2>&1 || {
   exit 1
 }
 
+# A GNUPGHOME of this project's own, beside the Android signing key.
+#
+# On Windows this is load-bearing: Git for Windows' gpg writes `use-keyboxd`
+# into the global ~/.gnupg/common.conf and then looks for that daemon at a
+# POSIX path that only resolves inside MSYS, so signing works from Git Bash and
+# fails from PowerShell and from Node. Elsewhere it simply keeps the project's
+# key out of the user's personal keyring, which is worth having anyway.
+mkdir -p "$GNUPG_DIR"
+chmod 700 "$GNUPG_DIR"
+# Empty rather than absent: an empty file is what stops gpg writing
+# `use-keyboxd` into it on first use.
+: > "$GNUPG_DIR/common.conf"
+
+echo "Key home: $GNUPG_DIR"
 echo "Generating a 4096-bit RSA signing key. This takes a minute or two."
 
 PASS="$(head -c 32 /dev/urandom | base64 | tr -d '\n=')"
@@ -66,9 +81,9 @@ Passphrase: $PASS
 %commit
 PARAMSEOF
 
-gpg --batch --gen-key "$PARAMS"
+gpg --homedir "$GNUPG_DIR" --batch --gen-key "$PARAMS"
 
-FPR="$(gpg --list-keys --with-colons "$EMAIL" | awk -F: '/^fpr:/ {print $10; exit}')"
+FPR="$(gpg --homedir "$GNUPG_DIR" --list-keys --with-colons "$EMAIL" | awk -F: '/^fpr:/ {print $10; exit}')"
 [ -n "$FPR" ] || { echo "Could not read the fingerprint back — key generation failed."; exit 1; }
 
 umask 077
@@ -81,21 +96,23 @@ cat > "$PROPS" <<PROPSEOF
 fingerprint=$FPR
 passphrase=$PASS
 uid=$NAME <$EMAIL>
+gnupghome=$GNUPG_DIR
 PROPSEOF
 
 # An armoured backup of the secret key, so losing the GnuPG home does not mean
 # losing the ability to sign — the same reason the .jks lives here rather than
 # only inside a build tool's cache.
-gpg --batch --yes --pinentry-mode loopback --passphrase "$PASS" \
+gpg --homedir "$GNUPG_DIR" --batch --yes --pinentry-mode loopback --passphrase "$PASS" \
     --export-secret-keys --armor "$FPR" > "$HOME_DIR/aevistle-signing-key.asc"
-gpg --armor --export "$FPR" > "$HOME_DIR/aevistle-public-key.asc"
+gpg --homedir "$GNUPG_DIR" --armor --export "$FPR" > "$HOME_DIR/aevistle-public-key.asc"
 
 echo
 echo "Done. Fingerprint:"
 echo "  $FPR"
 echo
 echo "Written to $HOME_DIR:"
-echo "  gpg.properties            fingerprint + passphrase"
+echo "  gpg.properties            fingerprint, passphrase, key home
+  gnupg/                    this project's own GnuPG home"
 echo "  aevistle-signing-key.asc  encrypted backup of the private key"
 echo "  aevistle-public-key.asc   the public half, published with each release"
 echo

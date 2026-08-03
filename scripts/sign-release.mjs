@@ -78,6 +78,21 @@ const props = Object.fromEntries(
 const { fingerprint, passphrase } = props
 if (!fingerprint || !passphrase) die(`${PROPS} is missing fingerprint or passphrase.`)
 
+/*
+ * The project's own GnuPG home, not the user's.
+ *
+ * Written by the setup script into ~/.aevistle/gnupg, for a Windows-specific
+ * reason worth knowing: Git for Windows' gpg puts `use-keyboxd` in the global
+ * ~/.gnupg/common.conf, and then looks for that daemon at a POSIX path which
+ * only resolves inside MSYS. Signing therefore works from Git Bash and fails
+ * from PowerShell and from Node — which is where these scripts actually run.
+ *
+ * Falls back to the default home for installs made before this existed, and
+ * for Linux and macOS where none of it applies.
+ */
+const GNUPGHOME = props.gnupghome && existsSync(props.gnupghome) ? props.gnupghome : null
+const homeArgs = GNUPGHOME ? ['--homedir', GNUPGHOME] : []
+
 if (!existsSync(SUMS)) die(`${SUMS} not found.`, 'Build the release first.')
 
 // --- sign -------------------------------------------------------------------
@@ -86,6 +101,7 @@ console.log(`\n  Signing ${SUMS}`)
 console.log(`  key ${fingerprint}`)
 
 const signed = run(GPG, [
+  ...homeArgs,
   '--batch',
   '--yes',
   '--pinentry-mode',
@@ -108,7 +124,15 @@ if (signed.status !== 0) die('gpg refused to sign.', (signed.stderr || '').trim(
 // trusts its own secret key unconditionally, so verifying there would confirm
 // almost nothing. This is the check a stranger would run.
 
-const verified = run(GPG, ['--no-default-keyring', '--keyring', PUBLIC_KEY, '--verify', SIG, SUMS])
+const verified = run(GPG, [
+  ...homeArgs,
+  '--no-default-keyring',
+  '--keyring',
+  PUBLIC_KEY,
+  '--verify',
+  SIG,
+  SUMS,
+])
 const verifyOut = `${verified.stdout ?? ''}${verified.stderr ?? ''}`
 if (verified.status !== 0 || !/Good signature/i.test(verifyOut)) {
   die('The signature does not verify against the published public key.', verifyOut.trim().split('\n').pop())

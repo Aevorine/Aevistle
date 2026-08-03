@@ -7,8 +7,21 @@
   scripts cannot see and everything afterwards reports "no signing key" while a
   key plainly exists.
 
-  gpg itself is usually not on PATH in PowerShell. Git for Windows ships one
-  under its own install directory, wherever that was put; this looks there.
+  Two Windows-specific things this handles, both of which stop gpg dead:
+
+  1. gpg is usually not on PATH. Git for Windows ships one under its own
+     install directory, wherever that was put.
+
+  2. Git for Windows' gpg writes `use-keyboxd` into ~/.gnupg/common.conf, which
+     makes every later run require the keyboxd daemon. gpg then looks for it at
+     the POSIX path /usr/lib/gnupg/keyboxd, which only resolves inside the MSYS
+     environment — so it works in Git Bash and fails from PowerShell, from Node,
+     and from anything the release scripts actually run under.
+
+     The fix is not to edit the user's global GnuPG configuration. This project
+     gets its own GNUPGHOME under ~/.aevistle, beside the Android signing key,
+     with a config that does not ask for a daemon. Nothing outside this project
+     changes, and the key travels with the rest of the key material.
 
   Why this is separate from the release flow: generating a private key must not
   be repeatable by accident. A second key produces releases signed with
@@ -22,12 +35,13 @@
 
 $ErrorActionPreference = 'Stop'
 
-$homeDir = Join-Path $HOME '.aevistle'
-$props   = Join-Path $homeDir 'gpg.properties'
-$name    = 'Aevistle Release Signing'
+$homeDir  = Join-Path $HOME '.aevistle'
+$gnupgDir = Join-Path $homeDir 'gnupg'
+$props    = Join-Path $homeDir 'gpg.properties'
+$name     = 'Aevistle Release Signing'
 # The GitHub noreply address on purpose: a GPG uid is published to everyone who
 # ever verifies a download, and the real address is a privacy red line here.
-$email   = '199806313+Fusheng201@users.noreply.github.com'
+$email    = '199806313+Fusheng201@users.noreply.github.com'
 
 New-Item -ItemType Directory -Force -Path $homeDir | Out-Null
 
@@ -51,19 +65,36 @@ if (-not $gpg) {
         $candidates += "${d}:\Program Files\GnuPG\bin\gpg.exe"
         $candidates += "${d}:\APPS\Git\usr\bin\gpg.exe"
     }
-    # Last resort: look beside git itself, which covers an install nobody would
-    # guess the path of.
     $git = (Get-Command git -ErrorAction SilentlyContinue).Source
-    if ($git) {
-        $candidates += Join-Path (Split-Path (Split-Path $git)) 'usr\bin\gpg.exe'
-    }
+    if ($git) { $candidates += Join-Path (Split-Path (Split-Path $git)) 'usr\bin\gpg.exe' }
     $gpg = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
 }
 if (-not $gpg) {
     Write-Error 'gpg not found. It ships with Git for Windows (usr\bin\gpg.exe) or Gpg4win.'
     exit 1
 }
+
+# --- a GNUPGHOME of our own --------------------------------------------------
+
+New-Item -ItemType Directory -Force -Path $gnupgDir | Out-Null
+# Permissions matter to gpg itself: it refuses to use a home directory other
+# people can read, and says so in a way that reads like a different problem.
+try {
+    $acl = Get-Acl $gnupgDir
+    $acl.SetAccessRuleProtection($true, $false)
+    $acl.SetAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule(
+        $env:USERNAME, 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow')))
+    Set-Acl -Path $gnupgDir -AclObject $acl
+} catch {
+    Write-Output "  (could not tighten permissions on $gnupgDir — continuing)"
+}
+
+# Empty rather than absent: an empty common.conf is what stops gpg writing
+# `use-keyboxd` into it on first use, which is the whole problem being avoided.
+Set-Content -Path (Join-Path $gnupgDir 'common.conf') -Value '' -Encoding ascii
+
 Write-Output "Using $gpg"
+Write-Output "Key home: $gnupgDir"
 Write-Output 'Generating a 4096-bit RSA signing key. This takes a minute or two.'
 
 # --- passphrase --------------------------------------------------------------
@@ -88,13 +119,13 @@ Passphrase: $pass
 "@ | Set-Content -Path $paramsFile -Encoding utf8
 
 try {
-    & $gpg --batch --gen-key $paramsFile
+    & $gpg --homedir $gnupgDir --batch --gen-key $paramsFile
     if ($LASTEXITCODE -ne 0) { throw "gpg --gen-key failed with exit code $LASTEXITCODE" }
 } finally {
     Remove-Item $paramsFile -Force -ErrorAction SilentlyContinue
 }
 
-$fpr = (& $gpg --list-keys --with-colons $email |
+$fpr = (& $gpg --homedir $gnupgDir --list-keys --with-colons $email |
         Where-Object { $_ -like 'fpr:*' } |
         Select-Object -First 1).Split(':')[9]
 if (-not $fpr) { Write-Error 'Could not read the fingerprint back — generation failed.'; exit 1 }
@@ -110,14 +141,15 @@ if (-not $fpr) { Write-Error 'Could not read the fingerprint back — generation
 fingerprint=$fpr
 passphrase=$pass
 uid=$name <$email>
+gnupghome=$gnupgDir
 "@ | Set-Content -Path $props -Encoding utf8
 
 # An armoured backup of the secret key, so losing the GnuPG home does not mean
 # losing the ability to sign.
-& $gpg --batch --yes --pinentry-mode loopback --passphrase $pass `
+& $gpg --homedir $gnupgDir --batch --yes --pinentry-mode loopback --passphrase $pass `
        --export-secret-keys --armor $fpr |
     Set-Content -Path (Join-Path $homeDir 'aevistle-signing-key.asc') -Encoding ascii
-& $gpg --armor --export $fpr |
+& $gpg --homedir $gnupgDir --armor --export $fpr |
     Set-Content -Path (Join-Path $homeDir 'aevistle-public-key.asc') -Encoding ascii
 
 Write-Output ''
@@ -125,7 +157,8 @@ Write-Output 'Done. Fingerprint:'
 Write-Output "  $fpr"
 Write-Output ''
 Write-Output "Written to ${homeDir}:"
-Write-Output '  gpg.properties            fingerprint + passphrase'
+Write-Output '  gpg.properties            fingerprint, passphrase, key home'
+Write-Output '  gnupg\                    this project''s own GnuPG home'
 Write-Output '  aevistle-signing-key.asc  encrypted backup of the private key'
 Write-Output '  aevistle-public-key.asc   the public half, published with each release'
 Write-Output ''
