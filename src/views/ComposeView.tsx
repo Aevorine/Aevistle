@@ -796,6 +796,30 @@ export function ComposeView({
                 action={
                   <div className="field__tools">
                     {/*
+                      On the label line, not on a row of its own.
+
+                      Its own row cost 44px and measured out at a body box of
+                      260px against 304px before it — and pushed the
+                      options-open state into 11px of scroll, which this form
+                      is not allowed to do. That is the same reason `labelHint`
+                      exists, written down two hundred lines above this and
+                      then ignored here.
+
+                      Always available, and using it decides the format: the
+                      body-format picker was removed on purpose because the
+                      right answer is derivable, and pressing Bold is the
+                      moment the answer becomes "Markdown". Hidden once the
+                      body is already HTML — which only happens after an
+                      embedded image — because inserting `**bold**` there would
+                      put literal asterisks in the message.
+                    */}
+                    {draft.bodyFormat !== 'html' ? (
+                      <MarkupToolbar
+                        textarea={bodyRef}
+                        onChange={(body) => patch({ body, bodyFormat: 'markdown' })}
+                      />
+                    ) : null}
+                    {/*
                       A live count, and not only of characters.
 
                       Bytes are what a provider's size limit is actually
@@ -829,27 +853,6 @@ export function ComposeView({
                   put literal asterisks in the recipient's inbox, which is the
                   opposite of formatting it.
                 */}
-                {/*
-                  Always available, and using it decides the format.
-
-                  The body-format picker was removed on purpose (see the note
-                  in More options): the right answer is derivable, and asking
-                  someone to choose between plain, HTML and Markdown before
-                  writing a word is a question with no good time to ask it.
-                  This follows the same rule as pasting an image, which
-                  switches to HTML by itself — pressing Bold is the moment the
-                  answer becomes "Markdown", so that is when it is set.
-
-                  Hidden once the body is HTML, which only happens after an
-                  embedded image: inserting `**bold**` into HTML would put
-                  literal asterisks in the message.
-                */}
-                {draft.bodyFormat !== 'html' ? (
-                  <MarkupToolbar
-                    textarea={bodyRef}
-                    onChange={(body) => patch({ body, bodyFormat: 'markdown' })}
-                  />
-                ) : null}
                 <textarea
                   id={bodyId}
                   ref={bodyRef}

@@ -4947,15 +4947,16 @@ textarea {
 
 /* Formatting buttons directly above the body box, sharing its left edge so the
    two read as one control rather than as a strip that happens to sit nearby. */
+/* Inline on the label line — see the note at its use site. No margin and no
+   wrapping: it shares a row with the character count and the focus toggle, and
+   a wrap here would give back the row it was moved to avoid. */
 .markup {
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-bottom: 4px;
+  gap: 3px;
 }
 .markup__btn {
-  min-width: 34px;
-  min-height: 32px;
+  min-width: 28px;
+  min-height: 26px;
   padding: 0 var(--sp-2);
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
