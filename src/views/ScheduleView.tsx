@@ -1,0 +1,262 @@
+import { useState } from 'react'
+import { HealthAllClear } from '../components/HealthBoard'
+import { VirtualList } from '../components/VirtualList'
+import {
+  Button,
+  EmptyState,
+  IconButton,
+  PageHead,
+  StatusChip,
+  useConfirm,
+  useToast,
+} from '../components/ui'
+import { IconClock, IconCopy, IconPause, IconPlay, IconSend, IconTrash } from '../components/icons'
+import { useApp } from '../state/AppState'
+import { useI18n } from '../i18n'
+import { summarizeRecurrence } from '../core/schedule'
+
+export function ScheduleView({ onCompose }: { onCompose: () => void }) {
+  const { state, dispatch, toggleJob, deleteJob, runJobNow } = useApp()
+  const { t, formatDateTime, formatRelative } = useI18n()
+  const toast = useToast()
+  const { confirm, confirmElement } = useConfirm()
+  const [busy, setBusy] = useState<string | null>(null)
+
+  const jobs = [...state.jobs].sort((a, b) => {
+    const an = a.occurrences[0] ?? Number.MAX_SAFE_INTEGER
+    const bn = b.occurrences[0] ?? Number.MAX_SAFE_INTEGER
+    return an - bn
+  })
+
+  /**
+   * Delete a reminder — and, if it is one stage of a chain, offer to take the
+   * rest with it. Deleting "3 days before" on its own and leaving "the day
+   * before" behind is occasionally what someone wants and usually not; asking
+   * costs one extra click and saves finding the strays later.
+   */
+  const remove = async (id: string) => {
+    const job = state.jobs.find((j) => j.id === id)
+    const siblings = job?.chainId
+      ? state.jobs.filter((j) => j.chainId === job.chainId)
+      : []
+
+    if (siblings.length > 1) {
+      const all = await confirm({
+        title: t('confirm.deleteJob'),
+        body: t('chain.partOf', { n: siblings.length }),
+        confirmLabel: t('chain.cancelAll', { n: siblings.length }),
+        cancelLabel: t('chain.cancelOne'),
+        danger: true,
+      })
+      // Either answer deletes something, so there is no "cancel" here — the
+      // dialog's dismiss (Esc / backdrop) is handled by the promise resolving
+      // false, which is why "only this one" is the false branch rather than a
+      // third option nobody would find.
+      for (const sibling of all ? siblings : [job!]) {
+        await deleteJob(sibling.id)
+      }
+      toast.push({ tone: 'info', title: t('toast.deleted') })
+      return
+    }
+
+    const ok = await confirm({
+      title: t('confirm.deleteJob'),
+      confirmLabel: t('common.delete'),
+      cancelLabel: t('common.cancel'),
+      danger: true,
+    })
+    if (!ok) return
+    await deleteJob(id)
+    toast.push({ tone: 'info', title: t('toast.deleted') })
+  }
+
+  /**
+   * Send this one again, later. The commonest thing anyone does with a
+   * finished reminder is want another like it, and rebuilding it by hand from
+   * the recipients up is the tax this removes.
+   */
+  const repeat = (job: (typeof jobs)[number]) => {
+    dispatch({ type: 'setDraft', patch: { ...job.draft } })
+    toast.push({ tone: 'info', title: t('schedule.copiedToCompose') })
+    onCompose()
+  }
+
+  const runNow = async (id: string) => {
+    setBusy(id)
+    try {
+      const result = await runJobNow(id)
+      if (result?.ok) {
+        toast.push({
+          tone: 'success',
+          title: t('toast.sent', { n: result.accepted.length, ms: result.durationMs }),
+        })
+      } else {
+        toast.push({ tone: 'error', title: t('toast.sendFailed'), detail: result?.error })
+      }
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  return (
+    <div className="view view--list">
+      <div className="view__inner">
+        <PageHead
+          title={t('schedule.title')}
+          subtitle={t('schedule.subtitle')}
+          action={
+            <Button variant="primary" icon={<IconClock size={16} />} onClick={onCompose}>
+              {t('schedule.new')}
+            </Button>
+          }
+        />
+
+        <HealthAllClear />
+
+        {jobs.length === 0 ? (
+          <div className="list-pane">
+            <EmptyState
+              icon={<IconClock size={24} />}
+              title={t('schedule.empty')}
+              hint={t('schedule.emptyHint')}
+              action={
+                <Button variant="secondary" onClick={onCompose}>
+                  {t('nav.compose')}
+                </Button>
+              }
+            />
+          </div>
+        ) : (
+          <VirtualList
+            items={jobs}
+            keyOf={(job) => job.id}
+            estimate={104}
+            scrollerClassName="list-pane"
+            rowsClassName="joblist"
+          >
+            {(job) => {
+              const next = job.occurrences[0]
+              const summary = summarizeRecurrence(job.recurrence)
+              const recipients =
+                job.draft.to.length + job.draft.cc.length + job.draft.bcc.length
+              return (
+                <div
+                  className="job"
+                  data-disabled={!job.enabled}
+                  data-failed={job.lastResult === 'failed'}
+                >
+                  <span className="job__pulse" />
+                  <div className="job__body">
+                    <div className="job__name">
+                      {job.name}
+                      {/* One visual language for state, everywhere. Before this
+                          the schedule screen said "paused" in grey italics, the
+                          inbox used a chip and the log used a coloured dot —
+                          three dialects for one idea, so none of them could be
+                          learned. See `StatusChip`. */}
+                      <StatusChip
+                        tone={
+                          job.lastResult === 'failed'
+                            ? 'danger'
+                            : !job.enabled
+                              ? 'neutral'
+                              : job.occurrences.length === 0
+                                ? 'neutral'
+                                : 'accent'
+                        }
+                        dot={job.enabled && job.occurrences.length > 0}
+                        label={
+                          job.lastResult === 'failed'
+                            ? t('status.failed')
+                            : !job.enabled
+                              ? t('status.paused')
+                              : job.occurrences.length === 0
+                                ? t('status.done')
+                                : t('status.armed')
+                        }
+                        title={job.lastError}
+                      />
+                      {job.conditions && job.conditions.length > 0 ? (
+                        <StatusChip
+                          tone="info"
+                          label={t('status.conditional', { n: job.conditions.length })}
+                        />
+                      ) : null}
+                      {job.chainId ? (
+                        <StatusChip
+                          tone="neutral"
+                          label={t('chain.partOf', {
+                            n: state.jobs.filter((j) => j.chainId === job.chainId).length,
+                          })}
+                        />
+                      ) : null}
+                    </div>
+                    <div className="job__meta">
+                      <span>{t(summary.key as 'recur.summary.once', summary.values)}</span>
+                      {job.enabled && next ? (
+                        <span>
+                          <strong>{t('schedule.nextRun')}:</strong> {formatDateTime(next)} (
+                          {formatRelative(next)})
+                        </span>
+                      ) : (
+                        <span>{job.enabled ? t('schedule.noMoreRuns') : t('common.disabled')}</span>
+                      )}
+                      <span>{t('logs.recipients', { n: recipients })}</span>
+                      {job.runCount > 0 ? <span>{t('schedule.runs', { n: job.runCount })}</span> : null}
+                      {job.draft.attachments.length > 0 ? (
+                        <span>
+                          {t('compose.attachments')}: {job.draft.attachments.length}
+                        </span>
+                      ) : null}
+                    </div>
+                    {job.lastResult === 'failed' && job.lastError ? (
+                      <div
+                        style={{
+                          marginTop: 6,
+                          fontSize: 'var(--text-xs)',
+                          color: 'var(--danger)',
+                          overflowWrap: 'anywhere',
+                        }}
+                      >
+                        {job.lastError}
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div className="job__actions">
+                    <IconButton label={t('schedule.sendAnother')} onClick={() => repeat(job)}>
+                      <IconCopy size={16} />
+                    </IconButton>
+                    <IconButton
+                      label={t('schedule.runNow')}
+                      onClick={() => runNow(job.id)}
+                      disabled={busy === job.id}
+                    >
+                      <IconSend size={16} />
+                    </IconButton>
+                    <IconButton
+                      label={job.enabled ? t('schedule.pause') : t('schedule.resume')}
+                      onClick={() => {
+                        void toggleJob(job.id, !job.enabled)
+                        toast.push({
+                          tone: 'info',
+                          title: job.enabled ? t('toast.jobPaused') : t('toast.jobResumed'),
+                        })
+                      }}
+                    >
+                      {job.enabled ? <IconPause size={16} /> : <IconPlay size={16} />}
+                    </IconButton>
+                    <IconButton label={t('common.delete')} onClick={() => remove(job.id)}>
+                      <IconTrash size={16} />
+                    </IconButton>
+                  </div>
+                </div>
+              )
+            }}
+          </VirtualList>
+        )}
+      </div>
+      {confirmElement}
+    </div>
+  )
+}

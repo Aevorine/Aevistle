@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#14161b" media="(prefers-color-scheme: dark)" />
+    <!-- Both values are --bg from theme.css. They are duplicated here because
+         the browser needs them before any stylesheet has parsed; if that file
+         is retuned, these move with it. -->
+    <meta name="theme-color" content="#eceef1" media="(prefers-color-scheme: light)" />
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <meta name="description" content="Aevistle — scheduled email reminders with attachments, for Windows and Android." />
+
+    <!--
+      Content Security Policy.
+
+      The renderer is a local app: it has no business loading remote script,
+      opening a socket, or embedding a frame. Locking that down here means an
+      injected string in a subject line or a template has nowhere to go even if
+      it somehow reached the DOM as markup.
+
+      'unsafe-inline' for style is required because the app sets a handful of
+      inline layout styles; scripts have no such exemption.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="
+        default-src 'self';
+        script-src 'self';
+        style-src 'self' 'unsafe-inline';
+        img-src 'self' data: blob:;
+        font-src 'self' data:;
+        connect-src 'self';
+        media-src 'self';
+        object-src 'none';
+        frame-src 'none';
+        worker-src 'self' blob:;
+        base-uri 'none';
+        form-action 'none';
+        frame-ancestors 'none';
+      "
+    />
+
+    <title>Aevistle</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

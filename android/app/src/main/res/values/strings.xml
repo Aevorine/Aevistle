@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Aevistle</string>
+    <string name="title_activity_main">Aevistle</string>
+    <string name="package_name">dev.aevistle.app</string>
+    <string name="custom_url_scheme">dev.aevistle.app</string>
+</resources>

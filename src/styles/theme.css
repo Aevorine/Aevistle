@@ -1,0 +1,463 @@
+/* ==========================================================================
+   Aevistle — design tokens
+
+   Two themes and seven accents, all driven from this one file. Nothing below
+   this layer knows what colour anything is; components only ever reference
+   `var(--...)`, which is what makes the theme switch instant and total.
+
+   The light theme is not "the dark theme inverted". Shadows, borders and
+   surface separation work differently in the two, so each is tuned on its
+   own: dark leans on luminance steps between surfaces, light leans on
+   hairline borders and soft shadows.
+   ========================================================================== */
+
+/* ==========================================================================
+   Typeface composition
+
+   One family name, two fonts, split by codepoint. `unicode-range` lets the
+   browser pick per character rather than per element, so a Chinese sentence
+   containing an English product name gets Songti for the Chinese and Times
+   New Roman for the Latin — without markup, and without the two ever being
+   chosen by the fallback order of a plain font stack (which resolves per
+   *element* and would put the whole sentence in whichever font came first).
+
+   Latin, digits and Western punctuation → Times New Roman.
+   CJK ideographs and full-width punctuation → 宋体 / Songti.
+
+   The `local()` sources mean nothing is downloaded: these are the fonts that
+   ship with Windows, macOS and most Linux distributions. The fallbacks after
+   each preferred name cover the machines that lack the first choice — Tinos
+   and Liberation Serif are metric-compatible with Times New Roman, and Noto
+   Serif CJK / Source Han Serif are the usual Songti substitutes.
+   ========================================================================== */
+
+@font-face {
+  font-family: "Aevistle Text";
+  font-style: normal;
+  font-weight: 100 900;
+  src:
+    local("Times New Roman"), local("TimesNewRomanPSMT"), local("Tinos"),
+    local("Liberation Serif"), local("Nimbus Roman");
+  /* Basic Latin, Latin-1, Latin Extended-A/B, IPA, Greek, Cyrillic,
+     general punctuation, superscripts, currency and letterlike symbols. */
+  unicode-range:
+    U+0000-024F, U+0250-02AF, U+0370-03FF, U+0400-04FF,
+    U+2000-206F, U+2070-209F, U+20A0-20CF, U+2100-214F, U+2190-21FF, U+2200-22FF;
+}
+
+@font-face {
+  font-family: "Aevistle Text";
+  font-style: normal;
+  font-weight: 100 900;
+  src:
+    local("SimSun"), local("宋体"), local("NSimSun"), local("Songti SC"),
+    local("STSong"), local("Noto Serif CJK SC"), local("Noto Serif SC"),
+    local("Source Han Serif SC"), local("AR PL UMing CN");
+  /* CJK symbols and punctuation, Hiragana/Katakana, unified ideographs,
+     compatibility ideographs and full-width forms. */
+  unicode-range:
+    U+2E80-2EFF, U+3000-303F, U+3040-30FF, U+3100-312F, U+3190-319F,
+    U+31C0-31EF, U+3200-32FF, U+3400-4DBF, U+4E00-9FFF,
+    U+F900-FAFF, U+FE30-FE4F, U+FF00-FFEF;
+}
+
+:root {
+  /* ---- typography ----
+
+     Chinese text is set in 宋体 at the two sizes the brief calls for, chosen
+     by *what the text is* rather than by user preference:
+
+       小四 (12 pt) = 16px  — body copy, labels, buttons, inputs
+       四号 (14 pt) = 18.67px — the name of a function or section
+       小二 (18 pt) = 24px  — the name of the screen you are on
+       二号 (22 pt) = 29.33px — the one hero line
+
+     Everything below 小四 is reserved for numbers and timestamps that sit
+     beside a label rather than being read as prose. */
+  --font-sans:
+    "Aevistle Text", "Times New Roman", "SimSun", "Songti SC",
+    "Noto Serif CJK SC", "Noto Sans Arabic", "Segoe UI Emoji", serif;
+  --font-mono:
+    "JetBrains Mono", "Cascadia Code", "SF Mono", "Consolas", ui-monospace, monospace;
+
+  /* 12px 小五 — badge digits and file-type tags only. Never prose: it is
+     below the size Songti stays legible at, which is why it is fenced off
+     here instead of being typed as a bare `10px` wherever it was needed. */
+  --text-2xs: 0.75rem;
+  --text-xs: 0.875rem;      /* 14px  五号 — counters, timestamps, chips */
+  --text-sm: 1rem;          /* 16px  小四 — secondary UI text */
+  --text-base: 1rem;        /* 16px  小四 — the workhorse */
+  --text-md: 1rem;          /* 16px  小四 — inputs, body copy */
+  --text-lg: 1.1667rem;     /* 18.67px 四号 — function and section names */
+  --text-xl: 1.5rem;        /* 24px  小二 — screen titles */
+  --text-2xl: 1.8333rem;    /* 29.33px 二号 — hero */
+
+  /* Songti needs more air between lines than a sans-serif at the same size;
+     the strokes are thinner and the glyphs are full-width. */
+  --leading-tight: 1.35;
+  --leading-normal: 1.65;
+  --leading-relaxed: 1.8;
+
+  /* Negative tracking is a sans-serif trick. Applied to 宋体 it collides the
+     full-width glyphs, so the "tight" step is neutral here and only the wide
+     step, used on all-caps Latin labels, does anything. */
+  --tracking-tight: 0;
+  --tracking-normal: 0;
+  --tracking-wide: 0.06em;
+
+  /* ---- spacing (4px base) ----
+
+     Tightened one step across the board. The type scale is fixed by the brief
+     (16px body minimum), so the only way to get a whole task onto one screen is
+     to spend less on the gaps between things. The previous 24px card padding
+     and 18px field gaps pushed attachments and the delivery switches below the
+     fold on a 880px-tall window — the compose screen scrolled before a single
+     character was typed. */
+  --sp-1: 0.25rem;
+  --sp-2: 0.5rem;
+  --sp-3: 0.75rem;
+  --sp-4: 1rem;
+  --sp-5: 1.25rem;
+  --sp-6: 1.5rem;
+  --sp-8: 2rem;
+  --sp-10: 2.25rem;
+  --sp-12: 2.75rem;
+  --sp-16: 3.5rem;
+
+  /* ---- shape ----
+
+     A ladder by container size, not a palette to pick from. Which step a
+     thing gets is decided by what kind of thing it is, so two elements of the
+     same kind cannot end up with different corners:
+
+       xs   something inside a group   chip, segmented item, focus ring
+       sm   a standalone control       button, input, nav item
+       md   a grouped surface          card row, toast, stat, banner
+       lg   a container of surfaces    card, list pane
+       xl   a container of containers  modal
+       full a pill                     badge, avatar, toggle
+
+     Collapsing this to three steps was considered and rejected: it would put
+     a modal and a chip in the same corner family, which reads as less
+     deliberate rather than more uniform. */
+  --r-xs: 5px;
+  --r-sm: 8px;
+  --r-md: 11px;
+  --r-lg: 15px;
+  --r-xl: 20px;
+  --r-full: 999px;
+
+  /* ---- control height ----
+     One number for everything a pointer lands on: text input, select, button,
+     the recipient tag field. They had drifted to 46 / 42 / 40px, which is
+     invisible on its own and unmistakable in a row where a button sits beside
+     the box it submits — the two baselines miss by 4px and the row reads as
+     assembled from parts rather than designed. Comfortably past the 44px
+     pointer-target minimum, so the uniform value is also the accessible one. */
+  --control-h: 46px;
+
+  /* ---- motion ----
+     Short and eased-out. Anything longer than 220ms on a click feels like lag
+     rather than polish. */
+  --ease: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-fast: 110ms;
+  --dur: 180ms;
+  --dur-slow: 260ms;
+
+  /* ---- layout ----
+     Widened alongside the type scale: 16px body copy needs roughly 15% more
+     measure than the 14px it replaced before lines start wrapping awkwardly. */
+  --sidebar-w: 244px;
+  --sidebar-w-collapsed: 68px;
+  --pagehead-h: 60px;
+  --actionbar-h: 76px;
+  /* No ceiling. The content column fills the window.
+
+     This was `clamp(1060px, 80vw, 1500px)`, and the cap is what every
+     "the boxes are too small / there is a big empty band down each side"
+     report was actually about: maximise on a 1920px display and 210px of grey
+     sat on each side; on 2560px it was 530px each side. Raising the number
+     only moved the complaint to the next monitor size, because the shape of
+     the problem is a fixed cap on a variable window.
+
+     What stops lines becoming unreadably long is not this — it is
+     `--reading-max` below, which caps *prose* at 68 characters wherever prose
+     appears. Controls, lists and tables have no such limit and never needed
+     one: a wider window should show more mail, not more background. Screens
+     that gain from a second column now take one (see `.view__inner--grid`
+     and `.compose-grid`) rather than stretching one column across the glass. */
+  --content-max: 100%;
+  /* Breathing room at the window edge, scaled to the window. */
+  --page-pad-x: clamp(1rem, 1.8vw, 2.5rem);
+  /* One measure, one variable. Every place that limits line length points here
+     so "comfortable to read" cannot drift apart between screens. */
+  --reading-max: 68ch;
+
+  /* ---- accent palettes ----
+     Each accent ships a light-theme and dark-theme pair so contrast against
+     white and against near-black both stay readable.
+
+     Azure is the default because it is the application icon's own blue. With
+     any other accent selected, the icon in the sidebar and the navigation
+     highlight directly beneath it are two different blues eight pixels apart,
+     which is the kind of mismatch that reads as sloppiness long before anyone
+     works out what they are looking at. */
+  --accent-azure-l: #0b6bd8;
+  --accent-azure-d: #56a9ff;
+  --accent-indigo-l: #4f46e5;
+  --accent-indigo-d: #818cf8;
+  --accent-teal-l: #0d9488;
+  --accent-teal-d: #2dd4bf;
+  --accent-violet-l: #7c3aed;
+  --accent-violet-d: #a78bfa;
+  --accent-amber-l: #b45309;
+  --accent-amber-d: #fbbf24;
+  --accent-rose-l: #e11d48;
+  --accent-rose-d: #fb7185;
+  --accent-emerald-l: #059669;
+  --accent-emerald-d: #34d399;
+}
+
+/* ==========================================================================
+   Light theme
+   ========================================================================== */
+
+:root,
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  /* Tuned for an hour of reading, not for a screenshot.
+
+     The previous pairing (#1a1f2b on #fdfdfe) measured 16.2:1. That is well
+     past the point where more contrast helps: with 宋体 at 16px the strokes are
+     hairline-thin, and near-black on near-white makes their edges shimmer.
+     Backing the paper off pure white and lifting the ink off near-black brings
+     it to 13.5:1 — still comfortably above the 7:1 AAA line, and calm enough to
+     sit in front of. */
+  --bg: #eceef1;
+  --surface-1: #fafbfc;
+  --surface-2: #f2f4f7;
+  --surface-3: #e8ebf0;
+  --surface-inset: #f1f3f6;
+  --surface-hover: rgba(15, 23, 42, 0.04);
+  --surface-active: rgba(15, 23, 42, 0.07);
+
+  --text-1: #262c38;   /* 13.5:1 on --surface-1 */
+  --text-2: #545c6b;   /*  7.4:1 — secondary prose, still AAA */
+  /* Measured, not asserted: #79808f was documented as 4.6:1 but is 3.7:1 on
+     white — the comment was aspirational and the colour failed AA for 16px
+     text everywhere it was used (field hints, the brand tagline, row meta).
+     #656c7a is 5.3:1 on white and still reads as clearly tertiary. */
+  --text-3: #656c7a;   /*  5.3:1 on white — AA for normal text */
+  --text-inverse: #ffffff;
+
+  --border: #e6e9ef;
+  --border-strong: #d3d8e1;
+  --border-subtle: #f0f2f6;
+
+  --shadow-sm: 0 1px 2px rgba(16, 19, 26, 0.05);
+  --shadow-md: 0 2px 4px rgba(16, 19, 26, 0.05), 0 6px 16px rgba(16, 19, 26, 0.06);
+  --shadow-lg: 0 4px 8px rgba(16, 19, 26, 0.06), 0 16px 40px rgba(16, 19, 26, 0.1);
+  --shadow-accent: 0 4px 14px color-mix(in srgb, var(--accent) 28%, transparent);
+
+  --success: #047857;
+  --success-bg: #ecfdf5;
+  --warning: #b45309;
+  --warning-bg: #fffbeb;
+  --danger: #be123c;
+  --danger-bg: #fff1f2;
+  --info: #0369a1;
+  --info-bg: #f0f9ff;
+
+  --accent: var(--accent-azure-l);
+  --accent-text: #ffffff;
+  --scrim: rgba(16, 19, 26, 0.32);
+}
+
+/* ==========================================================================
+   Dark theme
+   ========================================================================== */
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* Dark mode is where glare actually bites. Near-white serif text on a
+     near-black page (the old #e7ebf2 on #12151c, 15.3:1) blooms — the thin
+     strokes of 宋体 smear outward on an LCD, and that halation is what makes an
+     hour in dark mode tiring. Lifting the page and softening the ink lands at
+     11.9:1: still AAA, without the bloom. */
+  --bg: #14161b;
+  --surface-1: #1b1e25;
+  --surface-2: #1f232b;
+  --surface-3: #262b34;
+  --surface-inset: #17191f;
+  --surface-hover: rgba(255, 255, 255, 0.05);
+  --surface-active: rgba(255, 255, 255, 0.085);
+
+  --text-1: #d5dae3;   /* 11.9:1 on --surface-1 */
+  --text-2: #a3acbb;   /*  7.1:1 */
+  --text-3: #8b95a6;   /*  5.4:1 on --surface-1 — was 4.3:1, under AA */
+  --text-inverse: #14161b;
+
+  --border: #2e3440;
+  --border-strong: #3d4552;
+  --border-subtle: #252a33;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 2px 6px rgba(0, 0, 0, 0.45), 0 8px 24px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 8px 20px rgba(0, 0, 0, 0.5), 0 24px 56px rgba(0, 0, 0, 0.45);
+  --shadow-accent: 0 4px 18px color-mix(in srgb, var(--accent) 32%, transparent);
+
+  --success: #34d399;
+  --success-bg: rgba(52, 211, 153, 0.1);
+  --warning: #fbbf24;
+  --warning-bg: rgba(251, 191, 36, 0.1);
+  --danger: #fb7185;
+  --danger-bg: rgba(251, 113, 133, 0.1);
+  --info: #38bdf8;
+  --info-bg: rgba(56, 189, 248, 0.1);
+
+  --accent: var(--accent-azure-d);
+  --accent-text: #14161b;
+  --scrim: rgba(0, 0, 0, 0.6);
+}
+
+/* Follow the OS when the user has not chosen explicitly. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    --bg: #14161b;
+    --surface-1: #1b1e25;
+    --surface-2: #1f232b;
+    --surface-3: #262b34;
+    --surface-inset: #17191f;
+    --surface-hover: rgba(255, 255, 255, 0.05);
+    --surface-active: rgba(255, 255, 255, 0.085);
+
+    --text-1: #d5dae3;
+    --text-2: #a3acbb;
+    --text-3: #8b95a6;
+    --text-inverse: #14161b;
+
+    --border: #2e3440;
+    --border-strong: #3d4552;
+    --border-subtle: #252a33;
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-md: 0 2px 6px rgba(0, 0, 0, 0.45), 0 8px 24px rgba(0, 0, 0, 0.35);
+    --shadow-lg: 0 8px 20px rgba(0, 0, 0, 0.5), 0 24px 56px rgba(0, 0, 0, 0.45);
+
+    --success: #34d399;
+    --success-bg: rgba(52, 211, 153, 0.1);
+    --warning: #fbbf24;
+    --warning-bg: rgba(251, 191, 36, 0.1);
+    --danger: #fb7185;
+    --danger-bg: rgba(251, 113, 133, 0.1);
+    --info: #38bdf8;
+    --info-bg: rgba(56, 189, 248, 0.1);
+
+    --accent-text: #14161b;
+    --scrim: rgba(0, 0, 0, 0.6);
+  }
+}
+
+/* ==========================================================================
+   Accent selection — light values by default, dark values when dark is active
+   ========================================================================== */
+
+:root[data-accent="azure"]   { --accent: var(--accent-azure-l); }
+:root[data-accent="indigo"]  { --accent: var(--accent-indigo-l); }
+:root[data-accent="teal"]    { --accent: var(--accent-teal-l); }
+:root[data-accent="violet"]  { --accent: var(--accent-violet-l); }
+:root[data-accent="amber"]   { --accent: var(--accent-amber-l); }
+:root[data-accent="rose"]    { --accent: var(--accent-rose-l); }
+:root[data-accent="emerald"] { --accent: var(--accent-emerald-l); }
+
+:root[data-theme="dark"][data-accent="azure"]   { --accent: var(--accent-azure-d); }
+:root[data-theme="dark"][data-accent="indigo"]  { --accent: var(--accent-indigo-d); }
+:root[data-theme="dark"][data-accent="teal"]    { --accent: var(--accent-teal-d); }
+:root[data-theme="dark"][data-accent="violet"]  { --accent: var(--accent-violet-d); }
+:root[data-theme="dark"][data-accent="amber"]   { --accent: var(--accent-amber-d); }
+:root[data-theme="dark"][data-accent="rose"]    { --accent: var(--accent-rose-d); }
+:root[data-theme="dark"][data-accent="emerald"] { --accent: var(--accent-emerald-d); }
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"])[data-accent="azure"]   { --accent: var(--accent-azure-d); }
+:root:not([data-theme="light"])[data-accent="indigo"]  { --accent: var(--accent-indigo-d); }
+  :root:not([data-theme="light"])[data-accent="teal"]    { --accent: var(--accent-teal-d); }
+  :root:not([data-theme="light"])[data-accent="violet"]  { --accent: var(--accent-violet-d); }
+  :root:not([data-theme="light"])[data-accent="amber"]   { --accent: var(--accent-amber-d); }
+  :root:not([data-theme="light"])[data-accent="rose"]    { --accent: var(--accent-rose-d); }
+  :root:not([data-theme="light"])[data-accent="emerald"] { --accent: var(--accent-emerald-d); }
+}
+
+/* ==========================================================================
+   Density
+   ========================================================================== */
+
+:root[data-density="compact"] {
+  --sp-3: 0.5rem;
+  --sp-4: 0.75rem;
+  --sp-5: 0.875rem;
+  --sp-6: 1.125rem;
+  --sp-8: 1.5rem;
+  --pagehead-h: 52px;
+  --actionbar-h: 68px;
+  /* Density tightens spacing, never the type: shrinking 小四 below 16px would
+     break the one typographic rule this interface is held to. */
+  --leading-normal: 1.5;
+  --leading-relaxed: 1.65;
+}
+
+/* --- list density -----------------------------------------------------------
+
+   Separate from `data-density` above, which is the global control-spacing
+   scale. This one only moves list rows, because the two are wanted for
+   different reasons: someone auditing four hundred log entries wants tighter
+   *rows* without also shrinking every button and input in Settings.
+
+   One variable, read by every row-shaped thing (`--row-pad-y`). Adding a
+   second knob per screen is how six lists end up with five different rhythms.
+   ------------------------------------------------------------------------- */
+
+:root {
+  --row-pad-y: var(--sp-3);
+  --row-gap: var(--sp-3);
+  /* Numerals that do not shuffle sideways as they change: timestamps,
+     counters, sizes, and above all verification codes. */
+  --numeric: tabular-nums lining-nums;
+}
+
+:root[data-list-density="compact"] {
+  --row-pad-y: var(--sp-2);
+  --row-gap: var(--sp-2);
+}
+
+:root[data-list-density="roomy"] {
+  --row-pad-y: var(--sp-5);
+  --row-gap: var(--sp-4);
+}
+
+/* ==========================================================================
+   Accessibility
+   ========================================================================== */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@media (prefers-contrast: more) {
+  :root {
+    --border: var(--border-strong);
+    --text-2: var(--text-1);
+  }
+}

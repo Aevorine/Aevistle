@@ -1,0 +1,59 @@
+{
+  "name": "aevistle",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cross-platform scheduled email reminder — compose once, attach anything, deliver on time. Windows desktop + Android.",
+  "author": "Fusheng201",
+  "license": "MIT",
+  "homepage": "https://github.com/Aevorine/Aevistle",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Aevorine/Aevistle.git"
+  },
+  "main": "dist-electron/main.cjs",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build:web": "vite build",
+    "build:electron": "node scripts/build-electron.mjs",
+    "build": "npm run build:web && npm run build:electron",
+    "start": "npm run build && electron .",
+    "dist:win": "npm run build && electron-builder --win --publish never",
+    "cap:sync": "npm run build:web && cap sync android",
+    "build:android": "npm run cap:sync && node scripts/build-android.mjs",
+    "typecheck": "tsc --noEmit",
+    "audit:self": "node scripts/audit.mjs",
+    "check:time": "node scripts/check-natural-time.mjs",
+    "check:backup": "node scripts/check-backup.mjs",
+    "check": "npm run typecheck && npm run check:time && npm run check:backup && npm run check:features && npm run audit:self",
+    "check:features": "node scripts/check-innovations.mjs",
+    "dist:win:out": "npm run build && electron-builder --win --publish never -c.directories.output=%TEMP%/aevistle-release",
+    "release:hashes": "node scripts/release-hashes.mjs"
+  },
+  "dependencies": {
+    "imapflow": "^1.6.5",
+    "mailparser": "^3.9.14",
+    "nodemailer": "^9.0.3",
+    "sanitize-html": "^2.17.6"
+  },
+  "devDependencies": {
+    "@capacitor/android": "^8.5.0",
+    "@capacitor/cli": "^8.5.0",
+    "@capacitor/core": "^8.5.0",
+    "@capacitor/preferences": "^8.0.1",
+    "@types/mailparser": "^3.4.6",
+    "@types/node": "^22.10.2",
+    "@types/nodemailer": "^6.4.17",
+    "@types/react": "^19.0.2",
+    "@types/react-dom": "^19.0.2",
+    "@types/sanitize-html": "^2.16.1",
+    "@vitejs/plugin-react": "^6.0.5",
+    "electron": "^43.2.0",
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.28.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "typescript": "~5.9.3",
+    "vite": "^8.2.0"
+  }
+}

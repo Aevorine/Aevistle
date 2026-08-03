@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    What the FileProvider is allowed to hand to another app.
+
+    Deliberately narrow. `openPath` grants a read URI to whichever app the user
+    picked out of the chooser, so every directory listed here is a directory
+    another application can be handed a file from. Only the two attachment
+    folders qualify: `inbox-attachments/` holds what was downloaded from a
+    received message, `attachments/` holds what the user attached themselves.
+
+    Notably absent: the data folder root. It also holds the secrets store and
+    the schedule, and there is no version of "open this with…" that should ever
+    be able to reach either.
+-->
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <external-path name="my_images" path="." />
+    <cache-path name="my_cache_images" path="." />
+
+    <!-- Internal storage — the default data folder. -->
+    <files-path name="inbox_attachments" path="inbox-attachments/" />
+    <files-path name="attachments" path="attachments/" />
+
+    <!-- The same two, for a data folder moved to shared or SD-card storage. -->
+    <external-files-path name="ext_inbox_attachments" path="inbox-attachments/" />
+    <external-files-path name="ext_attachments" path="attachments/" />
+</paths>

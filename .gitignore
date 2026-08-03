@@ -1,0 +1,119 @@
+# ---------------------------------------------------------------------------
+# Aevistle — .gitignore
+# Rule of thumb: if it holds a credential, a build artifact, or a machine path,
+# it does not belong in git.
+# ---------------------------------------------------------------------------
+
+# --- secrets & personal data (NEVER commit) --------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+keystore.properties
+secrets.json
+credentials.json
+local.properties
+android/keystore*
+android/**/keystore*
+**/aevistle-release-key*
+**/*.private.*
+user-data/
+userdata/
+*.sqlite
+*.sqlite3
+*.db
+
+# runtime state written by the app (contains recipients, drafts, logs)
+data/
+logs/
+*.log
+!docs/**/*.log
+
+# --- dependencies ----------------------------------------------------------
+node_modules/
+.pnp
+.pnp.js
+.yarn/
+
+# --- build output ----------------------------------------------------------
+dist/
+dist-electron/
+dist-ssr/
+release/
+out/
+*.local
+
+# NOTE: `build/` is deliberately NOT ignored. It holds the app icons that
+# electron-builder needs, and git cannot re-include a file whose parent
+# directory is excluded — ignoring it would make a fresh clone fail to package.
+# Gradle's build directories are covered by the Android section below.
+
+# --- Android / Gradle ------------------------------------------------------
+android/.gradle/
+android/build/
+android/app/build/
+android/captures/
+android/.idea/
+android/local.properties
+android/app/release/
+android/app/debug/
+*.apk
+*.aab
+*.dex
+.gradle/
+gradle-app.setting
+!gradle-wrapper.jar
+
+# --- Electron packaging ----------------------------------------------------
+*.exe
+*.msi
+*.nsis
+*.blockmap
+!docs/assets/*.png
+
+# --- editors & OS ----------------------------------------------------------
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.recommended.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- AI workspace bookkeeping (local only) ---------------------------------
+task-progress.md
+.claude/
+hs_err_pid*.log
+replay_pid*.log
+
+# --- machine-local tooling -------------------------------------------------
+# .npmrc here pins a regional registry mirror. That is a per-machine choice,
+# not a project one — committing it would route every contributor through it.
+.npmrc
+__pycache__/
+*.py[cod]
+
+# --- misc ------------------------------------------------------------------
+coverage/
+.nyc_output/
+*.tsbuildinfo
+.eslintcache
+.npm/
+.cache/
+tmp/
+temp/
+.playwright-mcp/
+
+# Stray copy of the electron bundle; the real one is dist-electron/main.cjs
+/main.cjs
+/preload.cjs

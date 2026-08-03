@@ -1,0 +1,162 @@
+apply plugin: 'com.android.application'
+
+/**
+ * Release signing.
+ *
+ * The keystore deliberately lives OUTSIDE the repository — a signing key in
+ * git is a key you have to assume is compromised. Point the build at one with
+ * either environment variables or ~/.aevistle/keystore.properties. When
+ * neither is present the build falls back to the debug key so that
+ * `assembleRelease` still produces something installable for testing; it just
+ * is not the key the published release is signed with.
+ */
+def releaseSigning = null
+def keystoreFile = System.getenv('AEVISTLE_KEYSTORE')
+def keystorePassword = System.getenv('AEVISTLE_KEYSTORE_PASSWORD')
+def keyAliasName = System.getenv('AEVISTLE_KEY_ALIAS')
+def keyPasswordValue = System.getenv('AEVISTLE_KEY_PASSWORD')
+
+def propsFile = new File("${System.properties['user.home']}/.aevistle/keystore.properties")
+if (keystoreFile == null && propsFile.exists()) {
+    def props = new Properties()
+    propsFile.withInputStream { props.load(it) }
+    keystoreFile = props.getProperty('storeFile')
+    keystorePassword = props.getProperty('storePassword')
+    keyAliasName = props.getProperty('keyAlias')
+    keyPasswordValue = props.getProperty('keyPassword')
+}
+
+if (keystoreFile != null && new File(keystoreFile).exists()) {
+    releaseSigning = [
+        storeFile    : new File(keystoreFile),
+        storePassword: keystorePassword,
+        keyAlias     : keyAliasName,
+        keyPassword  : keyPasswordValue
+    ]
+    logger.lifecycle("Aevistle: signing release with ${keystoreFile}")
+} else {
+    logger.lifecycle('Aevistle: no release keystore found, falling back to the debug key')
+}
+
+android {
+    namespace = "dev.aevistle.app"
+    compileSdk = rootProject.ext.compileSdkVersion
+
+    defaultConfig {
+        applicationId "dev.aevistle.app"
+        minSdkVersion rootProject.ext.minSdkVersion
+        targetSdkVersion rootProject.ext.targetSdkVersion
+        versionCode 1
+        versionName "0.1.0"
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        aaptOptions {
+             // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
+             // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
+            ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+        }
+    }
+
+    buildFeatures {
+        // AevistleNativePlugin reads BuildConfig.VERSION_NAME for the About panel.
+        buildConfig = true
+    }
+
+    signingConfigs {
+        if (releaseSigning != null) {
+            release {
+                storeFile releaseSigning.storeFile
+                storePassword releaseSigning.storePassword
+                keyAlias releaseSigning.keyAlias
+                keyPassword releaseSigning.keyPassword
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            // R8 is off on purpose: JavaMail resolves its providers by
+            // reflection out of META-INF/javamail.*, and a stripped build fails
+            // at the first send with "no provider for smtp", which no user
+            // could diagnose. The APK is a few MB either way.
+            minifyEnabled false
+            shrinkResources false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            signingConfig releaseSigning != null ? signingConfigs.release : signingConfigs.debug
+        }
+    }
+
+    packagingOptions {
+        resources {
+            // android-mail and android-activation both ship these, and the
+            // merger treats any duplicate as a hard error.
+            //
+            // The split matters: legal text is dropped, but the javamail.*
+            // and mailcap entries are how JavaMail finds its SMTP provider at
+            // runtime. Excluding those instead of picking one would build
+            // fine and then fail on the first send with "no provider for smtp".
+            excludes += ['META-INF/LICENSE.md',
+                         'META-INF/LICENSE.txt',
+                         'META-INF/LICENSE',
+                         'META-INF/NOTICE.md',
+                         'META-INF/NOTICE.txt',
+                         'META-INF/NOTICE',
+                         'META-INF/DEPENDENCIES',
+                         'META-INF/INDEX.LIST']
+
+            pickFirsts += ['META-INF/mailcap',
+                           'META-INF/mailcap.default',
+                           'META-INF/mimetypes.default',
+                           'META-INF/javamail.default.providers',
+                           'META-INF/javamail.default.address.map',
+                           'META-INF/javamail.providers',
+                           'META-INF/javamail.address.map',
+                           'META-INF/javamail.charset.map']
+        }
+    }
+}
+
+repositories {
+    flatDir{
+        dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
+    }
+}
+
+dependencies {
+    implementation fileTree(include: ['*.jar'], dir: 'libs')
+    implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+    implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
+    implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+    implementation project(':capacitor-android')
+
+    // Scheduled sends: WorkManager runs them, JavaMail performs them.
+    implementation "androidx.work:work-runtime:2.10.0"
+    implementation "com.sun.mail:android-mail:1.6.7"
+    implementation "com.sun.mail:android-activation:1.6.7"
+
+    // Receiving: same JavaMail dependency above also carries an IMAP
+    // provider, so no separate library is needed for that half. Jsoup
+    // sanitizes received HTML before it reaches the WebView — see
+    // InboxSanitizer.java.
+    implementation "org.jsoup:jsoup:1.17.2"
+
+    // Saving a received attachment to a folder the user picked. Android has no
+    // writable path outside app storage, so the destination is a SAF tree URI
+    // and DocumentFile is what turns one into "create a file in here".
+    implementation "androidx.documentfile:documentfile:1.0.1"
+
+    testImplementation "junit:junit:$junitVersion"
+    androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
+    androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
+    implementation project(':capacitor-cordova-android-plugins')
+}
+
+apply from: 'capacitor.build.gradle'
+
+try {
+    def servicesJSON = file('google-services.json')
+    if (servicesJSON.text) {
+        apply plugin: 'com.google.gms.google-services'
+    }
+} catch(Exception e) {
+    logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
+}

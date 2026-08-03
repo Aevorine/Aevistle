@@ -1,0 +1,1073 @@
+/**
+ * Electron main process.
+ *
+ * Security posture, in one place so it can be audited at a glance:
+ *   - contextIsolation on, nodeIntegration off, sandbox on
+ *   - the renderer is loaded from disk; no remote content ever
+ *   - every `window.open` and in-page navigation to an external origin is
+ *     refused and handed to the OS browser instead
+ *   - `openExternal` only accepts http/https, so a crafted settings import
+ *     cannot make the app run `file://` or a custom protocol handler
+ */
+
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  Menu,
+  Notification,
+  nativeImage,
+  nativeTheme,
+  powerMonitor,
+  shell,
+  Tray,
+} from 'electron'
+import path from 'node:path'
+import { promises as fs } from 'node:fs'
+import { IPC, type TrayCommand } from '../src/core/ipc-contract'
+import type {
+  Attachment,
+  InboxAccountState,
+  InboxTag,
+  LocaleId,
+  MailAccount,
+  MessageDraft,
+  ScheduledJob,
+  SecretKind,
+  SendResult,
+} from '../src/core/types'
+import type { DataFolder, DataFolderChange } from '../src/core/bridge'
+// The translation tables, not the i18n module: that one pulls in React for the
+// context helper, and the main process has no business bundling React.
+import { en } from '../src/i18n/en'
+import { zhCN } from '../src/i18n/zh-CN'
+import { fr } from '../src/i18n/fr'
+import { es } from '../src/i18n/es'
+import { ru } from '../src/i18n/ru'
+import { ar } from '../src/i18n/ar'
+import { fetchLatest, type UpdateAsset, type UpdateInfo } from '../src/core/update'
+import {
+  closeAllConnections,
+  invalidateConnection,
+  prewarm,
+  sendMail,
+  testConnection,
+} from './mailer'
+import { downloadUpdate } from './updater'
+import { isInside } from './fsUtil'
+import { Scheduler } from './scheduler'
+import { ControlServer } from './controlServer'
+import {
+  CONTROL_DIR,
+  ENDPOINT_FILE,
+  type ControlEndpoint,
+  type ControlResponse,
+} from '../src/core/control'
+import {
+  dataFolderSize,
+  dataLocation,
+  defaultDataRoot,
+  deleteSecret,
+  getSecret,
+  hasSecret,
+  initDataRoot,
+  isDefaultLocation,
+  loadState,
+  pruneSnapshots,
+  saveState,
+  setDataRoot,
+  setSecret,
+  withDataDir,
+  snapshotDir,
+  pastedDir,
+} from './store'
+import { fetchMessageBody, setServerSeenFlag, syncInbox, testInbox } from './imap'
+import { stopAllInboxWatchers, watchInboxes } from './imapIdle'
+import { deleteAccountInboxCache, deleteMessageCache, pruneInboxCache } from './inboxStore'
+import { downloadRemoteImage } from './remoteImage'
+
+// Bundled to CommonJS by scripts/build-electron.mjs, so __dirname is real.
+const DIRNAME = __dirname
+const DEV_SERVER = process.env.VITE_DEV_SERVER_URL
+
+const TABLES = { en, 'zh-CN': zhCN, fr, es, ru, ar } as const
+const SUPPORTED_LOCALES = Object.keys(TABLES) as LocaleId[]
+
+/** Look up a tray label, falling back to English rather than to a raw key. */
+function tr(locale: LocaleId, key: keyof typeof en): string {
+  return TABLES[locale]?.[key] ?? en[key]
+}
+
+let mainWindow: BrowserWindow | null = null
+let tray: Tray | null = null
+/**
+ * The language the tray menu is drawn in.
+ *
+ * Seeded from the OS display language once the app is ready — `app.getLocale()`
+ * returns an empty string before that, which would silently pin every machine
+ * to English. The renderer overrides it through `IPC.setUiLocale` once it knows
+ * what the user actually picked.
+ */
+let uiLocale: LocaleId = 'en'
+let quitting = false
+let dataFolderFellBack = false
+const scheduler = new Scheduler()
+
+// ---------------------------------------------------------------------------
+// Control interface
+//
+// The server accepts requests; the renderer answers them. This map is the join
+// between the two, and the timeout is what stops a hung window turning into a
+// hung HTTP client — 30s is far longer than any of these operations, so firing
+// it means something is actually wrong.
+// ---------------------------------------------------------------------------
+
+let controlSettings = { enabled: false, allowSending: false }
+const pendingControl = new Map<string, (response: ControlResponse) => void>()
+
+const controlServer = new ControlServer({
+  permissions: () => controlSettings,
+  dataRoot: () => dataLocation(),
+  log: (level, message, detail) => {
+    // eslint-disable-next-line no-console
+    console[level === 'error' ? 'error' : 'log'](`[control] ${message}`, detail ?? '')
+  },
+  execute: (request) =>
+    new Promise<ControlResponse>((resolve) => {
+      const window = mainWindow
+      if (!window || window.webContents.isDestroyed()) {
+        resolve({ id: request.id, ok: false, error: 'Aevistle window is not available' })
+        return
+      }
+      const timer = setTimeout(() => {
+        pendingControl.delete(request.id)
+        resolve({ id: request.id, ok: false, error: 'timed out waiting for the app to answer' })
+      }, 30_000)
+      pendingControl.set(request.id, (response) => {
+        clearTimeout(timer)
+        pendingControl.delete(request.id)
+        resolve(response)
+      })
+      window.webContents.send(IPC.controlRequest, request)
+    }),
+})
+
+/**
+ * Where the server ended up, for the settings screen to show. Read back from
+ * the file the server wrote rather than kept in a second variable, so what the
+ * user is told and what a caller will find cannot disagree.
+ */
+async function readEndpoint(): Promise<ControlEndpoint | null> {
+  try {
+    const raw = await fs.readFile(
+      path.join(dataLocation(), CONTROL_DIR, ENDPOINT_FILE),
+      'utf8',
+    )
+    return JSON.parse(raw) as ControlEndpoint
+  } catch {
+    return null
+  }
+}
+
+// A second copy would run the schedule twice and send everything in duplicate.
+if (!app.requestSingleInstanceLock()) {
+  app.quit()
+}
+
+app.on('second-instance', () => {
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.show()
+    mainWindow.focus()
+  }
+})
+
+// ---------------------------------------------------------------------------
+// Window
+// ---------------------------------------------------------------------------
+
+function createWindow(): void {
+  mainWindow = new BrowserWindow({
+    // Sized for the serif type scale: 16 px body text needs more line length
+    // than the 14 px it replaced before the layout starts feeling cramped.
+    width: 1280,
+    height: 880,
+    minWidth: 880,
+    minHeight: 620,
+    show: false,
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#14161b' : '#eceef1',
+    autoHideMenuBar: true,
+    title: 'Aevistle',
+    webPreferences: {
+      preload: path.join(DIRNAME, 'preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      webviewTag: false,
+      spellcheck: true,
+    },
+  })
+
+  mainWindow.once('ready-to-show', () => mainWindow?.show())
+
+  if (DEV_SERVER) {
+    void mainWindow.loadURL(DEV_SERVER)
+  } else {
+    void mainWindow.loadFile(path.join(DIRNAME, '..', 'dist', 'index.html'))
+  }
+
+  // Any attempt to open a new window goes to the OS browser, never to a new
+  // Electron window with our preload attached.
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    void openExternalSafely(url)
+    return { action: 'deny' }
+  })
+
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    const current = mainWindow?.webContents.getURL() ?? ''
+    if (new URL(url).origin !== new URL(current).origin) {
+      event.preventDefault()
+      void openExternalSafely(url)
+    }
+  })
+
+  // Closing the window keeps the scheduler alive in the tray; quitting is
+  // explicit. Without this, "send at 3am" would only work if the user left the
+  // window open, which nobody does.
+  mainWindow.on('close', (event) => {
+    if (!quitting && tray) {
+      event.preventDefault()
+      mainWindow?.hide()
+    }
+  })
+
+  mainWindow.on('closed', () => {
+    mainWindow = null
+  })
+}
+
+function createTray(): void {
+  // The tray icon is what keeps the app alive after the window is closed, which
+  // is the whole point of a scheduler — so a missing asset must not silently
+  // cost the user their 07:00 send. `nativeImage` returns an empty image for a
+  // path that does not exist instead of throwing, and `new Tray(<empty>)` is
+  // what actually throws, so both are handled and there is a drawn fallback.
+  const candidates = [
+    path.join(DIRNAME, '..', 'build', 'tray.png'),
+    path.join(process.resourcesPath ?? '', 'build', 'tray.png'),
+  ]
+
+  let icon = nativeImage.createEmpty()
+  for (const candidate of candidates) {
+    const loaded = nativeImage.createFromPath(candidate)
+    if (!loaded.isEmpty()) {
+      icon = loaded
+      break
+    }
+  }
+  if (icon.isEmpty()) icon = fallbackTrayIcon()
+
+  try {
+    tray = new Tray(icon)
+  } catch {
+    tray = null
+    return
+  }
+
+  tray.setToolTip('Aevistle')
+  refreshTrayMenu()
+  tray.on('double-click', () => {
+    mainWindow?.show()
+    mainWindow?.focus()
+  })
+}
+
+/**
+ * (Re)draw the tray menu in `uiLocale`.
+ *
+ * Electron has no way to relabel an existing menu, so the whole template is
+ * rebuilt. That is cheap and happens only when the language changes.
+ */
+function refreshTrayMenu(): void {
+  if (!tray) return
+  const label = (
+    key:
+      | 'tray.open'
+      | 'tray.compose'
+      | 'tray.quit'
+      | 'tray.schedule'
+      | 'tray.logs'
+      | 'tray.pauseAll'
+      | 'tray.resumeAll'
+      | 'tray.nothingDue'
+      | 'tray.nextAt',
+  ) => tr(uiLocale, key)
+
+  const reveal = () => {
+    if (!mainWindow) createWindow()
+    mainWindow?.show()
+    mainWindow?.focus()
+  }
+
+  const send = (command: TrayCommand) => () => {
+    reveal()
+    mainWindow?.webContents.send(IPC.trayCommand, command)
+  }
+
+  /**
+   * When the next reminder actually goes out.
+   *
+   * This is the one thing worth putting in a tray menu that is otherwise just
+   * shortcuts: the window is closed, the app is a small icon, and the only
+   * question anyone has is "is it still going to fire?". A menu that cannot
+   * answer that is a menu with no reason to be read.
+   */
+  const jobs = scheduler.snapshot().filter((j) => j.enabled)
+  const next = jobs
+    .flatMap((j) => j.occurrences)
+    .filter((t) => t > Date.now())
+    .sort((a, b) => a - b)[0]
+  const anyEnabled = jobs.length > 0
+
+  const nextLabel =
+    next === undefined
+      ? label('tray.nothingDue')
+      : `${label('tray.nextAt')} ${new Date(next).toLocaleString(uiLocale)}`
+
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      // Disabled on purpose: it is a readout, not a command. Making it
+      // clickable would invite the guess that clicking sends it now.
+      { label: nextLabel, enabled: false },
+      { type: 'separator' },
+      { label: label('tray.open'), click: reveal },
+      { label: label('tray.compose'), click: send('compose') },
+      { label: label('tray.schedule'), click: send('schedule') },
+      { label: label('tray.logs'), click: send('logs') },
+      { type: 'separator' },
+      anyEnabled
+        ? { label: label('tray.pauseAll'), click: send('pauseAll') }
+        : { label: label('tray.resumeAll'), click: send('resumeAll') },
+      { type: 'separator' },
+      {
+        label: label('tray.quit'),
+        click: () => {
+          quitting = true
+          app.quit()
+        },
+      },
+    ]),
+  )
+}
+
+/**
+ * The closest supported locale for the OS display language.
+ *
+ * `app.getLocale()` is only reliable after the `ready` event, so this is called
+ * lazily rather than at module scope — Electron returns `''` before then, which
+ * would silently pin every machine to English.
+ */
+function systemLocale(): LocaleId {
+  const raw = (app.isReady() ? app.getLocale() : '').toLowerCase()
+  if (!raw) return 'en'
+  if (raw.startsWith('zh')) return 'zh-CN'
+  const base = raw.split('-')[0]
+  const match = SUPPORTED_LOCALES.find((id) => id === raw || id.split('-')[0] === base)
+  return match ?? 'en'
+}
+
+/**
+ * A 16×16 accent-coloured square, drawn from raw pixels.
+ *
+ * Not pretty, but a tray entry the user can right-click is the difference
+ * between "schedules keep running" and "closing the window stopped everything",
+ * so there is always one even if the packaged asset went missing.
+ */
+function fallbackTrayIcon(): Electron.NativeImage {
+  const size = 16
+  const pixels = Buffer.alloc(size * size * 4)
+  for (let i = 0; i < size * size; i++) {
+    pixels[i * 4 + 0] = 0xe5 // B
+    pixels[i * 4 + 1] = 0x46 // G
+    pixels[i * 4 + 2] = 0x4f // R
+    pixels[i * 4 + 3] = 0xff // A
+  }
+  return nativeImage.createFromBuffer(pixels, { width: size, height: size })
+}
+
+async function openExternalSafely(url: string): Promise<void> {
+  try {
+    const parsed = new URL(url)
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return
+    await shell.openExternal(parsed.toString())
+  } catch {
+    /* not a URL we are willing to hand to the OS */
+  }
+}
+
+// ---------------------------------------------------------------------------
+// IPC
+// ---------------------------------------------------------------------------
+
+function registerIpc(): void {
+  ipcMain.handle(IPC.loadState, () => loadState())
+  ipcMain.handle(IPC.saveState, (_e, state: unknown) => saveState(state))
+
+  // Any change to a credential invalidates the connection it authenticated,
+  // otherwise the next send would go out over a socket logged in as the old
+  // user — which succeeds, silently, from the wrong account.
+  ipcMain.handle(IPC.setSecret, (_e, id: string, secret: string, kind?: SecretKind) => {
+    if (!kind || kind === 'smtp') invalidateConnection(id)
+    return setSecret(id, secret, kind)
+  })
+  ipcMain.handle(IPC.hasSecret, (_e, id: string, kind?: SecretKind) => hasSecret(id, kind))
+  ipcMain.handle(IPC.deleteSecret, async (_e, id: string, kind?: SecretKind) => {
+    if (!kind || kind === 'smtp') invalidateConnection(id)
+    await deleteSecret(id, kind)
+    // The IMAP secret and the cached bodies/attachments it unlocked are
+    // deleted together — a credential with no cache to read is a leak
+    // waiting to be noticed, not a feature.
+    if (kind === 'imap') await deleteAccountInboxCache(id).catch(() => {})
+  })
+
+  ipcMain.handle(IPC.sendNow, async (_e, draft: MessageDraft, account: MailAccount) => {
+    const secret = await getSecret(account.id)
+    return sendMail(draft, account, secret)
+  })
+
+  ipcMain.handle(IPC.prewarm, async (_e, account: MailAccount) => {
+    const secret = await getSecret(account.id)
+    return prewarm(account, secret)
+  })
+
+  ipcMain.handle(IPC.setUiLocale, (_e, locale: LocaleId) => {
+    // Validated rather than trusted: this value goes straight into menu labels,
+    // and an unknown key would index the table to `undefined`.
+    if (!SUPPORTED_LOCALES.includes(locale) || locale === uiLocale) return
+    uiLocale = locale
+    refreshTrayMenu()
+  })
+
+  ipcMain.handle(
+    IPC.testConnection,
+    async (_e, account: MailAccount, secret?: string) => {
+      const pass = secret ?? (await getSecret(account.id))
+      // Drop any warm connection first: the dialog may be testing settings the
+      // user has edited but not saved, and reusing a pool opened with the old
+      // ones would report success for a configuration that does not exist yet.
+      invalidateConnection(account.id)
+      return testConnection(account, pass)
+    },
+  )
+
+  /**
+   * Attachments from a drag-and-drop, built from the paths the renderer
+   * resolved with `webUtils.getPathForFile`.
+   *
+   * Directories are skipped rather than half-attached: dropping a folder is a
+   * plausible mistake, and silently attaching nothing while the other files in
+   * the same drop succeed is the confusing half of that. Same bounded batch as
+   * `checkFiles` — a drop of ten thousand files is not a drop worth honouring.
+   */
+  ipcMain.handle(IPC.attachPaths, async (_e, paths: string[]): Promise<Attachment[]> => {
+    if (!Array.isArray(paths)) return []
+    const files: Attachment[] = []
+    for (const filePath of paths.slice(0, 50)) {
+      if (typeof filePath !== 'string' || filePath.length === 0) continue
+      try {
+        const stat = await fs.stat(filePath)
+        if (!stat.isFile()) continue
+        files.push({
+          id: `att_${Date.now()}_${files.length}`,
+          name: path.basename(filePath),
+          size: stat.size,
+          mime: guessMime(filePath),
+          source: 'path',
+          path: filePath,
+          addedAt: Date.now(),
+          inline: false,
+        })
+      } catch {
+        /* Unreadable file in a multi-file drop must not lose the rest. */
+      }
+    }
+    return files
+  })
+
+  ipcMain.handle(IPC.pickFiles, async (): Promise<Attachment[]> => {
+    if (!mainWindow) return []
+    const result = await dialog.showOpenDialog(mainWindow, {
+      properties: ['openFile', 'multiSelections'],
+      title: 'Add attachments',
+    })
+    if (result.canceled) return []
+
+    const files: Attachment[] = []
+    for (const filePath of result.filePaths) {
+      try {
+        const stat = await fs.stat(filePath)
+        files.push({
+          id: `att_${Date.now()}_${files.length}`,
+          name: path.basename(filePath),
+          size: stat.size,
+          mime: guessMime(filePath),
+          source: 'path',
+          path: filePath,
+          addedAt: Date.now(),
+          inline: false,
+        })
+      } catch {
+        /* skip anything we cannot stat */
+      }
+    }
+    return files
+  })
+
+  ipcMain.handle(
+    IPC.snapshotAttachments,
+    async (_e, attachments: Attachment[], jobId: string): Promise<Attachment[]> => {
+      const dir = snapshotDir(jobId)
+      await fs.mkdir(dir, { recursive: true })
+      const out: Attachment[] = []
+      for (const a of attachments) {
+        // basename() strips any directory component, so a crafted name cannot
+        // write outside the snapshot directory.
+        const target = path.join(dir, `${a.id}_${path.basename(a.name)}`)
+        await fs.copyFile(a.path, target)
+        out.push({ ...a, source: 'copy', path: target })
+      }
+      return out
+    },
+  )
+
+  /**
+   * Does this file still exist?
+   *
+   * Unlike `revealPath` this is *not* confined to the data folder, and that is
+   * deliberate: an attachment is normally a file somewhere in Documents, and
+   * confining the check would make it answer "missing" for every real
+   * attachment — a check that is always wrong is worse than no check. What
+   * keeps it safe is how little it returns: one boolean per path the renderer
+   * already knew about, no contents, no listing, no metadata. It cannot be
+   * used to enumerate anything, only to confirm a guess the renderer made.
+   */
+  ipcMain.handle(IPC.checkFiles, async (_e, paths: string[]) => {
+    const out: Record<string, boolean> = {}
+    if (!Array.isArray(paths)) return out
+    // A bounded batch: this is called from a live preview, and an unbounded
+    // list would let one draft stat ten thousand paths on every keystroke.
+    for (const p of paths.slice(0, 200)) {
+      if (typeof p !== 'string' || p.length === 0) continue
+      try {
+        const stat = await fs.stat(p)
+        out[p] = stat.isFile()
+      } catch {
+        out[p] = false
+      }
+    }
+    return out
+  })
+
+  ipcMain.handle(IPC.revealPath, (_e, target: string) => {
+    // A bare renderer-supplied string — confine it to the data folder.
+    // Without this, `target` could be any path on disk (e.g. `../../..`).
+    const resolved = path.resolve(target)
+    const root = path.resolve(dataLocation())
+    if (resolved !== root && !isInside(resolved, root)) return
+    shell.showItemInFolder(resolved)
+  })
+
+  /**
+   * Open a file with the OS's default handler for it — what "double-click an
+   * attachment" means, and the piece the inbox never had: `revealPath` above
+   * only ever highlighted the file in a folder, it did not open it. Confined
+   * to the data folder for the same reason `revealPath` is; every attachment
+   * this app itself wrote (received-mail attachments, pasted images) lives
+   * there, so the confinement costs nothing real.
+   */
+  ipcMain.handle(IPC.openPath, async (_e, target: string) => {
+    const resolved = path.resolve(target)
+    const root = path.resolve(dataLocation())
+    if (resolved !== root && !isInside(resolved, root)) return
+    const error = await shell.openPath(resolved)
+    if (error) throw new Error(error)
+  })
+
+  /**
+   * Read an attachment back for previewing it inside the window.
+   *
+   * Three separate limits, because this is the one method here that returns
+   * file *contents* rather than a boolean or a path:
+   *
+   *   - confined to the data folder, exactly as `openPath` and `revealPath`
+   *     are, so a crafted path cannot read `id_rsa`;
+   *   - capped at `PREVIEW_MAX_BYTES`, because the result crosses IPC as a
+   *     base64 string and doubles in size doing it — a 200 MB video would
+   *     otherwise be turned into a 270 MB string in the renderer's heap;
+   *   - restricted to types that render inertly. PDFs, images and plain text
+   *     are shown in a sandboxed frame that cannot execute anything; SVG is
+   *     *excluded on purpose* despite being an image, because it is a document
+   *     format that can carry script.
+   *
+   * `null` rather than a thrown error for "not previewable": the caller's
+   * fallback is to offer the OS handler instead, which is a normal outcome,
+   * not a failure worth a red toast.
+   */
+  ipcMain.handle(IPC.readAttachment, async (_e, target: string) => {
+    if (typeof target !== 'string' || target.length === 0) return null
+    const resolved = path.resolve(target)
+    const root = path.resolve(dataLocation())
+    if (!isInside(resolved, root)) return null
+    const mime = guessMime(resolved)
+    if (!PREVIEWABLE_MIME.test(mime)) return null
+    try {
+      const stat = await fs.stat(resolved)
+      if (!stat.isFile() || stat.size > PREVIEW_MAX_BYTES) return null
+      const bytes = await fs.readFile(resolved)
+      return { dataUrl: `data:${mime};base64,${bytes.toString('base64')}`, mime }
+    } catch {
+      return null
+    }
+  })
+
+  /**
+   * "Save a copy of this attachment somewhere I chose."
+   *
+   * The *source* is confined to the data folder like every other path handler;
+   * the *destination* is not, and must not be — the whole point is to put the
+   * file where the user wants it, and they picked that place in an OS dialog
+   * a moment ago rather than a renderer choosing it for them.
+   */
+  ipcMain.handle(IPC.saveAttachmentAs, async (_e, target: string, suggestedName: string) => {
+    const resolved = path.resolve(String(target ?? ''))
+    const root = path.resolve(dataLocation())
+    if (!isInside(resolved, root)) return null
+    const result = await dialog.showSaveDialog({
+      defaultPath: path.basename(String(suggestedName || '') || resolved),
+    })
+    if (result.canceled || !result.filePath) return null
+    await fs.copyFile(resolved, result.filePath)
+    return result.filePath
+  })
+
+  /** The same, for every attachment on a message at once: one folder, one dialog. */
+  ipcMain.handle(IPC.saveAttachmentsTo, async (_e, targets: string[]) => {
+    if (!Array.isArray(targets) || targets.length === 0) return null
+    const root = path.resolve(dataLocation())
+    const sources = targets
+      .filter((p): p is string => typeof p === 'string' && p.length > 0)
+      .map((p) => path.resolve(p))
+      .filter((p) => isInside(p, root))
+    if (sources.length === 0) return null
+
+    const result = await dialog.showOpenDialog({ properties: ['openDirectory', 'createDirectory'] })
+    if (result.canceled || result.filePaths.length === 0) return null
+    const folder = result.filePaths[0]
+
+    let saved = 0
+    for (const source of sources) {
+      // Never overwrite: two mails routinely attach `invoice.pdf`, and a
+      // silent overwrite here would destroy the first one with no way to tell.
+      const target = await uniqueTarget(folder, path.basename(source))
+      try {
+        await fs.copyFile(source, target)
+        saved++
+      } catch {
+        /* One unwritable file must not abandon the rest of the batch. */
+      }
+    }
+    return { folder, saved }
+  })
+
+  /**
+   * Save a clipboard image as an attachment, for pasting one straight into
+   * the compose body. `data` arrives as an `ArrayBuffer` over IPC's
+   * structured clone — no base64 round trip.
+   */
+  ipcMain.handle(
+    IPC.attachBlob,
+    async (_e, name: string, mime: string, data: ArrayBuffer): Promise<Attachment> => {
+      const dir = pastedDir()
+      await fs.mkdir(dir, { recursive: true })
+      const id = `paste_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+      // basename() so a crafted name cannot write outside the pasted
+      // directory — the same discipline every other renderer-supplied
+      // filename in this file follows.
+      const safeName = path.basename(name || 'pasted-image.png')
+      const target = path.join(dir, `${id}_${safeName}`)
+      await fs.writeFile(target, Buffer.from(data))
+      const stat = await fs.stat(target)
+      return {
+        id,
+        name: safeName,
+        size: stat.size,
+        mime: mime || guessMime(target),
+        source: 'copy',
+        path: target,
+        addedAt: Date.now(),
+        inline: false,
+      }
+    },
+  )
+
+  ipcMain.handle(
+    IPC.syncJobs,
+    async (_e, jobs: ScheduledJob[], accounts: MailAccount[]) => {
+      scheduler.sync(jobs, accounts)
+      // The tray shows the next fire time, so it is stale the moment the
+      // schedule changes. Redrawing here is what keeps "next: 09:00 tomorrow"
+      // from still saying that after the reminder has been deleted.
+      refreshTrayMenu()
+      await pruneSnapshots(jobs.map((j) => j.id))
+    },
+  )
+
+  // --- inbox (receiving) ---------------------------------------------------
+
+  /**
+   * The receive password, falling back to the send password for the same
+   * account.
+   *
+   * Every provider this app ships a preset for issues one app password that
+   * authenticates both SMTP and IMAP — Gmail, Outlook, QQ, 163, Yahoo, Zoho.
+   * Making people paste the same string into a second box teaches them the
+   * two are unrelated, and typo'ing it produces an authentication failure
+   * that looks like the app is broken. They stay separate keys in the store,
+   * so anyone who genuinely has two passwords can still set them apart.
+   */
+  async function getInboxSecret(accountId: string): Promise<string | null> {
+    return (await getSecret(accountId, 'imap')) ?? (await getSecret(accountId, 'smtp'))
+  }
+
+  ipcMain.handle(
+    IPC.testInbox,
+    async (_e, config: InboxAccountState, secret?: string): Promise<SendResult> => {
+      const pass = secret || (await getInboxSecret(config.accountId))
+      return testInbox(config, pass)
+    },
+  )
+
+  /**
+   * Point the push watchers at the accounts that currently want one.
+   *
+   * The renderer sends configs without passwords — those never leave the main
+   * process — so the secret for each is looked up here before handing the set
+   * to the watcher pool, which reconciles it against what is already running.
+   */
+  ipcMain.handle(IPC.watchInbox, async (_e, configs: InboxAccountState[]) => {
+    const withSecrets = await Promise.all(
+      configs.map(async (config) => ({
+        config,
+        secret: await getInboxSecret(config.accountId),
+      })),
+    )
+    watchInboxes(withSecrets, (accountId) => {
+      // The watcher only ever says "something changed"; the renderer runs the
+      // same sync it would have run on a timer. One fetch path, not two.
+      mainWindow?.webContents.send(IPC.inboxEvent, {
+        accountId,
+        folderPath: 'INBOX',
+        newMessageIds: [],
+      })
+    })
+  })
+
+  ipcMain.handle(IPC.syncInbox, async (_e, config: InboxAccountState) => {
+    const secret = await getInboxSecret(config.accountId)
+    const result = await syncInbox(config, secret)
+    // A cache that only ever grows would eventually make "check now" slower
+    // than the sync it triggers — pruning after every sync keeps it bounded
+    // without a separate timer to forget about.
+    const state = await loadState<{ settings?: { inboxCacheMaxMb?: number; inboxCacheRetentionDays?: number } }>()
+    await pruneInboxCache(
+      config.accountId,
+      state?.settings?.inboxCacheMaxMb ?? 500,
+      state?.settings?.inboxCacheRetentionDays ?? 90,
+    ).catch(() => {})
+    return result
+  })
+
+  ipcMain.handle(
+    IPC.getMessageBody,
+    async (_e, config: InboxAccountState, folderPath: string, uid: number) => {
+      const secret = await getInboxSecret(config.accountId)
+      return fetchMessageBody(config, secret, folderPath, uid)
+    },
+  )
+
+  ipcMain.handle(
+    IPC.setMessageFlags,
+    async (
+      _e,
+      config: InboxAccountState,
+      folderPath: string,
+      uid: number,
+      patch: { seen?: boolean; tag?: InboxTag },
+    ) => {
+      // `tag` never reaches here — it is local-only by design (see `InboxTag`
+      // in types.ts) and the renderer never sends it over this channel for
+      // anything but `seen`.
+      if (patch.seen === undefined) return
+      const secret = await getInboxSecret(config.accountId)
+      await setServerSeenFlag(config, secret, folderPath, uid, patch.seen)
+    },
+  )
+
+  ipcMain.handle(
+    IPC.deleteInboxMessages,
+    async (_e, accountId: string, items: Array<{ folderPath: string; uid: number }>) => {
+      await deleteMessageCache(accountId, items)
+    },
+  )
+
+  ipcMain.handle(IPC.fetchRemoteImage, (_e, url: string) => downloadRemoteImage(url))
+
+  ipcMain.handle(IPC.notify, (_e, title: string, body: string) => {
+    if (Notification.isSupported()) new Notification({ title, body }).show()
+  })
+
+  ipcMain.handle(IPC.openExternal, (_e, url: string) => openExternalSafely(url))
+
+  ipcMain.handle(
+    IPC.applyControl,
+    async (_e, settings: { enabled: boolean; allowSending: boolean }): Promise<ControlEndpoint | null> => {
+      controlSettings = settings
+      await controlServer.apply()
+      return readEndpoint()
+    },
+  )
+
+  ipcMain.handle(IPC.controlResponse, (_e, response: ControlResponse) => {
+    pendingControl.get(response.id)?.(response)
+  })
+
+  ipcMain.handle(IPC.appInfo, () => ({
+    version: app.getVersion(),
+    platform: 'desktop' as const,
+    os: `${process.platform} ${process.arch}`,
+    dataLocation: dataLocation(),
+    // Packaged builds get it from extraResources; a dev run reads it straight
+    // out of the repo, so the Settings command is correct either way.
+    mcpServerPath: app.isPackaged
+      ? path.join(process.resourcesPath, 'integrations', 'mcp-server.mjs')
+      : path.join(DIRNAME, '..', 'integrations', 'mcp-server.mjs'),
+  }))
+
+  // --- data folder --------------------------------------------------------
+
+  ipcMain.handle(IPC.dataFolder, async (): Promise<DataFolder> => {
+    return {
+      path: dataLocation(),
+      isDefault: isDefaultLocation(),
+      sizeBytes: await dataFolderSize(),
+      canPickAny: true,
+      options: [{ id: 'default', path: defaultDataRoot(), available: true }],
+      fellBack: dataFolderFellBack || undefined,
+      // Passwords are encrypted against the OS user account, so they are of no
+      // use in a folder on a stick anyway. Saying so beats a user moving the
+      // folder to a shared drive and assuming their credentials went too.
+      staysBehind: ['secrets'],
+    }
+  })
+
+  ipcMain.handle(
+    IPC.chooseDataFolder,
+    async (_e, move: boolean): Promise<DataFolderChange> => {
+      const before = dataLocation()
+      const parent = mainWindow
+      const result = parent
+        ? await dialog.showOpenDialog(parent, {
+            properties: ['openDirectory', 'createDirectory'],
+            defaultPath: dataLocation(),
+            title: 'Choose where Aevistle keeps its data',
+          })
+        : await dialog.showOpenDialog({
+            properties: ['openDirectory', 'createDirectory'],
+            defaultPath: dataLocation(),
+          })
+
+      if (result.canceled || result.filePaths.length === 0) {
+        return { changed: false, path: dataLocation(), moved: false }
+      }
+
+      // The dialog returns the container the user chose; the data itself
+      // always lands in an AevistleData folder inside it.
+      const outcome = await setDataRoot(withDataDir(result.filePaths[0]), move)
+      dataFolderFellBack = false
+      return {
+        changed: outcome.root !== before,
+        path: outcome.root,
+        moved: outcome.moved,
+        warning: outcome.warning,
+      }
+    },
+  )
+
+  ipcMain.handle(
+    IPC.useDataFolder,
+    async (_e, optionId: string, move: boolean): Promise<DataFolderChange> => {
+      // The desktop build offers exactly one preset: back to the default.
+      if (optionId !== 'default') throw new Error(`Unknown data folder option: ${optionId}`)
+      const before = dataLocation()
+      const outcome = await setDataRoot(defaultDataRoot(), move)
+      dataFolderFellBack = false
+      return {
+        changed: outcome.root !== before,
+        path: outcome.root,
+        moved: outcome.moved,
+        warning: outcome.warning,
+      }
+    },
+  )
+
+  ipcMain.handle(IPC.openDataFolder, async () => {
+    await fs.mkdir(dataLocation(), { recursive: true }).catch(() => {})
+    await shell.openPath(dataLocation())
+  })
+
+  // --- updates ------------------------------------------------------------
+
+  ipcMain.handle(
+    IPC.checkForUpdate,
+    (): Promise<UpdateInfo> => fetchLatest(app.getVersion(), 'desktop'),
+  )
+
+  ipcMain.handle(IPC.downloadUpdate, async (_e, asset: UpdateAsset) => {
+    const target = path.join(app.getPath('downloads'), 'Aevistle')
+    return downloadUpdate(asset, target, (progress) => {
+      mainWindow?.webContents.send(IPC.updateProgress, progress)
+    })
+  })
+
+  ipcMain.handle(IPC.installUpdate, async (_e, filePath: string) => {
+    // Only ever launch something we put in our own download folder — a path
+    // arriving from the renderer is otherwise a request to run arbitrary code.
+    const expected = path.join(app.getPath('downloads'), 'Aevistle')
+    const resolved = path.resolve(filePath)
+    if (!resolved.startsWith(path.resolve(expected) + path.sep)) {
+      throw new Error('Refusing to launch a file from outside the download folder')
+    }
+    await fs.access(resolved)
+
+    // Quit first: the installer replaces files this process has open, and on
+    // Windows that fails with a file-in-use error the user cannot interpret.
+    quitting = true
+    scheduler.stop()
+    setTimeout(() => {
+      void shell.openPath(resolved).finally(() => app.quit())
+    }, 300)
+  })
+}
+
+/**
+ * What `readAttachment` is willing to hand back.
+ *
+ * SVG is excluded even though it is an image: it is a document that can carry
+ * script, and the preview frame's job is to be boring. Everything here either
+ * has no scripting model at all, or is displayed by Chromium's own hardened
+ * viewer (PDF).
+ */
+const PREVIEWABLE_MIME = /^(image\/(png|jpeg|gif|webp|bmp|avif)|application\/pdf|text\/(plain|csv))$/
+
+/** 24 MB of file becomes ~32 MB of base64 in transit; past that, offer the OS handler instead. */
+const PREVIEW_MAX_BYTES = 24 * 1024 * 1024
+
+/** `invoice.pdf` → `invoice (2).pdf` when the first one is already there. */
+async function uniqueTarget(folder: string, name: string): Promise<string> {
+  const ext = path.extname(name)
+  const stem = path.basename(name, ext)
+  let candidate = path.join(folder, name)
+  for (let n = 2; n < 1000; n++) {
+    try {
+      await fs.access(candidate)
+    } catch {
+      return candidate
+    }
+    candidate = path.join(folder, `${stem} (${n})${ext}`)
+  }
+  return candidate
+}
+
+function guessMime(filePath: string): string {
+  const ext = path.extname(filePath).slice(1).toLowerCase()
+  const map: Record<string, string> = {
+    pdf: 'application/pdf',
+    png: 'image/png',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    gif: 'image/gif',
+    webp: 'image/webp',
+    svg: 'image/svg+xml',
+    zip: 'application/zip',
+    rar: 'application/vnd.rar',
+    '7z': 'application/x-7z-compressed',
+    txt: 'text/plain',
+    csv: 'text/csv',
+    doc: 'application/msword',
+    docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    xls: 'application/vnd.ms-excel',
+    xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    ppt: 'application/vnd.ms-powerpoint',
+    pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  }
+  return map[ext] ?? 'application/octet-stream'
+}
+
+// ---------------------------------------------------------------------------
+// Lifecycle
+// ---------------------------------------------------------------------------
+
+void app.whenReady().then(() => {
+  // Before anything reads or writes: the user may have pointed the data folder
+  // somewhere else, and loading state from the default folder first would show
+  // them an empty app.
+  dataFolderFellBack = initDataRoot().fellBack
+
+  // Now that `app.getLocale()` answers, the tray can be built in the OS
+  // language straight away instead of flashing English until the window loads.
+  uiLocale = systemLocale()
+
+  registerIpc()
+  createWindow()
+  createTray()
+
+  scheduler.on('jobEvent', (payload) => {
+    mainWindow?.webContents.send(IPC.jobEvent, payload)
+    if (!payload.result.ok && Notification.isSupported()) {
+      new Notification({
+        title: 'Aevistle — scheduled send failed',
+        body: payload.result.error ?? 'Unknown error',
+      }).show()
+    }
+  })
+  scheduler.start()
+
+  // The drop folder is served whether or not the port is open: a request left
+  // there while the app was closed is the case it exists for.
+  void controlServer.startDropWatcher()
+
+  // The 15-second poll would otherwise leave a due job waiting out however
+  // much of the current tick is left after the machine wakes back up.
+  powerMonitor.on('resume', () => scheduler.wake())
+  powerMonitor.on('unlock-screen', () => scheduler.wake())
+
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+  })
+})
+
+app.on('before-quit', () => {
+  quitting = true
+  scheduler.stop()
+  void controlServer.dispose()
+  closeAllConnections()
+  // Held-open IDLE sockets would otherwise keep the process from exiting
+  // cleanly, and leave the provider counting a connection that is gone.
+  stopAllInboxWatchers()
+})
+
+app.on('window-all-closed', () => {
+  // With a tray icon the app deliberately keeps running so schedules fire.
+  if (!tray && process.platform !== 'darwin') app.quit()
+})

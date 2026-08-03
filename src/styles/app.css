@@ -1,0 +1,3846 @@
+/* ==========================================================================
+   Aevistle — application styles
+   Tokens live in theme.css. Nothing here hard-codes a colour.
+   ========================================================================== */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  color: var(--text-1);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  overscroll-behavior: none;
+  /* Neither Times New Roman nor SimSun ships a variable weight axis, so the
+     renderer has to synthesise bold. Left to itself it would also synthesise
+     oblique, which shears Chinese glyphs into something unreadable. */
+  font-synthesis: weight;
+  /* Figures line up in columns — sizes, counts, timestamps, ports. */
+  font-variant-numeric: tabular-nums;
+  /* The quarter-space between Han and Latin/digits that Chinese typesetting
+     has always used and that nobody wants to type by hand. The browser's
+     initial value is `no-autospace`, so this has to be asked for: without it
+     「收到 3 封」and「打开 Aevistle」run their scripts together. Measured at
+     16px it adds an eighth of an em per boundary.
+
+     `trim-start` is the companion rule: full-width punctuation carries its own
+     half-em of padding, so 「，」at the start of a wrapped line otherwise
+     indents it against the margin. Both are ignored by engines that have not
+     shipped them, which costs nothing. */
+  text-autospace: normal;
+  text-spacing-trim: trim-start;
+}
+
+/*
+ * Only two weights exist in practice: the regular face and a synthesised bold.
+ * Asking for 550 or 620 gets rounded to one of them anyway, so hierarchy is
+ * carried by size, colour and spacing instead, and every "semi-bold" in this
+ * file resolves to the one bold that actually renders.
+ */
+strong,
+b {
+  font-weight: 700;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+/* The one focus ring.
+ *
+ * Note what is *not* here: `border-radius`. Setting it in this rule changes
+ * the focused element's own corners — a pill button squared off to 5px the
+ * moment it was tabbed to, and a card-sized target lost its rounding. The
+ * outline already follows whatever radius the element has, so the correct
+ * amount of shape control here is none.
+ *
+ * The second, inverted ring is what keeps this visible on a surface that
+ * happens to be the accent colour (a focused primary button): two rings of
+ * opposite lightness cannot both disappear into the same background. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--surface-0) 92%, transparent);
+}
+/* Inputs draw their own ring inside the border, so the outline would double up. */
+.input:focus-visible,
+.textarea:focus-visible,
+.select:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent) 26%, transparent);
+}
+
+/* Scrollbars — thin and out of the way, but visible enough to grab. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: var(--r-full);
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--text-3);
+  background-clip: content-box;
+}
+
+/* ==========================================================================
+   Shell
+   ========================================================================== */
+
+.shell {
+  display: grid;
+  grid-template-columns: var(--sidebar-w) 1fr;
+  height: 100%;
+  transition: grid-template-columns var(--dur) var(--ease);
+}
+.shell[data-collapsed="true"] {
+  grid-template-columns: var(--sidebar-w-collapsed) 1fr;
+}
+
+/* --- sidebar --- */
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  /* Deliberately *not* --surface-1: the sidebar sits behind the content, and
+     matching the card colour made the whole window look like one flat sheet. */
+  background: var(--surface-2);
+  border-inline-end: 1px solid var(--border-subtle);
+  padding: var(--sp-3);
+  gap: var(--sp-1);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-3) var(--sp-4);
+  min-width: 0;
+}
+
+/* The application icon itself, not a stand-in drawn from the accent colour.
+   It carries its own squircle and its own palette, so the tile underneath is
+   only a shadow — giving it a background would put a second, differently
+   coloured rounded rectangle behind the one already in the artwork. */
+.brand__mark {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  filter: drop-shadow(0 2px 6px rgba(16, 19, 26, 0.22));
+}
+.brand__mark img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  -webkit-user-drag: none;
+}
+
+.brand__text {
+  min-width: 0;
+  overflow: hidden;
+}
+.brand__name {
+  font-size: var(--text-lg);
+  font-weight: 700;
+  letter-spacing: var(--tracking-tight);
+  white-space: nowrap;
+}
+.brand__tagline {
+  font-size: var(--text-sm);
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.nav__item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  min-height: 44px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-2);
+  font-size: var(--text-base);
+  font-weight: 400;
+  text-align: start;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+.nav__item:hover {
+  background: var(--surface-hover);
+  color: var(--text-1);
+}
+/* The selected screen.
+ *
+ * The label is `--text-1`, not the accent. Accent-on-accent-tint measured
+ * 3.5:1 in light and 3.2:1 in dark — below AA for 16px text — and it could not
+ * be fixed by adjusting one colour, because the accent is one of seven the
+ * user picks between. Carrying the accent on the indicator bar and the icon
+ * instead keeps the screen just as obviously selected while the words stay
+ * readable at every accent. */
+.nav__item[aria-current="page"] {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--text-1);
+  font-weight: 700;
+}
+.nav__item[aria-current="page"] .nav__icon {
+  color: var(--accent);
+}
+.nav__item[aria-current="page"]::before {
+  content: "";
+  position: absolute;
+  inset-inline-start: 0;
+  top: 50%;
+  translate: 0 -50%;
+  width: 3px;
+  height: 18px;
+  border-radius: var(--r-full);
+  background: var(--accent);
+}
+.nav__icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+}
+.nav__label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.nav__badge {
+  flex: none;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-full);
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.shell[data-collapsed="true"] .brand__text,
+.shell[data-collapsed="true"] .nav__label,
+.shell[data-collapsed="true"] .sidebar__footer-text {
+  display: none;
+}
+.shell[data-collapsed="true"] .nav__item {
+  justify-content: center;
+  padding-inline: 0;
+}
+.shell[data-collapsed="true"] .nav__badge {
+  position: absolute;
+  top: 2px;
+  inset-inline-end: 6px;
+  min-width: 16px;
+  height: 16px;
+  font-size: var(--text-2xs);
+}
+
+.sidebar__footer {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: var(--sp-3);
+  margin-top: var(--sp-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+/* --- main --- */
+
+.main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--bg);
+}
+
+.view {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 var(--sp-5) var(--sp-8);
+}
+.view__inner {
+  max-width: var(--content-max);
+  margin-inline: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+/* Prose never runs the full width of a wide window: past about 70 characters
+   the eye loses the start of the next line. */
+.view__inner p,
+.banner__body {
+  max-width: var(--reading-max);
+}
+
+/* --- list screens ---
+
+   Scheduled, Contacts, Templates and Activity are lists, and a list cannot be
+   made to fit a screen by tightening it: fifty contacts are fifty contacts.
+   What *can* fit is everything around the list. So the heading, the primary
+   action, the search box, the stat row and the filter are taken out of the
+   scrolling area and only the rows move underneath them.
+
+   This is what "fits on one screen" means for a list — not that everything is
+   visible at once, but that you always know which screen you are on, the
+   filter you set stays in sight, and "Add contact" is still reachable at row
+   fifty instead of being somewhere above the scroll position. Measured at 8
+   activity entries the whole page used to overflow by 270px, taking the stat
+   row and the filter off screen with it. */
+.view--list {
+  overflow: hidden;
+  padding-bottom: var(--sp-5);
+}
+.view--list .view__inner {
+  height: 100%;
+}
+.view--list .list-pane {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  /* The rounded corners of the card inside must not be clipped square by the
+     scroll container. */
+  border-radius: var(--r-lg);
+}
+/* An empty list should not sit squashed against the heading. */
+.view--list .list-pane > .empty {
+  height: 100%;
+}
+
+/* --- page head ---
+
+   The single heading in the app, and the only place a screen's primary action
+   lives. It replaces the old title bar, which printed the screen name a second
+   time on the four views that already had a heading of their own and printed
+   nothing at all on Compose and Settings — the same app appearing to have been
+   laid out by two different people depending on which tab you were on.
+
+   Sticky rather than fixed chrome: it scrolls in the same box as the content,
+   so it costs nothing on a short screen and still names the page on a long
+   one. */
+.page-head {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+  min-height: var(--pagehead-h);
+  padding: var(--sp-2) 0;
+  margin-bottom: var(--sp-1);
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(12px) saturate(140%);
+}
+/* The rule runs the full width of the scroll area, not just the content
+   column, so the heading reads as a band rather than a floating label. */
+.page-head::after {
+  content: "";
+  position: absolute;
+  inset-inline: calc(-1 * var(--sp-5));
+  bottom: 0;
+  height: 1px;
+  background: var(--border-subtle);
+}
+.page-head__text {
+  flex: 1;
+  min-width: 200px;
+}
+.page-title {
+  margin: 0;
+  font-size: var(--text-xl);      /* 小二 — the name of the screen */
+  font-weight: 700;
+  letter-spacing: var(--tracking-tight);
+  line-height: var(--leading-tight);
+}
+.page-subtitle {
+  margin: 2px 0 0;
+  /* --text-3 is tuned against a card, and the page head sits on the darker page
+     background instead — the same colour measures 3.4:1 here, under AA. */
+  color: var(--text-2);
+  font-size: var(--text-sm);
+  line-height: var(--leading-tight);
+  max-width: var(--reading-max);
+}
+/* Actions sit at the trailing edge on every screen, so the eye learns one
+   place to look for "the thing this page is for". */
+.page-head__actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+/* ==========================================================================
+   Cards & sections
+   ========================================================================== */
+
+.card {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  /* No shadow. A hairline and a surface step already separate the card from
+     the page; adding a drop shadow on top is what makes a dense settings
+     screen look busy rather than calm. */
+}
+.card--flush {
+  padding: 0;
+  overflow: hidden;
+}
+.card__body {
+  padding: var(--sp-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+.card__header {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-5) var(--sp-5) var(--sp-4);
+  border-bottom: 1px solid var(--border-subtle);
+}
+/* A body under a header lines up with the header's gutter rather than keeping
+   its own narrower one, and does not restate the padding the header already
+   put between the two. Cards that carry a header and cards that use an inline
+   `section-label` then have the same inner edge. */
+.card__header + .card__body {
+  padding: var(--sp-4) var(--sp-5) var(--sp-5);
+}
+.card__title {
+  font-size: var(--text-lg);
+  font-weight: 700;
+  line-height: var(--leading-tight);
+}
+.card__hint {
+  font-size: var(--text-sm);
+  color: var(--text-3);
+}
+
+.section-label {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  font-size: var(--text-lg);
+  font-weight: 700;
+  line-height: var(--leading-tight);
+  color: var(--text-1);
+}
+/* A hairline that runs to the edge of the card, so a heading reads as the
+   start of a group rather than as the first item in one. */
+.section-label::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border-subtle);
+}
+
+/* ==========================================================================
+   Form controls
+   ========================================================================== */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.field__label {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--text-base);
+  font-weight: 700;
+  color: var(--text-1);
+}
+/* Explanation that rides on the label line rather than buying its own row.
+   Truncates instead of wrapping: it must never be the thing that makes the
+   form taller, which is the entire reason it is here. */
+.field__labelhint {
+  margin-inline-start: auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 400;
+  /* Also 小四: this is a sentence of Chinese guidance, not a numeric label.
+     It costs no height — it shares the label's line — so there is nothing to
+     trade off here. */
+  font-size: var(--text-sm);
+  color: var(--text-3);
+}
+.field__optional {
+  font-weight: 400;
+  color: var(--text-3);
+  font-size: var(--text-sm);
+}
+.field__hint {
+  font-size: var(--text-sm);
+  color: var(--text-3);
+  line-height: var(--leading-relaxed);
+}
+.field__row {
+  display: flex;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+.field__row > * {
+  flex: 1;
+  min-width: 140px;
+}
+
+/* --- form rows ---
+
+   Labels beside their controls instead of stacked above them.
+
+   On a 940px-wide card, "To" on its own line spends a full row of height to
+   say one word and leaves the rest of that row empty — repeated per field,
+   that is what pushed the message body and the attachment picker off a
+   880px-tall window. A label column costs 5.5em of width nobody was using and
+   gives back ~34px of height per field.
+
+   Nested `.field__row` groups (two controls side by side) keep the stacked
+   form: there is no room for a label column inside a half-width cell. */
+.form-rows .field {
+  display: grid;
+  grid-template-columns: 5.5em minmax(0, 1fr);
+  column-gap: var(--sp-4);
+  row-gap: var(--sp-2);
+  align-items: start;
+}
+.form-rows .field > * {
+  grid-column: 2;
+}
+.form-rows .field > .field__label {
+  grid-column: 1;
+  grid-row: 1;
+  /* Matches the control height so the two read as one line rather than as a
+     caption that happens to sit nearby. */
+  min-height: 44px;
+  align-items: center;
+  justify-content: flex-end;
+  text-align: end;
+  color: var(--text-2);
+}
+/* Paired controls line up with the single controls above them. Without this
+   the row starts at the card edge while every field beside it starts 5.5em in,
+   and the eye reads two different forms stacked on top of each other. */
+.form-rows > .field__row,
+.form-rows > .switch {
+  margin-inline-start: calc(5.5em + var(--sp-4));
+}
+.form-rows .field__row .field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.form-rows .field__row .field > .field__label {
+  min-height: 0;
+  justify-content: flex-start;
+  text-align: start;
+  color: var(--text-1);
+}
+
+@media (max-width: 720px) {
+  .form-rows .field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-2);
+  }
+  .form-rows .field > .field__label {
+    min-height: 0;
+    justify-content: flex-start;
+    text-align: start;
+  }
+  .form-rows > .field__row,
+  .form-rows > .switch {
+    margin-inline-start: 0;
+  }
+}
+
+.input,
+.textarea,
+.select {
+  width: 100%;
+  padding: 11px var(--sp-3);
+  min-height: var(--control-h);
+  font-size: var(--text-md);
+  color: var(--text-1);
+  background: var(--surface-inset);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  transition:
+    border-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease);
+}
+.input::placeholder,
+.textarea::placeholder {
+  color: var(--text-3);
+}
+.input:hover,
+.textarea:hover,
+.select:hover {
+  border-color: var(--border-strong);
+}
+.input:focus,
+.textarea:focus,
+.select:focus {
+  outline: none;
+  background: var(--surface-1);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.input[aria-invalid="true"],
+.textarea[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+/* A port, a timeout, a retry count — every number this app collects is a
+   handful of digits. Letting the wider content column stretch these the
+   same way it stretches an address field would just be a box with three
+   digits in one corner and empty space filling the rest. */
+.input[type="number"] {
+  max-width: 160px;
+}
+.input[aria-invalid="true"]:focus,
+.textarea[aria-invalid="true"]:focus {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 18%, transparent);
+}
+
+.textarea {
+  min-height: 128px;
+  resize: vertical;
+  line-height: var(--leading-relaxed);
+  font-family: inherit;
+}
+/**
+ * The compose body: the one field the whole screen exists to collect, so it
+ * gets a box sized like it — not the same height as a subject line. This
+ * trades some of the "fits one screen with no scroll" work done elsewhere in
+ * this form for a body a person can actually see more than four lines of;
+ * the surrounding card still scrolls rather than clipping it.
+ */
+.textarea--body {
+  min-height: 320px;
+}
+@media (max-height: 720px) {
+  .textarea--body {
+    min-height: 220px;
+  }
+}
+.textarea--mono {
+  font-family: var(--font-mono);
+  font-size: var(--text-base);
+}
+
+.select {
+  appearance: none;
+  padding-inline-end: var(--sp-8);
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position:
+    calc(100% - 17px) calc(50% + 1px),
+    calc(100% - 12px) calc(50% + 1px);
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+[dir="rtl"] .select {
+  background-position:
+    17px calc(50% + 1px),
+    12px calc(50% + 1px);
+}
+
+/* --- switch --- */
+
+.switch {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  cursor: pointer;
+  user-select: none;
+  padding: var(--sp-1) 0;
+}
+.switch__control {
+  flex: none;
+  position: relative;
+  width: 36px;
+  height: 20px;
+  margin-top: 1px;
+  border-radius: var(--r-full);
+  background: var(--border-strong);
+  transition: background var(--dur) var(--ease);
+}
+.switch__control::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  inset-inline-start: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: var(--shadow-sm);
+  transition: translate var(--dur) var(--ease);
+}
+.switch input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.switch input:checked + .switch__control {
+  background: var(--accent);
+}
+.switch input:checked + .switch__control::after {
+  translate: 16px 0;
+}
+[dir="rtl"] .switch input:checked + .switch__control::after {
+  translate: -16px 0;
+}
+.switch input:focus-visible + .switch__control {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+/* Both children are spans, so without this the label and its explanation run
+   together into one sentence — "Check for updates at startupContacts GitHub
+   only." It reads as a typo rather than as two fields. */
+.switch__text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.switch__title {
+  font-size: var(--text-base);
+  font-weight: 700;
+  color: var(--text-1);
+}
+.switch__desc {
+  font-size: var(--text-sm);
+  color: var(--text-3);
+  line-height: var(--leading-relaxed);
+  margin-top: 2px;
+}
+.switch--danger .switch__title {
+  color: var(--danger);
+}
+
+/* --- segmented control --- */
+
+.segmented {
+  display: inline-flex;
+  /* Sizes to its options. A flex column stretches its children, which turned a
+     three-word toggle into a 950px-wide bar with the options marooned at the
+     far ends. */
+  align-self: start;
+  padding: 3px;
+  gap: 2px;
+  background: var(--surface-inset);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  max-width: 100%;
+  overflow-x: auto;
+}
+.segmented__item {
+  flex: 1;
+  /* An icon and its label are two words, not one: without this they collide,
+     which is the sort of detail that reads as "unfinished" more than any
+     missing feature does. */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  border: 0;
+  background: transparent;
+  color: var(--text-2);
+  padding: 8px var(--sp-4);
+  border-radius: var(--r-xs);
+  font-size: var(--text-base);
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+.segmented__item:hover {
+  color: var(--text-1);
+}
+.segmented__item[aria-pressed="true"] {
+  background: var(--surface-1);
+  color: var(--text-1);
+  box-shadow: var(--shadow-sm);
+}
+
+/* --- chips / tag input --- */
+
+.tagfield__suggestheader {
+  padding: var(--sp-2) var(--sp-3);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-tight);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.tagfield {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px;
+  min-height: var(--control-h);
+  background: var(--surface-inset);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  cursor: text;
+  transition:
+    border-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
+}
+.tagfield:focus-within {
+  background: var(--surface-1);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.tagfield__input {
+  flex: 1;
+  min-width: 160px;
+  border: 0;
+  background: transparent;
+  padding: 3px var(--sp-2);
+  font-size: var(--text-md);
+}
+.tagfield__input:focus {
+  outline: none;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 5px 3px var(--sp-2);
+  border-radius: var(--r-xs);
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  color: var(--accent);
+  font-size: var(--text-sm);
+  font-weight: 400;
+  max-width: 100%;
+}
+.chip--invalid {
+  background: var(--danger-bg);
+  color: var(--danger);
+  text-decoration: underline wavy currentColor 1px;
+  text-underline-offset: 3px;
+}
+/* Priority tags on inbox messages (see `InboxTag`) — the first two tone
+   variants this component has needed beyond `--invalid`, so the recipe is
+   spelled out once here: reuse the semantic `-bg` tokens, no new colours. */
+.chip--danger {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+.chip--warning {
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+.chip__text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chip__remove {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border: 0;
+  border-radius: var(--r-xs);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.6;
+}
+.chip__remove:hover {
+  opacity: 1;
+  background: color-mix(in srgb, currentColor 18%, transparent);
+}
+
+/* --- weekday picker --- */
+
+.daypicker {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+.daypicker__day {
+  min-width: 42px;
+  padding: 7px var(--sp-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-inset);
+  color: var(--text-2);
+  font-size: var(--text-sm);
+  font-weight: 700;
+  cursor: pointer;
+  transition: all var(--dur-fast) var(--ease);
+}
+.daypicker__day:hover {
+  border-color: var(--border-strong);
+  color: var(--text-1);
+}
+.daypicker__day[aria-pressed="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+/* ==========================================================================
+   Buttons
+   ========================================================================== */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  padding: 9px var(--sp-4);
+  min-height: var(--control-h);
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  font-size: var(--text-base);
+  font-weight: 700;
+  letter-spacing: var(--tracking-tight);
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease),
+    translate var(--dur-fast) var(--ease);
+}
+.btn:active:not(:disabled) {
+  translate: 0 1px;
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn--primary {
+  background: var(--accent);
+  color: var(--accent-text);
+  box-shadow: var(--shadow-accent);
+}
+.btn--primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 88%, var(--text-1));
+}
+
+.btn--secondary {
+  background: var(--surface-1);
+  border-color: var(--border-strong);
+  color: var(--text-1);
+  box-shadow: var(--shadow-sm);
+}
+.btn--secondary:hover:not(:disabled) {
+  background: var(--surface-3);
+}
+
+.btn--ghost {
+  background: transparent;
+  color: var(--text-2);
+}
+.btn--ghost:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text-1);
+}
+
+.btn--danger {
+  background: var(--danger-bg);
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 30%, transparent);
+}
+.btn--danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+}
+
+.btn--lg {
+  min-height: 50px;
+  padding-inline: var(--sp-6);
+  font-size: var(--text-md);
+  border-radius: var(--r-md);
+}
+/* Square, and on the same height as everything else on its row. */
+.btn--icon {
+  padding: 0;
+  width: var(--control-h);
+  min-height: var(--control-h);
+}
+.btn--block {
+  width: 100%;
+}
+
+.icon-btn {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+.icon-btn:hover {
+  background: var(--surface-hover);
+  color: var(--text-1);
+}
+
+/* ==========================================================================
+   The action bar — the two most important buttons in the app.
+   Pinned to the bottom of the compose view so "Send now" and "Schedule" are
+   reachable without scrolling, at any window height.
+   ========================================================================== */
+
+.actionbar {
+  position: sticky;
+  bottom: 0;
+  z-index: 15;
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-4) var(--sp-5);
+  border-top: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--surface-1) 88%, transparent);
+  backdrop-filter: blur(14px) saturate(150%);
+}
+.actionbar__summary {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.actionbar__line {
+  font-size: var(--text-base);
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* `--text-2`, not `--text-3`. The action bar is translucent over the page
+   below it, which costs the tertiary tone enough contrast to land at 3.96:1 in
+   the light theme — under AA. This line carries the sender address and the
+   provider's daily limit, which is not text to squint at. */
+.actionbar__meta {
+  font-size: var(--text-sm);
+  color: var(--text-2);
+}
+
+/* ==========================================================================
+   Attachments
+   ========================================================================== */
+
+/* One line until it is being used.
+ *
+ * A 116px dashed box is the right affordance for a screen whose job is
+ * uploading files. This screen's job is writing a message, and on an 800px
+ * window that box was buying its own prominence with vertical space the
+ * "one screen" requirement does not have to spare. It grows to the full
+ * target the moment a drag enters it — the drop area is generous exactly
+ * when someone is aiming at it. */
+.dropzone {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-4);
+  min-height: 44px;
+  border: 1.5px dashed var(--border-strong);
+  border-radius: var(--r-md);
+  background: var(--surface-inset);
+  color: var(--text-2);
+  cursor: pointer;
+  text-align: center;
+  transition:
+    border-color var(--dur) var(--ease),
+    background var(--dur) var(--ease),
+    color var(--dur) var(--ease);
+}
+.dropzone:hover {
+  border-color: var(--accent);
+  color: var(--text-1);
+}
+.dropzone[data-dragging="true"] {
+  flex-direction: column;
+  min-height: 96px;
+  border-color: var(--accent);
+  border-style: solid;
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface-inset));
+  color: var(--accent);
+}
+.dropzone__title {
+  font-size: var(--text-base);
+  font-weight: 700;
+}
+.dropzone__hint {
+  font-size: var(--text-sm);
+  color: var(--text-3);
+}
+
+.attachments {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.attachment {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+}
+.attachment__icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--r-xs);
+  background: var(--surface-3);
+  color: var(--text-2);
+}
+.attachment__icon--tag {
+  font-size: var(--text-2xs);
+  font-weight: 700;
+  letter-spacing: var(--tracking-wide);
+}
+.attachment__body {
+  flex: 1;
+  min-width: 0;
+}
+.attachment__name {
+  font-size: var(--text-base);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.attachment__meta {
+  font-size: var(--text-sm);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.attachment--risky .attachment__icon {
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+
+/* "Show in body" / "Attach instead" — a two-state text button rather than a
+   switch, because the two states are two different actions, not on and off. */
+.attachment__action {
+  flex: none;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition:
+    background var(--dur) var(--ease),
+    color var(--dur) var(--ease),
+    border-color var(--dur) var(--ease);
+}
+.attachment__action:hover {
+  background: var(--surface-3);
+  color: var(--text-1);
+}
+.attachment__action[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  color: var(--accent);
+}
+
+/* ==========================================================================
+   Job list
+   ========================================================================== */
+
+.joblist {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.job {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-1);
+  box-shadow: var(--shadow-sm);
+  transition:
+    border-color var(--dur) var(--ease),
+    box-shadow var(--dur) var(--ease),
+    translate var(--dur) var(--ease);
+}
+.job:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-md);
+}
+.job[data-disabled="true"] {
+  opacity: 0.62;
+}
+/* A leading checkbox slot — the first multi-select row anywhere in this
+   codebase (see InboxView), added as a minor extension of the existing `.job`
+   flex row rather than a parallel row component. */
+.job__select {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.job__pulse {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 22%, transparent);
+}
+.job__pulse[data-unread="false"] {
+  background: var(--border-strong);
+  box-shadow: none;
+}
+.job[data-disabled="true"] .job__pulse {
+  background: var(--text-3);
+  box-shadow: none;
+}
+.job[data-failed="true"] .job__pulse {
+  background: var(--danger);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 22%, transparent);
+}
+.job__body {
+  flex: 1;
+  min-width: 0;
+}
+.job__name {
+  font-size: var(--text-lg);
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.job__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-3);
+  margin-top: 4px;
+  font-size: var(--text-sm);
+  color: var(--text-3);
+}
+.job__meta strong {
+  color: var(--text-2);
+  font-weight: 700;
+}
+.job__actions {
+  flex: none;
+  display: flex;
+  gap: var(--sp-1);
+}
+
+/* ==========================================================================
+   Feedback: banners, toasts, empty states
+   ========================================================================== */
+
+.banner {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--r-md);
+  border: 1px solid transparent;
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+}
+.banner__icon {
+  flex: none;
+  margin-top: 1px;
+}
+.banner__body {
+  flex: 1;
+  min-width: 0;
+}
+.banner__title {
+  font-weight: 700;
+}
+.banner--info {
+  background: var(--info-bg);
+  border-color: color-mix(in srgb, var(--info) 26%, transparent);
+  color: var(--info);
+}
+.banner--warning {
+  background: var(--warning-bg);
+  border-color: color-mix(in srgb, var(--warning) 26%, transparent);
+  color: var(--warning);
+}
+.banner--danger {
+  background: var(--danger-bg);
+  border-color: color-mix(in srgb, var(--danger) 26%, transparent);
+  color: var(--danger);
+}
+.banner--success {
+  background: var(--success-bg);
+  border-color: color-mix(in srgb, var(--success) 26%, transparent);
+  color: var(--success);
+}
+
+/* Several problems, one box. Each line is a sentence, so they read as a list
+   of things to fix rather than as a stack of separate alarms. */
+.banner__list {
+  margin: 0;
+  padding-inline-start: 1.2em;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: var(--reading-max);
+}
+.banner__list:has(> li:only-child) {
+  padding-inline-start: 0;
+  list-style: none;
+}
+
+.issues {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.toasts {
+  position: fixed;
+  bottom: var(--sp-5);
+  inset-inline-end: var(--sp-5);
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  max-width: min(420px, calc(100vw - var(--sp-8)));
+  pointer-events: none;
+}
+.toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  background: var(--surface-1);
+  box-shadow: var(--shadow-lg);
+  animation: toast-in var(--dur-slow) var(--ease-out);
+}
+.toast__body {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--text-sm);
+}
+.toast__title {
+  font-weight: 700;
+  color: var(--text-1);
+}
+.toast__detail {
+  color: var(--text-3);
+  font-size: var(--text-sm);
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+}
+.toast--success .toast__icon {
+  color: var(--success);
+}
+.toast--error .toast__icon {
+  color: var(--danger);
+}
+.toast--info .toast__icon {
+  color: var(--info);
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    translate: 0 12px;
+    scale: 0.98;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+    scale: 1;
+  }
+}
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-12) var(--sp-6);
+  text-align: center;
+  color: var(--text-3);
+}
+.empty__icon {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border-radius: var(--r-lg);
+  background: var(--surface-3);
+  color: var(--text-3);
+}
+.empty__title {
+  font-size: var(--text-md);
+  font-weight: 700;
+  color: var(--text-2);
+}
+.empty__hint {
+  font-size: var(--text-sm);
+  max-width: 380px;
+}
+
+/* ==========================================================================
+   Modal
+   ========================================================================== */
+
+.modal-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: var(--sp-5);
+  background: var(--scrim);
+  backdrop-filter: blur(3px);
+  animation: fade-in var(--dur) var(--ease);
+}
+.modal {
+  width: min(560px, 100%);
+  max-height: min(85vh, 760px);
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-lg);
+  animation: modal-in var(--dur-slow) var(--ease-out);
+  overflow: hidden;
+}
+.modal--wide {
+  width: min(760px, 100%);
+}
+.modal--fullscreen {
+  width: min(1160px, 96vw);
+  height: 92vh;
+  max-height: 92vh;
+}
+.modal--fullscreen .modal__body {
+  flex: 1;
+}
+.modal__header {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-5) var(--sp-5) var(--sp-4);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.modal__title {
+  flex: 1;
+  font-size: var(--text-lg);
+  font-weight: 700;
+  letter-spacing: var(--tracking-tight);
+}
+.modal__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--sp-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+.modal__footer {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+  padding: var(--sp-4) var(--sp-5);
+  border-top: 1px solid var(--border-subtle);
+  background: var(--surface-2);
+}
+.modal__footer-spacer {
+  flex: 1;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes modal-in {
+  from {
+    opacity: 0;
+    translate: 0 10px;
+    scale: 0.985;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+    scale: 1;
+  }
+}
+
+/* ==========================================================================
+   Misc
+   ========================================================================== */
+
+.accent-swatches {
+  display: flex;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.swatch {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 3px;
+  background-clip: content-box;
+  transition:
+    border-color var(--dur-fast) var(--ease),
+    scale var(--dur-fast) var(--ease);
+}
+.swatch:hover {
+  scale: 1.08;
+}
+.swatch[aria-pressed="true"] {
+  border-color: currentColor;
+}
+
+.kv {
+  display: grid;
+  grid-template-columns: minmax(120px, auto) 1fr;
+  gap: var(--sp-2) var(--sp-4);
+  font-size: var(--text-sm);
+}
+.kv__k {
+  color: var(--text-3);
+}
+.kv__v {
+  color: var(--text-1);
+  overflow-wrap: anywhere;
+}
+
+.link {
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 700;
+  cursor: pointer;
+  background: none;
+  border: 0;
+  padding: 0;
+  font-size: inherit;
+}
+.link:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+/* --- data folder ---------------------------------------------------------- */
+
+.path-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.path-row__value {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text-1);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: var(--sp-2) var(--sp-3);
+  /* A long path must wrap rather than push the card sideways. */
+  overflow-wrap: anywhere;
+}
+
+.diag-folders {
+  margin-block-start: var(--sp-2);
+}
+.diag-folders summary {
+  cursor: pointer;
+  font-size: var(--text-sm);
+  color: var(--text-2);
+}
+.diag-folders .diag {
+  margin-block-start: var(--sp-2);
+}
+
+.search {
+  position: relative;
+  /* Full width, matching the list it filters.
+     It was capped at 460px on the reasoning that a query is only a few words
+     long, which is true of the text and false of the box: a search field
+     stopping short above a full-width list leaves a notch of empty page at
+     the top of every list screen, and the eye reads the two as unrelated
+     controls rather than as a filter attached to its list. Aligning the edges
+     is what makes the pair read as one block. */
+}
+.search__icon {
+  position: absolute;
+  inset-inline-start: 11px;
+  top: 50%;
+  translate: 0 -50%;
+  color: var(--text-3);
+  pointer-events: none;
+}
+.search__input {
+  padding-inline-start: 34px;
+}
+/* Chromium draws its own clear button; ours would be the second one. */
+.search__input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.btn-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+/* A labelled dropdown that sits on a row of buttons without looking like a
+   form field that wandered in — same height, same rhythm. */
+.inline-select {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-inline-end: auto;
+}
+.inline-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-sm);
+  color: var(--text-2);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.inline-check input {
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.inline-select__label {
+  font-size: var(--text-sm);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+.select--compact {
+  height: 32px;
+  padding-block: 0;
+  font-size: var(--text-sm);
+  width: auto;
+  min-width: 8.5em;
+}
+
+/* A test button and its cancel, kept together and away from the fields above. */
+.inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-block-start: var(--sp-2);
+}
+
+.option-list {
+  display: grid;
+  gap: var(--sp-2);
+}
+.option {
+  display: grid;
+  gap: 2px;
+  text-align: start;
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-1);
+  color: inherit;
+  cursor: pointer;
+  transition: border-color var(--dur-fast), background var(--dur-fast);
+}
+.option:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+.option[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.option:disabled {
+  cursor: default;
+  opacity: 0.62;
+}
+.option__title {
+  font-weight: 700;
+  font-size: var(--text-sm);
+}
+.option__path {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text-3);
+  overflow-wrap: anywhere;
+}
+.option__meta {
+  font-size: var(--text-sm);
+  color: var(--text-3);
+}
+
+.log {
+  display: flex;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.log:last-child {
+  border-bottom: 0;
+}
+.log__dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  margin-top: 7px;
+  background: var(--text-3);
+}
+.log[data-level="info"] .log__dot { background: var(--success); }
+.log[data-level="warn"] .log__dot { background: var(--warning); }
+.log[data-level="error"] .log__dot { background: var(--danger); }
+.log__body { flex: 1; min-width: 0; }
+.log__title { font-size: var(--text-base); }
+.log__detail {
+  font-size: var(--text-sm);
+  color: var(--text-3);
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+}
+.log__time {
+  flex: none;
+  font-size: var(--text-xs);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.spinner {
+  width: 15px;
+  height: 15px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 620ms linear infinite;
+}
+@keyframes spin {
+  to { rotate: 360deg; }
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ==========================================================================
+   Narrow screens — phones and tablets get a bottom tab bar instead of a rail
+   ========================================================================== */
+
+@media (max-width: 760px) {
+  .shell,
+  .shell[data-collapsed="true"] {
+    grid-template-columns: 1fr;
+    grid-template-rows: 1fr auto;
+  }
+  .sidebar {
+    grid-row: 2;
+    flex-direction: row;
+    align-items: center;
+    border-inline-end: 0;
+    border-top: 1px solid var(--border);
+    padding: var(--sp-2) var(--sp-2)
+      calc(var(--sp-2) + env(safe-area-inset-bottom, 0px));
+  }
+  .brand,
+  .sidebar__footer {
+    display: none;
+  }
+  .nav {
+    flex-direction: row;
+    justify-content: space-around;
+    overflow: visible;
+  }
+  /* Seven tabs, a 360px-wide phone, and a 16px floor on Chinese text do not
+     all fit at once — 「联系人」alone is 48px of glyphs before padding. Rather
+     than shrink the type below 小四, only the tab you are on is named: the
+     other six are their icon plus an accessible label. One label at a legible
+     size beats seven at an illegible one, and the pill doubles as a much
+     louder "you are here" than a 3px underline. */
+  .nav__item {
+    flex: none;
+    gap: var(--sp-2);
+    padding: var(--sp-2);
+    min-height: 52px;
+    border-radius: var(--r-full);
+  }
+  .nav__item[aria-current="page"] {
+    padding-inline: var(--sp-4);
+  }
+  .nav__item[aria-current="page"]::before {
+    display: none;
+  }
+  .nav__label {
+    display: none;
+    flex: none;
+  }
+  .nav__item[aria-current="page"] .nav__label {
+    display: block;
+  }
+  .view {
+    padding: 0 var(--sp-4) var(--sp-6);
+  }
+  .page-head::after {
+    inset-inline: calc(-1 * var(--sp-4));
+  }
+  .actionbar {
+    padding: var(--sp-3) var(--sp-4);
+  }
+  .toasts {
+    inset-inline: var(--sp-4);
+    bottom: calc(var(--sp-4) + 64px);
+    max-width: none;
+  }
+}
+
+/* ==========================================================================
+   Connection diagnostics & send outcome
+
+   Both exist for the same reason: a result the user can see and act on beats
+   a spinner that ends in silence.
+   ========================================================================== */
+
+.diag {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 3px var(--sp-4);
+  margin: var(--sp-3) 0 0;
+  font-size: var(--text-sm);
+}
+.diag dt {
+  color: var(--text-3);
+  white-space: nowrap;
+}
+.diag dd {
+  margin: 0;
+  color: var(--text-1);
+  overflow-wrap: anywhere;
+}
+
+/* Sits directly above the action bar so the confirmation and the button that
+   produced it are in the same glance. */
+.sendresult {
+  position: sticky;
+  bottom: var(--actionbar-h);
+  z-index: 14;
+  padding: 0 var(--sp-5) var(--sp-3);
+  animation: sendresult-in var(--dur-slow) var(--ease-out);
+}
+.sendresult .banner {
+  box-shadow: var(--shadow-md);
+}
+
+@keyframes sendresult-in {
+  from {
+    opacity: 0;
+    translate: 0 8px;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+
+/* ==========================================================================
+   Update card
+   ========================================================================== */
+
+.update-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+}
+.update-row__text {
+  flex: 1;
+  min-width: 200px;
+}
+.update-version {
+  font-size: var(--text-lg);
+  font-weight: 700;
+  line-height: var(--leading-tight);
+}
+.update-meta {
+  font-size: var(--text-sm);
+  color: var(--text-3);
+  margin-top: 2px;
+}
+
+.progress {
+  height: 8px;
+  width: 100%;
+  border-radius: var(--r-full);
+  background: var(--surface-3);
+  overflow: hidden;
+}
+.progress__bar {
+  height: 100%;
+  border-radius: var(--r-full);
+  background: var(--accent);
+  transition: width var(--dur) var(--ease);
+}
+
+.update-notes {
+  max-height: 190px;
+  overflow-y: auto;
+  padding: var(--sp-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-sm);
+  background: var(--surface-inset);
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* ==========================================================================
+   Activity statistics
+   ========================================================================== */
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--sp-3);
+}
+.stat {
+  padding: var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+}
+.stat__value {
+  font-size: var(--text-xl);
+  font-weight: 700;
+  line-height: var(--leading-tight);
+  font-variant-numeric: tabular-nums;
+}
+.stat__label {
+  margin-top: 2px;
+  font-size: var(--text-sm);
+  color: var(--text-3);
+}
+.stat--good .stat__value {
+  color: var(--success);
+}
+.stat--bad .stat__value {
+  color: var(--danger);
+}
+
+/* ==========================================================================
+   Health strip
+
+   Shown on Compose when something is quietly wrong, and on Scheduled when
+   nothing is. Never both, and never a permanent "all good" banner on the
+   screen people use every day — a status line that always says the same thing
+   is a status line nobody reads on the day it changes.
+   ========================================================================== */
+
+.health {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.health__item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--border);
+  border-inline-start-width: 3px;
+  border-radius: var(--r-md);
+  background: var(--surface-1);
+}
+.health__item[data-level="danger"] {
+  border-inline-start-color: var(--danger);
+  background: var(--danger-bg);
+}
+.health__item[data-level="warning"] {
+  border-inline-start-color: var(--warning);
+  background: var(--warning-bg);
+}
+.health__item[data-level="info"] {
+  border-inline-start-color: var(--info);
+}
+.health__item[data-level="ok"] {
+  border-inline-start-color: var(--success);
+}
+.health__icon {
+  flex: none;
+}
+.health__item[data-level="danger"] .health__icon { color: var(--danger); }
+.health__item[data-level="warning"] .health__icon { color: var(--warning); }
+.health__item[data-level="info"] .health__icon { color: var(--info); }
+.health__item[data-level="ok"] .health__icon { color: var(--success); }
+
+.health__text {
+  flex: 1;
+  min-width: 0;
+}
+/* A link, not a button: it navigates, and dressing navigation as a button
+   makes the row look like it has a destructive action in it. */
+.health__go {
+  flex: none;
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--accent);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.health__more {
+  color: var(--text-3);
+  padding-inline-start: var(--sp-4);
+}
+
+/* A chip used as a toggle — the chain stage picker. Pressed state has to be
+   unmistakable at a glance, because the difference between one reminder and
+   four is exactly which of these are lit. */
+.chip--toggle {
+  cursor: pointer;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-2);
+  color: var(--text-2);
+  transition:
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
+}
+.chip--toggle:hover {
+  border-color: var(--accent);
+  color: var(--text-1);
+}
+.chip--toggle[aria-pressed="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+  font-weight: 700;
+}
+/* A stage whose moment has already gone. Still clickable — the user may be
+   about to move the event later — but it says so rather than silently doing
+   nothing when the reminder is created. */
+.chip--toggle[data-gone="true"] {
+  opacity: 0.55;
+  text-decoration: line-through;
+}
+
+/* ==========================================================================
+   Command palette
+
+   Positioned high rather than centred: the list grows downwards as you type,
+   and a vertically centred dialog would shift under the cursor on every
+   keystroke.
+   ========================================================================== */
+
+.palette {
+  width: min(640px, calc(100vw - var(--sp-8)));
+  margin-top: 12vh;
+  max-height: 62vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+.palette__search {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-3);
+}
+.palette__input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: none;
+  outline: none;
+  color: var(--text-1);
+  font-size: var(--text-lg);
+}
+.palette__list {
+  overflow-y: auto;
+  padding: var(--sp-2);
+}
+.palette__item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  color: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+/* Driven by an attribute rather than :hover so the keyboard and the mouse
+   cannot both claim to have selected a row at the same time. */
+.palette__item[data-active="true"] {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.palette__icon {
+  flex: none;
+  color: var(--text-3);
+}
+.palette__item[data-active="true"] .palette__icon {
+  color: var(--accent);
+}
+.palette__label {
+  flex: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.palette__hint {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-3);
+  font-size: var(--text-sm);
+  text-align: end;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.palette__empty {
+  padding: var(--sp-6);
+  text-align: center;
+  color: var(--text-3);
+}
+
+/* ===========================================================================
+   Status chips
+   ---------------------------------------------------------------------------
+   The one shape a state is allowed to take. Tones map onto the existing
+   semantic tokens — no new colours enter the system through this file, which
+   is what keeps a seventh state from arriving with an eighth hue.
+   =========================================================================== */
+
+.statuschip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  padding: 2px var(--sp-2);
+  border-radius: var(--r-xs);
+  /* 小四, not 五号. These chips carry words ("已暂停", "待发送"), and the type
+     rule is that Chinese prose never drops below 16px — the 14px exceptions
+     are digits and Latin labels only. A compact-looking chip is not worth
+     breaking that for. */
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  white-space: nowrap;
+  background: var(--surface-2);
+  color: var(--text-2);
+  vertical-align: middle;
+}
+.statuschip--accent {
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  color: var(--accent);
+}
+.statuschip--success {
+  background: var(--success-bg);
+  color: var(--success);
+}
+.statuschip--warning {
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+.statuschip--danger {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+.statuschip--info {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--text-2);
+}
+.statuschip__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--r-full);
+  background: currentColor;
+  flex: none;
+}
+/* Live states pulse; settled ones do not. The distinction has to survive
+   `prefers-reduced-motion`, so the dot stays visible and only stops moving. */
+.statuschip--warning .statuschip__dot,
+.statuschip--accent .statuschip__dot {
+  animation: statuspulse 2s ease-in-out infinite;
+}
+@keyframes statuspulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .statuschip__dot { animation: none; }
+}
+.statuschip__icon {
+  display: inline-grid;
+  place-items: center;
+}
+.log__title .statuschip,
+.job__name .statuschip {
+  margin-inline-start: var(--sp-2);
+}
+
+/* --- inset section headings (grouped account list) --- */
+.section-label--inset {
+  padding: var(--sp-3) var(--sp-5) 0;
+}
+
+/* ===========================================================================
+   Send preview
+   =========================================================================== */
+
+.preflight__figures {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-4);
+}
+.preflight__figure {
+  padding: var(--sp-3);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  text-align: center;
+}
+.preflight__value {
+  font-size: var(--text-lg);
+  color: var(--text-1);
+  line-height: 1.2;
+}
+.preflight__label {
+  margin-top: 2px;
+  font-size: var(--text-xs);
+  color: var(--text-3);
+}
+.preflight__notes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  margin-bottom: var(--sp-4);
+}
+.preflight__note {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  font-size: var(--text-sm);
+  color: var(--text-2);
+}
+.preflight__note--warning {
+  color: var(--warning);
+}
+.preflight__route {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--sp-4);
+}
+.preflight__arrow {
+  color: var(--text-3);
+}
+.preflight__preview {
+  border: 1px solid var(--border-1);
+  border-radius: var(--r-md);
+  padding: var(--sp-3);
+  margin-top: var(--sp-3);
+  background: var(--surface-1);
+}
+.preflight__row {
+  display: flex;
+  gap: var(--sp-3);
+  padding: 2px 0;
+  font-size: var(--text-sm);
+}
+.preflight__key {
+  flex: none;
+  width: 5.5rem;
+  color: var(--text-3);
+}
+.preflight__val {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--text-2);
+}
+.preflight__val--strong {
+  color: var(--text-1);
+}
+/* The body is shown as text and never as markup — see the component. */
+.preflight__body {
+  margin: var(--sp-3) 0 0;
+  padding: var(--sp-3);
+  max-height: 12rem;
+  overflow: auto;
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.preflight__files {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  margin-top: var(--sp-3);
+}
+.preflight__file {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  font-size: var(--text-sm);
+}
+.preflight__file[data-missing="true"] {
+  background: var(--danger-bg);
+}
+.preflight__filename {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.preflight__filesize {
+  flex: none;
+  color: var(--text-3);
+  font-size: var(--text-xs);
+}
+
+/* ===========================================================================
+   Merge variables
+   =========================================================================== */
+
+.mergevars {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.mergevars__label {
+  font-size: var(--text-xs);
+  color: var(--text-3);
+}
+
+/* ===========================================================================
+   Draft history
+   =========================================================================== */
+
+.history {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  max-height: 22rem;
+  overflow: auto;
+}
+.history__row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+}
+.history__body {
+  flex: 1;
+  min-width: 0;
+}
+.history__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-1);
+}
+.history__meta {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  margin-top: 2px;
+  font-size: var(--text-xs);
+  color: var(--text-3);
+}
+
+/* ===========================================================================
+   Outbox
+   =========================================================================== */
+
+.outbox {
+  border: 1px solid var(--warning);
+  border-radius: var(--r-lg);
+  background: var(--warning-bg);
+  padding: var(--sp-3);
+  margin-bottom: var(--sp-4);
+}
+.outbox[data-failed="true"] {
+  border-color: var(--danger);
+  background: var(--danger-bg);
+}
+.outbox__head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+.outbox__when {
+  font-size: var(--text-xs);
+  color: var(--text-2);
+}
+.outbox__actions {
+  margin-inline-start: auto;
+}
+.outbox__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  margin-top: var(--sp-2);
+}
+.outbox__item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-md);
+  background: var(--surface-1);
+}
+.outbox__item[data-status="sending"] {
+  opacity: 0.65;
+}
+.outbox__icon {
+  flex: none;
+  color: var(--text-3);
+}
+.outbox__body {
+  flex: 1;
+  min-width: 0;
+}
+.outbox__subject {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.outbox__meta {
+  display: flex;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  font-size: var(--text-xs);
+  color: var(--text-3);
+}
+.outbox__error {
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}
+
+/* ===========================================================================
+   Send conditions
+   =========================================================================== */
+
+.conditions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+.condition {
+  border: 1px solid var(--border-1);
+  border-radius: var(--r-md);
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--surface-1);
+}
+.condition[data-on="true"] {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border-1));
+  background: color-mix(in srgb, var(--accent) 5%, var(--surface-1));
+}
+.condition__head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  cursor: pointer;
+}
+.condition__name {
+  flex: 1;
+  min-width: 0;
+}
+.condition__detail {
+  margin-top: var(--sp-2);
+  padding-inline-start: calc(var(--sp-4) + 2px);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.condition__effect {
+  font-size: var(--text-xs);
+  color: var(--text-3);
+  line-height: var(--leading-normal);
+}
+.condition__times {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.condition__times .input {
+  width: auto;
+}
+
+/* ===========================================================================
+   Working calendar
+   =========================================================================== */
+
+.workcal__entry {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  align-items: flex-start;
+}
+.workcal__paste {
+  min-height: 4.5rem;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+.workcal__dates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+
+/* ===========================================================================
+   List controls — the filter row that stays outside the scroller
+   =========================================================================== */
+
+.listcontrols {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--sp-3);
+}
+.listcontrols .search {
+  flex: 1;
+  min-width: 12rem;
+  max-width: none;
+}
+
+/* An attachment whose file has since been moved or deleted. Only ever shown
+   when the platform actually looked — see AttachmentPicker's presence prop. */
+.attachment[data-missing] {
+  border-color: var(--danger);
+  background: var(--danger-bg);
+}
+.attachment__gone {
+  color: var(--danger);
+  margin-inline-end: var(--sp-2);
+}
+
+/* ===========================================================================
+   Keyboard shortcut list
+   =========================================================================== */
+
+.shortcuts {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.shortcuts__row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-sm);
+}
+.shortcuts__row:nth-child(odd) {
+  background: var(--surface-2);
+}
+.shortcuts__keys {
+  flex: none;
+  min-width: 9.5rem;
+  padding: 2px var(--sp-2);
+  border: 1px solid var(--border-1);
+  border-bottom-width: 2px;
+  border-radius: var(--r-xs);
+  background: var(--surface-1);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-align: center;
+}
+.shortcuts__label {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ===========================================================================
+   Settings section navigation
+   =========================================================================== */
+
+.settingsnav {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  gap: var(--sp-1);
+  flex-wrap: wrap;
+  padding: var(--sp-2) 0;
+  margin-bottom: var(--sp-3);
+  background: var(--surface-0);
+  border-bottom: 1px solid var(--border-1);
+}
+.settingsnav__link {
+  padding: var(--sp-1) var(--sp-3);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-2);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.settingsnav__link:hover {
+  background: var(--surface-2);
+  color: var(--text-1);
+}
+.settingsnav__link[aria-current="true"] {
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  color: var(--accent);
+}
+/* Anchored scrolling must not tuck the heading under the sticky bar above. */
+.settings-section {
+  scroll-margin-top: 4rem;
+}
+
+/* ===========================================================================
+   Contact groups
+   =========================================================================== */
+
+.contactgroup {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-5) var(--sp-1);
+  font-size: var(--text-xs);
+  color: var(--text-3);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+}
+.contact__pin {
+  flex: none;
+  border: 0;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  padding: var(--sp-1);
+  border-radius: var(--r-xs);
+}
+.contact__pin[aria-pressed="true"] {
+  color: var(--accent);
+}
+.contact__pin:hover {
+  background: var(--surface-2);
+}
+
+/* ===========================================================================
+   Skeletons
+   ---------------------------------------------------------------------------
+   Shape, not motion. See components/Skeleton.tsx for why there is no shimmer.
+   =========================================================================== */
+
+.skeleton__head {
+  margin-bottom: var(--sp-5);
+}
+.skeleton__card {
+  border: 1px solid var(--border-1);
+  border-radius: var(--r-lg);
+  background: var(--surface-1);
+  padding: var(--sp-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+.skeleton__bar {
+  border-radius: var(--r-xs);
+  background: var(--surface-2);
+}
+.skeleton__bar--title {
+  width: 12rem;
+  height: 1.5rem;
+  margin-bottom: var(--sp-2);
+}
+.skeleton__bar--sub {
+  width: 20rem;
+  max-width: 70%;
+  height: 1rem;
+}
+.skeleton__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.skeleton__bar--label {
+  width: 6rem;
+  height: 0.875rem;
+}
+.skeleton__bar--input {
+  width: 100%;
+  height: 2.25rem;
+  border-radius: var(--r-sm);
+}
+.skeleton__row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+.skeleton__bar--dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--r-full);
+}
+.skeleton__rowbody {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.skeleton__bar--line {
+  width: 60%;
+  height: 1rem;
+}
+.skeleton__bar--short {
+  width: 35%;
+  height: 0.875rem;
+  opacity: 0.7;
+}
+
+/* ===========================================================================
+   Send details and the endpoint ladder
+   ---------------------------------------------------------------------------
+   Rungs that were never tried are drawn as absent, not as passed — see
+   components/SendDetails.tsx.
+   =========================================================================== */
+
+.senddetails {
+  margin-top: var(--sp-3);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--border-1);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+.senddetails__stages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+  align-items: center;
+}
+.senddetails__stage {
+  padding: 1px var(--sp-2);
+  border-radius: var(--r-xs);
+  font-size: var(--text-xs);
+  background: var(--surface-2);
+  color: var(--text-3);
+}
+.senddetails__stage[data-state="passed"] {
+  background: var(--success-bg);
+  color: var(--success);
+}
+.senddetails__stage[data-state="stopped"] {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+.senddetails__stage[data-state="notreached"] {
+  opacity: 0.5;
+}
+.senddetails__facts {
+  display: grid;
+  grid-template-columns: minmax(6rem, max-content) 1fr;
+  gap: 2px var(--sp-3);
+  margin: 0;
+  font-size: var(--text-sm);
+}
+.senddetails__facts dt {
+  color: var(--text-3);
+}
+.senddetails__facts dd {
+  margin: 0;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+.senddetails__bad {
+  color: var(--danger);
+}
+
+.ladder {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ladder__rung {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--r-xs);
+  font-size: var(--text-xs);
+  background: var(--surface-2);
+}
+.ladder__rung[data-state="ok"] {
+  background: var(--success-bg);
+  color: var(--success);
+}
+.ladder__rung[data-state="failed"] {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+.ladder__rung[data-state="skipped"] {
+  opacity: 0.55;
+}
+.ladder__marker {
+  display: inline-grid;
+  place-items: center;
+  width: 14px;
+  flex: none;
+}
+.ladder__endpoint {
+  font-family: var(--font-mono);
+}
+.ladder__note {
+  margin-inline-start: auto;
+  color: var(--text-3);
+}
+.ladder__rung[data-state="ok"] .ladder__note,
+.ladder__rung[data-state="failed"] .ladder__note {
+  color: inherit;
+  opacity: 0.8;
+}
+.ladder__adjusted {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-top: var(--sp-1);
+  font-size: var(--text-xs);
+  color: var(--text-2);
+}
+
+/* Search box that is still catching up with what was typed (see the
+   `useDeferredValue` note in InboxView). Deliberately faint: the input itself
+   is never late, so this must not read as "blocked". */
+.search-wrap[data-pending] .search__icon {
+  opacity: 0.45;
+}
+
+/* The compose form's disclosure for per-message rarities. Styled as a quiet
+   row, not a card: it must read as 'more of this form', not as a new section. */
+.moreoptions {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: var(--sp-3);
+}
+.moreoptions__summary {
+  cursor: pointer;
+  list-style: none;
+  font-size: var(--text-sm);
+  color: var(--text-2);
+  padding: var(--sp-1) 0;
+}
+.moreoptions__summary::-webkit-details-marker { display: none; }
+.moreoptions__summary::before {
+  content: '';
+  display: inline-block;
+  width: 0;
+  height: 0;
+  margin-inline-end: var(--sp-2);
+  border-inline-start: 5px solid currentColor;
+  border-block: 4px solid transparent;
+  transition: rotate var(--motion-fast, 120ms) ease;
+  vertical-align: middle;
+}
+.moreoptions[open] > .moreoptions__summary::before { rotate: 90deg; }
+.moreoptions__summary:hover { color: var(--text-1); }
+.moreoptions[open] > .moreoptions__summary { margin-bottom: var(--sp-3); }
+.moreoptions > .field__row + .field__row { margin-top: var(--sp-3); }
+
+/* ==========================================================================
+   Phase 5 — the screens that grew
+
+   Three things are being fixed here, and they are the same complaint stated
+   three ways: boxes too small, empty space unused, important things not in
+   important places.
+
+     1. Fill the window.  Every screen's content column stretches to the
+        viewport instead of hugging its contents and leaving a grey band under
+        it. What grows is chosen per screen — the compose body, the message
+        frame, the code list — rather than everything growing equally, which
+        is how you get a tall empty card next to a cramped one.
+     2. Give the space to the main thing.  On Compose that is the body box; on
+        the reader it is the message; on Codes it is the value itself.
+     3. Nothing may leave its box.  Long addresses, long filenames and long
+        subjects are the norm in mail, not the exception, so every flex child
+        along a text path gets `min-width: 0` and an ellipsis.
+   ========================================================================== */
+
+/* --- 1. fill the window -------------------------------------------------- */
+
+/* A non-list screen's column is at least as tall as the viewport, so the card
+   inside it has something to stretch against. `min-height` and not `height`:
+   content longer than the window must still push the page taller. */
+.view__inner {
+  min-height: 100%;
+}
+
+/* No extra bottom padding for the action bar: it is a flex sibling of `.view`
+   inside `.main`, not an overlay, so `.view` is already sized to the space
+   left above it. Reserving `--actionbar-h` here would reserve it twice and
+   put a scrollbar on a form that is required to fit without one. */
+
+/* The compose form takes every pixel the screen has left over... */
+.compose-card {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.compose-card > .card__body {
+  flex: 1;
+  min-height: 0;
+}
+
+/* ...and inside it, the body box is the one that grows. Everything else on
+   this form is one or two rows tall by nature; the body is the message. */
+.form-rows {
+  display: flex;
+  flex-direction: column;
+}
+/* Keep the label-beside-control grid this form uses — only let the row grow,
+   and let the control inside it stretch to the height it gained. Overriding
+   `display` here would move the Body label above its box and break the one
+   alignment every other field on the screen follows. */
+.form-rows > .field:has(.textarea--body) {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.form-rows > .field:has(.textarea--body) > .textarea--body {
+  align-self: stretch;
+  height: 100%;
+}
+
+/* --- 2. the compose body ------------------------------------------------- */
+
+/**
+ * The single most-used input in the application, sized like it.
+ *
+ * It was 320px against a 900px-tall window — roughly a third of the space, for
+ * the field that receives everything the user came here to write, while the
+ * form around it had room to spare. Now it takes the leftover height with a
+ * floor of 45vh, and the drag handle still works for anyone who wants more
+ * (the height is remembered — see `BODY_HEIGHT_KEY`).
+ */
+.textarea--body {
+  flex: 1;
+  min-height: max(45vh, 300px);
+  resize: vertical;
+  padding: var(--sp-4);
+  line-height: var(--leading-relaxed);
+}
+@media (max-height: 720px) {
+  .textarea--body {
+    min-height: 240px;
+  }
+}
+
+/* --- 3. nothing leaves its box ------------------------------------------- */
+
+/* The text paths. Each of these is a flex child whose content is
+   user-supplied and unbounded — an address, a filename, a subject line. */
+.job__body,
+.log__body,
+.attachment__body,
+.page-head__text,
+.codecard__main,
+.quickpick__text,
+.tagfield__optiontext {
+  min-width: 0;
+}
+
+.job__name,
+.job__from,
+.log__title,
+.codecard__subject,
+.quickpick__name,
+.quickpick__address,
+.tagfield__optionname,
+.tagfield__optionaddress {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.job__meta,
+.codecard__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+/* A row of buttons must wrap rather than push the page sideways. */
+.page-head__actions {
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.btn-row__note {
+  align-self: center;
+  color: var(--text-2);
+  font-size: var(--text-sm);
+  font-variant-numeric: var(--numeric);
+}
+
+/* Rows breathe according to the list-density setting. */
+.job,
+.log {
+  padding-block: var(--row-pad-y);
+}
+
+/* --- verification codes -------------------------------------------------- */
+
+.codelist {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-1);
+}
+
+/**
+ * The whole card is the copy button.
+ *
+ * There is exactly one thing anyone does on this screen, so it gets the
+ * largest possible target rather than a 24px icon on the right that has to be
+ * aimed at. The nested buttons stop propagation, so "open link" still means
+ * open link.
+ */
+.codecard {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  width: 100%;
+  padding: var(--sp-4) var(--sp-5);
+  text-align: start;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  cursor: pointer;
+  transition:
+    border-color var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease);
+}
+.codecard:hover {
+  border-color: var(--accent);
+  background: var(--surface-2);
+}
+.codecard:active {
+  transform: scale(0.995);
+}
+.codecard:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.codecard[data-copied] {
+  border-color: var(--success);
+  background: var(--success-bg);
+}
+/* Already used once. Dimmed, not hidden: needing the same code twice is
+   common, and hiding it would be the app deciding that for you. */
+.codecard[data-used] .codecard__value {
+  color: var(--text-2);
+}
+
+/* Read cards recede; they are not hidden and they do not move. A code often
+   gets wanted a second time, and a list that reshuffles under the cursor is
+   the same mistake the "show N earlier" fold made — see `views/CodesView`.
+   The card keeps its full contrast on hover, so re-reading one costs nothing. */
+.codecard[data-read] {
+  background: var(--surface-2);
+  border-color: color-mix(in srgb, var(--border) 60%, transparent);
+}
+.codecard[data-read] .codecard__mark {
+  background: var(--surface-3);
+  color: var(--text-3);
+}
+.codecard[data-read]:hover {
+  background: var(--surface-1);
+  border-color: var(--border);
+}
+.codecard[data-read]:hover .codecard__mark {
+  color: var(--text-2);
+}
+/* Freshness stops shouting once the card has been dealt with — an unread
+   arrival is the only thing that should be pulling the eye. */
+.codecard[data-read][data-fresh] {
+  border-color: color-mix(in srgb, var(--border) 60%, transparent);
+  box-shadow: none;
+}
+.codecard[data-read][data-fresh] .codecard__mark {
+  background: var(--surface-3);
+  color: var(--text-3);
+}
+
+.codecard__mark {
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: var(--r-full);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+}
+/* Unread state carried by a shape, not only by contrast. Sits on the icon
+   rather than in the metadata row so it reads at the same glance as the code
+   itself, and is ringed in the page background so it stays visible against
+   both the plain and the fresh (accent-filled) mark. */
+.codecard__unread {
+  position: absolute;
+  inset-block-start: -1px;
+  inset-inline-end: -1px;
+  width: 11px;
+  height: 11px;
+  border-radius: var(--r-full);
+  background: var(--accent);
+  border: 2px solid var(--surface-1);
+}
+.codecard[data-fresh] .codecard__unread {
+  background: var(--accent-text);
+  border-color: var(--accent);
+}
+.codecard[data-kind="link"] .codecard__mark {
+  background: var(--surface-3);
+  color: var(--text-2);
+}
+
+.codecard__main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/**
+ * The value, at the size the screen exists for.
+ *
+ * Tabular figures so the digits sit on a fixed grid — a code that reflows as
+ * you read it is a code you check twice. Wide tracking because six digits read
+ * as one long number otherwise; the display groups them 3+3 as well.
+ */
+.codecard__value {
+  font-size: 2rem;
+  font-weight: 700;
+  line-height: 1.15;
+  font-variant-numeric: var(--numeric);
+  letter-spacing: 0.08em;
+  color: var(--text-1);
+  word-break: break-all;
+}
+.codecard__value[data-kind="link"] {
+  font-size: var(--text-base);
+  font-weight: 400;
+  letter-spacing: 0;
+  color: var(--accent);
+  /* A URL is read from the front; clip the tail rather than wrapping it over
+     three lines and pushing everything else off the card. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.codecard__sender {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  min-width: 0;
+  font-size: var(--text-base);
+  color: var(--text-1);
+}
+.codecard__address {
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.codecard__meta {
+  font-size: var(--text-xs);
+  color: var(--text-3);
+}
+.codecard__subject {
+  max-width: 42ch;
+}
+.codecard__actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.codes__more {
+  align-self: center;
+  padding-block: var(--sp-2);
+}
+
+.chip--quiet {
+  background: var(--surface-3);
+  color: var(--text-3);
+}
+
+@media (max-width: 900px) {
+  .codecard {
+    flex-wrap: wrap;
+  }
+  .codecard__actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+}
+
+/* --- message reader ------------------------------------------------------ */
+
+/* The reader's own body: no gap-driven stack, the frame does the growing. */
+.modal__body--reader {
+  padding: 0;
+  gap: 0;
+}
+.modal__body--reader > * {
+  flex: none;
+}
+.modal__body--reader > .banner,
+.modal__body--reader > .reader__meta,
+.modal__body--reader > .reader__find,
+.modal__body--reader > .reader__attachments {
+  margin: var(--sp-3) var(--sp-5);
+}
+
+.reader__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+  font-size: var(--text-sm);
+  color: var(--text-2);
+  min-width: 0;
+}
+.reader__hint {
+  margin-inline-start: auto;
+  color: var(--text-3);
+  font-size: var(--text-xs);
+}
+
+.reader__find {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  color: var(--text-3);
+}
+.reader__find .input {
+  flex: 1;
+}
+
+.reader__loading {
+  display: grid;
+  place-items: center;
+  padding: var(--sp-8) 0;
+}
+
+/**
+ * The message itself, filling everything left over.
+ *
+ * Previously `min-height: 280px; max-height: 480px` inside a dialog that was
+ * itself capped — so a long message scrolled inside a box inside a box, and
+ * two thirds of a maximised window showed nothing at all.
+ */
+.reader__frame {
+  flex: 1 1 auto;
+  min-height: 320px;
+  width: 100%;
+  border: 0;
+  border-block: 1px solid var(--border);
+  background: #fff;
+}
+
+.reader__attachments {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.reader__attachments .section-label {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+}
+.attachments {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+/* An attachment row where the row itself opens the file. */
+.attachment--clickable {
+  padding-inline-start: 0;
+}
+.attachment__open {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex: 1;
+  min-width: 0;
+  padding: var(--sp-2) var(--sp-3);
+  background: none;
+  border: 0;
+  border-radius: var(--r-sm);
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.attachment__open:hover {
+  background: var(--surface-hover);
+}
+.attachment__open .attachment__body {
+  display: flex;
+  flex-direction: column;
+}
+
+/* --- attachment preview -------------------------------------------------- */
+
+.modal__body--preview {
+  padding: 0;
+  background: var(--surface-inset);
+}
+.preview__image {
+  margin: auto;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+.preview__frame {
+  flex: 1;
+  width: 100%;
+  border: 0;
+  background: #fff;
+}
+
+/* --- recipient picker ---------------------------------------------------- */
+
+.tagfield-wrap {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.tagfield__menu {
+  position: absolute;
+  inset-inline: 0;
+  top: calc(100% + 4px);
+  z-index: 30;
+  overflow: hidden;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-lg);
+}
+.tagfield__option {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  padding: var(--sp-2) var(--sp-3);
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.tagfield__option[data-active] {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.tagfield__optiontext {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  line-height: var(--leading-tight);
+}
+.tagfield__optionname {
+  color: var(--text-1);
+  font-weight: 700;
+}
+.tagfield__optionaddress {
+  color: var(--text-3);
+  font-size: var(--text-sm);
+}
+.tagfield__pin {
+  flex: none;
+  color: var(--accent);
+}
+
+.chip--recipient {
+  max-width: 32ch;
+}
+
+/**
+ * The always-on quick bar.
+ *
+ * The dropdown only exists while the field has focus, which is precisely when
+ * the common recipients are *not* visible to someone still deciding who to
+ * write to. This row answers "at least give me the common ones": name over
+ * address, one click to add, and contact tags on the same row so a whole group
+ * goes in at once.
+ */
+.quickpicks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.quickpicks__label {
+  font-size: var(--text-xs);
+  color: var(--text-3);
+  margin-inline-end: var(--sp-1);
+}
+.quickpick {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  max-width: 26ch;
+  padding: 4px var(--sp-3) 4px 4px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-full);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  transition:
+    border-color var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease);
+}
+.quickpick:hover {
+  border-color: var(--accent);
+  background: var(--surface-3);
+}
+.quickpick--group {
+  padding-inline-start: var(--sp-3);
+  border-style: dashed;
+}
+.quickpick__text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+  min-width: 0;
+}
+.quickpick__name {
+  font-size: var(--text-sm);
+  color: var(--text-1);
+}
+.quickpick__address {
+  font-size: var(--text-xs);
+  color: var(--text-3);
+}
+
+.avatar {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-full);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
+  font-size: var(--text-sm);
+  font-weight: 700;
+}
+
+/* --- badges -------------------------------------------------------------- */
+
+/* Codes are time-critical in a way unread mail is not, so their badge is the
+   accent rather than the neutral count treatment. */
+.nav__badge--accent {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+/* --- responsive ---------------------------------------------------------- */
+
+/* Two breakpoints, not five. 1280 is the default window; below 1100 the paired
+   fields stack rather than squeezing two 300px controls into 500px. Above
+   1600 the column is already capped by `--content-max`, so the only thing
+   left to do is let paired rows spread. */
+@media (max-width: 1100px) {
+  /* `.field__row` is a wrapping flex row; below this width two controls at
+     their 140px floor still fit side by side but read as cramped, so stack
+     them outright rather than relying on wrap to decide. */
+  .field__row {
+    flex-direction: column;
+  }
+  .reader__hint {
+    display: none;
+  }
+}
+@media (min-width: 1600px) {
+  .field__row {
+    gap: var(--sp-5);
+  }
+}
+
+/* ==========================================================================
+   Phase 6 — fill the window
+
+   Four complaints, one cause. Content was capped at 1500px by
+   `--content-max`, so every screen left a grey band down each side of a
+   maximised window; and every screen was a single column, so the room that
+   *was* used went into stretching short rows rather than showing more.
+
+   The cap is gone (see `theme.css`). What follows is what to do with the
+   space: give it to a second column where one helps, and to the field people
+   actually type into.
+   ========================================================================== */
+
+/* --- the page gutter ----------------------------------------------------- */
+
+.view {
+  padding-inline: var(--page-pad-x);
+}
+
+/* --- settings: a grid of cards, not a ribbon ------------------------------ */
+
+/**
+ * Every card is full width. The columns happen *inside* them.
+ *
+ * Two earlier attempts got this wrong in the same way, so the reasoning is
+ * worth keeping. Laying the cards out in a multi-column grid — whether by
+ * `auto-fit` or by a fixed count — makes each card a fraction of the window,
+ * and a card that is 550px wide holds a 480px field no matter how large the
+ * monitor is. Widening the window then bought nothing: `auto-fit` spent the
+ * space on *more* columns, and a fixed two-column rule split it evenly between
+ * cards that did not all need it.
+ *
+ * Full-width cards give every field the whole window to work with. What that
+ * cannot do on its own is fill the space — one switch per line across 1400px
+ * is empty on the right, which is the same complaint in a new place. So the
+ * card body below lays its own controls out in columns: the card is as wide as
+ * the window, and its contents cover that width.
+ */
+.view__inner--grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: var(--sp-4);
+}
+
+/**
+ * Controls flow into columns once the card is wider than one control needs.
+ *
+ * `auto-fit` is right here and wrong one level up: inside a card the cell
+ * contents are a fixed size — a switch, a segmented control, a select — so
+ * extra columns genuinely use the space instead of subdividing it. 300px is
+ * the width at which a switch's label and its description still read as two
+ * lines rather than five.
+ *
+ * Rows that are already horizontal (`.field__row` puts two or three fields
+ * side by side) and anything that labels the card span the full width, so the
+ * card reads as sections rather than as a scatter of controls.
+ */
+@media (min-width: 1100px) {
+  .view--settings .card__body {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    column-gap: var(--sp-6);
+    row-gap: var(--sp-3);
+    align-items: start;
+  }
+
+  /* Span by default; pair up only where it is known to help.
+     The reverse — listing what must span — was tried first and is the wrong
+     way round: it puts the burden on whoever adds a control later, and the
+     failure is silent and ugly (a seven-cell day picker, or a row of date
+     chips, crushed into a 300px column). Defaulting to full width means a new
+     element is merely wide, never broken. */
+  .view--settings .card__body > * {
+    grid-column: 1 / -1;
+  }
+  .view--settings .card__body > .switch,
+  .view--settings .card__body > .field {
+    grid-column: auto;
+  }
+  /* …except a field wrapping a free-text box, which wants the room. */
+  .view--settings .card__body > .field:has(.textarea) {
+    grid-column: 1 / -1;
+  }
+}
+
+/* The scroll anchors the section nav jumps to. Zero-height and full-width, so
+   they neither take a visible cell nor land in the middle of a row. */
+.view__inner--grid > .settings-section {
+  grid-column: 1 / -1;
+  height: 0;
+}
+
+/* Heading, nav and banners span everything above the grid. */
+.view__inner--grid > .page-head,
+.view__inner--grid > .banner,
+.view__inner--grid > .settingsnav {
+  grid-column: 1 / -1;
+}
+
+/* --- compose: addressing beside the message ------------------------------- */
+
+/**
+ * Two columns once there is room for both.
+ *
+ * The body is placed explicitly in column two and spanned down the grid;
+ * everything else falls into column one in document order. Doing it this way
+ * keeps the JSX in its natural reading order — recipient, subject, body — so
+ * the one-column layout below the breakpoint is unchanged and the tab order is
+ * still the order the form gets filled in.
+ */
+@media (min-width: 1280px) {
+  .compose-grid {
+    display: grid;
+    /* Column one holds fixed-size controls — a recipient chip row, a subject,
+       two selects. Past about 420px it gains nothing, so it is capped rather
+       than given a share of the window, and every pixel beyond that goes to
+       the message. On a maximised 1920 window this is the difference between a
+       body box of ~840px and one of ~1180px, for the field that receives
+       everything the user opened the app to write. */
+    grid-template-columns: minmax(320px, 420px) minmax(480px, 1fr);
+    align-content: start;
+    column-gap: var(--sp-6);
+    row-gap: var(--sp-3);
+  }
+  .compose-grid > *:not(:has(.textarea--body)) {
+    grid-column: 1;
+  }
+  .compose-grid > .field:has(.textarea--body) {
+    grid-column: 2;
+    /* Past the number of rows column one can produce, so the body is as tall
+       as the card however many fields happen to be showing. */
+    grid-row: 1 / span 99;
+    display: flex;
+    flex-direction: column;
+  }
+  /* Label above the box in this column rather than beside it: a 5.5em label
+     gutter stealing width from the message is the wrong trade here. */
+  .compose-grid > .field:has(.textarea--body) > .field__label {
+    min-height: 0;
+  }
+  .compose-grid > .field:has(.textarea--body) > .textarea--body {
+    flex: 1;
+    height: auto;
+  }
+}
+
+/* --- fields that are comfortable to type in ------------------------------- */
+
+/* Matches `.input` and `.select`, which are already 46px — the recipient box
+   was the odd one out at 40 and read as a different kind of control. */
+.tagfield {
+  min-height: var(--control-h);
+}
+.form-rows .field > .field__label {
+  min-height: 46px;
+}
+
+/* --- lists that fill their pane ------------------------------------------- */
+
+/**
+ * One panel, the height of the screen.
+ *
+ * The rows used to sit on the raw page background, so eight log entries in a
+ * maximised window meant eight rows and then a large field of nothing. The
+ * pane is now itself a surface: it still ends where the window does, but the
+ * area below the last row reads as an empty list rather than as unused page.
+ */
+.view--list .list-pane {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+}
+/* The lists that already brought their own card must not draw a second one. */
+.view--list .list-pane > .card--flush {
+  border: 0;
+  background: none;
+}
+
+/* Rows tall enough to be a target rather than a line of text. */
+.job,
+.log {
+  min-height: 62px;
+}
+:root[data-list-density="compact"] .job,
+:root[data-list-density="compact"] .log {
+  min-height: 50px;
+}
+:root[data-list-density="roomy"] .job,
+:root[data-list-density="roomy"] .log {
+  min-height: 76px;
+}
+
+/* --- codes: freshness is a mark, not a filter ----------------------------- */
+
+/**
+ * The just-arrived one, findable at a glance.
+ *
+ * Older codes used to be folded behind a "show N earlier" link — which is
+ * where they went to be lost, because the list looked empty and that control
+ * had no reason to be pressed. Everything is listed now, and this is what
+ * makes the newest obvious without hiding the rest.
+ *
+ * (No multi-column grid here: `VirtualList` positions rows by a prefix sum of
+ * measured heights, which assumes one row per line. Two cards per line would
+ * make every offset it computes wrong.)
+ */
+.codecard[data-fresh] {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  box-shadow: inset 3px 0 0 0 var(--accent);
+}
+.codecard[data-fresh] .codecard__mark {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+/* Wide windows have room for the metadata to sit beside the code rather than
+   under it, which is what stops one card per line looking sparse. */
+@media (min-width: 1500px) {
+  .codecard {
+    gap: var(--sp-6);
+    padding-inline: var(--sp-6);
+  }
+  .codecard__value {
+    font-size: 2.4rem;
+  }
+}

@@ -1,0 +1,404 @@
+/**
+ * The one seam between platform-independent code and the operating system.
+ *
+ * The renderer never imports `nodemailer`, never touches `fs`, and never calls
+ * a Capacitor plugin directly. It asks the bridge. That is what lets the same
+ * React tree ship inside Electron and inside an Android WebView, and what lets
+ * the UI run in a plain browser during development.
+ */
+
+import type { ControlEndpoint, ControlRequest, ControlResponse } from './control'
+import type {
+  AppState,
+  Attachment,
+  InboxAccountState,
+  InboxTag,
+  LocaleId,
+  MailAccount,
+  MessageDraft,
+  Platform,
+  ScheduledJob,
+  SecretKind,
+  SendResult,
+} from './types'
+import type { DownloadProgress, UpdateAsset, UpdateInfo } from './update'
+import type { TrayCommand } from './ipc-contract'
+
+export interface AppInfo {
+  version: string
+  platform: Platform
+  os: string
+  /** Human-readable location of the state file / preferences store. */
+  dataLocation: string
+  /**
+   * Absolute path of the bundled MCP server, so the Settings card can print a
+   * command that works on this machine. Desktop only.
+   */
+  mcpServerPath?: string
+}
+
+export interface JobEvent {
+  jobId: string
+  at: number
+  result: SendResult
+}
+
+/** One folder the user is allowed to keep their data in. */
+export interface DataFolderOption {
+  /** `default` everywhere; `external` / `sdcard` on Android; `custom` desktop. */
+  id: string
+  path: string
+  /** Present but unusable — an SD card slot with no card in it. */
+  available: boolean
+  freeBytes?: number
+}
+
+export interface DataFolder {
+  path: string
+  isDefault: boolean
+  sizeBytes: number
+  /** Whether the platform can offer a "pick any folder" dialog. */
+  canPickAny: boolean
+  /** Fixed choices. Always contains `default`; Android adds its volumes. */
+  options: DataFolderOption[]
+  /** A saved location was unreachable at startup and the default is in use. */
+  fellBack?: boolean
+  /**
+   * What deliberately does *not* move. Passwords live in the OS keystore and
+   * Android's alarm store has to stay where the system can read it without the
+   * app running; saying so is better than a user assuming otherwise.
+   */
+  staysBehind: string[]
+}
+
+export interface DataFolderChange {
+  changed: boolean
+  path: string
+  moved: boolean
+  warning?: string
+}
+
+/** A message body, already sanitized on the main-process side if it was HTML. */
+export interface InboxMessageBody {
+  text?: string
+  sanitizedHtml?: string
+  attachments: Attachment[]
+  /**
+   * Remote image URLs stripped out by the sanitizer, in the order their
+   * placeholders appear in `sanitizedHtml` (see `src/core/remoteImagePlaceholder.ts`).
+   * The renderer resolves these itself, on an explicit "load images" click,
+   * via `bridge.fetchRemoteImage` + `resolveRemoteImages` — never automatically.
+   */
+  remoteImages?: string[]
+}
+
+/** New mail arrived while the app was open — the inbox analogue of `JobEvent`. */
+export interface InboxEvent {
+  accountId: string
+  folderPath: string
+  newMessageIds: string[]
+}
+
+export interface PlatformBridge {
+  readonly platform: Platform
+
+  // --- persistence --------------------------------------------------------
+  loadState(): Promise<Partial<AppState> | null>
+  saveState(state: AppState): Promise<void>
+
+  // --- secrets (never stored in AppState) ---------------------------------
+  /** `kind` defaults to `'smtp'` — every secret written before Phase 1 used that key. */
+  setSecret(accountId: string, secret: string, kind?: SecretKind): Promise<void>
+  hasSecret(accountId: string, kind?: SecretKind): Promise<boolean>
+  deleteSecret(accountId: string, kind?: SecretKind): Promise<void>
+
+  // --- mail ---------------------------------------------------------------
+  sendNow(draft: MessageDraft, account: MailAccount): Promise<SendResult>
+  testConnection(account: MailAccount, secret?: string): Promise<SendResult>
+  /**
+   * Open and authenticate before the user presses Send.
+   *
+   * Optional because only the desktop keeps a connection alive; Android hands
+   * each send to a background worker that outlives the WebView, so there is no
+   * long-lived process to hold one open in.
+   */
+  prewarm?(account: MailAccount): Promise<boolean>
+
+  /**
+   * Tell the platform which language the window is showing in.
+   *
+   * Only the desktop has UI outside the window — the tray menu — and it is
+   * built before the window exists, so it starts from the OS locale and this is
+   * how an explicit in-app choice catches up with it.
+   */
+  setUiLocale?(locale: LocaleId): Promise<void>
+
+  /** Tray menu items that ask the window to do something. Desktop only. */
+  onTrayCommand?(handler: (command: TrayCommand) => void): () => void
+
+  // --- control interface (desktop only) ------------------------------------
+  // Optional because only the desktop build can listen on a socket or watch a
+  // folder. The Android and browser builds simply do not offer it, and the
+  // settings screen hides the card rather than showing a switch that lies.
+  applyControl?(settings: {
+    enabled: boolean
+    allowSending: boolean
+  }): Promise<ControlEndpoint | null>
+  onControlRequest?(handler: (request: ControlRequest) => void): () => void
+  respondToControl?(response: ControlResponse): Promise<void>
+
+  // --- files --------------------------------------------------------------
+  pickFiles(): Promise<Attachment[]>
+  /** Copy attachments into app-private storage so a later send still finds them. */
+  snapshotAttachments(attachments: Attachment[], jobId: string): Promise<Attachment[]>
+  revealPath(path: string): Promise<void>
+  /**
+   * Hand a file to the OS's default handler for it — desktop only, since it is
+   * the only platform holding a real filesystem path an "open" can act on.
+   */
+  openPath?(path: string): Promise<void>
+  /**
+   * Save clipboard image bytes as an attachment (pasting an image into the
+   * compose body). Desktop only, for the same reason `openPath` is.
+   */
+  attachBlob?(name: string, mime: string, data: ArrayBuffer): Promise<Attachment>
+  /**
+   * Read an attachment back as a `data:` URL so it can be shown in place.
+   *
+   * Resolves `null` for anything the platform will not preview — too large,
+   * not a safe type, no longer on disk. Optional as a whole because a platform
+   * that cannot do it at all should degrade to "open with the system handler",
+   * not report an error for every attachment.
+   */
+  readAttachment?(path: string): Promise<{ dataUrl: string; mime: string } | null>
+  /** Save a copy where the user chooses. Resolves null if they cancelled. */
+  saveAttachmentAs?(path: string, suggestedName: string): Promise<string | null>
+  /** Save every listed attachment into one chosen folder. */
+  saveAttachmentsTo?(paths: string[]): Promise<{ folder: string; saved: number } | null>
+  /**
+   * Make sure a received attachment's bytes are on local disk, and answer
+   * where they landed.
+   *
+   * Only implemented where a listed attachment might not have been downloaded
+   * yet — which today means Android, whose sync deliberately records
+   * attachment metadata and leaves the bytes on the server so a mailbox full
+   * of photographs does not spend a phone's data allowance on files nobody
+   * opens. The desktop writes attachments out during the body fetch, so it
+   * omits this and every caller falls back to `attachment.path`.
+   *
+   * Idempotent: an attachment already on disk comes back without a connection
+   * being opened, which is what makes preview → save → open three taps rather
+   * than three downloads.
+   */
+  ensureAttachment?(
+    config: InboxAccountState,
+    folderPath: string,
+    uid: number,
+    attachment: Attachment,
+  ): Promise<Attachment>
+  /**
+   * Which of these paths still exist. Optional: platforms that cannot answer
+   * simply omit it, and every caller treats "cannot check" as "do not claim
+   * anything" rather than as "missing".
+   */
+  checkFiles?(paths: string[]): Promise<Record<string, boolean>>
+  /** Turn dropped file paths into attachments. Absent where drops carry no path. */
+  attachPaths?(paths: string[]): Promise<Attachment[]>
+  /** The real path of a dropped `File`, where the platform can tell us. */
+  pathForFile?(file: File): string
+
+  // --- scheduling ---------------------------------------------------------
+  /**
+   * Hand the platform scheduler everything it needs to fire without us.
+   * Accounts travel with the jobs because on Android the worker runs long
+   * after the WebView is gone and cannot ask the UI for the SMTP settings —
+   * it only looks the *password* up separately, from the keystore.
+   */
+  syncJobs(jobs: ScheduledJob[], accounts: MailAccount[]): Promise<void>
+  /** Fires when the platform completed a scheduled send while we were open. */
+  onJobEvent(handler: (event: JobEvent) => void): () => void
+
+  // --- inbox (receiving) ---------------------------------------------------
+  // All optional: only the desktop has IMAP wired up so far. The Android
+  // build reuses the same `com.sun.mail` JavaMail dependency already bundled
+  // for SMTP (it registers an IMAP provider too — no new library needed) but
+  // that wiring is later work; until then `bridge?.syncInbox` is simply
+  // absent and the UI hides inbox affordances, the same way it already hides
+  // install/download on platforms where those are unavailable.
+  /** Connect, fetch new headers, cache bodies — returns the account's updated inbox state. */
+  syncInbox?(config: InboxAccountState): Promise<InboxAccountState>
+  /**
+   * Probe the receive endpoint and report back, saving nothing.
+   *
+   * `secret` is optional so the dialog can test a password the user has typed
+   * but not yet saved; omit it and the stored one is used (falling back to the
+   * SMTP password for the same account, which for every provider that issues
+   * app passwords is the same string).
+   */
+  testInbox?(config: InboxAccountState, secret?: string): Promise<SendResult>
+  /**
+   * Hand the platform the set of accounts that should be watched for new mail
+   * over a held-open connection. Passwords are deliberately absent — the
+   * platform looks them up itself, the same way the scheduler does.
+   *
+   * Absent on platforms with no push story (Android keeps its periodic
+   * WorkManager job instead of holding a socket open in the background), and
+   * the timed check runs on every platform regardless, so an implementation
+   * missing here costs latency and nothing else.
+   */
+  watchInbox?(configs: InboxAccountState[]): Promise<void>
+  /** Takes the account's inbox config (not just its id), matching `sendNow`/`testConnection`'s convention of passing the live object rather than re-reading it from disk. */
+  getMessageBody?(
+    config: InboxAccountState,
+    folderPath: string,
+    uid: number,
+  ): Promise<InboxMessageBody>
+  /**
+   * `seen` best-effort mirrors to the server's `\Seen` flag; `tag` never
+   * leaves the device (see `InboxTag`). Local state always updates regardless
+   * of whether the server round-trip succeeds.
+   */
+  setMessageFlags?(
+    config: InboxAccountState,
+    folderPath: string,
+    uid: number,
+    patch: { seen?: boolean; tag?: InboxTag },
+  ): Promise<void>
+  /** Local cache only — never issues an IMAP `\Deleted`/EXPUNGE. Re-syncable. */
+  deleteInboxMessages?(
+    accountId: string,
+    items: Array<{ folderPath: string; uid: number }>,
+  ): Promise<void>
+  /**
+   * Download a remote image through the trusted main process and return it as
+   * a `data:` URI, so a sanitized message body never makes its own network
+   * request (which is how a tracking pixel would otherwise leak the reader's
+   * IP and confirm the message was opened).
+   */
+  fetchRemoteImage?(url: string): Promise<string>
+  /** New mail arrived while the app was open. */
+  onInboxEvent?(handler: (event: InboxEvent) => void): () => void
+
+  // --- data folder --------------------------------------------------------
+  /** Where the app keeps everything, and where else it could. */
+  dataFolder(): Promise<DataFolder>
+  /** Free choice via the OS folder picker. Desktop only — see `canPickAny`. */
+  chooseDataFolder(move: boolean): Promise<DataFolderChange>
+  /** Switch to one of the offered options, `default` included. */
+  useDataFolder(optionId: string, move: boolean): Promise<DataFolderChange>
+  openDataFolder(): Promise<void>
+
+  // --- updates ------------------------------------------------------------
+  /** Ask the release feed whether a newer build exists. Never throws. */
+  checkForUpdate(): Promise<UpdateInfo>
+  /**
+   * Fetch and verify the new build.
+   *
+   * Desktop only. Android returns `undefined`, because installing an APK has to
+   * go through the system package installer and that means handing the URL to
+   * the browser rather than downloading it ourselves.
+   */
+  downloadUpdate?(asset: UpdateAsset): Promise<DownloadProgress>
+  installUpdate?(filePath: string): Promise<void>
+  onUpdateProgress?(handler: (progress: DownloadProgress) => void): () => void
+
+  // --- misc ---------------------------------------------------------------
+  /**
+   * `code: true` marks a verification code, which some platforms route to a
+   * separate, higher-importance channel — the whole value of that one is being
+   * readable without switching apps. Platforms with a single notification
+   * surface ignore it.
+   */
+  notify(title: string, body: string, opts?: { code?: boolean }): Promise<void>
+  openExternal(url: string): Promise<void>
+  appInfo(): Promise<AppInfo>
+}
+
+// ---------------------------------------------------------------------------
+// Platform detection
+// ---------------------------------------------------------------------------
+
+declare global {
+  interface Window {
+    aevistle?: unknown
+    Capacitor?: { isNativePlatform?: () => boolean; getPlatform?: () => string }
+  }
+}
+
+export function detectPlatform(): Platform {
+  if (typeof window === 'undefined') return 'web'
+  if (window.aevistle) return 'desktop'
+  const cap = window.Capacitor
+  if (cap?.isNativePlatform?.() && cap.getPlatform?.() === 'android') return 'android'
+  return 'web'
+}
+
+let cached: PlatformBridge | null = null
+
+/**
+ * Resolve the bridge for the current host. Implementations are imported lazily
+ * so that, for example, the Capacitor runtime is never pulled into the Electron
+ * bundle and vice versa.
+ */
+export async function getBridge(): Promise<PlatformBridge> {
+  if (cached) return cached
+  const platform = detectPlatform()
+
+  if (platform === 'desktop') {
+    const mod = await import('./bridge-desktop')
+    cached = mod.createDesktopBridge()
+  } else if (platform === 'android') {
+    const mod = await import('./bridge-android')
+    cached = mod.createAndroidBridge()
+  } else {
+    const mod = await import('./bridge-web')
+    cached = mod.createWebBridge()
+  }
+
+  return cached
+}
+
+/** Test seam — lets a unit test or a story inject a fake. */
+export function __setBridge(bridge: PlatformBridge | null): void {
+  cached = bridge
+}
+
+// ---------------------------------------------------------------------------
+// Shared helpers used by every implementation
+// ---------------------------------------------------------------------------
+
+/**
+ * Classify a transport error so the UI can say something useful about it.
+ *
+ * Order matters. `handshake` is tested before the generic `tls` and `network`
+ * cases because "Unexpected socket close" contains the word "socket" and would
+ * otherwise be filed as a network problem — sending the user off to check
+ * their Wi-Fi when the actual fix is a different port.
+ */
+export function classifyError(message: string): SendResult['errorKind'] {
+  const m = message.toLowerCase()
+  if (/auth|535|534|password|credential|login|应用专用|授权码/.test(m)) return 'auth'
+  if (/unexpected socket close|wrong version number|greeting never received|econnreset|epipe|etls|handshake/.test(m)) {
+    return 'handshake'
+  }
+  if (/no answer from the server|timed out|timeout|etimedout/.test(m)) return 'timeout'
+  if (/certificate|self[- ]signed|tls|ssl|depth zero|unable to verify/.test(m)) return 'tls'
+  if (/enotfound|econnrefused|ehostunreach|enetunreach|network|dns|getaddrinfo|socket/.test(m)) return 'network'
+  if (/550|551|553|recipient|no such user|mailbox unavailable/.test(m)) return 'recipient'
+  if (/552|quota|exceeded|too large|message size/.test(m)) return 'quota'
+  if (/enoent|no such file|permission denied|eacces/.test(m)) return 'attachment'
+  if (/invalid|missing|required|port|host/.test(m)) return 'config'
+  return 'unknown'
+}
+
+export function failedResult(error: unknown, startedAt: number): SendResult {
+  const message = error instanceof Error ? error.message : String(error)
+  return {
+    ok: false,
+    accepted: [],
+    rejected: [],
+    durationMs: Date.now() - startedAt,
+    error: message,
+    errorKind: classifyError(message),
+  }
+}
