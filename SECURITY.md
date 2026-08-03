@@ -234,6 +234,13 @@ If `gpg --verify` reports anything other than a good signature from that
 fingerprint, do not install the download — whatever else is wrong, it did not
 come from this project's key.
 
+Maintainers: the key is created once with `scripts/setup-signing-key.ps1`
+(Windows) or `scripts/setup-signing-key.sh`. On Windows use the PowerShell one
+— typing `bash` there resolves to WSL, which has a different home directory, so
+the key would land where nothing else can find it. After that `npm run
+release:sign -- <tag>` signs and publishes, and `npm run check:signing` fails
+if a published release is missing its signature.
+
 ### The Android package
 
 The Android package is signed with a key that has not changed since the first

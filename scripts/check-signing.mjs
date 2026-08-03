@@ -24,6 +24,7 @@ import { spawnSync } from 'node:child_process'
 import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { findGpg, GPG_HINT } from './gpg-path.mjs'
 
 const REPO = 'Aevorine/Aevistle'
 
@@ -76,7 +77,7 @@ try {
     }
   }
 
-  const verified = run('gpg', [
+  const verified = run(GPG, [
     '--no-default-keyring',
     '--keyring',
     path.join(dir, 'aevistle-public-key.asc'),

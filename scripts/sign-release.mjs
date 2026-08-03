@@ -25,6 +25,7 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { findGpg, GPG_HINT } from './gpg-path.mjs'
 
 const TAG = process.argv[2]
 if (!TAG) {
@@ -55,6 +56,9 @@ function die(message, hint) {
 
 // --- the key ----------------------------------------------------------------
 
+const GPG = findGpg()
+if (!GPG) die('Cannot sign: gpg is not installed or not reachable.', GPG_HINT)
+
 if (!existsSync(PROPS)) {
   die(
     'No signing key. This release would go out unsigned.',
@@ -81,7 +85,7 @@ if (!existsSync(SUMS)) die(`${SUMS} not found.`, 'Build the release first.')
 console.log(`\n  Signing ${SUMS}`)
 console.log(`  key ${fingerprint}`)
 
-const signed = run('gpg', [
+const signed = run(GPG, [
   '--batch',
   '--yes',
   '--pinentry-mode',
@@ -104,7 +108,7 @@ if (signed.status !== 0) die('gpg refused to sign.', (signed.stderr || '').trim(
 // trusts its own secret key unconditionally, so verifying there would confirm
 // almost nothing. This is the check a stranger would run.
 
-const verified = run('gpg', ['--no-default-keyring', '--keyring', PUBLIC_KEY, '--verify', SIG, SUMS])
+const verified = run(GPG, ['--no-default-keyring', '--keyring', PUBLIC_KEY, '--verify', SIG, SUMS])
 const verifyOut = `${verified.stdout ?? ''}${verified.stderr ?? ''}`
 if (verified.status !== 0 || !/Good signature/i.test(verifyOut)) {
   die('The signature does not verify against the published public key.', verifyOut.trim().split('\n').pop())
