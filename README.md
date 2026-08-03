@@ -103,6 +103,19 @@ Grab the latest build from **[Releases](https://github.com/Aevorine/Aevistle/rel
 | Windows 10/11 (x64) | `Aevistle-0.1.5-win-x64-portable.exe` | Single file, no installation, runs from a USB stick |
 | Android 7.0+ | `Aevistle-0.1.5.apk` | Phones and tablets. Enable "install unknown apps" for your browser or file manager first. |
 
+> **Verifying a download.** Every release publishes `SHA256SUMS.txt`, a
+> detached signature `SHA256SUMS.txt.asc`, and the public key that made it:
+>
+> ```bash
+> gpg --import aevistle-public-key.asc
+> gpg --verify SHA256SUMS.txt.asc SHA256SUMS.txt
+> sha256sum -c SHA256SUMS.txt
+> ```
+>
+> The checksums alone prove the file arrived intact; the signature proves it
+> came from this project's key. The fingerprint is in
+> [SECURITY.md](SECURITY.md).
+
 > Windows SmartScreen will warn about an unrecognised publisher. That is what a
 > release without a paid code-signing certificate looks like; choose
 > **More info → Run anyway**, or check the SHA-256 from the release page first.

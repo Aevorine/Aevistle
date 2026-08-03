@@ -211,6 +211,31 @@ Every release publishes `SHA256SUMS.txt` next to the binaries.
 sha256sum -c SHA256SUMS.txt
 ```
 
+### The checksums themselves are signed
+
+`SHA256SUMS.txt` proves a download was not corrupted on the way to you. On its
+own it cannot prove who published it — the file and the binaries it describes
+come from the same place, reachable by the same credential, so anyone able to
+replace one can replace the other. That is the gap the signature closes.
+
+```bash
+gpg --import aevistle-public-key.asc     # published with every release
+gpg --verify SHA256SUMS.txt.asc SHA256SUMS.txt
+sha256sum -c SHA256SUMS.txt
+```
+
+Signing key fingerprint:
+
+```
+<!-- AEVISTLE_GPG_FINGERPRINT -->not yet published
+```
+
+If `gpg --verify` reports anything other than a good signature from that
+fingerprint, do not install the download — whatever else is wrong, it did not
+come from this project's key.
+
+### The Android package
+
 The Android package is signed with a key that has not changed since the first
 release and will not change. Check that the APK you have is the one this
 project built:
