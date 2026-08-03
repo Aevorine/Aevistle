@@ -48,8 +48,8 @@
     "@capacitor/core": "^8.5.0",
     "@capacitor/preferences": "^8.0.1",
     "@types/mailparser": "^3.4.6",
-    "@types/node": "^22.10.2",
-    "@types/nodemailer": "^6.4.17",
+    "@types/node": "^26.1.2",
+    "@types/nodemailer": "^8.0.1",
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2",
     "@types/sanitize-html": "^2.16.1",
@@ -59,7 +59,7 @@
     "esbuild": "^0.28.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "typescript": "~5.9.3",
+    "typescript": "~7.0.2",
     "vite": "^8.2.0"
   }
 }
