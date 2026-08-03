@@ -601,7 +601,7 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
  */
 function UpdateCard() {
   const { state, dispatch, bridge } = useApp()
-  const { t, formatBytes, formatAgo } = useI18n()
+  const { t, formatBytes, formatDateTime } = useI18n()
   const toast = useToast()
   const { confirm, confirmElement } = useConfirm()
 
@@ -732,17 +732,21 @@ function UpdateCard() {
                   ? `${t('update.failed')} — ${info.error}`
                   : info
                     ? /*
-                       * `formatAgo`, not `formatRelative`.
+                       * The timestamp itself, not a relative phrase.
                        *
-                       * `formatRelative` describes how far away a *future*
-                       * moment is and answers "overdue" for anything already
-                       * past — right for a reminder that has not fired, and
-                       * nonsense for a check that just ran. A check completed
-                       * four seconds ago was labelled "overdue", which is
-                       * exactly what a check that never ran would look like.
-                       * The inbox hit this same confusion; see `i18n/index`.
+                       * This line was `formatRelative`, which describes how far
+                       * away a *future* moment is and answers "overdue" for
+                       * anything already past — so a check that finished four
+                       * seconds ago was labelled 已逾期, indistinguishable from
+                       * a check that never ran. `formatAgo` fixed the lie but
+                       * kept the vagueness: "just now" is true for anything
+                       * under a minute and stops being useful the moment you
+                       * are trying to work out whether a check actually
+                       * happened. A date and time answers that outright, and it
+                       * is the one line on this card whose whole job is to say
+                       * when something happened.
                        */
-                      t('update.lastChecked', { when: formatAgo(info.checkedAt) })
+                      t('update.lastChecked', { when: formatDateTime(info.checkedAt) })
                     : t('update.neverChecked')}
             </div>
           </div>
