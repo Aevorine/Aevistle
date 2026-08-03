@@ -154,7 +154,19 @@ check('SEC-01', 'No credentials in tracked source', () => {
 
 check('SEC-02', 'Signing keys and local config are git-ignored', () => {
   const ignore = read('.gitignore') ?? ''
-  const required = ['*.jks', '*.keystore', 'keystore.properties', 'local.properties', '.env']
+  // `gpg.properties` and `*.asc` joined this list when release signing did.
+  // They live outside the working tree, so git cannot reach them anyway — this
+  // is the second line, for a key copied in by hand or exported into the repo
+  // during a debugging session.
+  const required = [
+    '*.jks',
+    '*.keystore',
+    'keystore.properties',
+    'gpg.properties',
+    '*.asc',
+    'local.properties',
+    '.env',
+  ]
   const missing = required.filter((pattern) => !ignore.includes(pattern))
   if (missing.length === 0) return null
   return {

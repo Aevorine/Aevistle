@@ -16,6 +16,10 @@
 # in ~/.aevistle, outside the repository, passphrase in a properties file beside
 # it. There is no reason for this project to have two models for the same thing.
 #
+# Nothing written here is reachable by git — this directory is not in the
+# working tree. `.gitignore` also lists these names, which is belt and braces
+# for the case where somebody copies a key into the repository by hand.
+#
 # The uid uses the GitHub noreply address deliberately. A GPG uid is published
 # to everyone who ever verifies a download, and the real address is a stated
 # privacy red line for this repository.
@@ -72,8 +76,8 @@ cat > "$PROPS" <<PROPSEOF
 # Aevistle release signing key.
 #
 # Never commit this file. It lives here rather than in the repository for the
-# same reason aevistle-release.jks does, and .gitignore covers the patterns
-# that would let it slip in.
+# same reason aevistle-release.jks does — this directory is outside the working
+# tree, so git cannot see it at all.
 fingerprint=$FPR
 passphrase=$PASS
 uid=$NAME <$EMAIL>

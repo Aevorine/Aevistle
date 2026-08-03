@@ -15,6 +15,13 @@
 *.jks
 *.keystore
 keystore.properties
+# Signing-key material never lives in the repository — it is kept in
+# ~/.aevistle, which git cannot reach. These patterns are the second line:
+# a key copied in here by hand, or a stray export from a debugging session,
+# must not become a commit.
+gpg.properties
+*.asc
+aevistle-signing-key*
 secrets.json
 credentials.json
 local.properties
