@@ -587,7 +587,13 @@ textarea {
    the row starts at the card edge while every field beside it starts 5.5em in,
    and the eye reads two different forms stacked on top of each other. */
 .form-rows > .field__row,
-.form-rows > .switch {
+.form-rows > .switch,
+/* The disclosure is a direct child of the form, so its own children are one
+   level deeper than the rule above reaches. Without these two the opened
+   section starts hard against the card edge while every field above it starts
+   5.5em in, and the eye reads two forms rather than one. */
+.form-rows > .moreoptions > .field__row,
+.form-rows > .moreoptions > .switch {
   margin-inline-start: calc(5.5em + var(--sp-4));
 }
 .form-rows .field__row .field {
@@ -614,7 +620,9 @@ textarea {
     text-align: start;
   }
   .form-rows > .field__row,
-  .form-rows > .switch {
+  .form-rows > .switch,
+  .form-rows > .moreoptions > .field__row,
+  .form-rows > .moreoptions > .switch {
     margin-inline-start: 0;
   }
 }
@@ -3664,22 +3672,29 @@ textarea {
 }
 
 /**
- * Controls flow into columns once the card is wider than one control needs.
- *
- * `auto-fit` is right here and wrong one level up: inside a card the cell
- * contents are a fixed size — a switch, a segmented control, a select — so
- * extra columns genuinely use the space instead of subdividing it. 300px is
- * the width at which a switch's label and its description still read as two
- * lines rather than five.
+ * Controls pair up once the card is wider than one control needs.
  *
  * Rows that are already horizontal (`.field__row` puts two or three fields
  * side by side) and anything that labels the card span the full width, so the
  * card reads as sections rather than as a scatter of controls.
  */
-@media (min-width: 1100px) {
+/**
+ * Two columns, and only ever two.
+ *
+ * `auto-fit` was the first attempt and it repeats, one level down, exactly the
+ * trap the card grid above was rewritten to escape: measured across a real
+ * window it went 2 columns of 461px at 1280 to *3 of 338px* at 1400, so
+ * widening the window made every control narrower and squeezed the data-folder
+ * path into three wrapped lines. More columns is not more room.
+ *
+ * A fixed pair keeps the relationship the right way round — wider window,
+ * wider fields — and two is the honest maximum: at three, a label and its
+ * control stop reading as a pair and start reading as a table.
+ */
+@media (min-width: 1000px) {
   .view--settings .card__body {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     column-gap: var(--sp-6);
     row-gap: var(--sp-3);
     align-items: start;
@@ -3762,6 +3777,43 @@ textarea {
   .compose-grid > .field:has(.textarea--body) > .textarea--body {
     flex: 1;
     height: auto;
+  }
+
+  /* --- controls that have to stop being rows in this column ---------------
+     Column one is 420px wide, and a 5.5em label gutter leaves its controls
+     about 305px. Two things were still laying themselves out as horizontal
+     rows in that space, which only became visible once the options disclosure
+     was opened for the README screenshot:
+
+       · the dropzone put its title and its hint side by side, and both wrapped
+         — four lines of text to say two things;
+       · the delivery switches sat two-across at ~145px each, so one label
+         wrapped to two lines and its description to two more while its
+         neighbour stayed on one.
+
+     Both are the same mistake: a layout that is right in a wide card being
+     reused in a narrow column. Neither needs the column to be wider — they
+     need to stack, which costs vertical space the column has to spare. */
+  .compose-grid .dropzone {
+    flex-direction: column;
+    gap: var(--sp-1);
+    padding: var(--sp-3) var(--sp-4);
+  }
+  /* The base rule centres items on the cross axis, which in a column flex
+     sizes each block of text to shrink-to-fit rather than to the box. The hint
+     then wraps against a width narrower than the box it sits in — in Chinese
+     it broke 「都行」 down the middle with room to spare on both lines. Only
+     the text needs the full width; widening the flex alignment instead would
+     also stretch the icon and pull it off centre. */
+  .compose-grid .dropzone__title,
+  .compose-grid .dropzone__hint {
+    width: 100%;
+  }
+  /* One per line rather than two squeezed side by side. `flex-basis: 100%`
+     rather than a raised `min-width`, so this cannot degrade into two columns
+     again at some in-between width. */
+  .compose-grid .moreoptions .field__row > .switch {
+    flex-basis: 100%;
   }
 }
 

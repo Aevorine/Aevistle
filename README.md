@@ -108,6 +108,10 @@ Grab the latest build from **[Releases](https://github.com/Aevorine/Aevistle/rel
    anything, so you find out now rather than at 03:00.
 4. **Write your reminder**, attach what you need, and choose **Schedule**.
 
+<div align="center">
+<img src="docs/assets/screenshot-settings.png" alt="Aevistle settings, showing the mail account and data folder cards" width="880">
+</div>
+
 For scheduled sends to fire while the window is closed, leave
 *Keep running in the tray* on (Windows), and allow exact alarms and
 notifications when Android asks.

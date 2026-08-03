@@ -59,7 +59,7 @@ export const ru: Translations = {
   'compose.pasteImageFailed': 'Не удалось добавить вставленное изображение',
   'compose.attachments': 'Вложения',
   'compose.dropHere': 'Перетащите файлы сюда или нажмите, чтобы выбрать',
-  'compose.dropHint': 'Документы, изображения, архивы — до {limit} МБ',
+  'compose.dropHint': 'Документы, изображения, архивы — до {limit} МБ',
   'compose.attachmentCount': 'файлов: {n} · {size}',
   'compose.onTheWire': '{size} в канале',
   'compose.dailyLimit': 'лимит провайдера: {n}/день',

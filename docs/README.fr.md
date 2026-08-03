@@ -100,6 +100,10 @@ La dernière version se trouve dans **[Releases](https://github.com/Aevorine/Aev
    le savez maintenant plutôt qu’à 03:00.
 4. **Écrivez votre rappel**, joignez ce qu’il faut, puis choisissez **Planifier**.
 
+<div align="center">
+<img src="assets/screenshot-settings.png" alt="Les réglages d’Aevistle : le compte mail et le dossier de données" width="880">
+</div>
+
 Pour que les envois programmés partent fenêtre fermée, laissez
 *Garder actif dans la zone de notification* activé (Windows) et autorisez les
 alarmes exactes et les notifications quand Android le demande.

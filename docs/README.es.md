@@ -98,6 +98,10 @@ La última versión está en **[Releases](https://github.com/Aevorine/Aevistle/r
    enteras ahora y no a las 03:00.
 4. **Escribe tu recordatorio**, adjunta lo necesario y elige **Programar**.
 
+<div align="center">
+<img src="assets/screenshot-settings.png" alt="Ajustes de Aevistle: la cuenta de correo y la carpeta de datos" width="880">
+</div>
+
 Para que los envíos programados salgan con la ventana cerrada, deja activado
 *Mantener en la bandeja* (Windows) y permite alarmas exactas y notificaciones
 cuando Android lo pida.

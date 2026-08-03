@@ -59,7 +59,7 @@ export const ar: Translations = {
   'compose.pasteImageFailed': 'تعذّرت إضافة الصورة الملصقة',
   'compose.attachments': 'المرفقات',
   'compose.dropHere': 'أفلِت الملفات هنا، أو انقر للاختيار',
-  'compose.dropHint': 'مستندات وصور وملفات مضغوطة — حتى {limit} ميغابايت',
+  'compose.dropHint': 'مستندات وصور وملفات مضغوطة — حتى {limit} ميغابايت',
   'compose.attachmentCount': '{n} ملف · {size}',
   'compose.onTheWire': '{size} على الشبكة',
   'compose.dailyLimit': 'حد المزوّد {n}/يوم',

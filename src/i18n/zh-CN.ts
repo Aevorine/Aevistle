@@ -59,7 +59,7 @@ export const zhCN: Translations = {
   'compose.pasteImageFailed': '粘贴的图片添加失败',
   'compose.attachments': '附件',
   'compose.dropHere': '把文件拖到这里，或点击选择',
-  'compose.dropHint': '文档、图片、压缩包都行，单次上限 {limit} MB',
+  'compose.dropHint': '文档、图片、压缩包都行，单次上限 {limit} MB',
   'compose.attachmentCount': '{n} 个文件 · {size}',
   'compose.onTheWire': '编码后 {size}',
   'compose.dailyLimit': '服务商上限 每天 {n} 封',
