@@ -31,12 +31,18 @@ import {
   type RetryPolicy,
 } from '../core/types'
 
-function toLocalInput(ms: number): string {
+/**
+ * Exported because the compose screen sets a send time inline now, and a
+ * second copy of this would be a second chance to get the timezone wrong:
+ * `toISOString().slice(0,16)` is the obvious spelling and it is UTC, which
+ * silently shifts every time a user picks by up to half a day.
+ */
+export function toLocalInput(ms: number): string {
   const d = new Date(ms)
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`
 }
 
-function fromLocalInput(value: string, fallback: number): number {
+export function fromLocalInput(value: string, fallback: number): number {
   const t = new Date(value).getTime()
   return Number.isFinite(t) ? t : fallback
 }

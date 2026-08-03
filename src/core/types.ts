@@ -463,6 +463,14 @@ export interface Settings {
   minimiseToTray: boolean
   launchAtLogin: boolean
   logRetentionDays: number
+  /**
+   * Hard ceiling on how many activity entries are kept, whatever their age.
+   *
+   * Days alone is not a retention policy on a busy account: a thousand sends
+   * inside the window are a thousand rows of recipients still on disk. Both
+   * limits apply, and whichever bites first wins.
+   */
+  logMaxEntries: number
   /** Redact recipient addresses in the on-disk log. */
   redactLogs: boolean
 
@@ -570,6 +578,7 @@ export const DEFAULT_SETTINGS: Settings = {
   minimiseToTray: true,
   launchAtLogin: false,
   logRetentionDays: 30,
+  logMaxEntries: 500,
   redactLogs: false,
   quietHoursEnabled: false,
   quietStart: '22:00',

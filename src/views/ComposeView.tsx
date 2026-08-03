@@ -23,8 +23,9 @@ import {
 } from '../components/ui'
 import { AttachmentPicker, TagField } from '../components/inputs'
 import { CHAIN_STAGES, buildChain, leadLabelKey } from '../core/chain'
+import { summarizeRecurrence } from '../core/schedule'
 import { HealthBoard } from '../components/HealthBoard'
-import { RecurrenceEditor } from '../components/RecurrenceEditor'
+import { RecurrenceEditor, fromLocalInput, toLocalInput } from '../components/RecurrenceEditor'
 import { ConditionEditor } from '../components/ConditionEditor'
 import { DraftHistory } from '../components/DraftHistory'
 import { OutboxStrip } from '../components/OutboxStrip'
@@ -112,6 +113,15 @@ export function ComposeView({
   /** The last send, kept on screen until dismissed or superseded. */
   const [outcome, setOutcome] = useState<SendResult | null>(null)
   const [scheduleOpen, setScheduleOpen] = useState(false)
+  /**
+   * Whether the send time on screen is one the user chose.
+   *
+   * `recurrence` always holds a valid value (five minutes from now), so it
+   * cannot answer this by itself — and a screen that says "sends at 14:32"
+   * about a time nobody picked is worse than one that says nothing. Cleared
+   * with the draft, so the next reminder does not inherit the last one's time.
+   */
+  const [scheduleSet, setScheduleSet] = useState(false)
   const [jobName, setJobName] = useState('')
   /** Lead times ticked in the chain picker. `[0]` is "just the event itself". */
   const [leadTimes, setLeadTimes] = useState<number[]>([0])
@@ -374,12 +384,14 @@ export function ComposeView({
           void bridge?.notify(t('result.sentTitle'), draft.subject || account?.fromAddress || '')
         }
         dispatch({ type: 'resetDraft', accountId: draft.accountId })
+        clearSchedule()
       } else if (state.settings.offlineQueueEnabled !== false && isQueueable(result)) {
         // It is in the outbox, not lost. Saying "failed" here would be true of
         // the attempt and false of the message, and the message is what the
         // person cares about.
         toast.push({ tone: 'info', title: t('outbox.queued'), detail: result.error })
         dispatch({ type: 'resetDraft', accountId: draft.accountId })
+        clearSchedule()
       } else {
         toast.push({
           tone: 'error',
@@ -394,7 +406,11 @@ export function ComposeView({
 
   const openSchedule = () => {
     setJobName(draft.subject.trim() || t('schedule.namePlaceholder'))
-    setRecurrence(defaultRecurrence())
+    // The time the user already picked on the compose screen is kept. Resetting
+    // it unconditionally — which is what this did when the dialog was the only
+    // place a time could be chosen — would now silently throw away the value
+    // showing in the bar they just clicked.
+    if (!scheduleSet) setRecurrence(defaultRecurrence())
     setRetry(DEFAULT_RETRY)
     setBurst(DEFAULT_BURST)
     // Every dialog starts as a single reminder. Remembering the last chain
@@ -405,6 +421,16 @@ export function ComposeView({
     setConditions([])
     setScheduleOpen(true)
   }
+
+  /** Reset the send time along with the draft it belonged to. */
+  const clearSchedule = () => {
+    setScheduleSet(false)
+    setRecurrence(defaultRecurrence())
+    setLeadTimes([0])
+    setConditions([])
+  }
+
+  const scheduleSummary = useMemo(() => summarizeRecurrence(recurrence), [recurrence])
 
   const scheduleHasErrors = hasErrors([...validateRecurrence(recurrence), ...validateBurst(burst)])
 
@@ -464,6 +490,7 @@ export function ComposeView({
           : t('toast.scheduled', { when: '' }).replace(/\s*$/, ''),
     })
     dispatch({ type: 'resetDraft', accountId: draft.accountId })
+    clearSchedule()
   }
 
   return (
@@ -492,72 +519,97 @@ export function ComposeView({
           ) : null}
 
           {/*
-            Two columns once the window is wide enough to earn them.
+            One card, three bands: who it goes to, what it says, and when.
 
-            Recipient, subject and the options are short rows that were each
-            being stretched across a 1900px window to hold one control, while
-            the body — the field the screen exists to collect — got whatever
-            height was left underneath. Side by side, the addressing stays a
-            compact column and the body gets both the width and the full height
-            of the card. Below the breakpoint this collapses back to one
-            column, which is the phone and small-window layout unchanged.
+            The previous layout put addressing in a 420px left column and the
+            message in a right column beside it. That was an improvement on the
+            stacked form it replaced, but it capped the message at whatever was
+            left after a column sized for a select box — and it made the two
+            most important things on the screen (the message, and when it
+            sends) compete for the same horizontal space as a subject line.
+
+            Now the addressing is one compact row across the top, because a
+            recipient and a subject are each one line of text and never needed
+            a column of their own; the message takes the full width of the card
+            and every pixel of height left over; and the attachment picker and
+            the schedule sit together along the bottom, next to the buttons
+            they belong with. Below 900px the top row stacks, which is the
+            phone layout.
           */}
           <Card className="compose-card">
-            <div className="card__body form-rows compose-grid">
-              {state.accounts.length > 1 ? (
-                <Field label={t('compose.account')}>
-                  {/* Grouped once there is more than one group to show —
-                      a single `<optgroup>` wrapping everything is visual noise
-                      that says nothing. */}
-                  <select
-                    className="select"
-                    value={draft.accountId}
-                    onChange={(e) => patch({ accountId: e.target.value })}
-                  >
-                    {accountGroups.length > 1
-                      ? accountGroups.map((group) => (
-                          <optgroup
-                            key={group.name ?? '_'}
-                            label={group.name ?? t('account.ungrouped')}
-                          >
-                            {group.accounts.map((a) => (
-                              <option key={a.id} value={a.id}>
-                                {accountLabel(a)} — {a.fromAddress}
-                              </option>
-                            ))}
-                          </optgroup>
-                        ))
-                      : state.accounts.map((a) => (
-                          <option key={a.id} value={a.id}>
-                            {accountLabel(a)} — {a.fromAddress}
-                          </option>
-                        ))}
-                  </select>
-                </Field>
-              ) : null}
+            <div className="card__body compose-layout">
+              {/* --- band 1: who ------------------------------------------ */}
+              <div className="compose-head">
+                {state.accounts.length > 1 ? (
+                  <Field label={t('compose.account')}>
+                    {/* Grouped once there is more than one group to show —
+                        a single `<optgroup>` wrapping everything is visual
+                        noise that says nothing. */}
+                    <select
+                      className="select"
+                      value={draft.accountId}
+                      onChange={(e) => patch({ accountId: e.target.value })}
+                    >
+                      {accountGroups.length > 1
+                        ? accountGroups.map((group) => (
+                            <optgroup
+                              key={group.name ?? '_'}
+                              label={group.name ?? t('account.ungrouped')}
+                            >
+                              {group.accounts.map((a) => (
+                                <option key={a.id} value={a.id}>
+                                  {accountLabel(a)} — {a.fromAddress}
+                                </option>
+                              ))}
+                            </optgroup>
+                          ))
+                        : state.accounts.map((a) => (
+                            <option key={a.id} value={a.id}>
+                              {accountLabel(a)} — {a.fromAddress}
+                            </option>
+                          ))}
+                    </select>
+                  </Field>
+                ) : null}
 
-              <Field
-                label={t('compose.to')}
-                htmlFor={toId}
-                hint={
-                  <button type="button" className="link" onClick={() => setShowCcBcc((v) => !v)}>
-                    {t('compose.showCcBcc')}
-                  </button>
-                }
-              >
-                <TagField
-                  id={toId}
-                  values={draft.to}
-                  onChange={(v) => patch({ to: v })}
-                  placeholder={t('compose.recipientPlaceholder')}
-                  suggestions={state.contacts}
-                  recents={state.recentRecipients}
-                  quickBar
-                />
-              </Field>
+                {/* Cc/Bcc rides on the label line rather than buying a hint
+                    row underneath: this row sets the height of everything
+                    below it, and a 32px row to hold one link is 32px taken
+                    off the message. */}
+                <Field
+                  label={t('compose.to')}
+                  htmlFor={toId}
+                  labelHint={
+                    <button type="button" className="link" onClick={() => setShowCcBcc((v) => !v)}>
+                      {t('compose.showCcBcc')}
+                    </button>
+                  }
+                >
+                  <TagField
+                    id={toId}
+                    values={draft.to}
+                    onChange={(v) => patch({ to: v })}
+                    placeholder={t('compose.recipientPlaceholder')}
+                    suggestions={state.contacts}
+                    recents={state.recentRecipients}
+                    quickBar
+                  />
+                </Field>
+
+                <Field label={t('compose.subject')} htmlFor={subjectId}>
+                  <input
+                    id={subjectId}
+                    className="input"
+                    value={draft.subject}
+                    maxLength={998}
+                    placeholder={t('compose.subjectPlaceholder')}
+                    onChange={(e) => patch({ subject: e.target.value })}
+                  />
+                </Field>
+              </div>
 
               {showCcBcc ? (
-                <div className="field__row">
+                <div className="compose-head compose-head--extra">
                   <Field label={t('compose.cc')}>
                     <TagField
                       values={draft.cc}
@@ -577,29 +629,18 @@ export function ComposeView({
                 </div>
               ) : null}
 
-              <Field label={t('compose.subject')} htmlFor={subjectId}>
-                <input
-                  id={subjectId}
-                  className="input"
-                  value={draft.subject}
-                  maxLength={998}
-                  placeholder={t('compose.subjectPlaceholder')}
-                  onChange={(e) => patch({ subject: e.target.value })}
-                />
-              </Field>
-
+              {/* --- band 2: what ----------------------------------------- */}
               {/* The body is the one thing this whole screen exists to
-                  collect, so it is the one field allowed to grow: it claims
-                  every pixel the card has left over, with a floor tall enough
-                  to write a real message in and a drag handle for anyone who
-                  wants more.
+                  collect, so it is the one field allowed to grow: full card
+                  width, and every pixel of height the other two bands do not
+                  need.
 
                   No placeholder. The label already says "Body" and the
                   placeholder said it a second time three pixels below —
                   literally the same word twice, which read as a rendering
                   fault rather than as guidance. The merge syntax it used to
-                  advertise is discoverable through the variable chips further
-                  down the moment a `{{token}}` is typed. */}
+                  advertise is discoverable through the variable chips below
+                  the moment a `{{token}}` is typed. */}
               <Field label={t('compose.body')} htmlFor={bodyId}>
                 <textarea
                   id={bodyId}
@@ -612,72 +653,9 @@ export function ComposeView({
                 />
               </Field>
 
-              {/* Folded away by default.
-                  Format, priority, per-recipient delivery and read receipts
-                  are decided once and then left alone for months, but they
-                  were costing 149px of a form that is required to fit one
-                  screen. The disclosure remembers nothing on purpose: it
-                  reopening because you once used Bcc would defeat the point. */}
-              <details className="moreoptions">
-                <summary className="moreoptions__summary">{t('compose.moreOptions')}</summary>
-              {/* The body-format picker is gone on purpose. It asked people to
-                  choose between plain, HTML and Markdown before writing a
-                  word, when the right answer is always derivable: pasting or
-                  embedding an image needs HTML and switches to it by itself
-                  (see `toggleInline` and `handleBodyPaste`), and everything
-                  else is plain text. `draft.bodyFormat` still exists and is
-                  still what the transport reads — it is simply no longer a
-                  question anyone is asked. */}
-              <div className="field__row">
-                <Field label={t('compose.priority')}>
-                  <Segmented
-                    value={draft.priority}
-                    onChange={(v: Priority) => patch({ priority: v })}
-                    options={[
-                      { value: 'low', label: t('compose.priorityLow') },
-                      { value: 'normal', label: t('compose.priorityNormal') },
-                      { value: 'high', label: t('compose.priorityHigh') },
-                    ]}
-                  />
-                </Field>
-              </div>
-
-              <Field label={t('compose.attachments')}>
-                <AttachmentPicker
-                  attachments={draft.attachments}
-                  onAdd={addAttachments}
-                  onRemove={(id) =>
-                    patch({ attachments: draft.attachments.filter((a) => a.id !== id) })
-                  }
-                  onToggleInline={toggleInline}
-                  limitMb={limitMb}
-                  presence={attachmentPresence}
-                  onDropPaths={bridge?.pathForFile ? dropAttachments : undefined}
-                />
-              </Field>
-
-              {/* Side by side rather than stacked. Two full-width switches cost
-                  a hundred vertical pixels for two words each, and they were
-                  what pushed "Send now" off a short screen. */}
-              <div className="field__row">
-                <Switch
-                  checked={draft.individualDelivery}
-                  onChange={(v) => patch({ individualDelivery: v })}
-                  title={t('compose.individualDelivery')}
-                  description={t('compose.individualHint')}
-                />
-                <Switch
-                  checked={draft.requestReadReceipt}
-                  onChange={(v) => patch({ requestReadReceipt: v })}
-                  title={t('compose.readReceipt')}
-                />
-              </div>
-              </details>
-
               {/* Mail merge. Offered only once there is a `{{token}}` to merge:
                   a switch that does nothing until you learn an undocumented
-                  syntax is a switch that teaches nobody anything. The hint
-                  below is where that syntax is actually introduced. */}
+                  syntax is a switch that teaches nobody anything. */}
               {hasVars(draft) || draft.mergeEnabled ? (
                 <Switch
                   checked={draft.mergeEnabled === true}
@@ -697,6 +675,122 @@ export function ComposeView({
                   ))}
                 </div>
               ) : null}
+
+              {/* --- band 3: when, and what rides along -------------------- */}
+              <div className="compose-foot">
+                <Field label={t('compose.attachments')}>
+                  <AttachmentPicker
+                    attachments={draft.attachments}
+                    onAdd={addAttachments}
+                    onRemove={(id) =>
+                      patch({ attachments: draft.attachments.filter((a) => a.id !== id) })
+                    }
+                    onToggleInline={toggleInline}
+                    limitMb={limitMb}
+                    presence={attachmentPresence}
+                    onDropPaths={bridge?.pathForFile ? dropAttachments : undefined}
+                  />
+                </Field>
+
+                {/*
+                  When it sends, on the screen where it is written.
+
+                  This used to be knowable only by opening the Schedule dialog:
+                  the recurrence lived inside it, was reset every time it
+                  opened, and the compose screen showed nothing at all. So the
+                  answer to "when does this go out?" — the question the whole
+                  application exists to answer — was two clicks away and gone
+                  again the moment the dialog closed.
+
+                  Setting a time here is a `datetime-local`, which is the whole
+                  interaction for the common case (a one-off reminder). Repeats,
+                  retries, chains and conditions stay in the dialog, one click
+                  away, because those are the rare ones.
+                */}
+                <Field label={t('compose.sendsAt')}>
+                  <div className="whenbar">
+                    <input
+                      className="input whenbar__time"
+                      type="datetime-local"
+                      /* Empty until a time is actually chosen. `recurrence`
+                         always holds one (five minutes out), and showing that
+                         beside the words "no send time chosen yet" would be the
+                         box contradicting the sentence next to it. */
+                      value={scheduleSet ? toLocalInput(recurrence.startAt) : ''}
+                      onChange={(e) => {
+                        setRecurrence((r) => ({
+                          ...r,
+                          startAt: fromLocalInput(e.target.value, r.startAt),
+                        }))
+                        setScheduleSet(true)
+                      }}
+                    />
+                    <div className="whenbar__text">
+                      {scheduleSet ? (
+                        <>
+                          <span className="whenbar__rule">
+                            {t(scheduleSummary.key as TranslationKey, scheduleSummary.values)}
+                          </span>
+                          {plannedStages.length > 1 ? (
+                            <span className="whenbar__count">
+                              {t('chain.willCreate', { n: plannedStages.length })}
+                            </span>
+                          ) : null}
+                        </>
+                      ) : (
+                        <span className="whenbar__rule whenbar__rule--unset">
+                          {t('schedule.notSetYet')}
+                        </span>
+                      )}
+                    </div>
+                    <Button variant="ghost" onClick={openSchedule}>
+                      {t('schedule.moreRules')}
+                    </Button>
+                  </div>
+                </Field>
+
+                {/* Folded away by default.
+                    Priority, per-recipient delivery and read receipts are
+                    decided once and then left alone for months, but they were
+                    costing 149px of a form that is required to fit one screen.
+                    The disclosure remembers nothing on purpose: it reopening
+                    because you once used Bcc would defeat the point. */}
+                <details className="moreoptions">
+                  <summary className="moreoptions__summary">{t('compose.moreOptions')}</summary>
+                  {/* The body-format picker is gone on purpose. It asked people
+                      to choose between plain, HTML and Markdown before writing
+                      a word, when the right answer is always derivable:
+                      pasting or embedding an image needs HTML and switches to
+                      it by itself (see `toggleInline` and `handleBodyPaste`),
+                      and everything else is plain text. `draft.bodyFormat`
+                      still exists and is still what the transport reads — it is
+                      simply no longer a question anyone is asked. */}
+                  <div className="moreoptions__grid">
+                    <Field label={t('compose.priority')}>
+                      <Segmented
+                        value={draft.priority}
+                        onChange={(v: Priority) => patch({ priority: v })}
+                        options={[
+                          { value: 'low', label: t('compose.priorityLow') },
+                          { value: 'normal', label: t('compose.priorityNormal') },
+                          { value: 'high', label: t('compose.priorityHigh') },
+                        ]}
+                      />
+                    </Field>
+                    <Switch
+                      checked={draft.individualDelivery}
+                      onChange={(v) => patch({ individualDelivery: v })}
+                      title={t('compose.individualDelivery')}
+                      description={t('compose.individualHint')}
+                    />
+                    <Switch
+                      checked={draft.requestReadReceipt}
+                      onChange={(v) => patch({ requestReadReceipt: v })}
+                      title={t('compose.readReceipt')}
+                    />
+                  </div>
+                </details>
+              </div>
             </div>
           </Card>
 
@@ -948,7 +1042,13 @@ export function ComposeView({
 
         <RecurrenceEditor
           recurrence={recurrence}
-          onChange={setRecurrence}
+          onChange={(next) => {
+            setRecurrence(next)
+            // Touching anything in here is choosing a send time, which is what
+            // the bar on the compose screen reads to decide whether it has
+            // something true to say.
+            setScheduleSet(true)
+          }}
           retry={retry}
           onRetryChange={setRetry}
           burst={burst}

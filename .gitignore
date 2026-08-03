@@ -92,6 +92,11 @@ desktop.ini
 
 # --- AI workspace bookkeeping (local only) ---------------------------------
 task-progress.md
+# Finished ledgers are archived beside the live one as
+# `task-progress.<date>-<slug>.md`. They are working notes, not project
+# history — the pattern matters because the bare name above does not match them
+# and one nearly went into a public repository.
+task-progress.*.md
 .claude/
 hs_err_pid*.log
 replay_pid*.log

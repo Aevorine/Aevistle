@@ -183,25 +183,21 @@ async function readEndpoint(): Promise<ControlEndpoint | null> {
  * So: name the cause where we recognise it, keep running where it is safe to,
  * and never show a stack trace to someone who just wanted to send an email.
  */
+/**
+ * Errors the keystore raises when the saved passwords are not ours to read.
+ *
+ * Chromium keeps the key that encrypts saved passwords in its own `Local
+ * State`, wrapped by the OS. When that wrapping no longer matches this machine
+ * or this OS account — a restored backup, a copied profile folder, a rebuilt
+ * Windows user — the unwrap fails deep in BoringSSL and surfaces as
+ * `error:1e000065 ... BAD_DECRYPT`.
+ */
+function isKeystoreError(message: string): boolean {
+  return /BAD_DECRYPT|Cipher functions|bad decrypt|keystore/i.test(message)
+}
+
 function describeMainProcessError(err: unknown): { title: string; detail: string } {
   const message = err instanceof Error ? err.message : String(err)
-
-  // The one users actually hit. Chromium keeps the key that encrypts saved
-  // passwords in its own `Local State`, wrapped by the OS. When that wrapping
-  // no longer matches this machine or this OS account — a restored backup, a
-  // copied profile folder, a rebuilt Windows user — the unwrap fails deep in
-  // BoringSSL and surfaces as `error:1e000065 ... BAD_DECRYPT`.
-  if (/BAD_DECRYPT|Cipher functions|bad decrypt/i.test(message)) {
-    return {
-      title: 'Saved passwords cannot be read on this computer',
-      detail:
-        'Aevistle stores mail passwords with the operating system keystore, and the key ' +
-        'that unlocks them does not belong to this Windows account. This usually means the ' +
-        'data was restored from a backup or copied from another computer.\n\n' +
-        'Everything else still works. Open Settings → Mail accounts, edit each account and ' +
-        'enter its password again — after that, scheduled sending resumes as normal.',
-    }
-  }
 
   return {
     title: 'Aevistle hit an unexpected problem',
@@ -209,9 +205,40 @@ function describeMainProcessError(err: unknown): { title: string; detail: string
   }
 }
 
+/**
+ * One modal per process, ever.
+ *
+ * A failing timer or a retrying connection raises the *same* error on every
+ * tick. `showErrorBox` is modal and blocking, so the second one queues behind
+ * the first and the user ends up dismissing a dialog that reappears until they
+ * kill the app. Reporting a repeat is worth nothing anyway: the console line
+ * below is still written every time.
+ */
+let modalShown = false
+
 function reportMainProcessError(err: unknown): void {
-  const { title, detail } = describeMainProcessError(err)
+  const message = err instanceof Error ? err.message : String(err)
   console.error('[aevistle] main process error:', err)
+
+  /*
+   * An unreadable keystore is not a crash and must never open a modal.
+   *
+   * It used to. The app was still perfectly usable underneath — mail could be
+   * read, jobs could be edited, and every account whose password had become
+   * unreadable was *already* being reported inside the app, because
+   * `hasSecret` decrypts rather than checking for the presence of a blob (see
+   * `store.ts`) and `health.noSecret` counts exactly those accounts. So the
+   * dialog said, modally and in English regardless of the interface language,
+   * something the interface behind it was already saying in place, next to the
+   * account it was true of, with a button that fixed it.
+   *
+   * So it is logged and dropped here, and the account list is left to say it.
+   */
+  if (isKeystoreError(message)) return
+
+  if (modalShown) return
+  modalShown = true
+  const { title, detail } = describeMainProcessError(err)
   // `showErrorBox` works before the app is ready, which `dialog.showMessageBox`
   // does not — and the errors worth catching here happen at startup.
   try {

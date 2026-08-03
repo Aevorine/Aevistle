@@ -472,16 +472,43 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
         <Card>
           <div className="card__body">
             <div className="section-label">{t('settings.privacy')}</div>
-            <Field label={t('settings.logRetention')} hint={t('settings.days')}>
-              <input
-                className="input"
-                type="number"
-                min={1}
-                max={365}
-                value={s.logRetentionDays}
-                onChange={(e) => patch({ logRetentionDays: Number(e.target.value) })}
-              />
-            </Field>
+            {/*
+              Both limits, and both of them real.
+
+              The days box existed and did nothing to the data: it was applied
+              as a display filter on the Logs screen, so "keep for 30 days"
+              hid older entries while every recipient address stayed in
+              `state.json`. The count limit did not exist at all — it was a
+              hardcoded 500 in the reducer. They are enforced in `pruneLogs`
+              now, on the way into state, which is the copy that gets written
+              to disk.
+            */}
+            <div className="field__row">
+              <Field label={t('settings.logRetention')} hint={t('settings.days')}>
+                <input
+                  className="input"
+                  type="number"
+                  min={1}
+                  max={365}
+                  value={s.logRetentionDays}
+                  onChange={(e) => patch({ logRetentionDays: Number(e.target.value) })}
+                />
+              </Field>
+              <Field label={t('settings.logMaxEntries')} hint={t('settings.entries')}>
+                <input
+                  className="input"
+                  type="number"
+                  min={10}
+                  max={10000}
+                  step={10}
+                  value={s.logMaxEntries}
+                  onChange={(e) => patch({ logMaxEntries: Number(e.target.value) })}
+                />
+              </Field>
+            </div>
+            <div className="field__hint">
+              {t('settings.logRetentionHint', { n: state.logs.length })}
+            </div>
             <Switch
               checked={s.redactLogs}
               onChange={(v) => patch({ redactLogs: v })}
@@ -574,7 +601,7 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
  */
 function UpdateCard() {
   const { state, dispatch, bridge } = useApp()
-  const { t, formatBytes, formatRelative } = useI18n()
+  const { t, formatBytes, formatAgo } = useI18n()
   const toast = useToast()
   const { confirm, confirmElement } = useConfirm()
 
@@ -590,15 +617,29 @@ function UpdateCard() {
     return bridge.onUpdateProgress(setProgress)
   }, [bridge])
 
+  /**
+   * `announce` is what makes a check that changes nothing still visible.
+   *
+   * The startup check is silent unless it finds something — nobody wants a
+   * notification every launch. A check the user *asked for* is the opposite
+   * case: when the answer is "you already have the newest version", nothing on
+   * the card moves, and a button that produces no visible change reads as a
+   * button that did nothing. It reported success without checking, as far as
+   * anyone watching could tell. So a manual check always says how it went.
+   */
   const check = useCallback(
-    async (announce: boolean) => {
+    async (manual: boolean) => {
       if (!bridge) return
       setChecking(true)
       try {
         const result = await bridge.checkForUpdate()
         setInfo(result)
-        if (announce && result.available) {
+        if (result.available) {
           toast.push({ tone: 'info', title: t('update.newVersionToast', { version: result.latest }) })
+        } else if (manual && result.error) {
+          toast.push({ tone: 'error', title: t('update.failed'), detail: result.error })
+        } else if (manual) {
+          toast.push({ tone: 'success', title: t('update.upToDate', { version: result.current }) })
         }
       } finally {
         setChecking(false)
@@ -613,7 +654,7 @@ function UpdateCard() {
   useEffect(() => {
     if (autoChecked.current || !bridge || !state.settings.updateCheckOnStart) return
     autoChecked.current = true
-    void check(true)
+    void check(false)
   }, [bridge, state.settings.updateCheckOnStart, check])
 
   const download = async () => {
@@ -660,19 +701,49 @@ function UpdateCard() {
       <div className="card__body">
         <div className="section-label">{t('update.title')}</div>
 
+        {/*
+          Three states, not two.
+
+          This used to render "Aevistle {version} is the latest version" from
+          the *build* version whenever `info` was null — that is, before any
+          check had run at all, and again whenever a check failed. The card
+          asserted the one thing it had no way to know: that nothing newer
+          exists. Someone who had never been online, or whose check had just
+          timed out, was told they were up to date.
+
+          Now the headline only claims "latest" when a check actually came back
+          saying so. Otherwise it states which version is installed, which is
+          the only fact available without a network round trip, and the line
+          beneath says whether a check has ever happened.
+        */}
         <div className="update-row">
           <div className="update-row__text">
             <div className="update-version">
               {info?.available
                 ? t('update.available', { version: info.latest })
-                : t('update.upToDate', { version: info?.current ?? __APP_VERSION__ })}
+                : info && !info.error
+                  ? t('update.upToDate', { version: info.current })
+                  : t('update.currentVersion', { version: info?.current ?? __APP_VERSION__ })}
             </div>
             <div className="update-meta">
-              {info?.error
-                ? `${t('update.failed')} — ${info.error}`
-                : info
-                  ? t('update.lastChecked', { when: formatRelative(info.checkedAt) })
-                  : ''}
+              {checking
+                ? t('update.checking')
+                : info?.error
+                  ? `${t('update.failed')} — ${info.error}`
+                  : info
+                    ? /*
+                       * `formatAgo`, not `formatRelative`.
+                       *
+                       * `formatRelative` describes how far away a *future*
+                       * moment is and answers "overdue" for anything already
+                       * past — right for a reminder that has not fired, and
+                       * nonsense for a check that just ran. A check completed
+                       * four seconds ago was labelled "overdue", which is
+                       * exactly what a check that never ran would look like.
+                       * The inbox hit this same confusion; see `i18n/index`.
+                       */
+                      t('update.lastChecked', { when: formatAgo(info.checkedAt) })
+                    : t('update.neverChecked')}
             </div>
           </div>
 

@@ -3039,22 +3039,13 @@ textarea {
 }
 
 /* ...and inside it, the body box is the one that grows. Everything else on
-   this form is one or two rows tall by nature; the body is the message. */
+   this form is one or two rows tall by nature; the body is the message.
+   The growth rules themselves live with the rest of the compose layout — see
+   `.compose-layout > .field:has(.textarea--body)`; there is exactly one body
+   box in the application and two sets of rules for it was one too many. */
 .form-rows {
   display: flex;
   flex-direction: column;
-}
-/* Keep the label-beside-control grid this form uses — only let the row grow,
-   and let the control inside it stretch to the height it gained. Overriding
-   `display` here would move the Body label above its box and break the one
-   alignment every other field on the screen follows. */
-.form-rows > .field:has(.textarea--body) {
-  flex: 1 1 auto;
-  min-height: 0;
-}
-.form-rows > .field:has(.textarea--body) > .textarea--body {
-  align-self: stretch;
-  height: 100%;
 }
 
 /* --- 2. the compose body ------------------------------------------------- */
@@ -3733,88 +3724,251 @@ textarea {
   grid-column: 1 / -1;
 }
 
-/* --- compose: addressing beside the message ------------------------------- */
+/* --- compose: three bands, message in the middle -------------------------- */
 
 /**
- * Two columns once there is room for both.
+ * Who it goes to, what it says, when it sends.
  *
- * The body is placed explicitly in column two and spanned down the grid;
- * everything else falls into column one in document order. Doing it this way
- * keeps the JSX in its natural reading order — recipient, subject, body — so
- * the one-column layout below the breakpoint is unchanged and the tab order is
- * still the order the form gets filled in.
+ * This replaced a two-column layout (a 420px addressing column beside the
+ * message). That layout was itself a fix for a stacked form where the body got
+ * whatever height was left, and it did widen the message — but it capped it at
+ * "the window minus a column sized for a select box", and it put the two most
+ * important things on the screen, the message and the send time, in different
+ * columns competing with a subject line for the same space.
+ *
+ * The recipient and the subject are each one line of text. They never needed a
+ * column; they needed a row. Given one, the message gets the entire width of
+ * the card and all the height the other two bands do not use, and the send time
+ * gets a permanent home next to the buttons that act on it.
  */
-@media (min-width: 1280px) {
-  .compose-grid {
-    display: grid;
-    /* Column one holds fixed-size controls — a recipient chip row, a subject,
-       two selects. Past about 420px it gains nothing, so it is capped rather
-       than given a share of the window, and every pixel beyond that goes to
-       the message. On a maximised 1920 window this is the difference between a
-       body box of ~840px and one of ~1180px, for the field that receives
-       everything the user opened the app to write. */
-    grid-template-columns: minmax(320px, 420px) minmax(480px, 1fr);
-    align-content: start;
-    column-gap: var(--sp-6);
-    row-gap: var(--sp-3);
-  }
-  .compose-grid > *:not(:has(.textarea--body)) {
-    grid-column: 1;
-  }
-  .compose-grid > .field:has(.textarea--body) {
-    grid-column: 2;
-    /* Past the number of rows column one can produce, so the body is as tall
-       as the card however many fields happen to be showing. */
-    grid-row: 1 / span 99;
-    display: flex;
-    flex-direction: column;
-  }
-  /* Label above the box in this column rather than beside it: a 5.5em label
-     gutter stealing width from the message is the wrong trade here. */
-  .compose-grid > .field:has(.textarea--body) > .field__label {
-    min-height: 0;
-  }
-  .compose-grid > .field:has(.textarea--body) > .textarea--body {
-    flex: 1;
-    height: auto;
-  }
+.compose-layout {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-height: 0;
+}
 
-  /* --- controls that have to stop being rows in this column ---------------
-     Column one is 420px wide, and a 5.5em label gutter leaves its controls
-     about 305px. Two things were still laying themselves out as horizontal
-     rows in that space, which only became visible once the options disclosure
-     was opened for the README screenshot:
+/* Labels above their controls throughout this screen — the label-beside-control
+   grid `.form-rows` applies elsewhere buys back height per field, which is the
+   right trade on a settings page of twenty fields and the wrong one here: this
+   form has four, and a 5.5em label gutter down the left of a full-width message
+   box is 5.5em taken off the message for nothing. Uniform within the screen,
+   which is what the eye actually reads as consistent. */
+.compose-layout .field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.compose-layout .field > .field__label {
+  min-height: 0;
+  justify-content: flex-start;
+  text-align: start;
+  color: var(--text-1);
+}
 
-       · the dropzone put its title and its hint side by side, and both wrapped
-         — four lines of text to say two things;
-       · the delivery switches sat two-across at ~145px each, so one label
-         wrapped to two lines and its description to two more while its
-         neighbour stayed on one.
+/* --- band 1: addressing --------------------------------------------------- */
 
-     Both are the same mistake: a layout that is right in a wide card being
-     reused in a narrow column. Neither needs the column to be wider — they
-     need to stack, which costs vertical space the column has to spare. */
-  .compose-grid .dropzone {
-    flex-direction: column;
-    gap: var(--sp-1);
-    padding: var(--sp-3) var(--sp-4);
+/* Account, recipient, subject on one line. The recipient gets the largest
+   share because it is the one that holds chips and grows; the account select
+   is content-sized because its width is decided by the address inside it. */
+.compose-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1.2fr);
+  gap: var(--sp-4);
+  align-items: start;
+}
+.compose-head:has(> .field:nth-child(3)) {
+  grid-template-columns: minmax(180px, 0.8fr) minmax(0, 1.6fr) minmax(0, 1.2fr);
+}
+.compose-head--extra {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+/* The quick-recipient bar lives inside the recipient cell, which is now about a
+   third of the card rather than the whole of it. Left to wrap it would put two
+   rows of faces under the field and push the message down by ~90px every time
+   the contact list grew. One row that scrolls sideways keeps the height of this
+   band fixed no matter how many people are in it. */
+.compose-head .quickpicks {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.compose-head .quickpick {
+  flex: 0 0 auto;
+}
+
+/* --- band 2: the message -------------------------------------------------- */
+
+/* The one field allowed to grow, and the reason the card is a flex column. */
+.compose-layout > .field:has(.textarea--body) {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.compose-layout > .field:has(.textarea--body) > .textarea--body {
+  flex: 1 1 auto;
+  /*
+   * A floor, not a height. In the normal case the box grows well past this —
+   * it is the only thing on the card with `flex-grow`, so every pixel the
+   * other two bands do not use lands here.
+   *
+   * The number is the point at which the *form* would start to scroll, not a
+   * guess at a comfortable size. Measured with `scripts/layout-probe.mjs`: at
+   * 220px the column came to 940px against 744px of viewport on a 827px-tall
+   * window, and the first thing to go was the send button. Ten lines of
+   * Chinese at 小四 still fit here, and anything taller is space the box will
+   * have been given anyway.
+   */
+  min-height: 160px;
+  height: auto;
+  resize: vertical;
+}
+
+/* --- band 3: attachments and the send time -------------------------------- */
+
+.compose-foot {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+/*
+ * Labels beside their controls down here, above them in the two bands over
+ * this one — and that is deliberate rather than an inconsistency.
+ *
+ * A label sits above its control when the control is in a column narrow enough
+ * that a label gutter would eat it (the three-across addressing row) or wide
+ * enough that the gutter would be stealing from the thing that matters (the
+ * message). Neither is true of a dropzone and a time picker: both are single
+ * wide controls with room to spare, and a stacked label costs each of them a
+ * 36px row on a form whose whole requirement is to fit one screen. Two fields,
+ * 72px, measured — which is the difference between this form fitting an 827px
+ * window and scrolling.
+ *
+ * It also matches `.form-rows`, which is what every other form in the app uses.
+ */
+.compose-foot > .field {
+  display: grid;
+  grid-template-columns: 5.5em minmax(0, 1fr);
+  column-gap: var(--sp-4);
+  align-items: center;
+}
+.compose-foot > .field > .field__label {
+  grid-column: 1;
+  grid-row: 1;
+  justify-content: flex-end;
+  text-align: end;
+  color: var(--text-2);
+}
+.compose-foot > .field > *:not(.field__label) {
+  grid-column: 2;
+}
+/* The disclosure lines up with the controls, not with the label gutter. */
+.compose-foot > .moreoptions {
+  margin-inline-start: calc(5.5em + var(--sp-4));
+}
+
+/* Time picker, what it means in words, and the way to the full rules — one
+   row, because all three are the same question. */
+.whenbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+.whenbar__time {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 15em;
+}
+.whenbar__text {
+  flex: 1 1 12em;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.whenbar__rule {
+  color: var(--text-2);
+}
+/* Not an error and not a warning — nothing is wrong with a reminder whose time
+   has not been picked yet. Just quieter than a time that has been. */
+.whenbar__rule--unset {
+  color: var(--text-3);
+}
+.whenbar__count {
+  color: var(--accent);
+}
+
+/* The folded options are a grid rather than a stack: opened, they used to add
+   three full-width rows to a form that is required to fit one screen. */
+.moreoptions__grid {
+  display: grid;
+  /* 220px, not 280: three controls at 280 need 840px and the card is 829, so
+     they wrapped to two rows and the opened disclosure cost 152px instead of
+     76. One row is the difference between opening this and the send button
+     staying on screen. */
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--sp-3) var(--sp-4);
+  align-items: start;
+  margin-top: var(--sp-3);
+}
+
+/* Below this the top band cannot hold three controls without each of them
+   being too narrow to read an address in, so it stacks. This is the phone and
+   narrow-window layout. */
+@media (max-width: 900px) {
+  .compose-head,
+  .compose-head:has(> .field:nth-child(3)),
+  .compose-head--extra {
+    grid-template-columns: minmax(0, 1fr);
   }
-  /* The base rule centres items on the cross axis, which in a column flex
-     sizes each block of text to shrink-to-fit rather than to the box. The hint
-     then wraps against a width narrower than the box it sits in — in Chinese
-     it broke 「都行」 down the middle with room to spare on both lines. Only
-     the text needs the full width; widening the flex alignment instead would
-     also stretch the icon and pull it off centre. */
-  .compose-grid .dropzone__title,
-  .compose-grid .dropzone__hint {
+  .compose-head .quickpicks {
+    flex-wrap: wrap;
+    overflow-x: visible;
+  }
+  .whenbar__time {
     width: 100%;
+    min-width: 0;
   }
-  /* One per line rather than two squeezed side by side. `flex-basis: 100%`
-     rather than a raised `min-width`, so this cannot degrade into two columns
-     again at some in-between width. */
-  .compose-grid .moreoptions .field__row > .switch {
-    flex-basis: 100%;
-  }
+}
+
+/* --- one type size on this screen ----------------------------------------- */
+
+/**
+ * Everything readable here is 小四 (16px) or 四号 (18.67px), in 宋体 for the
+ * Chinese and Times New Roman for the Latin and the punctuation — the split is
+ * done per codepoint by the `@font-face` pair in `theme.css`, so a mixed
+ * sentence gets both without markup.
+ *
+ * Done by moving the token rather than by listing selectors. `--text-xs` (14px,
+ * 五号) is the shared default for hints, switch descriptions, quick-pick
+ * addresses, outbox timestamps and the send-result ladder — sensible on a dense
+ * list screen, and below the size 宋体 stays comfortable at on the screen that
+ * gets used most. Overriding the variable for this subtree raises every one of
+ * them at once, including the ones added later, which a hand-written list would
+ * silently miss.
+ *
+ * `--text-2xs` is deliberately left alone: it is fenced off for numeric badges
+ * and file-type tags ("PDF", "3"), which are not prose and do not read as small.
+ *
+ * The action bar and the send-result banner are siblings of the view rather than
+ * children of it — they sit outside the scrolling area on purpose — so they are
+ * named here too.
+ */
+.view--compose,
+.actionbar,
+.sendresult {
+  --text-xs: 1rem;
+}
+
+/* The name of a field is the name of a function — 四号, one step above the
+   value it labels. Applies to every label on the screen, so the addressing row,
+   the message and the send time are all titled the same way. */
+.view--compose .field > .field__label,
+.view--compose .switch__title {
+  font-size: var(--text-lg);
 }
 
 /* --- fields that are comfortable to type in ------------------------------- */

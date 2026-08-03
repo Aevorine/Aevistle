@@ -46,6 +46,7 @@ import {
   type JobEvent,
   type PlatformBridge,
 } from '../core/bridge'
+import { pruneLogs } from '../core/logRetention'
 import { applyQuietHours, computeOccurrences, rearm, type QuietHours } from '../core/schedule'
 import { applyWorkCalendar, DEFAULT_WORK_CALENDAR } from '../core/workCalendar'
 import { buildMergeMessages } from '../core/mergeVars'
@@ -69,8 +70,7 @@ import { executeControl } from './controlExecutor'
 import type { ControlRequest } from '../core/control'
 import { createI18n, detectLocale, localeMeta, type I18n } from '../i18n'
 
-const LOG_CAP = 500
-/** Headers only — mirrors LOG_CAP's role of keeping `state.json` small; bodies live on disk, see `inboxStore.ts`. */
+/** Headers only — mirrors the log cap's role of keeping `state.json` small; bodies live on disk, see `inboxStore.ts`. */
 const INBOX_MESSAGE_CAP = 1000
 
 /** The nightly hold window, in the shape `src/core/schedule` expects. */
@@ -164,11 +164,32 @@ type Action =
 
 function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
+    /*
+     * Pruned on the way in, not only on the way out.
+     *
+     * A state file written before the limits existed — or written on a machine
+     * where they were looser — arrives with entries the current policy says
+     * should be gone. Applying it at load is what makes "records older than N
+     * days are deleted" survive a restart instead of being re-read every time.
+     */
     case 'hydrate':
-      return action.state
+      return { ...action.state, logs: pruneLogs(action.state.logs, action.state.settings) }
 
-    case 'patchSettings':
-      return { ...state, settings: { ...state.settings, ...action.patch } }
+    /*
+     * Lowering a limit has to take effect now, not at the next log line. Left
+     * to the `log` case, someone who set retention to 1 day would still be
+     * carrying a month of recipients on disk until the next send happened.
+     */
+    case 'patchSettings': {
+      const settings = { ...state.settings, ...action.patch }
+      const touchesRetention =
+        action.patch.logRetentionDays !== undefined || action.patch.logMaxEntries !== undefined
+      return {
+        ...state,
+        settings,
+        logs: touchesRetention ? pruneLogs(state.logs, settings) : state.logs,
+      }
+    }
 
     case 'setDraft':
       return { ...state, draft: { ...state.draft, ...action.patch } }
@@ -255,7 +276,7 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, templates: state.templates.filter((t) => t.id !== action.id) }
 
     case 'log':
-      return { ...state, logs: [action.entry, ...state.logs].slice(0, LOG_CAP) }
+      return { ...state, logs: pruneLogs([action.entry, ...state.logs], state.settings) }
 
     case 'clearLogs':
       return { ...state, logs: [] }

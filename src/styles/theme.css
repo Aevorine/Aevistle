@@ -186,7 +186,7 @@
      appears. Controls, lists and tables have no such limit and never needed
      one: a wider window should show more mail, not more background. Screens
      that gain from a second column now take one (see `.view__inner--grid`
-     and `.compose-grid`) rather than stretching one column across the glass. */
+     and `.compose-layout`) rather than stretching one column across the glass. */
   --content-max: 100%;
   /* Breathing room at the window edge, scaled to the window. */
   --page-pad-x: clamp(1rem, 1.8vw, 2.5rem);

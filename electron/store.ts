@@ -357,10 +357,18 @@ export async function setSecret(
     // profile, unwrapping fails here — and it fails inside BoringSSL, so the
     // raw message is `error:1e000065 ... BAD_DECRYPT`, which tells the user
     // nothing. Fail with something they can act on instead of that.
+    //
+    // The raw text is logged, not interpolated. Pasting it into the message
+    // made every layer above treat this as an unrecognised crash — the main
+    // process matched `BAD_DECRYPT` in the string and opened a modal titled
+    // "Aevistle hit an unexpected problem" over an app that was working.
+    console.error('[aevistle] keystore encrypt failed:', err)
     throw new Error(
-      `The password could not be encrypted with this computer's keystore (${
-        err instanceof Error ? err.message : String(err)
-      }).`,
+      "This computer's keystore would not accept the password. Aevistle can " +
+        'only store passwords the operating system agrees to encrypt, and this ' +
+        'usually means the app data was copied from another computer or Windows ' +
+        'account. Signing in as that account, or removing and re-adding this mail ' +
+        'account, lets it be saved again.',
     )
   }
   map[secretKey(accountId, kind)] = blob
