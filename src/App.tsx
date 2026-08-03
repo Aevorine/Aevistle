@@ -4,6 +4,7 @@ import { AppProvider, useApp } from './state/AppState'
 import { I18nContext, useI18n } from './i18n'
 import { Banner, IconButton, ToastProvider, useToast } from './components/ui'
 import { ShortcutsDialog, matchShortcut } from './components/Shortcuts'
+import { NAV, type ViewId } from './core/nav'
 import { DataFolderSetup } from './components/DataFolderSetup'
 import {
   IconActivity,
@@ -22,7 +23,6 @@ import { useCodeWatcher } from './state/useCodeWatcher'
 import brandMark from './assets/brand.png'
 import { Skeleton } from './components/Skeleton'
 import { freshHits } from './core/codeHistory'
-import type { TranslationKey } from './i18n/en'
 
 /**
  * One chunk per screen.
@@ -78,34 +78,19 @@ function prefetchScreens(): void {
   else setTimeout(warm, 1500)
 }
 
-type ViewId =
-  | 'compose'
-  | 'codes'
-  | 'inbox'
-  | 'schedule'
-  | 'contacts'
-  | 'templates'
-  | 'workcal'
-  | 'logs'
-  | 'settings'
 
-const NAV: Array<{ id: ViewId; labelKey: TranslationKey; icon: typeof IconMail }> = [
-  { id: 'compose', labelKey: 'nav.compose', icon: IconMail },
-  // Second, directly under Compose: this is the screen people open the app
-  // *for* on the days they open it in a hurry, and a code six rows down is a
-  // code they had to go looking for.
-  { id: 'codes', labelKey: 'nav.codes', icon: IconKey },
-  { id: 'inbox', labelKey: 'nav.inbox', icon: IconInbox },
-  { id: 'schedule', labelKey: 'nav.schedule', icon: IconClock },
-  { id: 'contacts', labelKey: 'nav.contacts', icon: IconUsers },
-  { id: 'templates', labelKey: 'nav.templates', icon: IconFileText },
-  // Next to Schedule rather than buried in Settings: it decides which days a
-  // reminder may land on, which makes it part of scheduling, not a preference.
-  // It also stopped being a single form when it grew a month grid.
-  { id: 'workcal', labelKey: 'nav.workcal', icon: IconCalendar },
-  { id: 'logs', labelKey: 'nav.logs', icon: IconActivity },
-  { id: 'settings', labelKey: 'nav.settings', icon: IconSettings },
-]
+/** Icon name → component. Keeps `core/nav.ts` importable outside React. */
+const NAV_ICONS = {
+  mail: IconMail,
+  key: IconKey,
+  inbox: IconInbox,
+  clock: IconClock,
+  users: IconUsers,
+  file: IconFileText,
+  calendar: IconCalendar,
+  activity: IconActivity,
+  settings: IconSettings,
+} as const
 
 const COLLAPSE_KEY = 'aevistle.sidebar.collapsed'
 
@@ -279,7 +264,7 @@ function Shell() {
           </div>
           <nav className="nav" aria-label="Primary">
             {NAV.map((item) => {
-              const Icon = item.icon
+              const Icon = NAV_ICONS[item.icon]
               return (
                 <span key={item.id} className="nav__item" aria-disabled="true">
                   <span className="nav__icon">
@@ -313,7 +298,7 @@ function Shell() {
 
         <nav className="nav" aria-label="Primary">
           {NAV.map((item) => {
-            const Icon = item.icon
+            const Icon = NAV_ICONS[item.icon]
             return (
               <button
                 key={item.id}

@@ -1,6 +1,6 @@
 {
   "name": "aevistle",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "private": true,
   "description": "Cross-platform scheduled email reminder — compose once, attach anything, deliver on time. Windows desktop + Android.",
   "author": "Fusheng201",
@@ -30,8 +30,13 @@
     "check:job-status": "node scripts/check-job-status.mjs",
     "check:inbox-removal": "node scripts/check-inbox-removal.mjs",
     "check:i18n": "node scripts/check-i18n.mjs",
+    "check:shortcuts": "node scripts/check-shortcuts.mjs",
+    "check:transfer": "node scripts/check-job-transfer.mjs",
+    "check:upcoming": "node scripts/check-upcoming.mjs",
+    "check:markup": "node scripts/check-markup.mjs",
+    "check:gestures": "node scripts/check-gestures.mjs",
     "audit:deps": "node scripts/audit-deps.mjs high",
-    "check": "npm run typecheck && npm run check:time && npm run check:backup && npm run check:retention && npm run check:socket-drop && npm run check:job-status && npm run check:inbox-removal && npm run check:i18n && npm run check:features && npm run audit:self && npm run audit:deps",
+    "check": "npm run typecheck && npm run check:time && npm run check:backup && npm run check:retention && npm run check:socket-drop && npm run check:job-status && npm run check:inbox-removal && npm run check:i18n && npm run check:shortcuts && npm run check:transfer && npm run check:upcoming && npm run check:markup && npm run check:gestures && npm run check:features && npm run audit:self && npm run audit:deps",
     "check:features": "node scripts/check-innovations.mjs",
     "dist:win:out": "npm run build && electron-builder --win --publish never -c.directories.output=%TEMP%/aevistle-release",
     "release:hashes": "node scripts/release-hashes.mjs"

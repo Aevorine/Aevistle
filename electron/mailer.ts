@@ -321,9 +321,11 @@ function bodyParts(draft: MessageDraft): { text?: string; html?: string } {
   if (draft.bodyFormat === 'html') {
     return { html: draft.body, text: draft.body.replace(/<[^>]+>/g, ' ') }
   }
-  // Markdown is delivered as text with an escaped HTML twin. Rendering real
-  // Markdown would mean shipping a parser into a security-sensitive path for a
-  // feature most reminder emails do not use.
+  // Markdown never reaches here: `forTransport` renders it to HTML at the
+  // boundary between the app and the platform layer, so both this and the
+  // Android sender see `html` and neither needs a parser. Anything still
+  // marked markdown at this point is a draft that bypassed that boundary, and
+  // it is treated as plain text rather than shipped with visible asterisks.
   return { text: draft.body, html: plainToHtml(draft.body) }
 }
 

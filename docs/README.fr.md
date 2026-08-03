@@ -85,9 +85,9 @@ La dernière version se trouve dans **[Releases](https://github.com/Aevorine/Aev
 
 | Plateforme | Fichier | Remarques |
 |---|---|---|
-| Windows 10/11 (x64) | `Aevistle-0.1.4-win-x64-setup.exe` | Programme d’installation, avec raccourcis menu Démarrer et bureau |
-| Windows 10/11 (x64) | `Aevistle-0.1.4-win-x64-portable.exe` | Fichier unique, sans installation, fonctionne depuis une clé USB |
-| Android 7.0+ | `Aevistle-0.1.4.apk` | Téléphones et tablettes. Autorisez d’abord « installer des applications inconnues » pour votre navigateur ou gestionnaire de fichiers. |
+| Windows 10/11 (x64) | `Aevistle-0.1.5-win-x64-setup.exe` | Programme d’installation, avec raccourcis menu Démarrer et bureau |
+| Windows 10/11 (x64) | `Aevistle-0.1.5-win-x64-portable.exe` | Fichier unique, sans installation, fonctionne depuis une clé USB |
+| Android 7.0+ | `Aevistle-0.1.5.apk` | Téléphones et tablettes. Autorisez d’abord « installer des applications inconnues » pour votre navigateur ou gestionnaire de fichiers. |
 
 > Windows SmartScreen signalera un éditeur inconnu. C’est l’aspect normal d’une
 > version sans certificat de signature payant : choisissez **Informations

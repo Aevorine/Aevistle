@@ -4893,3 +4893,151 @@ textarea {
   top: 0;
   padding: var(--sp-4);
 }
+
+/* Scope chips beside the inbox search box. Wrap under it on a narrow window
+   rather than squeezing the input, which is the thing being typed into. */
+.search-scope {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+/* The schedule outlook in the send preview: how many, over what span, on which
+   days. Sits above the warnings because a wrong interval is a bigger problem
+   than anything the warning list reports, and it is the one thing here that
+   nothing else on the compose screen can answer. */
+.preflight__outlook {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-inset);
+}
+.preflight__outlookhead {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+.preflight__days {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+.preflight__day {
+  padding: 2px var(--sp-2);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+/* A day carrying several sends says so, rather than appearing once and
+   understating the volume — which is the mistake this panel exists to catch. */
+.preflight__daycount {
+  margin-inline-start: 4px;
+  color: var(--accent);
+  font-weight: 700;
+}
+.preflight__day--more {
+  background: transparent;
+  color: var(--text-3);
+}
+
+/* Formatting buttons directly above the body box, sharing its left edge so the
+   two read as one control rather than as a strip that happens to sit nearby. */
+.markup {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+.markup__btn {
+  min-width: 34px;
+  min-height: 32px;
+  padding: 0 var(--sp-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition:
+    border-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+.markup__btn:hover {
+  border-color: var(--accent);
+  color: var(--text-1);
+}
+.markup__btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* ==========================================================================
+   Swipe actions (touch)
+   ========================================================================== */
+
+/* The row slides over a fixed backdrop rather than the actions sliding in, so
+   what is about to happen is readable from the first few pixels — which is what
+   lets someone abandon a gesture they did not mean to start. */
+.swipe {
+  position: relative;
+  overflow: hidden;
+  /* `pan-y` hands vertical scrolling to the browser and keeps horizontal
+     movement for us. Without it the first few pixels of every swipe are eaten
+     by the scroller before any handler runs. */
+  touch-action: pan-y;
+}
+.swipe__behind {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-inline: var(--sp-4);
+  font-size: var(--text-sm);
+  font-weight: 700;
+}
+.swipe__action--lead {
+  color: var(--accent);
+}
+.swipe__action--trail {
+  color: var(--danger);
+}
+.swipe__front {
+  position: relative;
+  background: var(--surface-1);
+  /* Snapping back is animated; following the finger is not, or the row would
+     lag behind the thumb by the length of the transition. */
+  transition: transform var(--dur) var(--ease);
+}
+.swipe__front[data-sliding] {
+  transition: none;
+}
+
+/* Pull to refresh. The indicator is height-driven so it pushes the list down
+   rather than floating over the first row. */
+.pull {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: var(--text-sm);
+  transition: height var(--dur-fast) var(--ease);
+}
+.pull[data-armed='true'] {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .swipe__front,
+  .pull {
+    transition: none;
+  }
+}

@@ -69,6 +69,7 @@ import {
 } from '../core/outbox'
 import { evaluateConditions } from '../core/conditions'
 import { applyRun } from '../core/jobRun'
+import { forTransport } from '../core/markdown'
 import { mergeRemoved, rememberRemoved, restoreRemoved, withoutRemoved } from '../core/inboxRemoval'
 import { executeControl } from './controlExecutor'
 import type { ControlRequest } from '../core/control'
@@ -931,7 +932,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const arm = async (attemptsLeft: number): Promise<void> => {
       try {
         await bridge.syncJobs(
-          state.jobs.filter((j) => j.enabled),
+          /*
+           * Rendered on the way out, not in storage.
+           *
+           * The platform scheduler keeps its own copy of every job and fires it
+           * with no UI attached — on Android, from a Java worker that has no
+           * Markdown renderer and never will. Converting here means the stored
+           * job already carries HTML by the time anything native reads it,
+           * while application state keeps the Markdown the user typed.
+           */
+          state.jobs
+            .filter((j) => j.enabled)
+            .map((j) => ({ ...j, draft: forTransport(j.draft) })),
           state.accounts,
         )
         if (!cancelled) setSchedulerUnreachable(false)
@@ -1140,7 +1152,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       let result: SendResult
       if (parts.length === 1) {
-        result = await bridge.sendNow(parts[0].draft, account)
+        result = await bridge.sendNow(forTransport(parts[0].draft), account)
       } else {
         // One send per recipient, sequential on purpose: `mailer.ts` keeps a
         // warm authenticated connection per account, so serial sends reuse it,
@@ -1151,7 +1163,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         let durationMs = 0
         let firstFailure: SendResult | null = null
         for (const part of parts) {
-          const one = await bridge.sendNow(part.draft, account)
+          const one = await bridge.sendNow(forTransport(part.draft), account)
           durationMs += one.durationMs
           accepted.push(...one.accepted)
           rejected.push(...one.rejected)

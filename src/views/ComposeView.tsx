@@ -30,11 +30,13 @@ import {
 } from '../components/ImageLightbox'
 import { CHAIN_STAGES, buildChain, leadLabelKey } from '../core/chain'
 import { summarizeRecurrence } from '../core/schedule'
+import { upcoming } from '../core/upcoming'
 import { HealthBoard } from '../components/HealthBoard'
 import { RecurrenceEditor, fromLocalInput, toLocalInput } from '../components/RecurrenceEditor'
 import { ConditionEditor } from '../components/ConditionEditor'
 import { DraftHistory } from '../components/DraftHistory'
 import { OutboxStrip } from '../components/OutboxStrip'
+import { MarkupToolbar } from '../components/MarkupToolbar'
 import { PreflightDialog, useFilePresence, usePreflight } from '../components/PreflightDialog'
 import { SendResultDetails } from '../components/SendDetails'
 import { IconClock, IconFileText, IconMail, IconSearch, IconSend } from '../components/icons'
@@ -174,14 +176,39 @@ export function ComposeView({
    * reopening the app into a stripped-down screen with no visible way back
    * would be a mode someone got stuck in.
    */
+  /*
+   * How often the schedule on screen would actually fire.
+   *
+   * Only computed when a send time has been chosen — for an immediate send
+   * there is nothing to forecast, and showing "1 send in the next 30 days"
+   * about a message going out right now would be noise.
+   *
+   * Recomputed from the live recurrence rather than cached: the whole point is
+   * to catch a wrong interval, and a stale answer would be worse than none.
+   */
+  const outlook = useMemo(
+    () =>
+      scheduleSet
+        ? upcoming(recurrence, {
+            quiet: {
+              enabled: state.settings.quietHoursEnabled,
+              start: state.settings.quietStart,
+              end: state.settings.quietEnd,
+            },
+            calendar: state.settings.workCalendar,
+          })
+        : null,
+    [scheduleSet, recurrence, state.settings],
+  )
+
   const [focusMode, setFocusMode] = useState(false)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'F9') {
-        e.preventDefault()
-        setFocusMode((v) => !v)
-        return
-      }
+      // F9 is not handled here. It is in the shared shortcut table like every
+      // other key, and arrives as a `compose-action` — a second listener on the
+      // same key would toggle the mode twice on one press and look like the
+      // key had not worked.
+      //
       // Escape only leaves focus mode when nothing is stacked on top of it.
       // Every dialog in this app listens on `document`, so an unconditional
       // handler here would close the preview *and* the mode behind it with
@@ -299,6 +326,7 @@ export function ComposeView({
       if (action === 'schedule' && !blocked && !sending) openSchedule()
       if (action === 'preview' && started) setPreflightOpen(true)
       if (action === 'history') setHistoryOpen(true)
+      if (action === 'focus') setFocusMode((v) => !v)
     }
     window.addEventListener('aevistle:compose-action', onAction)
     return () => window.removeEventListener('aevistle:compose-action', onAction)
@@ -793,6 +821,35 @@ export function ComposeView({
                   </div>
                 }
               >
+                {/*
+                  Markdown, inserted into the same plain textarea.
+
+                  Shown only when the draft is being written as Markdown or
+                  HTML — inserting `**bold**` into a plain-text message would
+                  put literal asterisks in the recipient's inbox, which is the
+                  opposite of formatting it.
+                */}
+                {/*
+                  Always available, and using it decides the format.
+
+                  The body-format picker was removed on purpose (see the note
+                  in More options): the right answer is derivable, and asking
+                  someone to choose between plain, HTML and Markdown before
+                  writing a word is a question with no good time to ask it.
+                  This follows the same rule as pasting an image, which
+                  switches to HTML by itself — pressing Bold is the moment the
+                  answer becomes "Markdown", so that is when it is set.
+
+                  Hidden once the body is HTML, which only happens after an
+                  embedded image: inserting `**bold**` into HTML would put
+                  literal asterisks in the message.
+                */}
+                {draft.bodyFormat !== 'html' ? (
+                  <MarkupToolbar
+                    textarea={bodyRef}
+                    onChange={(body) => patch({ body, bodyFormat: 'markdown' })}
+                  />
+                ) : null}
                 <textarea
                   id={bodyId}
                   ref={bodyRef}
@@ -1109,6 +1166,8 @@ export function ComposeView({
         open={preflightOpen}
         report={preflight}
         sending={sending}
+        outlook={outlook}
+        retry={scheduleSet ? retry : null}
         confirmLabel={t('compose.sendNow')}
         onClose={() => setPreflightOpen(false)}
         onConfirm={() => {

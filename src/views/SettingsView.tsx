@@ -28,6 +28,7 @@ import {
 } from '../components/icons'
 import { AccountDialog } from '../components/AccountDialog'
 import { BackupCard } from './BackupCard'
+import { ScheduleTransferCard } from './ScheduleTransferCard'
 import { ControlCard } from './ControlCard'
 import { SectionNav } from '../components/SectionNav'
 import { groupAccounts, knownGroups } from '../core/accounts'
@@ -248,6 +249,10 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
         {/* --- updates ----------------------------------------------------- */}
         <div id="set-backup" className="settings-section" />
         <BackupCard />
+        {/* Next to the backup card because they answer neighbouring questions,
+            and deliberately separate because they are not the same one: a
+            backup restores this install, this moves reminders to another. */}
+        <ScheduleTransferCard />
 
         <div id="set-control" className="settings-section" />
         <ControlCard />

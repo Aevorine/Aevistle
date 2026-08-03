@@ -45,6 +45,7 @@ import {
   IconX,
 } from '../components/icons'
 import { VirtualList } from '../components/VirtualList'
+import { useSwipe } from '../components/useSwipe'
 import { useApp } from '../state/AppState'
 import { SearchInput } from '../components/inputs'
 import {
@@ -62,6 +63,8 @@ import type { InboxMessageBody } from '../core/bridge'
 import { REMOVED_RETENTION_MS, type Attachment, type InboxMessage, type InboxTag } from '../core/types'
 
 type AccountFilter = 'all' | string
+
+type SearchScope = 'all' | 'from' | 'subject' | 'body'
 
 /** Kept in step with `REMOVED_RETENTION_MS`; shown so the bin says how long it keeps things. */
 const BIN_DAYS = Math.round(REMOVED_RETENTION_MS / 86_400_000)
@@ -84,12 +87,14 @@ export function InboxView({ onGoToAccounts }: { onGoToAccounts?: () => void }) {
     restoreInboxMessages,
     clearRemovedMessages,
   } = useApp()
-  const { t, formatAgo, formatDateTime } = useI18n()
+  const { t, formatAgo, formatDateTime, dir } = useI18n()
   const toast = useToast()
   const { confirm, confirmElement } = useConfirm()
 
   const [filter, setFilter] = useState<AccountFilter>('all')
   const [query, setQuery] = useState('')
+  /** Which field the search box looks in. */
+  const [scope, setScope] = useState<SearchScope>('all')
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [openMessage, setOpenMessage] = useState<InboxMessage | null>(null)
   const [openBody, setOpenBody] = useState<InboxMessageBody | null>(null)
@@ -149,15 +154,32 @@ export function InboxView({ onGoToAccounts }: { onGoToAccounts?: () => void }) {
     let list = filter === 'all' ? allMessages : allMessages.filter((m) => m.accountId === filter)
     const q = deferredQuery.trim().toLowerCase()
     if (q) {
-      list = list.filter(
-        (m) =>
+      /*
+       * Which field to look in.
+       *
+       * "Everything" stays the default because it is what someone typing a
+       * half-remembered word wants. The other three exist for the case that
+       * default is bad at: searching for a person turns up every newsletter
+       * that happens to mention their name, and the sender is not something
+       * you can narrow to by typing more.
+       */
+      const inField = {
+        all: (m: InboxMessage) =>
           m.subject.toLowerCase().includes(q) ||
           m.from.toLowerCase().includes(q) ||
           m.snippet.toLowerCase().includes(q),
-      )
+        from: (m: InboxMessage) => m.from.toLowerCase().includes(q),
+        subject: (m: InboxMessage) => m.subject.toLowerCase().includes(q),
+        // The snippet, not the whole body: bodies live in an on-disk cache and
+        // are fetched on demand, so scanning them would mean reading up to a
+        // thousand files between two keystrokes. Saying "preview text" rather
+        // than "body" is the honest label for what is actually searched.
+        body: (m: InboxMessage) => m.snippet.toLowerCase().includes(q),
+      }[scope]
+      list = list.filter(inField)
     }
     return [...list].sort((a, b) => b.date - a.date)
-  }, [allMessages, filter, deferredQuery])
+  }, [allMessages, filter, deferredQuery, scope])
   const searchPending = deferredQuery !== query
 
   const unreadTotal = useMemo(() => allMessages.filter((m) => !m.seen).length, [allMessages])
@@ -785,7 +807,27 @@ export function InboxView({ onGoToAccounts }: { onGoToAccounts?: () => void }) {
             <Segmented value={filter} onChange={setFilter} ariaLabel={t('inbox.title')} options={accountOptions} />
 
             <div className="search-wrap" data-pending={searchPending || undefined}>
-              <SearchInput value={query} onChange={setQuery} placeholder={t('common.search')} />
+              <SearchInput
+                value={query}
+                onChange={setQuery}
+                placeholder={t(`inbox.searchIn.${scope}` as 'inbox.searchIn.all')}
+              />
+              {/* Beside the box rather than inside it: a scope hidden in a
+                  dropdown on the left of a search field is a scope people
+                  leave on the wrong setting without noticing. */}
+              <div className="search-scope" role="group" aria-label={t('inbox.searchScope')}>
+                {(['all', 'from', 'subject', 'body'] as const).map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    className="chip chip--toggle"
+                    aria-pressed={scope === s}
+                    onClick={() => setScope(s)}
+                  >
+                    {t(`inbox.scope.${s}` as 'inbox.scope.all')}
+                  </button>
+                ))}
+              </div>
             </div>
 
             {selected.size === 0 && filteredMessages.length > 0 ? (
@@ -931,6 +973,12 @@ export function InboxView({ onGoToAccounts }: { onGoToAccounts?: () => void }) {
             rowsClassName="joblist"
           >
             {(m) => (
+              <SwipeableRow
+                message={m}
+                rtl={dir === 'rtl'}
+                onRemove={() => void deleteInboxMessages(m.accountId, [m.id])}
+                onToggleRead={() => markSet(new Set([m.id]), !m.seen)}
+              >
               <div className="job" data-disabled={m.seen ? 'true' : undefined} onClick={() => openDetail(m)}>
                 <input
                   type="checkbox"
@@ -964,6 +1012,7 @@ export function InboxView({ onGoToAccounts }: { onGoToAccounts?: () => void }) {
                   </IconButton>
                 </div>
               </div>
+              </SwipeableRow>
             )}
           </VirtualList>
         )}
@@ -1364,6 +1413,56 @@ function PreviewFrame({
           </Banner>
         </div>
       ) : null}
+    </div>
+  )
+}
+
+/**
+ * One inbox row, swipeable on touch.
+ *
+ * The actions behind the row are the two anyone actually wants on a phone:
+ * remove it, or flip whether it has been read. Deliberately *not* the
+ * server-side delete — that one is irreversible, and putting it behind a
+ * gesture that can be triggered by a misread scroll would be indefensible.
+ *
+ * The row slides over a fixed backdrop rather than the actions sliding in, so
+ * what is being revealed is visible from the first few pixels of movement and
+ * the gesture can be abandoned by anyone who did not mean it.
+ */
+function SwipeableRow({
+  message,
+  rtl,
+  onRemove,
+  onToggleRead,
+  children,
+}: {
+  message: InboxMessage
+  rtl: boolean
+  onRemove: () => void
+  onToggleRead: () => void
+  children: React.ReactNode
+}) {
+  const { t } = useI18n()
+  const { offset, handlers } = useSwipe({
+    rtl,
+    onSwipe: (direction) => (direction === 'trailing' ? onRemove() : onToggleRead()),
+  })
+
+  return (
+    <div className="swipe" {...handlers}>
+      <div className="swipe__behind" aria-hidden="true">
+        <span className="swipe__action swipe__action--lead">
+          {message.seen ? t('inbox.markUnread') : t('inbox.markRead')}
+        </span>
+        <span className="swipe__action swipe__action--trail">{t('inbox.removeHere')}</span>
+      </div>
+      <div
+        className="swipe__front"
+        style={offset === 0 ? undefined : { transform: `translateX(${offset}px)` }}
+        data-sliding={offset !== 0 || undefined}
+      >
+        {children}
+      </div>
     </div>
   )
 }

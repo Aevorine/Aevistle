@@ -20,7 +20,8 @@ import { buildPreflight, type PreflightReport } from '../core/preflight'
 import { useApp } from '../state/AppState'
 import { useI18n, type TranslationKey } from '../i18n'
 import type { SendCondition } from '../core/conditions'
-import type { MessageDraft } from '../core/types'
+import type { MessageDraft, RetryPolicy } from '../core/types'
+import { countLabel, type Upcoming } from '../core/upcoming'
 
 /**
  * Which of these files are still on disk.
@@ -100,6 +101,13 @@ export function usePreflight(
   )
 }
 
+/** Seconds as the shortest sensible unit — "90 s" reads worse than "1.5 min". */
+function formatWait(seconds: number, t: (k: TranslationKey, v?: Record<string, string | number>) => string): string {
+  if (seconds < 90) return t('preflight.waitSeconds', { n: seconds })
+  if (seconds < 5400) return t('preflight.waitMinutes' as 'preflight.waitSeconds', { n: Math.round(seconds / 60) })
+  return t('preflight.waitHours' as 'preflight.waitSeconds', { n: Math.round(seconds / 360) / 10 })
+}
+
 export function PreflightDialog({
   open,
   report,
@@ -107,6 +115,8 @@ export function PreflightDialog({
   onConfirm,
   confirmLabel,
   sending,
+  outlook,
+  retry,
 }: {
   open: boolean
   report: PreflightReport
@@ -114,6 +124,10 @@ export function PreflightDialog({
   onConfirm: () => void
   confirmLabel: string
   sending?: boolean
+  /** How often this fires over the next month. Absent for an immediate send. */
+  outlook?: Upcoming | null
+  /** The retry policy the scheduled job will carry. */
+  retry?: RetryPolicy | null
 }) {
   const { t, formatBytes } = useI18n()
   /** Which of the merged copies is on screen. Index, not id — they are positional. */
@@ -149,6 +163,35 @@ export function PreflightDialog({
   const [lightboxAt, setLightboxAt] = useState<number | null>(null)
 
   const preview = report.messages[Math.min(previewIndex, report.messages.length - 1)]
+
+  /*
+   * How many messages, over what span, on which days.
+   *
+   * The rest of this dialog answers "what will one of these look like". This
+   * answers "how many of them am I agreeing to" — the question a mistyped
+   * interval makes expensive and which nothing on the compose screen could
+   * previously answer.
+   */
+  const count = outlook ? countLabel(outlook) : null
+
+  /*
+   * What happens if a send fails.
+   *
+   * The retry policy was configurable and invisible: a schedule that gives up
+   * after three tries and one that keeps going for an hour looked the same
+   * everywhere, including here. The waits are shown as the actual sequence
+   * rather than as "backoff factor 3", because nobody plans around a factor.
+   */
+  const retryWaits = useMemo(() => {
+    if (!retry) return []
+    const out: number[] = []
+    let wait = retry.backoffSeconds
+    for (let i = 1; i < Math.max(1, retry.maxAttempts); i++) {
+      out.push(wait)
+      wait = Math.round(wait * (retry.backoffFactor || 1))
+    }
+    return out
+  }, [retry])
   const errors = report.warnings.filter((w) => w.severity === 'error')
   const others = report.warnings.filter((w) => w.severity !== 'error')
 
@@ -196,6 +239,55 @@ export function PreflightDialog({
           <div className="preflight__label">{t('compose.attachments')}</div>
         </div>
       </div>
+
+      {outlook && count ? (
+        <div className="preflight__outlook">
+          <div className="preflight__outlookhead">
+            <strong>
+              {count.atLeast
+                ? t('preflight.sendsAtLeast', { n: count.n, days: outlook.days_ahead })
+                : t('preflight.sendsExact', { n: count.n, days: outlook.days_ahead })}
+            </strong>
+            {count.atLeast ? (
+              <StatusChip tone="warning" label={t('preflight.truncated')} />
+            ) : null}
+          </div>
+          {outlook.days.length > 0 ? (
+            <div className="preflight__days">
+              {/* Twelve days, then a count. The list is here to make a wrong
+                  interval obvious at a glance, and thirty rows of dates would
+                  bury the thing it is meant to reveal. */}
+              {outlook.days.slice(0, 12).map((d) => (
+                <span key={d.date} className="preflight__day">
+                  {d.date}
+                  {d.times.length > 1 ? (
+                    <span className="preflight__daycount">×{d.times.length}</span>
+                  ) : null}
+                </span>
+              ))}
+              {outlook.days.length > 12 ? (
+                <span className="preflight__day preflight__day--more">
+                  {t('preflight.moreDays', { n: outlook.days.length - 12 })}
+                </span>
+              ) : null}
+            </div>
+          ) : (
+            <div className="field__hint">{t('preflight.noneInWindow', { days: outlook.days_ahead })}</div>
+          )}
+
+          {retry && retryWaits.length > 0 ? (
+            <div className="field__hint">
+              {t('preflight.retryPlan', {
+                n: retry.maxAttempts,
+                waits: retryWaits.map((w) => formatWait(w, t)).join(' → '),
+              })}
+            </div>
+          ) : null}
+          {retry && retryWaits.length === 0 ? (
+            <div className="field__hint">{t('preflight.retryNone')}</div>
+          ) : null}
+        </div>
+      ) : null}
 
       {errors.length > 0 ? (
         <Banner tone="danger" title={t('preflight.blocked')}>
