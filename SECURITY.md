@@ -184,13 +184,49 @@ crash-reporting or auto-update dependency. `package-lock.json` is committed.
 npm run audit:self
 ```
 
-Twenty checks covering committed credentials, `.gitignore` coverage, Electron
-window flags, navigation guards, CSP strictness, `eval`/`innerHTML` usage,
-header-injection guards on both platforms, TLS configuration, attachment path
-handling, Android manifest exposure, keystore usage, dependency surface,
+Twenty-one checks covering committed credentials, `.gitignore` coverage,
+Electron window flags, navigation guards, CSP strictness, `eval`/`innerHTML`
+usage, header-injection guards on both platforms, TLS configuration, attachment
+path handling, Android manifest exposure, keystore usage, dependency surface,
 received-mail sanitization, remote-image CSP coverage, IMAP credential
 namespacing, the `revealPath` path guard, and update-checksum fail-closed
 behavior. Exit code 1 if anything needs attention.
+
+Alongside it:
+
+```bash
+npm run audit:deps      # advisories, against registry.npmjs.org
+npm run check           # the above plus typecheck and every behavioural guard
+```
+
+`audit:deps` distinguishes three outcomes rather than two: clean, an advisory
+at or above the threshold (exit 1), and *the database could not be reached* —
+which is reported loudly and does not pass silently as if nothing were wrong.
+
+### Verifying what you downloaded
+
+Every release publishes `SHA256SUMS.txt` next to the binaries.
+
+```bash
+sha256sum -c SHA256SUMS.txt
+```
+
+The Android package is signed with a key that has not changed since the first
+release and will not change. Check that the APK you have is the one this
+project built:
+
+```bash
+apksigner verify --print-certs Aevistle-<version>.apk
+```
+
+```
+Signer #1 certificate SHA-256 digest: 563e9757d43f821986d271d0c27e9b7422124d9d7d024d230dd28f6f7697d08d
+Signer #1 certificate SHA-1 digest:   15e23a5fb7ec677cabcfd50529c22e873d20a29d
+```
+
+A different fingerprint means a different signer — not a new version of this
+app. The Windows builds are **not** code-signed (see "Hardening choices"), so
+`SHA256SUMS.txt` is the only integrity check available for those.
 
 It runs on the source tree, so it works on a clone as well as on this
 repository.

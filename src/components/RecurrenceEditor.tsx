@@ -47,6 +47,81 @@ export function fromLocalInput(value: string, fallback: number): number {
   return Number.isFinite(t) ? t : fallback
 }
 
+/** `HH:mm` in local time — the shape `Recurrence.timeOfDay` stores. */
+export function hhmm(ms: number): string {
+  const d = new Date(ms)
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`
+}
+
+/**
+ * The four start times people actually pick, as one tap each.
+ *
+ * Built from the current clock rather than from constants, and *not*
+ * memoised on mount: a window left open overnight would otherwise offer
+ * "tomorrow morning" for a tomorrow that is now today. Each entry is computed
+ * when the row renders.
+ *
+ * Every one of them lands on a whole minute with seconds zeroed. A reminder
+ * whose stored time carries the 37 seconds that happened to be on the clock
+ * when the chip was tapped fires at 09:00:37, which is not what "tomorrow at
+ * nine" means to anyone.
+ */
+function quickTimes(now: number): Array<{ key: string; at: number }> {
+  const at = (dayOffset: number, hour: number, minute = 0) => {
+    const d = new Date(now)
+    d.setDate(d.getDate() + dayOffset)
+    d.setHours(hour, minute, 0, 0)
+    return d.getTime()
+  }
+  const tonight = at(0, 20)
+  const nextMonday = () => {
+    const d = new Date(now)
+    // 1 = Monday. `|| 7` turns Sunday's 0 into "one day away" rather than
+    // "today", and the `|| 7` on the difference keeps "it is Monday" meaning
+    // next Monday rather than this morning, which has already gone.
+    const delta = ((1 - d.getDay() + 7) % 7) || 7
+    d.setDate(d.getDate() + delta)
+    d.setHours(9, 0, 0, 0)
+    return d.getTime()
+  }
+  return [
+    { key: 'quick.hour', at: Math.ceil((now + 3_600_000) / 60_000) * 60_000 },
+    // Offered only while it is still ahead — a chip that silently schedules
+    // something in the past is worse than one that is not there.
+    ...(tonight > now ? [{ key: 'quick.tonight', at: tonight }] : []),
+    { key: 'quick.tomorrow', at: at(1, 9) },
+    { key: 'quick.nextWeek', at: nextMonday() },
+  ]
+}
+
+function QuickTimes({
+  t,
+  startAt,
+  onPick,
+}: {
+  t: (key: TranslationKey) => string
+  startAt: number
+  onPick: (at: number) => void
+}) {
+  const options = quickTimes(Date.now())
+  return (
+    <div className="chiprow" role="group" aria-label={t('schedule.quickTimes')}>
+      <span className="chiprow__label">{t('schedule.quickTimes')}</span>
+      {options.map((o) => (
+        <button
+          key={o.key}
+          type="button"
+          className="chip chip--toggle"
+          aria-pressed={Math.abs(startAt - o.at) < 60_000}
+          onClick={() => onPick(o.at)}
+        >
+          {t(o.key as TranslationKey)}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 type IntervalUnit = 'ms' | 's' | 'min' | 'hour' | 'day' | 'week' | 'month' | 'year'
 
 const UNIT_MS: Record<IntervalUnit, number> = {
@@ -185,6 +260,42 @@ export function RecurrenceEditor({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-4)' }}>
+      {/*
+        When, before how often.
+
+        The repeat rule used to come first and the start time after it, which
+        put the one field every single reminder needs below a control most of
+        them leave on "once". "The moment it goes out" is the answer the user
+        came here to give.
+      */}
+      <div className="field__row">
+        <Field label={t('schedule.startAt')}>
+          <input
+            className="input"
+            type="datetime-local"
+            value={toLocalInput(recurrence.startAt)}
+            onChange={(e) => patch({ startAt: fromLocalInput(e.target.value, recurrence.startAt) })}
+          />
+        </Field>
+
+        {recurrence.kind !== 'once' && recurrence.kind !== 'interval' ? (
+          <Field label={t('schedule.timeOfDay')}>
+            <input
+              className="input"
+              type="time"
+              value={recurrence.timeOfDay}
+              onChange={(e) => patch({ timeOfDay: e.target.value })}
+            />
+          </Field>
+        ) : null}
+      </div>
+
+      <QuickTimes
+        t={t}
+        startAt={recurrence.startAt}
+        onPick={(at) => patch({ startAt: at, timeOfDay: hhmm(at) })}
+      />
+
       <NaturalTimeInput onParsed={onChange} />
 
       <Field label={t('schedule.repeat')}>
@@ -212,29 +323,9 @@ export function RecurrenceEditor({
         </div>
       </Field>
 
-      {/* --- when ---------------------------------------------------------- */}
+      {/* --- how often, in the units the chosen kind uses ------------------- */}
 
       <div className="field__row">
-        <Field label={recurrence.kind === 'once' ? t('schedule.startAt') : t('schedule.startAt')}>
-          <input
-            className="input"
-            type="datetime-local"
-            value={toLocalInput(recurrence.startAt)}
-            onChange={(e) => patch({ startAt: fromLocalInput(e.target.value, recurrence.startAt) })}
-          />
-        </Field>
-
-        {recurrence.kind !== 'once' && recurrence.kind !== 'interval' ? (
-          <Field label={t('schedule.timeOfDay')}>
-            <input
-              className="input"
-              type="time"
-              value={recurrence.timeOfDay}
-              onChange={(e) => patch({ timeOfDay: e.target.value })}
-            />
-          </Field>
-        ) : null}
-
         {recurrence.kind === 'interval' ? (
           <Field label={t('schedule.interval')}>
             <div style={{ display: 'flex', gap: 'var(--sp-2)', alignItems: 'center' }}>
@@ -521,7 +612,26 @@ export function RecurrenceEditor({
               onChange={(v) => patch({ skipWeekends: v })}
               title={t('schedule.skipWeekends')}
             />
-          ) : null}
+          ) : (
+            /*
+              Only shown once the policy is on, and it says what the calendar
+              currently contains rather than just naming it.
+
+              The gap this closes: the switch above is the *only* thing that
+              makes the working calendar do anything, and until now nothing
+              connected the two — someone could turn this on with an empty
+              calendar and get identical behaviour to leaving it off, because
+              an empty calendar's only rule is the weekend.
+            */
+            <div className="field__hint">
+              {calendar.holidays.length === 0 && calendar.workdays.length === 0
+                ? t('workday.calendarEmpty')
+                : t('workday.calendarSummary', {
+                    h: calendar.holidays.length,
+                    w: calendar.workdays.length,
+                  })}
+            </div>
+          )}
 
           <Field label={t('schedule.retry')}>
             <div className="field__row">

@@ -345,6 +345,45 @@ final class MailFetcher {
         });
     }
 
+    /**
+     * Delete messages on the server: flag {@code \Deleted}, then expunge.
+     *
+     * The desktop reaches this through ImapFlow's {@code messageDelete}, which
+     * prefers a MOVE to the Trash folder. JavaMail has no equivalent
+     * convenience, and a hand-written MOVE would need the Trash folder's name
+     * — which is per-provider, localised, and discovered through an extension
+     * half the servers here do not advertise. Flag-and-expunge is what every
+     * IMAP server implements, and most of them file the result in Trash on
+     * their own anyway.
+     *
+     * Throws when nothing was matched. "Deleted zero of the three you asked
+     * for" reported as success is how the app would end up claiming a mailbox
+     * had been cleared while every message was still in it.
+     */
+    static void purge(JSONObject config, String secret, JSONArray items) throws Exception {
+        if (items == null || items.length() == 0) return;
+        withInbox(config, secret, Folder.READ_WRITE, (store, inbox) -> {
+            UIDFolder uidFolder = (UIDFolder) inbox;
+            List<Message> found = new ArrayList<>();
+            for (int i = 0; i < items.length(); i++) {
+                JSONObject item = items.optJSONObject(i);
+                if (item == null) continue;
+                Message m = uidFolder.getMessageByUID(item.optLong("uid", -1L));
+                if (m != null) found.add(m);
+            }
+            if (found.isEmpty()) {
+                throw new IllegalStateException("The server did not recognise any of those messages");
+            }
+            Message[] batch = found.toArray(new Message[0]);
+            inbox.setFlags(batch, new Flags(Flags.Flag.DELETED), true);
+            // `expunge` is what actually removes them; closing with true is the
+            // documented way to force it and works on servers whose expunge()
+            // is a no-op outside a close.
+            inbox.close(true);
+            return null;
+        });
+    }
+
     // -----------------------------------------------------------------------
     // MIME parsing — deliberately narrow: text/plain, text/html, and one level
     // of multipart/alternative or multipart/mixed. Real verification and

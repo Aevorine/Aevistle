@@ -20,6 +20,8 @@ final class JobStore {
     private static final String PREFS = "aevistle_jobs";
     private static final String KEY_JOBS = "jobs";
     private static final String KEY_ACCOUNTS = "accounts";
+    /** Run reports waiting for a WebView to exist. See {@link #recordRun}. */
+    private static final String KEY_PENDING_RUNS = "pendingRuns";
 
     private final SharedPreferences prefs;
 
@@ -76,9 +78,17 @@ final class JobStore {
      * The next fire time is whatever remains at the head of the list. Refilling
      * the list is the JavaScript layer's job — it owns all the calendar rules —
      * and happens the next time the app is opened.
+     *
+     * The result is also queued for the web layer in `KEY_PENDING_RUNS`. Almost
+     * every scheduled send on Android happens with no WebView alive to notify,
+     * so an event alone would be delivered to nobody: the mail would go out and
+     * the schedule row would still read "waiting to send" the next time the app
+     * was opened. The queue is what closes that gap — `drainRuns` hands it over
+     * on the next launch or resume.
      */
     void recordRun(String jobId, long ranAt, boolean ok, String error) {
         JSONArray all = jobs();
+        JSONObject run = null;
         for (int i = 0; i < all.length(); i++) {
             JSONObject job = all.optJSONObject(i);
             if (job == null || !jobId.equals(job.optString("id"))) continue;
@@ -88,7 +98,6 @@ final class JobStore {
                 job.put("lastRunAt", ranAt);
                 job.put("lastResult", ok ? "ok" : "failed");
                 if (error != null) job.put("lastError", error);
-                job.put("status", ok ? "armed" : "failed");
 
                 JSONArray remaining = new JSONArray();
                 JSONArray occurrences = job.optJSONArray("occurrences");
@@ -99,10 +108,74 @@ final class JobStore {
                     }
                 }
                 job.put("occurrences", remaining);
+
+                // "armed" means *waiting for the next one*, so it is only true
+                // when there is a next one. A one-off that has just fired is
+                // finished, and saying "waiting to send" about it is the exact
+                // complaint this whole change exists to fix. Repeating kinds
+                // keep "armed" even at zero remaining, because the JS layer
+                // refills the list on the next open.
+                boolean repeats = !"once".equals(recurrenceKind(job));
+                String status = !ok ? "failed" : (remaining.length() > 0 || repeats) ? "armed" : "done";
+                job.put("status", status);
+
+                run = new JSONObject();
+                run.put("jobId", jobId);
+                run.put("runCount", job.optInt("runCount", 0));
+                run.put("lastRunAt", ranAt);
+                run.put("lastResult", ok ? "ok" : "failed");
+                if (error != null) run.put("lastError", error);
+                run.put("status", status);
+                run.put("occurrences", remaining);
             } catch (Exception ignored) {
             }
             break;
         }
         prefs.edit().putString(KEY_JOBS, all.toString()).apply();
+        if (run != null) queueRun(run);
+    }
+
+    private static String recurrenceKind(JSONObject job) {
+        JSONObject recurrence = job.optJSONObject("recurrence");
+        return recurrence == null ? "once" : recurrence.optString("kind", "once");
+    }
+
+    /** Append one run report to the queue the web layer drains on next open. */
+    private void queueRun(JSONObject run) {
+        JSONArray queued = pendingRuns();
+        // One entry per job: the web layer only ever applies the latest state,
+        // and an unbounded queue would grow for the whole time the app is not
+        // opened — a minute-interval reminder left alone for a week is 10 000
+        // entries of which 9 999 are stale.
+        JSONArray next = new JSONArray();
+        String jobId = run.optString("jobId");
+        for (int i = 0; i < queued.length(); i++) {
+            JSONObject existing = queued.optJSONObject(i);
+            if (existing != null && !jobId.equals(existing.optString("jobId"))) next.put(existing);
+        }
+        next.put(run);
+        prefs.edit().putString(KEY_PENDING_RUNS, next.toString()).apply();
+    }
+
+    JSONArray pendingRuns() {
+        try {
+            return new JSONArray(prefs.getString(KEY_PENDING_RUNS, "[]"));
+        } catch (Exception e) {
+            return new JSONArray();
+        }
+    }
+
+    /**
+     * Hand over every queued run report and clear the queue.
+     *
+     * Cleared only after the caller has the data in hand, so a crash between
+     * the two leaves the reports to be delivered again rather than losing them.
+     * Applying the same report twice is harmless — it is absolute state, not a
+     * delta.
+     */
+    JSONArray drainRuns() {
+        JSONArray pending = pendingRuns();
+        prefs.edit().remove(KEY_PENDING_RUNS).apply();
+        return pending;
     }
 }

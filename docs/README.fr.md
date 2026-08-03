@@ -61,6 +61,10 @@ tout le reste tranquille par défaut.
 | ⚡ **Envoi en rafale** | Un seul déclenchement programmé peut envoyer le même message plusieurs fois de suite, cadencé selon le nombre de millisecondes que vous choisissez — pour tester la charge de votre propre circuit d’envoi, pas pour spammer qui que ce soit. |
 | 📎 **Pièces jointes et images dans le corps** | Documents, images, archives — tout ce qui reste sous la limite de votre fournisseur. Collez une image copiée directement dans le message pour l’insérer en ligne ; toute image jointe peut aussi passer de pièce jointe à image affichée dans le message, et revenir. Aevistle affiche la taille réelle transmise : le base64 transforme un fichier de 20 Mo en 27 Mo, et c’est pour cela que des pièces jointes « sous la limite » sont rejetées. |
 | 🖼️ **Des images que l’on voit vraiment** | Chaque image d’un message — insérée dans le corps, jointe en pièce, ou arrivée dans votre boîte — s’affiche en vignette lisible plutôt qu’en nom de fichier à deviner. Un clic ouvre la visionneuse plein écran : molette pour zoomer, glisser pour déplacer, double-clic pour basculer entre taille ajustée et taille réelle, rotation d’un quart de tour dans les deux sens, miroir horizontal ou vertical, flèches pour parcourir les autres images du message, et lecture des dimensions en pixels, de la taille et du format avant d’enregistrer ou de copier dans le presse-papiers. `Échap` ferme l’image, et rien d’autre. |
+| 📆 **Un calendrier de travail qui montre son effet** | Jours fériés, week-ends que vous définissez vous-même et jours de rattrapage — avec une grille mensuelle où un clic bascule un jour, des points de départ en un clic pour six pays, et sur chaque date le nombre de rappels qui y tombent, rempli quand c’est le calendrier qui les a déplacés. |
+| 📊 **On voit que c’est parti** | Chaque ligne indique le dernier envoi, s’il a réussi, et combien de fois elle s’est déclenchée. Les rappels uniques passent dans un onglet Terminés une fois faits, au lieu de rester dans la liste à prétendre attendre. |
+| 🗑️ **Une suppression qui veut dire quelque chose** | Deux actions distinctes, parce que ce sont deux demandes distinctes : retirer d’Aevistle (réversible depuis une corbeille conservée sept jours) ou supprimer de la boîte mail sur le serveur (irréversible, et c’est dit). |
+| ✍️ **Mode concentration** | `F9` masque tout sauf le message et lui donne toute la fenêtre. `Échap` ramène le reste. Un compteur de caractères et d’octets vit sur l’étiquette — un idéogramme fait trois octets, et c’est l’octet que compte la limite de votre fournisseur. |
 | 🔁 **Une vraie récurrence** | Une fois · toutes les N minutes · quotidienne · hebdomadaire selon les jours choisis · mensuelle (avec une règle sensée pour le 31) · annuelle · cron complet à 5 champs. |
 | 🔒 **Instantanés des pièces jointes** | Programmez un rappel pour le mois prochain : Aevistle garde sa propre copie des fichiers, donc déplacer ou renommer les originaux ne casse rien en silence. |
 | ⏰ **Se déclenche fenêtre fermée** | Windows conserve un processus dans la zone de notification ; Android utilise une alarme exacte et WorkManager. Fermer la fenêtre n’annule pas vos rappels. |
@@ -81,9 +85,9 @@ La dernière version se trouve dans **[Releases](https://github.com/Aevorine/Aev
 
 | Plateforme | Fichier | Remarques |
 |---|---|---|
-| Windows 10/11 (x64) | `Aevistle-0.1.3-win-x64-setup.exe` | Programme d’installation, avec raccourcis menu Démarrer et bureau |
-| Windows 10/11 (x64) | `Aevistle-0.1.3-win-x64-portable.exe` | Fichier unique, sans installation, fonctionne depuis une clé USB |
-| Android 7.0+ | `Aevistle-0.1.3.apk` | Téléphones et tablettes. Autorisez d’abord « installer des applications inconnues » pour votre navigateur ou gestionnaire de fichiers. |
+| Windows 10/11 (x64) | `Aevistle-0.1.4-win-x64-setup.exe` | Programme d’installation, avec raccourcis menu Démarrer et bureau |
+| Windows 10/11 (x64) | `Aevistle-0.1.4-win-x64-portable.exe` | Fichier unique, sans installation, fonctionne depuis une clé USB |
+| Android 7.0+ | `Aevistle-0.1.4.apk` | Téléphones et tablettes. Autorisez d’abord « installer des applications inconnues » pour votre navigateur ou gestionnaire de fichiers. |
 
 > Windows SmartScreen signalera un éditeur inconnu. C’est l’aspect normal d’une
 > version sans certificat de signature payant : choisissez **Informations

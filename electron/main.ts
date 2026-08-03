@@ -82,7 +82,7 @@ import {
   snapshotDir,
   pastedDir,
 } from './store'
-import { fetchMessageBody, setServerSeenFlag, syncInbox, testInbox } from './imap'
+import { fetchMessageBody, purgeMessages, setServerSeenFlag, syncInbox, testInbox } from './imap'
 import { stopAllInboxWatchers, watchInboxes } from './imapIdle'
 import { deleteAccountInboxCache, deleteMessageCache, pruneInboxCache } from './inboxStore'
 import { downloadRemoteImage } from './remoteImage'
@@ -324,6 +324,14 @@ function createWindow(): void {
       sandbox: true,
       webviewTag: false,
       spellcheck: true,
+      /*
+       * Electron's built-in PDF viewer is a plugin, and without this it does
+       * not exist — a PDF attachment opens into an empty frame with no error.
+       * It does not re-enable NPAPI or anything like it; the only thing it
+       * turns on in a modern Electron is the PDF viewer, and the frame that
+       * uses it is `sandbox=""` with an opaque origin.
+       */
+      plugins: true,
     },
   })
 
@@ -935,6 +943,29 @@ function registerIpc(): void {
   ipcMain.handle(
     IPC.deleteInboxMessages,
     async (_e, accountId: string, items: Array<{ folderPath: string; uid: number }>) => {
+      await deleteMessageCache(accountId, items)
+    },
+  )
+
+  /**
+   * The other half of deleting: the message itself, on the server.
+   *
+   * Deliberately not merged into the handler above. That one is a local
+   * cleanup that is fine to fail quietly; this one changes the user's mailbox
+   * and must say so when it does not work.
+   */
+  ipcMain.handle(
+    IPC.purgeInboxMessages,
+    async (
+      _e,
+      accountId: string,
+      config: InboxAccountState,
+      items: Array<{ folderPath: string; uid: number }>,
+    ) => {
+      const secret = await getSecret(accountId, 'imap')
+      await purgeMessages(config, secret, items)
+      // Only after the server agreed. Dropping the cache first would leave the
+      // app with no copy of a message that is still in the mailbox.
       await deleteMessageCache(accountId, items)
     },
   )

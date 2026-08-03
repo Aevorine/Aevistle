@@ -22,6 +22,27 @@
 
       'unsafe-inline' for style is required because the app sets a handful of
       inline layout styles; scripts have no such exemption.
+
+      `frame-src 'self' data:` rather than 'none'. The attachment preview shows
+      a PDF or a text file in `<iframe sandbox="" src="data:…">`, and 'none'
+      blocked it — the modal opened onto an empty white box with no error, no
+      toast and nothing in the UI to suggest anything had gone wrong. Verified
+      with a real Electron window before and after: ERR_BLOCKED_BY_CSP on both
+      the PDF and the text frame.
+
+      `blob:` is listed for the same frame: a blob URL is the better carrier
+      for a 20 MB attachment than a base64 string in an attribute, and the
+      preview falls back to it.
+
+      Allowing either here costs nothing: that frame carries `sandbox=""`, so
+      its content is an opaque origin that cannot run script, reach the parent
+      or make a request. The message-body frame is unaffected either way — it
+      uses `srcdoc`, which inherits this policy rather than being matched by
+      `frame-src`.
+
+      `frame-ancestors` is gone because it is *ignored* in a <meta> tag; the
+      browser says so in the console on every load. Nothing can frame a
+      `file://` renderer with no remote content anyway.
     -->
     <meta
       http-equiv="Content-Security-Policy"
@@ -34,11 +55,10 @@
         connect-src 'self';
         media-src 'self';
         object-src 'none';
-        frame-src 'none';
+        frame-src 'self' data: blob:;
         worker-src 'self' blob:;
         base-uri 'none';
         form-action 'none';
-        frame-ancestors 'none';
       "
     />
 

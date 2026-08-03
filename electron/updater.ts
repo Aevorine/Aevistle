@@ -42,17 +42,35 @@ const SUMS_URLS = [
   'https://github.com/Aevorine/Aevistle/releases/latest/download/SHA256SUMS',
 ]
 
-/** Only ever fetch from the project's own release host. */
+/**
+ * Only ever fetch from *this project's* releases.
+ *
+ * The host allowlist alone was not enough. The asset to download arrives from
+ * the renderer, and `github.com` is a host anyone can publish a release on — so
+ * a URL pointing at `github.com/someone-else/their-repo/releases/...` passed,
+ * the checksum lookup then found no line for it (that file belongs to this
+ * repo), and the download was offered as installable-but-unverified. Reaching
+ * that state needs a compromised renderer, which contextIsolation, the sandbox
+ * and the CSP all exist to prevent — but "you would need another bug first" is
+ * the argument every defence-in-depth layer is there to stop relying on.
+ *
+ * The path is now pinned too. `objects.githubusercontent.com` is where GitHub
+ * redirects asset downloads to and carries an opaque path, so it is checked on
+ * host alone; the human-facing hosts must additionally be under this repo.
+ */
+const REPO_PATH = '/Aevorine/Aevistle/'
+
 function assertTrustedUrl(url: string): URL {
   const parsed = new URL(url)
   const host = parsed.hostname.toLowerCase()
-  const allowed =
-    host === 'github.com' ||
-    host === 'api.github.com' ||
-    host === 'objects.githubusercontent.com' ||
-    host.endsWith('.githubusercontent.com')
-  if (parsed.protocol !== 'https:' || !allowed) {
+  const isRedirectTarget =
+    host === 'objects.githubusercontent.com' || host.endsWith('.githubusercontent.com')
+  const isRepoHost = host === 'github.com' || host === 'api.github.com'
+  if (parsed.protocol !== 'https:' || !(isRepoHost || isRedirectTarget)) {
     throw new Error(`Refusing to download from ${parsed.host}`)
+  }
+  if (isRepoHost && !parsed.pathname.startsWith(REPO_PATH)) {
+    throw new Error(`Refusing to download from outside ${REPO_PATH}: ${parsed.pathname}`)
   }
   return parsed
 }

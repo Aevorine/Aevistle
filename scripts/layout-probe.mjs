@@ -169,17 +169,33 @@ const closed = await measure('disclosure closed')
 
 /*
  * The scratch profile has no mail account, so the screen carries a first-run
- * warning banner a configured install does not. Removing it measures the state
- * every user after the first minute is actually in — labelled as the
- * simulation it is, rather than quietly reported as the general case.
+ * warning banner a configured install does not. Taking it out of the layout
+ * measures the state every user after the first minute is actually in —
+ * labelled as the simulation it is, rather than quietly reported as the
+ * general case.
+ *
+ * `display: none`, never `.remove()`. This is a React tree: deleting a node
+ * React still believes it owns makes the next render that touches that subtree
+ * throw inside `removeChild`, and the whole app unmounts to a blank window.
+ * That happened, and it happens *later* — so the crash shows up during
+ * whatever anyone does next and looks like their change caused it. An inline
+ * style is invisible to reconciliation and takes the element out of the
+ * height budget just as completely.
  */
-await evaluate(`document.querySelector('.view--compose .banner--warning')?.remove(), true`)
+await evaluate(
+  `{ const b = document.querySelector('.view--compose .banner--warning'); if (b) b.style.display = 'none'; true }`,
+)
 await sleep(300)
 const configured = await measure('disclosure closed, account configured')
 await evaluate(`document.querySelector('.moreoptions')?.setAttribute('open', ''), true`)
 await sleep(400)
 const open = await measure('disclosure open')
 await evaluate(`document.querySelector('.moreoptions')?.removeAttribute('open'), true`)
+// Put the banner back, so the app is left in the state it was found in and the
+// window stays usable for whatever is measured next.
+await evaluate(
+  `{ const b = document.querySelector('.view--compose .banner--warning'); if (b) b.style.display = ''; true }`,
+)
 
 const bodyShare = (m) =>
   m.body && m.viewport.h ? Math.round((m.body.h / m.viewport.h) * 100) : 0

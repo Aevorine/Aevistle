@@ -45,6 +45,7 @@ import {
   type DataFolderChange,
   type InboxMessageBody,
   type JobEvent,
+  type JobRun,
   type PlatformBridge,
 } from '../core/bridge'
 import { pruneLogs } from '../core/logRetention'
@@ -67,6 +68,8 @@ import {
   type OutboxItem,
 } from '../core/outbox'
 import { evaluateConditions } from '../core/conditions'
+import { applyRun } from '../core/jobRun'
+import { mergeRemoved, rememberRemoved, restoreRemoved, withoutRemoved } from '../core/inboxRemoval'
 import { executeControl } from './controlExecutor'
 import type { ControlRequest } from '../core/control'
 import { createI18n, detectLocale, localeMeta, type I18n } from '../i18n'
@@ -156,6 +159,7 @@ type Action =
   | { type: 'upsertAccount'; account: MailAccount }
   | { type: 'removeAccount'; id: string }
   | { type: 'upsertJob'; job: ScheduledJob }
+  | { type: 'jobRan'; jobId: string; run: JobRun }
   | { type: 'removeJob'; id: string }
   | { type: 'upsertContact'; contact: Contact }
   | { type: 'removeContact'; id: string }
@@ -172,7 +176,9 @@ type Action =
       ids: string[]
       patch: Partial<Pick<InboxAccountState['messages'][number], 'seen' | 'tag' | 'bodyCached'>>
     }
-  | { type: 'removeInboxMessages'; accountId: string; ids: string[] }
+  | { type: 'removeInboxMessages'; accountId: string; ids: string[]; purge?: boolean }
+  | { type: 'restoreInboxMessages'; accountId: string; keys: string[] }
+  | { type: 'clearRemovedMessages'; accountId?: string }
   | { type: 'snapshotDraft'; reason: SnapshotReason }
   | { type: 'restoreSnapshot'; id: string }
   | { type: 'clearSnapshots' }
@@ -272,6 +278,22 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, jobs }
     }
 
+    /**
+     * A run finished on the platform scheduler; write what it did back onto
+     * the job the user actually looks at.
+     *
+     * `updatedAt` is deliberately *not* touched. It feeds the signature that
+     * decides whether to re-arm the platform scheduler, and re-arming on the
+     * scheduler's own report would have every send trigger a fresh sync — a
+     * loop whose only symptom would be alarms being torn down and rebuilt
+     * every time one fired.
+     */
+    case 'jobRan':
+      return {
+        ...state,
+        jobs: state.jobs.map((j) => (j.id === action.jobId ? applyRun(j, action.run) : j)),
+      }
+
     case 'removeJob':
       return { ...state, jobs: state.jobs.filter((j) => j.id !== action.id) }
 
@@ -339,11 +361,20 @@ function reducer(state: AppState, action: Action): AppState {
 
     case 'upsertInboxAccount': {
       const exists = state.inboxAccounts.some((i) => i.accountId === action.inbox.accountId)
+      // The tombstone list belongs to the app, not to the sync result: a sync
+      // reports what the server holds and knows nothing about what the user
+      // has removed. Carrying the prior list forward here is what stops a
+      // sync from quietly clearing it — and clearing it would resurrect every
+      // removed message on the very next poll, which is the bug this exists
+      // to fix.
+      const prior = state.inboxAccounts.find((i) => i.accountId === action.inbox.accountId)
+      const removed = mergeRemoved(prior?.removed, action.inbox.removed, Date.now())
       // Cap message rows here, not in the caller — every writer of this
       // action (a fresh sync, a future push-update) gets the ceiling for free.
       const inbox: InboxAccountState = {
         ...action.inbox,
-        messages: [...action.inbox.messages]
+        removed,
+        messages: withoutRemoved([...action.inbox.messages], removed)
           .sort((a, b) => b.date - a.date)
           .slice(0, INBOX_MESSAGE_CAP),
       }
@@ -372,15 +403,53 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, inboxAccounts }
     }
 
+    /**
+     * Remove from this app, and write down that it happened.
+     *
+     * The tombstone is the whole point. Filtering the list alone is what the
+     * old version did, and the next sync put every one of them back.
+     */
     case 'removeInboxMessages': {
       const idSet = new Set(action.ids)
-      const inboxAccounts = state.inboxAccounts.map((i) =>
-        i.accountId !== action.accountId
-          ? i
-          : { ...i, messages: i.messages.filter((m) => !idSet.has(m.id)) },
-      )
+      const now = Date.now()
+      const inboxAccounts = state.inboxAccounts.map((i) => {
+        if (i.accountId !== action.accountId) return i
+        const going = i.messages.filter((m) => idSet.has(m.id))
+        return {
+          ...i,
+          messages: i.messages.filter((m) => !idSet.has(m.id)),
+          // `purge` means the message is being destroyed on the server too, so
+          // there is nothing to restore it from and no reason to offer.
+          removed: action.purge ? i.removed : rememberRemoved(i.removed, going, now),
+        }
+      })
       return { ...state, inboxAccounts }
     }
+
+    /** Take messages back out of the recycle bin and straight into the list. */
+    case 'restoreInboxMessages': {
+      const inboxAccounts = state.inboxAccounts.map((i) => {
+        if (i.accountId !== action.accountId) return i
+        const { removed, restored } = restoreRemoved(i.removed, action.keys)
+        return {
+          ...i,
+          removed,
+          messages: [...restored, ...i.messages]
+            .sort((a, b) => b.date - a.date)
+            .slice(0, INBOX_MESSAGE_CAP),
+        }
+      })
+      return { ...state, inboxAccounts }
+    }
+
+    /** Empty the recycle bin for one account, or for all of them. */
+    case 'clearRemovedMessages':
+      return {
+        ...state,
+        inboxAccounts: state.inboxAccounts.map((i) =>
+          action.accountId && i.accountId !== action.accountId ? i : { ...i, removed: [] },
+        ),
+      }
 
     /**
      * Record the current draft, if it is worth recording. `captureSnapshot`
@@ -557,7 +626,12 @@ export interface AppApi {
   markInboxMessagesRead: (accountId: string, ids: string[], seen: boolean) => Promise<void>
   /** Local-only — see `InboxTag`, never touches the server. */
   tagInboxMessages: (accountId: string, ids: string[], tag: InboxTag) => void
+  /** Remove from this app only. Reversible from the recycle bin; mailbox untouched. */
   deleteInboxMessages: (accountId: string, ids: string[]) => Promise<void>
+  /** Delete on the server. Not reversible, and it reports failure instead of pretending. */
+  purgeInboxMessages: (accountId: string, ids: string[]) => Promise<{ ok: boolean; error?: string }>
+  restoreInboxMessages: (accountId: string, keys: string[]) => void
+  clearRemovedMessages: (accountId?: string) => void
 
   /** Record the current draft in the history strip. */
   snapshotDraft: (reason?: SnapshotReason) => void
@@ -902,6 +976,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!bridge) return
     return bridge.onJobEvent((event: JobEvent) => {
+      // The status/run counters first, then the log line. This used to be the
+      // log line and nothing else, which is why a schedule that had genuinely
+      // sent still read "waiting to send" — the send result reached the
+      // activity list and never reached the job.
+      if (event.run) dispatch({ type: 'jobRan', jobId: event.jobId, run: event.run })
       addLog({
         kind: 'send',
         level: event.result.ok ? 'info' : 'error',
@@ -913,6 +992,43 @@ export function AppProvider({ children }: { children: ReactNode }) {
       })
     })
   }, [bridge, addLog])
+
+  /**
+   * Catch up on sends that happened while there was no UI to tell.
+   *
+   * On Android an alarm fires into a worker with the WebView long gone, so the
+   * live event above reaches nobody; the native side queues the report instead.
+   * Drained on open and again whenever the app comes back to the foreground —
+   * the second one matters because an app left running in the background for a
+   * week never re-mounts.
+   */
+  useEffect(() => {
+    if (!bridge?.pullJobRuns || !ready) return
+    const pull = bridge.pullJobRuns.bind(bridge)
+    let cancelled = false
+
+    const drain = async () => {
+      try {
+        const runs = await pull()
+        if (cancelled) return
+        for (const { jobId, ...run } of runs) dispatch({ type: 'jobRan', jobId, run })
+      } catch (err) {
+        // A failure here costs a stale row, not a lost send — the mail already
+        // went out and the queue is only cleared once we have the data.
+        console.error('[aevistle] could not read missed runs:', err)
+      }
+    }
+
+    void drain()
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void drain()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      cancelled = true
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [bridge, ready])
 
   // --- undo ---------------------------------------------------------------
   //
@@ -1429,6 +1545,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     dispatch({ type: 'patchInboxMessages', accountId, ids, patch: { tag } })
   }, [])
 
+  /**
+   * "Remove from Aevistle" — reversible, and the mailbox is not touched.
+   *
+   * Drops the row, drops the cached body and attachments, and writes a
+   * tombstone so the next sync does not fetch the same message back. That last
+   * part is what makes this do anything at all: without it the row reappeared
+   * within five minutes and the delete button was decoration.
+   */
   const deleteInboxMessages = useCallback(
     async (accountId: string, ids: string[]) => {
       const inbox = state.inboxAccounts.find((i) => i.accountId === accountId)
@@ -1446,6 +1570,49 @@ export function AppProvider({ children }: { children: ReactNode }) {
     },
     [bridge, state.inboxAccounts],
   )
+
+  /**
+   * "Delete from the mailbox" — the real one, on the server, not undoable.
+   *
+   * No tombstone is written: there will be nothing left to filter out and
+   * nothing to restore from, and offering a recycle-bin entry for a message
+   * that no longer exists would be a lie the first time someone tried it.
+   *
+   * A server failure is reported rather than swallowed. The rows are already
+   * gone locally, so a silent failure here reads as "deleted" while the mail
+   * is still sitting in the mailbox — and the user would only find out from
+   * another mail client, weeks later.
+   */
+  const purgeInboxMessages = useCallback(
+    async (accountId: string, ids: string[]): Promise<{ ok: boolean; error?: string }> => {
+      const inbox = state.inboxAccounts.find((i) => i.accountId === accountId)
+      const targets = inbox?.messages.filter((m) => ids.includes(m.id)) ?? []
+      if (targets.length === 0) return { ok: true }
+      if (!bridge?.purgeInboxMessages || !inbox) {
+        return { ok: false, error: 'This platform cannot delete on the server yet' }
+      }
+      try {
+        await bridge.purgeInboxMessages(
+          inbox,
+          targets.map((m) => ({ folderPath: m.folderPath, uid: m.uid })),
+        )
+      } catch (e) {
+        return { ok: false, error: e instanceof Error ? e.message : String(e) }
+      }
+      dispatch({ type: 'removeInboxMessages', accountId, ids, purge: true })
+      return { ok: true }
+    },
+    [bridge, state.inboxAccounts],
+  )
+
+  /** Put removed messages back into the list, straight from the recycle bin. */
+  const restoreInboxMessages = useCallback((accountId: string, keys: string[]) => {
+    dispatch({ type: 'restoreInboxMessages', accountId, keys })
+  }, [])
+
+  const clearRemovedMessages = useCallback((accountId?: string) => {
+    dispatch({ type: 'clearRemovedMessages', accountId })
+  }, [])
 
   /**
    * Periodic receive.
@@ -1681,6 +1848,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     markInboxMessagesRead,
     tagInboxMessages,
     deleteInboxMessages,
+    purgeInboxMessages,
+    restoreInboxMessages,
+    clearRemovedMessages,
     snapshotDraft,
     restoreSnapshot,
     queueDraft,

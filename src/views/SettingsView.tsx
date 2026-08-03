@@ -29,7 +29,6 @@ import {
 import { AccountDialog } from '../components/AccountDialog'
 import { BackupCard } from './BackupCard'
 import { ControlCard } from './ControlCard'
-import { WorkCalendarCard } from './WorkCalendarCard'
 import { SectionNav } from '../components/SectionNav'
 import { groupAccounts, knownGroups } from '../core/accounts'
 import { useApp } from '../state/AppState'
@@ -256,7 +255,6 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
         {/* Which days count as working days. Near the top because reminders
             are the product and the calendar changes when they fire. */}
         <div id="set-calendar" className="settings-section" />
-        <WorkCalendarCard />
 
         <div id="set-update" className="settings-section" />
         <UpdateCard />

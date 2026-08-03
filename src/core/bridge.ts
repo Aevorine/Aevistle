@@ -37,10 +37,41 @@ export interface AppInfo {
   mcpServerPath?: string
 }
 
+/**
+ * What a run did to the job's own bookkeeping.
+ *
+ * This travels with the event on purpose. The platform scheduler owns the
+ * job while it runs and updates `status`/`runCount`/`lastRunAt` on its own
+ * copy; the renderer owns `state.json` and everything the user looks at. Until
+ * this field existed those two never spoke: the mail went out, the activity log
+ * said so, and the schedule row kept displaying the status it was created with
+ * — "waiting to send", forever.
+ *
+ * Two things depended on that silence and were also broken by it:
+ * `runCount` stayed at 0, so an "after N sends" end condition never came true;
+ * and `lastRunAt`/`lastResult` stayed empty, so send conditions that ask about
+ * the previous run were reading values that never changed.
+ */
+export interface JobRun {
+  runCount: number
+  lastRunAt: number
+  lastResult?: 'ok' | 'failed'
+  lastError?: string
+  status: ScheduledJob['status']
+  /** What is still due after this run. Empty means the job is finished. */
+  occurrences: number[]
+}
+
 export interface JobEvent {
   jobId: string
   at: number
   result: SendResult
+  /**
+   * Optional so an older platform layer that does not send it still delivers a
+   * usable event — the log line is written either way, the row simply does not
+   * move. Absent is a missing feature; present-but-wrong would be a lie.
+   */
+  run?: JobRun
 }
 
 /** One folder the user is allowed to keep their data in. */
@@ -217,6 +248,14 @@ export interface PlatformBridge {
   syncJobs(jobs: ScheduledJob[], accounts: MailAccount[]): Promise<void>
   /** Fires when the platform completed a scheduled send while we were open. */
   onJobEvent(handler: (event: JobEvent) => void): () => void
+  /**
+   * Runs that completed with no UI attached, to be applied on open.
+   *
+   * Optional because it only means something where the scheduler outlives the
+   * window — Android. On the desktop the live event already carries the same
+   * data, and in the browser there is no scheduler to report anything.
+   */
+  pullJobRuns?(): Promise<Array<JobRun & { jobId: string }>>
 
   // --- inbox (receiving) ---------------------------------------------------
   // All optional: only the desktop has IMAP wired up so far. The Android
@@ -264,9 +303,26 @@ export interface PlatformBridge {
     uid: number,
     patch: { seen?: boolean; tag?: InboxTag },
   ): Promise<void>
-  /** Local cache only — never issues an IMAP `\Deleted`/EXPUNGE. Re-syncable. */
+  /**
+   * Local cache only — never issues an IMAP `\Deleted`/EXPUNGE.
+   *
+   * "Re-syncable" is why the caller must also record a tombstone: on its own
+   * this drops the cached body and the next sync fetches the message straight
+   * back. See `core/inboxRemoval.ts`.
+   */
   deleteInboxMessages?(
     accountId: string,
+    items: Array<{ folderPath: string; uid: number }>,
+  ): Promise<void>
+  /**
+   * Delete on the server, for real.
+   *
+   * Takes the account config rather than just an id because it has to open a
+   * connection. Rejects when the server refuses — a resolved promise here means
+   * the mail is genuinely gone from the mailbox.
+   */
+  purgeInboxMessages?(
+    config: InboxAccountState,
     items: Array<{ folderPath: string; uid: number }>,
   ): Promise<void>
   /**

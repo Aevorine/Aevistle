@@ -15,6 +15,7 @@ import type {
   DataFolderChange,
   InboxMessageBody,
   JobEvent,
+  JobRun,
   PlatformBridge,
 } from './bridge'
 import { failedResult } from './bridge'
@@ -48,6 +49,7 @@ interface AevistleNativePlugin {
   }): Promise<{ files: Attachment[] }>
 
   syncJobs(opts: { jobs: ScheduledJob[]; accounts: MailAccount[] }): Promise<void>
+  pullJobRuns(): Promise<{ runs: Array<JobRun & { jobId: string }> }>
   notify(opts: { title: string; body: string; code?: boolean }): Promise<void>
   appInfo(): Promise<AppInfo>
 
@@ -74,6 +76,10 @@ interface AevistleNativePlugin {
   }): Promise<void>
   deleteInboxMessages(opts: {
     accountId: string
+    items: Array<{ folderPath: string; uid: number }>
+  }): Promise<void>
+  purgeInboxMessages(opts: {
+    config: InboxAccountState
     items: Array<{ folderPath: string; uid: number }>
   }): Promise<void>
   fetchRemoteImage(opts: { url: string }): Promise<{ value: string }>
@@ -203,6 +209,14 @@ export function createAndroidBridge(): PlatformBridge {
 
     syncJobs: (jobs, accounts) => Native.syncJobs({ jobs, accounts }),
 
+    // Sends that fired while the app was closed — which on Android is most of
+    // them. Without this the mail goes out and the schedule row keeps saying
+    // "waiting to send" until the job is edited by hand.
+    async pullJobRuns() {
+      const { runs } = await Native.pullJobRuns()
+      return Array.isArray(runs) ? runs : []
+    },
+
     onJobEvent(handler) {
       const pending = Native.addListener('jobEvent', handler)
       return () => {
@@ -216,6 +230,7 @@ export function createAndroidBridge(): PlatformBridge {
     setMessageFlags: (config, folderPath, uid, patch) =>
       Native.setMessageFlags({ config, folderPath, uid, patch }),
     deleteInboxMessages: (accountId, items) => Native.deleteInboxMessages({ accountId, items }),
+    purgeInboxMessages: (config, items) => Native.purgeInboxMessages({ config, items }),
     fetchRemoteImage: (url) => Native.fetchRemoteImage({ url }).then((r) => r.value),
     // No native push exists yet — WorkManager's periodic sync updates its own
     // cache silently and the UI catches up on the next manual or app-open

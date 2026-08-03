@@ -14,19 +14,41 @@ import { IconClock, IconCopy, IconPause, IconPlay, IconSend, IconTrash } from '.
 import { useApp } from '../state/AppState'
 import { useI18n } from '../i18n'
 import { summarizeRecurrence } from '../core/schedule'
+import { isFinished } from '../core/jobRun'
 
 export function ScheduleView({ onCompose }: { onCompose: () => void }) {
   const { state, dispatch, toggleJob, deleteJob, runJobNow } = useApp()
-  const { t, formatDateTime, formatRelative } = useI18n()
+  const { t, formatDateTime, formatRelative, formatAgo } = useI18n()
   const toast = useToast()
   const { confirm, confirmElement } = useConfirm()
   const [busy, setBusy] = useState<string | null>(null)
 
-  const jobs = [...state.jobs].sort((a, b) => {
+  /**
+   * Finished reminders move out of the way instead of sitting at the top of
+   * the list looking like they are about to fire.
+   *
+   * Keyed off `status === 'done'`, which the scheduler now actually maintains
+   * — until this release it never left the value the job was created with, so
+   * a partition like this would have put everything in the same bucket
+   * forever. See `core/jobRun.ts`.
+   *
+   * Kept on screen rather than hidden: "did last month's reminder go out?" is
+   * a question people ask, and an archive they can see beats a list that
+   * silently forgets.
+   */
+  const [showDone, setShowDone] = useState(false)
+  const byNextRun = (a: (typeof state.jobs)[number], b: (typeof state.jobs)[number]) => {
     const an = a.occurrences[0] ?? Number.MAX_SAFE_INTEGER
     const bn = b.occurrences[0] ?? Number.MAX_SAFE_INTEGER
     return an - bn
-  })
+  }
+  const active = state.jobs.filter((j) => !isFinished(j)).sort(byNextRun)
+  // Most recently completed first: the one that just fired is the one being
+  // looked for.
+  const done = state.jobs
+    .filter((j) => isFinished(j))
+    .sort((a, b) => (b.lastRunAt ?? 0) - (a.lastRunAt ?? 0))
+  const jobs = showDone ? done : active
 
   /**
    * Delete a reminder — and, if it is one stage of a chain, offer to take the
@@ -111,6 +133,35 @@ export function ScheduleView({ onCompose }: { onCompose: () => void }) {
           }
         />
 
+        {/*
+          Pinned above the scroll area, like the other list screens' controls —
+          a filter that scrolls away with the rows is a filter nobody finds
+          once the list is long.
+
+          Hidden entirely until something has finished, so a new install does
+          not get a tab that leads to an empty room.
+        */}
+        {done.length > 0 ? (
+          <div className="segmented" role="group" aria-label={t('schedule.title')}>
+            <button
+              type="button"
+              className="segmented__item"
+              aria-pressed={!showDone}
+              onClick={() => setShowDone(false)}
+            >
+              {t('schedule.tabActive', { n: active.length })}
+            </button>
+            <button
+              type="button"
+              className="segmented__item"
+              aria-pressed={showDone}
+              onClick={() => setShowDone(true)}
+            >
+              {t('schedule.tabDone', { n: done.length })}
+            </button>
+          </div>
+        ) : null}
+
         <HealthAllClear />
 
         {jobs.length === 0 ? (
@@ -154,23 +205,31 @@ export function ScheduleView({ onCompose }: { onCompose: () => void }) {
                           inbox used a chip and the log used a coloured dot —
                           three dialects for one idea, so none of them could be
                           learned. See `StatusChip`. */}
+                      {/*
+                        Reads `job.status` now, not `occurrences.length`.
+
+                        The length was a stand-in for a status field that never
+                        updated, and it was wrong in both directions: a
+                        repeating job whose buffer had run dry showed "done"
+                        while it was still live, and a one-off that had already
+                        sent showed "waiting" because the renderer had never
+                        been told otherwise.
+                      */}
                       <StatusChip
                         tone={
-                          job.lastResult === 'failed'
+                          job.status === 'failed'
                             ? 'danger'
-                            : !job.enabled
+                            : !job.enabled || isFinished(job)
                               ? 'neutral'
-                              : job.occurrences.length === 0
-                                ? 'neutral'
-                                : 'accent'
+                              : 'accent'
                         }
-                        dot={job.enabled && job.occurrences.length > 0}
+                        dot={job.enabled && !isFinished(job) && job.status !== 'failed'}
                         label={
-                          job.lastResult === 'failed'
+                          job.status === 'failed'
                             ? t('status.failed')
                             : !job.enabled
                               ? t('status.paused')
-                              : job.occurrences.length === 0
+                              : isFinished(job)
                                 ? t('status.done')
                                 : t('status.armed')
                         }
@@ -202,7 +261,37 @@ export function ScheduleView({ onCompose }: { onCompose: () => void }) {
                         <span>{job.enabled ? t('schedule.noMoreRuns') : t('common.disabled')}</span>
                       )}
                       <span>{t('logs.recipients', { n: recipients })}</span>
-                      {job.runCount > 0 ? <span>{t('schedule.runs', { n: job.runCount })}</span> : null}
+                      {/*
+                        What happened last time, not just how many times.
+
+                        `formatAgo`, never `formatRelative` — the latter is for
+                        future instants and answers "overdue" for every past
+                        one, which is how the update card ended up telling
+                        people a check that had just succeeded was late.
+                      */}
+                      {job.runCount > 0 ? (
+                        <span>
+                          <strong>{t('schedule.lastRun')}:</strong>{' '}
+                          {job.lastRunAt ? formatAgo(job.lastRunAt) : '—'}
+                          {job.lastResult ? (
+                            <>
+                              {' · '}
+                              <span
+                                style={{
+                                  color:
+                                    job.lastResult === 'ok' ? 'var(--success)' : 'var(--danger)',
+                                }}
+                              >
+                                {job.lastResult === 'ok'
+                                  ? t('status.sentOk')
+                                  : t('status.failed')}
+                              </span>
+                            </>
+                          ) : null}
+                          {' · '}
+                          {t('schedule.runs', { n: job.runCount })}
+                        </span>
+                      ) : null}
                       {job.draft.attachments.length > 0 ? (
                         <span>
                           {t('compose.attachments')}: {job.draft.attachments.length}

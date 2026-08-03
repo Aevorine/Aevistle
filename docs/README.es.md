@@ -60,6 +60,10 @@ enlaces de acceso, y deja todo lo demás tal cual por defecto.
 | ⚡ **Envío en ráfaga** | Un único disparo programado puede enviar el mismo mensaje varias veces seguidas, con el ritmo que fijes en milisegundos —para poner a prueba tu propio circuito de envío, no para hacer spam a nadie. |
 | 📎 **Adjuntos e imágenes en el cuerpo** | Documentos, imágenes, archivos comprimidos: todo lo que quepa en el límite de tu proveedor. Pega una imagen copiada directamente en el mensaje para insertarla en línea; cualquier imagen adjunta también puede pasar de archivo adjunto a imagen dentro del mensaje, y volver. Aevistle muestra el tamaño real transmitido, porque base64 convierte un archivo de 20 MB en 27 MB y por eso rebotan adjuntos que «no superaban el límite». |
 | 🖼️ **Imágenes que se ven de verdad** | Cada imagen de un mensaje —incrustada en el cuerpo, adjunta como archivo o recibida en la bandeja— aparece como una miniatura que se puede mirar, no como un nombre de archivo que hay que adivinar. Un clic abre el visor a pantalla completa: rueda para acercar, arrastrar para desplazar, doble clic para alternar entre tamaño ajustado y real, giro de un cuarto en ambos sentidos, espejo horizontal o vertical, flechas para recorrer el resto de imágenes del mensaje, y las dimensiones en píxeles, el tamaño y el formato a la vista antes de guardarla o copiarla al portapapeles. `Esc` cierra la imagen y nada más. |
+| 📆 **Un calendario laboral que enseña lo que hace** | Festivos, fines de semana que defines tú y días de recuperación — con una cuadrícula mensual donde un clic cambia el día, puntos de partida de un clic para seis países, y en cada fecha cuántos recordatorios caen ahí, relleno cuando ha sido el calendario quien los movió. |
+| 📊 **Se ve que se envió** | Cada fila muestra el último envío, si salió bien y cuántas veces se ha ejecutado. Los recordatorios de una sola vez pasan a la pestaña Completados en cuanto terminan, en lugar de seguir en la lista fingiendo que esperan. |
+| 🗑️ **Un borrado que significa algo** | Dos acciones separadas, porque son dos peticiones distintas: quitarlo de Aevistle (reversible desde una papelera que lo guarda siete días) o eliminarlo del buzón en el servidor (irreversible, y lo dice). |
+| ✍️ **Modo concentración** | `F9` oculta todo salvo el mensaje y le da la ventana entera. `Esc` devuelve el resto. En la etiqueta hay un contador de caracteres y de bytes: un carácter chino son tres bytes, y el byte es lo que cuenta el límite de tu proveedor. |
 | 🔁 **Recurrencia de verdad** | Una vez · cada N minutos · diaria · semanal en los días elegidos · mensual (con una regla sensata para el día 31) · anual · cron completo de 5 campos. |
 | 🔒 **Copias de los adjuntos** | Programa un recordatorio para el mes que viene: Aevistle guarda su propia copia de los archivos, así que mover o renombrar los originales no lo rompe en silencio. |
 | ⏰ **Se dispara con la ventana cerrada** | Windows mantiene un proceso en la bandeja; Android usa una alarma exacta más WorkManager. Cerrar la ventana no cancela tus recordatorios. |
@@ -80,9 +84,9 @@ La última versión está en **[Releases](https://github.com/Aevorine/Aevistle/r
 
 | Plataforma | Archivo | Notas |
 |---|---|---|
-| Windows 10/11 (x64) | `Aevistle-0.1.3-win-x64-setup.exe` | Instalador, crea accesos directos en el menú Inicio y el escritorio |
-| Windows 10/11 (x64) | `Aevistle-0.1.3-win-x64-portable.exe` | Un solo archivo, sin instalación, funciona desde un USB |
-| Android 7.0+ | `Aevistle-0.1.3.apk` | Móviles y tabletas. Activa antes «instalar aplicaciones desconocidas» para tu navegador o gestor de archivos. |
+| Windows 10/11 (x64) | `Aevistle-0.1.4-win-x64-setup.exe` | Instalador, crea accesos directos en el menú Inicio y el escritorio |
+| Windows 10/11 (x64) | `Aevistle-0.1.4-win-x64-portable.exe` | Un solo archivo, sin instalación, funciona desde un USB |
+| Android 7.0+ | `Aevistle-0.1.4.apk` | Móviles y tabletas. Activa antes «instalar aplicaciones desconocidas» para tu navegador o gestor de archivos. |
 
 > Windows SmartScreen avisará de un editor desconocido. Así se ve una versión
 > sin certificado de firma de pago: elige **Más información → Ejecutar de todas

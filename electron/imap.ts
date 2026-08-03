@@ -589,3 +589,53 @@ export async function setServerSeenFlag(
     /* best-effort — see doc comment */
   }
 }
+
+/**
+ * Delete messages on the server.
+ *
+ * The opposite of `setServerSeenFlag` in temperament: this one throws. A read
+ * flag that failed to mirror costs nothing and fixes itself on the next sync,
+ * but a deletion that failed while the row already vanished from the app reads
+ * as "deleted" for a message still sitting in the mailbox — and the user finds
+ * out weeks later from another client, if at all. Every silent-failure bug
+ * this project has fixed had that shape.
+ *
+ * `messageDelete` is used rather than adding `\Deleted` by hand: ImapFlow
+ * routes it through MOVE to the Trash folder where the server supports it and
+ * falls back to flag-plus-expunge where it does not, which is the behaviour
+ * people expect from "delete" in every other mail client.
+ *
+ * Grouped by folder because each one needs its own mailbox lock, and deleting
+ * by uid across folders would otherwise silently address the wrong messages —
+ * uids are only unique within a mailbox.
+ */
+export async function purgeMessages(
+  config: InboxAccountState,
+  secret: string | null,
+  items: Array<{ folderPath: string; uid: number }>,
+): Promise<void> {
+  if (items.length === 0) return
+  if (!secret) throw new Error('No password saved for this mailbox')
+
+  const byFolder = new Map<string, number[]>()
+  for (const { folderPath, uid } of items) {
+    const list = byFolder.get(folderPath)
+    if (list) list.push(uid)
+    else byFolder.set(folderPath, [uid])
+  }
+
+  await withConnection(config, secret, async (client) => {
+    for (const [folderPath, uids] of byFolder) {
+      const lock = await client.getMailboxLock(folderPath)
+      try {
+        const done = await client.messageDelete(uids, { uid: true })
+        // ImapFlow answers `false` for "the server did not do it" without
+        // throwing. Letting that through would be the same silent success the
+        // rest of this comment is about.
+        if (!done) throw new Error(`The server refused to delete from ${folderPath}`)
+      } finally {
+        lock.release()
+      }
+    }
+  })
+}

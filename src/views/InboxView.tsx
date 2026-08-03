@@ -19,6 +19,8 @@ import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } f
 import {
   Banner,
   Button,
+  Card,
+  CardHeader,
   EmptyState,
   IconButton,
   Modal,
@@ -57,12 +59,12 @@ import { resolveRemoteImages } from '../core/remoteImagePlaceholder'
 import { resolveWithCache } from '../core/imageCache'
 import { getCachedBody, putCachedBody } from '../core/bodyMemo'
 import type { InboxMessageBody } from '../core/bridge'
-import type { Attachment, InboxMessage, InboxTag } from '../core/types'
-
-/** Above this many selected messages, deleting requires typing to confirm. */
-const TYPED_CONFIRM_THRESHOLD = 50
+import { REMOVED_RETENTION_MS, type Attachment, type InboxMessage, type InboxTag } from '../core/types'
 
 type AccountFilter = 'all' | string
+
+/** Kept in step with `REMOVED_RETENTION_MS`; shown so the bin says how long it keeps things. */
+const BIN_DAYS = Math.round(REMOVED_RETENTION_MS / 86_400_000)
 
 /** Types worth trying to show in place rather than handing straight to the OS. */
 const PREVIEWABLE = /\.(png|jpe?g|gif|webp|bmp|avif|pdf|txt|csv|log|md)$/i
@@ -78,6 +80,9 @@ export function InboxView({ onGoToAccounts }: { onGoToAccounts?: () => void }) {
     markInboxMessagesRead,
     tagInboxMessages,
     deleteInboxMessages,
+    purgeInboxMessages,
+    restoreInboxMessages,
+    clearRemovedMessages,
   } = useApp()
   const { t, formatAgo, formatDateTime } = useI18n()
   const toast = useToast()
@@ -198,6 +203,51 @@ export function InboxView({ onGoToAccounts }: { onGoToAccounts?: () => void }) {
 
   const clearSelection = () => setSelected(new Set())
 
+  /**
+   * The recycle bin, flattened across accounts and newest first.
+   *
+   * One list rather than one per mailbox: someone looking for a message they
+   * just removed is looking for *that message*, and being asked which account
+   * it was in first is the question they came here because they could not
+   * answer.
+   */
+  const [showBin, setShowBin] = useState(false)
+  const removedAll = useMemo(
+    () =>
+      state.inboxAccounts
+        .flatMap((i) => (i.removed ?? []).map((entry) => ({ accountId: i.accountId, entry })))
+        .sort((a, b) => b.entry.at - a.entry.at),
+    [state.inboxAccounts],
+  )
+
+  const restoreAllRemoved = () => {
+    const byAccount = new Map<string, string[]>()
+    for (const { accountId, entry } of removedAll) {
+      const key = `${entry.message.folderPath} ${entry.message.uid}`
+      const list = byAccount.get(accountId)
+      if (list) list.push(key)
+      else byAccount.set(accountId, [key])
+    }
+    for (const [accountId, keys] of byAccount) restoreInboxMessages(accountId, keys)
+    toast.push({ tone: 'success', title: t('toast.restored', { n: removedAll.length }) })
+  }
+
+  const emptyBin = async () => {
+    const ok = await confirm({
+      title: t('confirm.emptyBin', { n: removedAll.length }),
+      // Worth spelling out: emptying the bin is not a second deletion. The mail
+      // is still on the server; what is lost is the ability to bring the row
+      // back without also un-removing it by hand.
+      body: t('confirm.emptyBinBody'),
+      confirmLabel: t('inbox.binEmpty'),
+      cancelLabel: t('common.cancel'),
+      danger: true,
+    })
+    if (!ok) return
+    clearRemovedMessages()
+    setShowBin(false)
+  }
+
   const toggleSelect = (id: string) =>
     setSelected((prev) => {
       const next = new Set(prev)
@@ -234,12 +284,66 @@ export function InboxView({ onGoToAccounts }: { onGoToAccounts?: () => void }) {
       confirmLabel: t('common.delete'),
       cancelLabel: t('common.cancel'),
       danger: true,
-      requireTypedConfirmation: n > TYPED_CONFIRM_THRESHOLD ? String(n) : undefined,
     })
     if (!ok) return
     await deleteIdSet(selected)
     clearSelection()
     toast.push({ tone: 'info', title: t('toast.deleted') })
+  }
+
+  /** Apply one tag to every selected message, grouped by the account each belongs to. */
+  const tagSet = (ids: Set<string>, tag: InboxTag) => {
+    for (const [accountId, msgIds] of groupByAccount(ids)) {
+      tagInboxMessages(accountId, msgIds, tag)
+    }
+    clearSelection()
+  }
+
+  /**
+   * Delete on the server, for real.
+   *
+   * Asks a second time and names the mailbox, because this is the one action
+   * here that reaches outside the app and cannot be taken back — the recycle
+   * bin has nothing to restore from once the message is gone from the server.
+   * Failures are surfaced: the rows are only dropped after the server agrees,
+   * so a red toast here means the mail is still in the mailbox, which is the
+   * truth and is worth knowing.
+   */
+  const purgeSet = async (ids: Set<string>, title: string) => {
+    if (ids.size === 0) return
+    const ok = await confirm({
+      title,
+      body: t('confirm.purgeBody'),
+      confirmLabel: t('inbox.deleteOnServer'),
+      cancelLabel: t('common.cancel'),
+      danger: true,
+    })
+    if (!ok) return
+    const failures: string[] = []
+    let removed = 0
+    for (const [accountId, msgIds] of groupByAccount(ids)) {
+      const result = await purgeInboxMessages(accountId, msgIds)
+      if (result.ok) removed += msgIds.length
+      else failures.push(result.error ?? 'unknown')
+    }
+    clearSelection()
+    if (failures.length === 0) {
+      toast.push({ tone: 'success', title: t('toast.purged', { n: removed }) })
+    } else {
+      toast.push({
+        tone: 'error',
+        title: t('toast.purgeFailed'),
+        detail: failures.join('; '),
+      })
+    }
+  }
+
+  const purgeSelected = () =>
+    purgeSet(selected, t('confirm.purgeSelected', { n: selected.size }))
+
+  const purgeAllMessages = () => {
+    const ids = new Set(allMessages.map((m) => m.id))
+    return purgeSet(ids, t('confirm.purgeAll', { n: ids.size }))
   }
 
   const deleteAllRead = async () => {
@@ -250,7 +354,6 @@ export function InboxView({ onGoToAccounts }: { onGoToAccounts?: () => void }) {
       confirmLabel: t('common.delete'),
       cancelLabel: t('common.cancel'),
       danger: true,
-      requireTypedConfirmation: ids.size > TYPED_CONFIRM_THRESHOLD ? String(ids.size) : undefined,
     })
     if (!ok) return
     await deleteIdSet(ids)
@@ -266,7 +369,6 @@ export function InboxView({ onGoToAccounts }: { onGoToAccounts?: () => void }) {
       confirmLabel: t('common.delete'),
       cancelLabel: t('common.cancel'),
       danger: true,
-      requireTypedConfirmation: t('common.delete'),
     })
     if (!ok) return
     await deleteIdSet(ids)
@@ -615,8 +717,30 @@ export function InboxView({ onGoToAccounts }: { onGoToAccounts?: () => void }) {
         <Button variant="ghost" onClick={() => markSet(selected, false)}>
           {t('inbox.markUnread')}
         </Button>
-        <Button variant="danger" icon={<IconTrash size={15} />} onClick={deleteSelected}>
-          {t('common.delete')}
+        {/* Batch tagging: the third thing anyone does to a handful of selected
+            messages, after reading and deleting them. Cycling each row's tag
+            one click at a time is how you end up not bothering. */}
+        <Button variant="ghost" onClick={() => tagSet(selected, 'flagged')}>
+          {t('inbox.tagFlagged')}
+        </Button>
+        <Button variant="ghost" onClick={() => tagSet(selected, 'none')}>
+          {t('inbox.tagNone')}
+        </Button>
+        {/*
+          Two deletes, because they are two different requests.
+
+          "Remove" takes it out of Aevistle and leaves the mailbox alone; it is
+          reversible from the bin. "Delete from mailbox" is the real thing and
+          cannot be undone, so it is the one that stays red and asks a second
+          question. Before this there was one button that said "delete" and did
+          neither — it dropped the row, and the next sync five minutes later
+          fetched the message straight back.
+        */}
+        <Button variant="ghost" icon={<IconTrash size={15} />} onClick={deleteSelected}>
+          {t('inbox.removeHere')}
+        </Button>
+        <Button variant="danger" onClick={purgeSelected}>
+          {t('inbox.deleteOnServer')}
         </Button>
         <Button variant="ghost" onClick={clearSelection}>
           {t('inbox.clearSelection')}
@@ -718,7 +842,67 @@ export function InboxView({ onGoToAccounts }: { onGoToAccounts?: () => void }) {
                 <Button variant="ghost" onClick={deleteAllMessages}>
                   {t('inbox.deleteAll')}
                 </Button>
+                <Button variant="danger" onClick={purgeAllMessages}>
+                  {t('inbox.deleteAllOnServer')}
+                </Button>
+                {/* Only once there is something in it. A bin that is always
+                    there and always empty is a control people stop seeing. */}
+                {removedAll.length > 0 ? (
+                  <Button variant="ghost" onClick={() => setShowBin((v) => !v)}>
+                    {t('inbox.binToggle', { n: removedAll.length })}
+                  </Button>
+                ) : null}
               </div>
+            ) : null}
+
+            {showBin && removedAll.length > 0 ? (
+              <Card className="inbox-bin">
+                <CardHeader
+                  title={t('inbox.binTitle')}
+                  hint={t('inbox.binHint', { days: BIN_DAYS })}
+                  action={
+                    <div className="btn-row">
+                      <Button variant="ghost" onClick={restoreAllRemoved}>
+                        {t('inbox.binRestoreAll')}
+                      </Button>
+                      <Button variant="ghost" onClick={emptyBin}>
+                        {t('inbox.binEmpty')}
+                      </Button>
+                    </div>
+                  }
+                />
+                <div className="card__body">
+                  <div className="bin-list">
+                    {removedAll.slice(0, 100).map(({ accountId, entry }) => (
+                      <div className="bin-row" key={`${accountId} ${entry.message.folderPath} ${entry.message.uid}`}>
+                        <div className="bin-row__text">
+                          <div className="bin-row__subject">
+                            {entry.message.subject || t('inbox.noSubject')}
+                          </div>
+                          <div className="bin-row__meta">
+                            {entry.message.from} · {t('inbox.binRemovedAgo', { when: formatAgo(entry.at) })}
+                          </div>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          onClick={() =>
+                            restoreInboxMessages(accountId, [
+                              `${entry.message.folderPath} ${entry.message.uid}`,
+                            ])
+                          }
+                        >
+                          {t('inbox.binRestore')}
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                  {removedAll.length > 100 ? (
+                    <div className="field__hint">
+                      {t('inbox.binMore', { n: removedAll.length - 100 })}
+                    </div>
+                  ) : null}
+                </div>
+              </Card>
             ) : null}
           </>
         )}
@@ -970,11 +1154,15 @@ export function InboxView({ onGoToAccounts }: { onGoToAccounts?: () => void }) {
           // PDFs and text render inertly in a sandboxed frame. No
           // `allow-scripts`, exactly as the message body frame below.
           // Images never reach here — they get the full-screen viewer.
-          <iframe
-            className="preview__frame"
-            sandbox=""
+          <PreviewFrame
+            key={preview.attachment.id}
             src={preview.dataUrl}
-            title={preview.attachment.name}
+            name={preview.attachment.name}
+            onOpenExternally={
+              bridge?.openPath && preview.attachment.path
+                ? () => void bridge.openPath?.(preview.attachment.path!)
+                : undefined
+            }
           />
         ) : null}
       </Modal>
@@ -1113,5 +1301,69 @@ function MessageBodyFrame({
       title="message-body"
       className="reader__frame"
     />
+  )
+}
+
+/**
+ * The attachment preview frame, with a visible failure.
+ *
+ * Every previous version of this rendered an `<iframe>` and hoped. When the
+ * frame did not load — and for a while it never did, because `frame-src 'none'`
+ * blocked it outright — the modal opened onto a white rectangle: no error, no
+ * toast, nothing to click. The file was fine, the app was fine, and the user
+ * had no way to tell that anything had gone wrong at all.
+ *
+ * So the frame now has to *prove* it loaded. `onLoad` fires for a successful
+ * navigation; a frame that has not reported one within a short grace period is
+ * treated as failed, and the modal says so and offers the system handler
+ * instead. That covers the cases a `load` event alone does not — a blocked
+ * navigation, a format Chromium declines to render, a plugin that is not there.
+ *
+ * The timeout is deliberately generous. A 20 MB PDF off a slow disk is not a
+ * failure, and a preview that accuses itself of being broken while it is still
+ * decoding would be its own kind of wrong.
+ */
+function PreviewFrame({
+  src,
+  name,
+  onOpenExternally,
+}: {
+  src: string
+  name: string
+  onOpenExternally?: () => void
+}) {
+  const { t } = useI18n()
+  const [state, setState] = useState<'loading' | 'ok' | 'failed'>('loading')
+
+  useEffect(() => {
+    setState('loading')
+    const timer = window.setTimeout(() => {
+      setState((s) => (s === 'loading' ? 'failed' : s))
+    }, 4000)
+    return () => window.clearTimeout(timer)
+  }, [src])
+
+  return (
+    <div className="preview__wrap">
+      <iframe
+        className="preview__frame"
+        sandbox=""
+        src={src}
+        title={name}
+        data-state={state}
+        onLoad={() => setState('ok')}
+      />
+      {state === 'failed' ? (
+        <div className="preview__fallback">
+          <Banner tone="warning" title={t('inbox.previewFailed')}>
+            {onOpenExternally ? (
+              <Button variant="secondary" icon={<IconExternal size={15} />} onClick={onOpenExternally}>
+                {t('inbox.openExternally')}
+              </Button>
+            ) : null}
+          </Banner>
+        </div>
+      ) : null}
+    </div>
   )
 }

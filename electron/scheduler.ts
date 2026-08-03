@@ -14,6 +14,7 @@ import { evaluateConditions } from '../src/core/conditions'
 import { applyJitter, computeOccurrences, rearm } from '../src/core/schedule'
 import { MAX_BURST_COUNT } from '../src/core/types'
 import type { MailAccount, ScheduledJob, SendResult } from '../src/core/types'
+import type { JobRun } from '../src/core/bridge'
 import { sendMail } from './mailer'
 import { getSecret } from './store'
 
@@ -27,8 +28,27 @@ const TICK_MS = 15_000
 const PRECISE_WINDOW_MS = 30_000
 
 export interface SchedulerEvents {
-  jobEvent: (payload: { jobId: string; at: number; result: SendResult }) => void
+  jobEvent: (payload: { jobId: string; at: number; result: SendResult; run: JobRun }) => void
   jobUpdated: (job: ScheduledJob) => void
+}
+
+/**
+ * The bookkeeping a run leaves behind, packed for the renderer.
+ *
+ * Built here rather than left for `main.ts` to scrape off the job, because
+ * this is the only place that knows the run finished — and because the
+ * previous arrangement (mutate the job, emit `jobUpdated`, hope someone is
+ * listening) had nobody listening at all.
+ */
+function runOf(job: ScheduledJob): JobRun {
+  return {
+    runCount: job.runCount,
+    lastRunAt: job.lastRunAt ?? Date.now(),
+    lastResult: job.lastResult,
+    lastError: job.lastError,
+    status: job.status,
+    occurrences: job.occurrences,
+  }
 }
 
 export class Scheduler extends EventEmitter {
@@ -228,7 +248,7 @@ export class Scheduler extends EventEmitter {
       job.lastRunAt = Date.now()
       job.occurrences = this.topUp(job, remaining)
       if (job.occurrences.length === 0) job.status = 'done'
-      this.emit('jobEvent', { jobId: job.id, at: job.lastRunAt, result: skipped })
+      this.emit('jobEvent', { jobId: job.id, at: job.lastRunAt, result: skipped, run: runOf(job) })
       this.emit('jobUpdated', job)
       this.armPrecise()
       return
@@ -298,7 +318,7 @@ export class Scheduler extends EventEmitter {
 
     if (job.occurrences.length === 0) job.status = 'done'
 
-    this.emit('jobEvent', { jobId: job.id, at: job.lastRunAt, result })
+    this.emit('jobEvent', { jobId: job.id, at: job.lastRunAt, result, run: runOf(job) })
     this.emit('jobUpdated', job)
     this.armPrecise()
   }

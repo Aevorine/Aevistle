@@ -156,6 +156,44 @@ export function ComposeView({
     if (height) localStorage.setItem(BODY_HEIGHT_KEY, height)
   }
 
+  /**
+   * Focus mode: the message, and nothing else.
+   *
+   * The body box is already the only thing on this card that grows, so it
+   * ends up with whatever the page head, the health strip, the addressing row
+   * and the footer have not taken — measured at 281px of an 827px window, with
+   * 356px going to chrome around it. Trimming that chrome buys tens of pixels
+   * at a time and stops being possible fairly quickly.
+   *
+   * This is the answer for the case the trimming cannot reach: a long message.
+   * Everything except the message is hidden, so the box gets essentially the
+   * whole window, and one keystroke brings the rest back. `Escape` leaves, and
+   * `F9` toggles.
+   *
+   * Not persisted. It is a posture for writing one message, not a preference —
+   * reopening the app into a stripped-down screen with no visible way back
+   * would be a mode someone got stuck in.
+   */
+  const [focusMode, setFocusMode] = useState(false)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'F9') {
+        e.preventDefault()
+        setFocusMode((v) => !v)
+        return
+      }
+      // Escape only leaves focus mode when nothing is stacked on top of it.
+      // Every dialog in this app listens on `document`, so an unconditional
+      // handler here would close the preview *and* the mode behind it with
+      // one press — the same mistake the image viewer had to be fixed for.
+      if (e.key === 'Escape' && focusMode && !document.querySelector('.modal, dialog[open]')) {
+        setFocusMode(false)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [focusMode])
+
   const draft = state.draft
   const account = state.accounts.find((a) => a.id === draft.accountId)
   const preset = providerById(account?.providerId)
@@ -566,16 +604,28 @@ export function ComposeView({
 
   return (
     <>
-      <div className="view view--compose">
+      <div className="view view--compose" data-focus={focusMode}>
         <div className="view__inner">
-          <PageHead title={t('compose.title')} subtitle={t('compose.subtitle')} />
+          {/*
+            Hidden in focus mode along with everything else that is not the
+            message. The health strip is the one exception worth naming: it is
+            suppressed here too, and that is a real trade — but it reports
+            standing conditions that are equally visible the moment focus mode
+            is left, and it is the largest single band between the title and
+            the card.
+          */}
+          {focusMode ? null : (
+            <>
+              <PageHead title={t('compose.title')} subtitle={t('compose.subtitle')} />
 
-          {/* Whatever is quietly wrong, on the screen that gets opened most.
-              Absent entirely when there is nothing to report. */}
-          <HealthBoard onGo={onNavigate} />
+              {/* Whatever is quietly wrong, on the screen that gets opened most.
+                  Absent entirely when there is nothing to report. */}
+              <HealthBoard onGo={onNavigate} />
 
-          {/* Anything the network stopped from leaving. Absent when empty. */}
-          <OutboxStrip />
+              {/* Anything the network stopped from leaving. Absent when empty. */}
+              <OutboxStrip />
+            </>
+          )}
 
           {state.accounts.length === 0 ? (
             <Banner
@@ -712,7 +762,37 @@ export function ComposeView({
                   fault rather than as guidance. The merge syntax it used to
                   advertise is discoverable through the variable chips below
                   the moment a `{{token}}` is typed. */}
-              <Field label={t('compose.body')} htmlFor={bodyId}>
+              <Field
+                label={t('compose.body')}
+                htmlFor={bodyId}
+                action={
+                  <div className="field__tools">
+                    {/*
+                      A live count, and not only of characters.
+
+                      Bytes are what a provider's size limit is actually
+                      counted in, and one Chinese character is three of them
+                      in UTF-8 — so a draft that looks half the length of the
+                      limit can be over it. The two numbers disagreeing is the
+                      information.
+                    */}
+                    <span className="field__count" aria-live="polite">
+                      {t('compose.bodyCount', {
+                        c: [...draft.body].length,
+                        b: formatBytes(new TextEncoder().encode(draft.body).length),
+                      })}
+                    </span>
+                    <button
+                      type="button"
+                      className="linkbtn"
+                      onClick={() => setFocusMode((v) => !v)}
+                      title={t('compose.focusHint')}
+                    >
+                      {focusMode ? t('compose.focusExit') : t('compose.focusEnter')}
+                    </button>
+                  </div>
+                }
+              >
                 <textarea
                   id={bodyId}
                   ref={bodyRef}

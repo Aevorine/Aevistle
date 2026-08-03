@@ -61,6 +61,8 @@ const api: DesktopApi = {
     ipcRenderer.invoke(IPC.setMessageFlags, config, folderPath, uid, patch),
   deleteInboxMessages: (accountId, items) =>
     ipcRenderer.invoke(IPC.deleteInboxMessages, accountId, items),
+  purgeInboxMessages: (accountId, config, items) =>
+    ipcRenderer.invoke(IPC.purgeInboxMessages, accountId, config, items),
   fetchRemoteImage: (url) => ipcRenderer.invoke(IPC.fetchRemoteImage, url),
 
   onInboxEvent: (handler) => {

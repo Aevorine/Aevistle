@@ -663,7 +663,38 @@ export interface InboxAccountState {
   lastSyncError?: string
   showRemoteImages: RemoteImagePolicy
   imageAllowlist: string[]
+  /**
+   * Messages removed from this app but still on the server.
+   *
+   * Without this list "delete" was cosmetic: the row vanished, and the next
+   * automatic sync — five minutes later by default — fetched the same message
+   * back off the server and put it straight back. Nothing recorded that it had
+   * been removed, so nothing could filter it out.
+   *
+   * The whole row is kept, not just the uid, so restoring is instant and works
+   * even for a message that has since fallen outside the window a sync looks
+   * at. That is also what makes this list the recycle bin rather than a
+   * separate structure holding the same thing twice.
+   */
+  removed?: RemovedMessage[]
 }
+
+export interface RemovedMessage {
+  message: InboxMessage
+  /** When it was removed, for the retention sweep. */
+  at: number
+}
+
+/** How long a removed message stays restorable. */
+export const REMOVED_RETENTION_MS = 7 * 86_400_000
+/**
+ * Hard ceiling on the recycle bin, applied before the age sweep.
+ *
+ * "Delete all" on a busy mailbox is one gesture that produces hundreds of
+ * entries, and this list lives in `state.json` — the same file the log cap
+ * exists to keep small.
+ */
+export const REMOVED_CAP = 500
 
 export function defaultInboxAccountState(accountId: string): InboxAccountState {
   return {

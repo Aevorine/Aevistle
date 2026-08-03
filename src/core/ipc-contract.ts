@@ -126,8 +126,15 @@ export interface DesktopApi {
     uid: number,
     patch: { seen?: boolean; tag?: InboxTag },
   ): Promise<void>
+  /** Forget locally: cache files only, the mailbox is not touched. */
   deleteInboxMessages(
     accountId: string,
+    items: Array<{ folderPath: string; uid: number }>,
+  ): Promise<void>
+  /** Delete on the server. Rejects on failure — see `purgeMessages` in `imap.ts`. */
+  purgeInboxMessages(
+    accountId: string,
+    config: InboxAccountState,
     items: Array<{ folderPath: string; uid: number }>,
   ): Promise<void>
   fetchRemoteImage(url: string): Promise<string>
@@ -192,6 +199,7 @@ export const IPC = {
   getMessageBody: 'aevistle:get-message-body',
   setMessageFlags: 'aevistle:set-message-flags',
   deleteInboxMessages: 'aevistle:delete-inbox-messages',
+  purgeInboxMessages: 'aevistle:purge-inbox-messages',
   fetchRemoteImage: 'aevistle:fetch-remote-image',
   inboxEvent: 'aevistle:inbox-event',
   notify: 'aevistle:notify',

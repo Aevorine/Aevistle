@@ -1,0 +1,34 @@
+# Dependency updates.
+#
+# The repo had none, `.npmrc` set `audit=false`, and the registry it points at
+# does not implement the advisories endpoint — so between the three of them
+# this project had never had a single dependency vulnerability check run
+# against it. `npm run audit:deps` covers the local side; this covers the part
+# that keeps working when nobody is looking.
+#
+# Grouped and monthly on purpose. A weekly stream of individual patch bumps on
+# a one-maintainer project is noise that gets muted, and a muted Dependabot is
+# the same as no Dependabot.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 5
+    groups:
+      dev-dependencies:
+        dependency-type: development
+      production-dependencies:
+        dependency-type: production
+
+  - package-ecosystem: gradle
+    directory: /android
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

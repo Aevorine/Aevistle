@@ -37,7 +37,16 @@
   font-weight: 100 900;
   src:
     local("Times New Roman"), local("TimesNewRomanPSMT"), local("Tinos"),
-    local("Liberation Serif"), local("Nimbus Roman");
+    local("Liberation Serif"), local("Nimbus Roman"),
+    /* Android. None of the five above ship on it — Times New Roman is a
+       Microsoft font, and Tinos/Liberation/Nimbus are desktop Linux. Without
+       these two the Latin half of every mixed sentence fell through to the
+       generic `serif` at the end of the stack, which on Android is Noto Serif
+       anyway, but arrived there by accident rather than by choice and skipped
+       the unicode-range split on the way — so a phone got one font for the
+       whole sentence, which is the exact thing this pair of @font-face rules
+       exists to prevent. */
+    local("Noto Serif"), local("Droid Serif");
   /* Basic Latin, Latin-1, Latin Extended-A/B, IPA, Greek, Cyrillic,
      general punctuation, superscripts, currency and letterlike symbols. */
   unicode-range:
@@ -52,7 +61,10 @@
   src:
     local("SimSun"), local("宋体"), local("NSimSun"), local("Songti SC"),
     local("STSong"), local("Noto Serif CJK SC"), local("Noto Serif SC"),
-    local("Source Han Serif SC"), local("AR PL UMing CN");
+    local("Source Han Serif SC"), local("AR PL UMing CN"),
+    /* Android's own Songti substitute. Named differently on different vendor
+       builds, so all three spellings are listed. */
+    local("Noto Serif CJK"), local("NotoSerifCJK"), local("Source Han Serif");
   /* CJK symbols and punctuation, Hiragana/Katakana, unified ideographs,
      compatibility ideographs and full-width forms. */
   unicode-range:

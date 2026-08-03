@@ -289,6 +289,38 @@ public class AevistleNativePlugin extends Plugin {
         call.resolve();
     }
 
+    /**
+     * The other kind of delete: on the server, not just in the cache.
+     *
+     * Rejects when the server refuses. The web layer only drops the rows after
+     * this resolves, so a failure leaves the mailbox and the app agreeing with
+     * each other instead of the app claiming a deletion that never happened.
+     */
+    @PluginMethod
+    public void purgeInboxMessages(final PluginCall call) {
+        final JSObject config = call.getObject("config");
+        final JSArray items = call.getArray("items");
+        if (config == null) {
+            call.reject("config is required");
+            return;
+        }
+        io.execute(() -> {
+            try {
+                String accountId = config.optString("accountId", "");
+                String secret = new SecretStore(getContext()).get(accountId, "imap");
+                JSONArray list = items == null ? new JSONArray() : items;
+                MailFetcher.purge(config, secret, list);
+                // Cache last: a cache entry for a message still on the server is
+                // recoverable, a missing one for a message we failed to delete
+                // is a hole the user cannot see.
+                new InboxCache(getContext()).deleteMessages(accountId, list);
+                call.resolve();
+            } catch (Exception e) {
+                call.reject(e.getMessage() == null ? e.toString() : e.getMessage());
+            }
+        });
+    }
+
     @PluginMethod
     public void fetchRemoteImage(final PluginCall call) {
         final String url = call.getString("url");
@@ -665,6 +697,26 @@ public class AevistleNativePlugin extends Plugin {
 
         AevistleScheduler.rearmAll(getContext());
         call.resolve();
+    }
+
+    /**
+     * Hand over every send that happened while the web layer was not running.
+     *
+     * The desktop learns about a run from a live event because its scheduler
+     * and its window are in the same process. Android's is not: the alarm fires
+     * into a worker with no WebView attached, so there is nobody to notify at
+     * the moment it matters. {@link JobStore#recordRun} queues the report
+     * instead and this drains it — which is why a schedule that fired overnight
+     * now reads "sent" when the app is opened rather than still claiming to be
+     * waiting.
+     *
+     * Absolute state, not deltas, so redelivering a report is harmless.
+     */
+    @PluginMethod
+    public void pullJobRuns(PluginCall call) {
+        JSObject result = new JSObject();
+        result.put("runs", new JobStore(getContext()).drainRuns());
+        call.resolve(result);
     }
 
     // -----------------------------------------------------------------------

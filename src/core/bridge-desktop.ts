@@ -49,6 +49,8 @@ export function createDesktopBridge(): PlatformBridge {
     setMessageFlags: (config, folderPath, uid, patch) =>
       api.setMessageFlags(config, folderPath, uid, patch),
     deleteInboxMessages: (accountId, items) => api.deleteInboxMessages(accountId, items),
+    purgeInboxMessages: (config, items) =>
+      api.purgeInboxMessages(config.accountId, config, items),
     fetchRemoteImage: (url) => api.fetchRemoteImage(url),
     onInboxEvent: (handler) => api.onInboxEvent(handler),
 

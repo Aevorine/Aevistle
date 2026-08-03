@@ -229,8 +229,16 @@ check('ELE-02', 'External navigation is refused', () => {
 })
 
 check('ELE-03', 'Content Security Policy is present and strict', () => {
-  const html = read('index.html')
-  if (!html) return { severity: 'error', detail: 'index.html is missing.', fix: '' }
+  const raw = read('index.html')
+  if (!raw) return { severity: 'error', detail: 'index.html is missing.', fix: '' }
+  /*
+   * Comments stripped before anything is matched. The policy is documented in
+   * an HTML comment directly above itself, and that comment names the same
+   * directives it explains — so a scan of the raw file reads the *prose* first
+   * and reports on a sentence rather than on the policy. Which it did: a
+   * paragraph describing `frame-src` was flagged as allowing remote frames.
+   */
+  const html = raw.replace(/<!--[\s\S]*?-->/g, '')
   if (!/Content-Security-Policy/i.test(html)) {
     return {
       severity: 'high',
@@ -242,7 +250,26 @@ check('ELE-03', 'Content Security Policy is present and strict', () => {
   if (/script-src[^;]*'unsafe-inline'/.test(html)) problems.push("script-src allows 'unsafe-inline'")
   if (/script-src[^;]*'unsafe-eval'/.test(html)) problems.push("script-src allows 'unsafe-eval'")
   if (!/object-src\s+'none'/.test(html)) problems.push("object-src is not 'none'")
-  if (!/frame-ancestors\s+'none'/.test(html)) problems.push("frame-ancestors is not 'none'")
+
+  /*
+   * `frame-ancestors` used to be required here. It is *ignored* when the
+   * policy arrives in a <meta> tag — the browser logs a warning saying so on
+   * every single load — so the assertion was demanding a directive that could
+   * never do anything, and passing it proved nothing. A check that cannot
+   * fail for the right reason is worse than no check: it spends the reader's
+   * confidence without buying any.
+   *
+   * What is worth asserting is that frames cannot come from the network. The
+   * attachment preview needs `data:` (a sandboxed, opaque-origin frame with no
+   * script), and that is the whole of the legitimate use.
+   */
+  const frameSrc = /frame-src([^;]*);/.exec(html)?.[1]?.trim()
+  if (!frameSrc) {
+    problems.push('frame-src is not set')
+  } else if (/\*|https?:/.test(frameSrc)) {
+    problems.push(`frame-src allows remote frames: ${frameSrc}`)
+  }
+
   if (problems.length === 0) return null
   return { severity: 'medium', detail: problems.join('\n           '), fix: 'Tighten the policy in index.html.' }
 })

@@ -134,6 +134,7 @@ export function Field({
   label,
   hint,
   labelHint,
+  action,
   optional,
   children,
   htmlFor,
@@ -149,19 +150,46 @@ export function Field({
    * this for text that explains the field; use `hint` when it needs the width.
    */
   labelHint?: ReactNode
+  /**
+   * Controls that belong to this field, pushed to the end of the label line.
+   *
+   * On the label line rather than above the control for the same reason
+   * `labelHint` is: that line already has empty space to its right, and a row
+   * of its own would cost ~32px on a form that is required to fit one screen.
+   */
+  action?: ReactNode
   optional?: string
   children: ReactNode
   htmlFor?: string
 }) {
+  const labelEl = label ? (
+    <label className="field__label" htmlFor={htmlFor}>
+      {label}
+      {optional ? <span className="field__optional">{optional}</span> : null}
+      {labelHint ? <span className="field__labelhint">{labelHint}</span> : null}
+    </label>
+  ) : null
+
   return (
     <div className="field">
-      {label ? (
-        <label className="field__label" htmlFor={htmlFor}>
-          {label}
-          {optional ? <span className="field__optional">{optional}</span> : null}
-          {labelHint ? <span className="field__labelhint">{labelHint}</span> : null}
-        </label>
-      ) : null}
+      {/*
+        The wrapper appears only when there is something to put beside the
+        label. Wrapping unconditionally looked tidier and cost 69px on the
+        compose footer: `.form-rows .field > .field__label` places the label in
+        the 5.5em gutter column, that selector stopped matching through the new
+        div, and every label in the form went from beside its control to above
+        it. Measured, not guessed — `scripts/layout-probe.mjs` showed the
+        message box *shrinking* from 281px to 234px on a change meant to grow
+        it.
+      */}
+      {action ? (
+        <div className="field__labelrow">
+          {labelEl ?? <span />}
+          {action}
+        </div>
+      ) : (
+        labelEl
+      )}
       {children}
       {hint ? <div className="field__hint">{hint}</div> : null}
     </div>

@@ -124,21 +124,33 @@ export class ControlServer {
       pid: process.pid,
       startedAt: Date.now(),
     }
-    // Written twice: once beside the data it controls, and once at the fixed
-    // `~/.aevistle` a caller can find without being told where the data folder
-    // was moved to.
-    for (const dir of [this.controlDir(), homeControlDir()]) {
-      await fs.mkdir(dir, { recursive: true }).catch(() => {})
-      await fs
-        .writeFile(
-          path.join(dir, ENDPOINT_FILE),
-          JSON.stringify(endpoint, null, 2),
-          // Owner-only. Meaningless on most Windows filesystems, honoured
-          // everywhere else, and free to ask for.
-          { mode: 0o600 },
-        )
-        .catch(() => {})
-    }
+    /*
+     * Written to `~/.aevistle` only.
+     *
+     * It used to be written to the data folder as well, "beside the data it
+     * controls". But this file carries the live bearer token, and the data
+     * folder is explicitly allowed to be a synced or network location — the
+     * documentation for that setting says so. Putting a credential there means
+     * OneDrive or Dropbox uploads it, and it stays in that provider's version
+     * history long after the token itself has rotated.
+     *
+     * Nothing is lost: `~/.aevistle` is the fixed location precisely so a
+     * caller can find the endpoint without being told where the data folder
+     * went, and it was always written here too.
+     */
+    await fs.mkdir(homeControlDir(), { recursive: true }).catch(() => {})
+    await fs
+      .writeFile(
+        path.join(homeControlDir(), ENDPOINT_FILE),
+        JSON.stringify(endpoint, null, 2),
+        // Owner-only. Meaningless on most Windows filesystems, honoured
+        // everywhere else, and free to ask for.
+        { mode: 0o600 },
+      )
+      .catch(() => {})
+    // Any endpoint file an older version left in the data folder is a stale
+    // token sitting in a synced directory; clear it rather than leave it.
+    await fs.rm(path.join(this.controlDir(), ENDPOINT_FILE), { force: true }).catch(() => {})
     this.hooks.log('info', 'control.started', `127.0.0.1:${port}`)
   }
 

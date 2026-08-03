@@ -7,6 +7,7 @@ import { ShortcutsDialog, matchShortcut } from './components/Shortcuts'
 import { DataFolderSetup } from './components/DataFolderSetup'
 import {
   IconActivity,
+  IconCalendar,
   IconClock,
   IconFileText,
   IconInbox,
@@ -41,6 +42,7 @@ const loadInbox = () => import('./views/InboxView')
 const loadContacts = () => import('./views/ContactsView')
 const loadTemplates = () => import('./views/TemplatesView')
 const loadLogs = () => import('./views/LogsView')
+const loadWorkCalendar = () => import('./views/WorkCalendarView')
 const loadSettings = () => import('./views/SettingsView')
 
 const CodesView = lazy(() => loadCodes().then((m) => ({ default: m.CodesView })))
@@ -49,6 +51,9 @@ const InboxView = lazy(() => loadInbox().then((m) => ({ default: m.InboxView }))
 const ContactsView = lazy(() => loadContacts().then((m) => ({ default: m.ContactsView })))
 const TemplatesView = lazy(() => loadTemplates().then((m) => ({ default: m.TemplatesView })))
 const LogsView = lazy(() => loadLogs().then((m) => ({ default: m.LogsView })))
+const WorkCalendarView = lazy(() =>
+  loadWorkCalendar().then((m) => ({ default: m.WorkCalendarView })),
+)
 const SettingsView = lazy(() => loadSettings().then((m) => ({ default: m.SettingsView })))
 
 /**
@@ -80,6 +85,7 @@ type ViewId =
   | 'schedule'
   | 'contacts'
   | 'templates'
+  | 'workcal'
   | 'logs'
   | 'settings'
 
@@ -93,6 +99,10 @@ const NAV: Array<{ id: ViewId; labelKey: TranslationKey; icon: typeof IconMail }
   { id: 'schedule', labelKey: 'nav.schedule', icon: IconClock },
   { id: 'contacts', labelKey: 'nav.contacts', icon: IconUsers },
   { id: 'templates', labelKey: 'nav.templates', icon: IconFileText },
+  // Next to Schedule rather than buried in Settings: it decides which days a
+  // reminder may land on, which makes it part of scheduling, not a preference.
+  // It also stopped being a single form when it grew a month grid.
+  { id: 'workcal', labelKey: 'nav.workcal', icon: IconCalendar },
   { id: 'logs', labelKey: 'nav.logs', icon: IconActivity },
   { id: 'settings', labelKey: 'nav.settings', icon: IconSettings },
 ]
@@ -397,6 +407,11 @@ function Shell() {
         {view === 'templates' ? (
           <Suspense fallback={<Skeleton shape="list" rows={4} />}>
             <TemplatesView onApplied={() => setView('compose')} />
+          </Suspense>
+        ) : null}
+        {view === 'workcal' ? (
+          <Suspense fallback={<Skeleton shape="form" />}>
+            <WorkCalendarView />
           </Suspense>
         ) : null}
         {view === 'logs' ? (

@@ -70,6 +70,10 @@ own and collects nothing.
 | ⚡ **Burst sending** | A single scheduled fire can send the same message several times in a row, paced by however many milliseconds you set — for stress-testing your own send path, not for spamming anyone. |
 | 📎 **Any attachment, pictures in the body** | Documents, images, archives — anything up to your provider's limit. Paste a copied image straight into the message and it lands inline; any attached image can also be switched from a file to one shown inside the message, and back. Aevistle shows the real size on the wire, because base64 makes a 20 MB file into 27 MB and that is why "under the limit" attachments get bounced. |
 | 🖼️ **Pictures you can actually see** | Every image on a message — embedded in the body, riding along as an attachment, or arriving in your inbox — shows as a thumbnail you can look at instead of a filename you have to guess from. Click one for a full-screen viewer: scroll to zoom, drag to pan, double-click to swap between fitted and actual size, rotate a quarter turn either way, mirror it, step through the rest of the message with the arrow keys, and read off the pixel dimensions, file size and format before saving it anywhere or copying it to the clipboard. `Esc` closes the picture and nothing else. |
+| 📆 **A working calendar that shows its work** | Public holidays, weekends you define yourself, and make-up workdays — with a month grid where clicking a day switches it, one-click starting points for six countries, and a count on each date of how many reminders land there, filled in when the calendar is what moved one. |
+| 📊 **You can see that it sent** | Every schedule row carries its last send, whether it succeeded, and how many times it has run. One-off reminders move to a Completed tab once they are done instead of sitting in the list still claiming to be waiting. |
+| 🗑️ **Delete that means something** | Two separate actions, because they are two separate requests: remove it from Aevistle (reversible from a recycle bin that keeps it for seven days) or delete it from the mailbox on the server (not reversible, and it says so). |
+| ✍️ **Focus mode** | `F9` hides everything except the message and gives the box the whole window. `Esc` brings the rest back. A live character and byte count sits on the label — one Chinese character is three bytes, and that is what a provider's size limit counts. |
 | 🔁 **Real recurrence** | Once · every N minutes · daily · weekly on chosen days · monthly (with a sane rule for the 31st) · yearly · full 5-field cron. |
 | 🔒 **Attachment snapshots** | Schedule a reminder for next month and Aevistle keeps its own copy of the files, so moving or renaming the originals does not silently break it. |
 | ⏰ **Fires when closed** | Windows keeps a tray process; Android uses an exact alarm plus WorkManager. Closing the window does not cancel your reminders. |
@@ -90,9 +94,9 @@ Grab the latest build from **[Releases](https://github.com/Aevorine/Aevistle/rel
 
 | Platform | File | Notes |
 |---|---|---|
-| Windows 10/11 (x64) | `Aevistle-0.1.3-win-x64-setup.exe` | Installer, adds a Start-menu and desktop shortcut |
-| Windows 10/11 (x64) | `Aevistle-0.1.3-win-x64-portable.exe` | Single file, no installation, runs from a USB stick |
-| Android 7.0+ | `Aevistle-0.1.3.apk` | Phones and tablets. Enable "install unknown apps" for your browser or file manager first. |
+| Windows 10/11 (x64) | `Aevistle-0.1.4-win-x64-setup.exe` | Installer, adds a Start-menu and desktop shortcut |
+| Windows 10/11 (x64) | `Aevistle-0.1.4-win-x64-portable.exe` | Single file, no installation, runs from a USB stick |
+| Android 7.0+ | `Aevistle-0.1.4.apk` | Phones and tablets. Enable "install unknown apps" for your browser or file manager first. |
 
 > Windows SmartScreen will warn about an unrecognised publisher. That is what a
 > release without a paid code-signing certificate looks like; choose
