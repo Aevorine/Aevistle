@@ -551,6 +551,9 @@ export const zhCN: Translations = {
 
   // --- health board ---
   "health.orphanedAccount": "{n} 条提醒指向已删除的账号 —— 到点会失败",
+  "boot.failedTitle": "Aevistle 无法启动",
+  "boot.failedHint": "你的数据没有被改动。如果一直这样，重装一遍应用通常就能解决。",
+  "health.schedulerUnreachable": "定时任务没有真正生效——本设备没有接受这份日程，到点不会发出去",
   "health.noSecret": "{n} 个账号没存密码 —— 每次发送都会卡在登录",
   "health.failing": "{n} 条提醒上次发送失败",
   "health.spent": "{n} 条提醒开着，但已经没有下一次了",

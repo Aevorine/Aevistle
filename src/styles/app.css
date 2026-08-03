@@ -3896,3 +3896,40 @@ textarea {
     font-size: 2.4rem;
   }
 }
+
+/* --- start-up gave up ------------------------------------------------------
+   Deliberately plain: this renders when the bridge or the saved data could not
+   be read, so it must not depend on anything either of them provides. No
+   sidebar, no icons, no state — just the reason and what to do about it. */
+.shell--boot-error {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  padding: var(--sp-6);
+  background: var(--surface-2);
+}
+.bootfail {
+  max-width: 52ch;
+  padding: var(--sp-6);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface-1);
+  text-align: center;
+}
+.bootfail__title {
+  margin: 0 0 var(--sp-3);
+  font-size: var(--text-xl);
+  font-weight: 700;
+  color: var(--text-1);
+}
+.bootfail__detail {
+  margin: 0 0 var(--sp-3);
+  color: var(--text-2);
+  line-height: 1.6;
+}
+.bootfail__hint {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-3);
+  line-height: 1.6;
+}

@@ -333,6 +333,25 @@ export function detectPlatform(): Platform {
   return 'web'
 }
 
+/**
+ * Are we inside the desktop shell but without the bridge it should have injected?
+ *
+ * This matters because of what the fallback is. `detectPlatform` answers "no
+ * `window.aevistle`" with `'web'`, and the web bridge is a working app: it
+ * keeps state in localStorage and its scheduling maths runs. So a preload that
+ * failed to load — a sandbox change, a bad path, a throw inside preload.cjs —
+ * would not produce a broken-looking app. It would produce a normal-looking one
+ * that quietly writes to browser storage instead of the data folder and arms no
+ * alarms at all, and the user would only find out when the mail never arrived.
+ *
+ * The user-agent is the honest signal here: Electron puts its own token in it,
+ * and that token is there whether or not our preload ran.
+ */
+export function isDesktopShellWithoutBridge(): boolean {
+  if (typeof window === 'undefined' || window.aevistle) return false
+  return / Electron\//.test(navigator.userAgent ?? '')
+}
+
 let cached: PlatformBridge | null = null
 
 /**
@@ -342,6 +361,17 @@ let cached: PlatformBridge | null = null
  */
 export async function getBridge(): Promise<PlatformBridge> {
   if (cached) return cached
+
+  // Refuse to quietly become the browser sandbox inside the desktop app. See
+  // `isDesktopShellWithoutBridge` — falling back here loses the user's data
+  // folder and their entire schedule while looking completely normal.
+  if (isDesktopShellWithoutBridge()) {
+    throw new Error(
+      'The desktop bridge did not load, so Aevistle cannot reach your data folder or the ' +
+        'scheduler. Reinstalling usually fixes this. Your existing data has not been touched.',
+    )
+  }
+
   const platform = detectPlatform()
 
   if (platform === 'desktop') {

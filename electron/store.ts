@@ -347,7 +347,23 @@ export async function setSecret(
 ): Promise<void> {
   assertEncryptionAvailable()
   const map = await readSecrets()
-  map[secretKey(accountId, kind)] = safeStorage.encryptString(secret).toString('base64')
+  let blob: string
+  try {
+    blob = safeStorage.encryptString(secret).toString('base64')
+  } catch (err) {
+    // `isEncryptionAvailable()` answers "is there a keystore", not "can this
+    // process use the key in it". On Windows the AES key lives DPAPI-wrapped in
+    // Chromium's `Local State`; if that file was copied from another machine or
+    // profile, unwrapping fails here — and it fails inside BoringSSL, so the
+    // raw message is `error:1e000065 ... BAD_DECRYPT`, which tells the user
+    // nothing. Fail with something they can act on instead of that.
+    throw new Error(
+      `The password could not be encrypted with this computer's keystore (${
+        err instanceof Error ? err.message : String(err)
+      }).`,
+    )
+  }
+  map[secretKey(accountId, kind)] = blob
   await writeSecrets(map)
 }
 
@@ -367,9 +383,29 @@ export async function getSecret(
   }
 }
 
+/**
+ * Whether a password is stored *and* this machine can still read it.
+ *
+ * The cheap version of this — "is there a blob under that key" — was a silent
+ * failure waiting to happen, and it happened. When the OS keystore key changes
+ * (a restored backup, a new Windows profile, a rotated DPAPI key) the blob is
+ * still sitting there, so every reader agreed the password was set: the account
+ * row said "password saved", `health.noSecret` counted zero accounts missing
+ * one, and preflight raised no warning. Meanwhile `getSecret` returned null and
+ * every send failed at sign-in. Nothing was broken loudly enough to look
+ * broken.
+ *
+ * Decrypting is what makes the answer true. It costs one keystore call per
+ * account — this runs when the account list is read, not per message — and in
+ * exchange the existing "no saved password" banner and preflight warning start
+ * firing, which is exactly what should happen when the password is unusable.
+ *
+ * Note this deliberately does not delete the unreadable blob. It may become
+ * readable again (the user signs back into the right OS account), and throwing
+ * away a credential the user cannot see is not a decision to make for them.
+ */
 export async function hasSecret(accountId: string, kind: SecretKind = 'smtp'): Promise<boolean> {
-  const map = await readSecrets()
-  return Boolean(map[secretKey(accountId, kind)])
+  return (await getSecret(accountId, kind)) !== null
 }
 
 export async function deleteSecret(accountId: string, kind: SecretKind = 'smtp'): Promise<void> {

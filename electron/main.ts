@@ -170,6 +170,60 @@ async function readEndpoint(): Promise<ControlEndpoint | null> {
   }
 }
 
+/**
+ * Keep a main-process error from becoming Electron's raw crash dialog.
+ *
+ * Without a handler here, anything that throws outside a request — a keystore
+ * call, a timer callback, a rejected promise nobody awaited — reaches Electron's
+ * default reporter, which shows the user a modal titled "A JavaScript error
+ * occurred in the main process" containing a BoringSSL stack trace. That dialog
+ * is unactionable and, worse, it is the *only* thing they see: the app is often
+ * still perfectly usable underneath it.
+ *
+ * So: name the cause where we recognise it, keep running where it is safe to,
+ * and never show a stack trace to someone who just wanted to send an email.
+ */
+function describeMainProcessError(err: unknown): { title: string; detail: string } {
+  const message = err instanceof Error ? err.message : String(err)
+
+  // The one users actually hit. Chromium keeps the key that encrypts saved
+  // passwords in its own `Local State`, wrapped by the OS. When that wrapping
+  // no longer matches this machine or this OS account — a restored backup, a
+  // copied profile folder, a rebuilt Windows user — the unwrap fails deep in
+  // BoringSSL and surfaces as `error:1e000065 ... BAD_DECRYPT`.
+  if (/BAD_DECRYPT|Cipher functions|bad decrypt/i.test(message)) {
+    return {
+      title: 'Saved passwords cannot be read on this computer',
+      detail:
+        'Aevistle stores mail passwords with the operating system keystore, and the key ' +
+        'that unlocks them does not belong to this Windows account. This usually means the ' +
+        'data was restored from a backup or copied from another computer.\n\n' +
+        'Everything else still works. Open Settings → Mail accounts, edit each account and ' +
+        'enter its password again — after that, scheduled sending resumes as normal.',
+    }
+  }
+
+  return {
+    title: 'Aevistle hit an unexpected problem',
+    detail: `${message}\n\nThe app is still running. If this keeps happening, please report it.`,
+  }
+}
+
+function reportMainProcessError(err: unknown): void {
+  const { title, detail } = describeMainProcessError(err)
+  console.error('[aevistle] main process error:', err)
+  // `showErrorBox` works before the app is ready, which `dialog.showMessageBox`
+  // does not — and the errors worth catching here happen at startup.
+  try {
+    dialog.showErrorBox(title, detail)
+  } catch {
+    // A failure to report a failure is not worth crashing over.
+  }
+}
+
+process.on('uncaughtException', reportMainProcessError)
+process.on('unhandledRejection', reportMainProcessError)
+
 // A second copy would run the schedule twice and send everything in duplicate.
 if (!app.requestSingleInstanceLock()) {
   app.quit()

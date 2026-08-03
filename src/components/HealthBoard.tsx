@@ -23,7 +23,7 @@ const ICONS: Record<HealthLevel, typeof IconAlert> = {
 }
 
 export function HealthBoard({ onGo }: { onGo?: (where: NonNullable<HealthIssue['goTo']>) => void }) {
-  const { state } = useApp()
+  const { state, schedulerUnreachable } = useApp()
   const { t } = useI18n()
   /**
    * Keyed on what it actually reads, not on the whole store.
@@ -33,9 +33,9 @@ export function HealthBoard({ onGo }: { onGo?: (where: NonNullable<HealthIssue['
    * work whose answer cannot change while someone is typing a sentence.
    */
   const issues = useMemo(
-    () => collectHealth(state),
+    () => collectHealth(state, Date.now(), schedulerUnreachable),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [state.jobs, state.accounts, state.settings, state.inboxAccounts, state.logs],
+    [state.jobs, state.accounts, state.settings, state.inboxAccounts, state.logs, schedulerUnreachable],
   )
 
   // Nothing wrong and nothing scheduled is a new install, not a clean bill of
@@ -83,7 +83,7 @@ export function HealthBoard({ onGo }: { onGo?: (where: NonNullable<HealthIssue['
 
 /** The all-clear line, for the schedule screen where "nothing wrong" is news. */
 export function HealthAllClear() {
-  const { state } = useApp()
+  const { state, schedulerUnreachable } = useApp()
   const { t } = useI18n()
   /**
    * Keyed on what it actually reads, not on the whole store.
@@ -93,9 +93,9 @@ export function HealthAllClear() {
    * work whose answer cannot change while someone is typing a sentence.
    */
   const issues = useMemo(
-    () => collectHealth(state),
+    () => collectHealth(state, Date.now(), schedulerUnreachable),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [state.jobs, state.accounts, state.settings, state.inboxAccounts, state.logs],
+    [state.jobs, state.accounts, state.settings, state.inboxAccounts, state.logs, schedulerUnreachable],
   )
   if (issues.some((i) => i.level !== 'info')) return null
   if (state.jobs.length === 0) return null

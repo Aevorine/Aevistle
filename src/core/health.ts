@@ -31,11 +31,31 @@ export interface HealthIssue {
 /** How far ahead "coming up" looks. A week is one planning horizon. */
 const HORIZON_MS = 7 * 86_400_000
 
-export function collectHealth(state: AppState, now = Date.now()): HealthIssue[] {
+export function collectHealth(
+  state: AppState,
+  now = Date.now(),
+  /**
+   * Set when the schedule could not be handed to the platform scheduler. It is
+   * not derivable from `state` — the jobs look identical whether or not an
+   * alarm exists behind them — so it has to be passed in.
+   */
+  schedulerUnreachable = false,
+): HealthIssue[] {
   const issues: HealthIssue[] = []
   const accountIds = new Set(state.accounts.map((a) => a.id))
 
   // --- things that will definitely fail ----------------------------------
+
+  // First, because it invalidates every other reassurance on this strip: if the
+  // scheduler never received the jobs, nothing below is going to happen either.
+  if (schedulerUnreachable && state.jobs.some((j) => j.enabled)) {
+    issues.push({
+      id: 'scheduler-unreachable',
+      level: 'danger',
+      key: 'health.schedulerUnreachable',
+      goTo: 'schedule',
+    })
+  }
 
   const orphaned = state.jobs.filter((j) => j.enabled && !accountIds.has(j.draft.accountId))
   if (orphaned.length > 0) {

@@ -456,6 +456,20 @@ export interface AppApi {
   bridge: PlatformBridge | null
   i18n: I18n
   dispatch: (action: Action) => void
+  /**
+   * Why start-up stopped, when it did. `ready` stays false in that case, so
+   * without this the UI has no way to tell "still loading" from "gave up".
+   */
+  bootError: string | null
+  /**
+   * True when handing the schedule to the platform scheduler last failed.
+   *
+   * Nothing else can tell: the jobs are still in state, still enabled, still
+   * showing a next-send time — the alarms behind them just do not exist. This
+   * is the app's whole promise failing with the UI unchanged, so it has to be
+   * reported rather than retried in silence.
+   */
+  schedulerUnreachable: boolean
 
   addLog: (entry: Omit<LogEntry, 'id' | 'at'>) => void
   saveAccount: (account: MailAccount, secret?: string) => Promise<void>
@@ -544,6 +558,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   liveRef.current = state
   const [bridge, setBridge] = useState<PlatformBridge | null>(null)
   const [ready, setReady] = useState(false)
+  const [schedulerUnreachable, setSchedulerUnreachable] = useState(false)
+  const [bootError, setBootError] = useState<string | null>(null)
   const hydrated = useRef(false)
 
   /**
@@ -574,11 +590,33 @@ export function AppProvider({ children }: { children: ReactNode }) {
     let cancelled = false
 
     void (async () => {
-      const b = await getBridge()
+      // Boot has to report its own failures. `ready` gates the whole UI, so a
+      // throw anywhere below used to leave the app sitting on its loading
+      // skeleton indefinitely — no error, no content, nothing to act on, and
+      // nothing in the window to suggest it was not simply still loading.
+      let b: PlatformBridge
+      try {
+        b = await getBridge()
+      } catch (err) {
+        if (!cancelled) setBootError(err instanceof Error ? err.message : String(err))
+        return
+      }
       if (cancelled) return
       setBridge(b)
 
-      const stored = await b.loadState()
+      let stored: Awaited<ReturnType<PlatformBridge['loadState']>>
+      try {
+        stored = await b.loadState()
+      } catch (err) {
+        if (!cancelled) {
+          setBootError(
+            `Your saved data could not be read (${
+              err instanceof Error ? err.message : String(err)
+            }).`,
+          )
+        }
+        return
+      }
       if (cancelled) return
 
       if (stored) {
@@ -643,7 +681,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const DRAFT_ONLY_DELAY = 1_500
   const NORMAL_DELAY = 350
+  const SAVE_RETRY_DELAY = 3_000
   const lastSaved = useRef<AppState | null>(null)
+  /** Identifies the most recent save, so a slow earlier one cannot claim it. */
+  const saveToken = useRef(0)
 
   useEffect(() => {
     if (!bridge || !hydrated.current) return
@@ -666,10 +707,35 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     const timer = window.setTimeout(
       () => {
-        lastSaved.current = state
-        void bridge.saveState(state).catch(() => {
-          /* A failed write must not take the UI down; the next change retries. */
-        })
+        // Record the save only once it has actually happened. Marking it before
+        // awaiting looked harmless — "the next change retries" — but it is only
+        // true when a next change comes. Stop typing right after a failed write
+        // and the work is gone at restart, with nothing on screen having
+        // suggested anything went wrong. Worse, `lastSaved` claiming success
+        // made the pagehide flush below skip the very write that had failed.
+        const attempt = ++saveToken.current
+        void bridge
+          .saveState(state)
+          .then(() => {
+            // A newer save may have been issued while this one was in flight;
+            // letting a stale success win would mark newer edits as persisted.
+            if (attempt === saveToken.current) lastSaved.current = state
+          })
+          .catch((err) => {
+            console.error('[aevistle] could not save state:', err)
+            // Leave `lastSaved` alone so any later change — or the flush on the
+            // way out — tries again, and retry once unprompted in case there is
+            // no later change to ride along with.
+            window.setTimeout(() => {
+              if (attempt !== saveToken.current) return
+              void bridge
+                .saveState(state)
+                .then(() => {
+                  if (attempt === saveToken.current) lastSaved.current = state
+                })
+                .catch(() => {})
+            }, SAVE_RETRY_DELAY)
+          })
       },
       draftOnly ? DRAFT_ONLY_DELAY : NORMAL_DELAY,
     )
@@ -689,8 +755,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (!bridge) return
     const flush = () => {
       if (!hydrated.current || lastSaved.current === liveRef.current) return
-      lastSaved.current = liveRef.current
-      void bridge.saveState(liveRef.current).catch(() => {})
+      const pending = liveRef.current
+      const attempt = ++saveToken.current
+      void bridge
+        .saveState(pending)
+        .then(() => {
+          if (attempt === saveToken.current) lastSaved.current = pending
+        })
+        // Same reasoning as the debounced save: only a write that landed counts
+        // as saved. On `visibilitychange` the app is backgrounded rather than
+        // closing, so a flush that failed here must stay retryable — claiming
+        // success would make every later flush skip it.
+        .catch((err) => {
+          console.error('[aevistle] could not flush state:', err)
+        })
     }
     const onHidden = () => {
       if (document.visibilityState === 'hidden') flush()
@@ -718,12 +796,38 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!bridge || !ready) return
-    void bridge
-      .syncJobs(
-        state.jobs.filter((j) => j.enabled),
-        state.accounts,
-      )
-      .catch(() => {})
+    let cancelled = false
+    /**
+     * Arm the platform scheduler, and say so when that fails.
+     *
+     * This used to swallow the error. Everything downstream then agreed the
+     * schedule was live — the job list, the "next send" time, the tray tooltip
+     * — while no alarm existed on the device at all. On Android that is the
+     * ordinary outcome of exact-alarm permission being refused, so the failure
+     * mode was not exotic. One retry covers a transient IPC hiccup; past that
+     * the health strip says it out loud.
+     */
+    const arm = async (attemptsLeft: number): Promise<void> => {
+      try {
+        await bridge.syncJobs(
+          state.jobs.filter((j) => j.enabled),
+          state.accounts,
+        )
+        if (!cancelled) setSchedulerUnreachable(false)
+      } catch (err) {
+        if (cancelled) return
+        if (attemptsLeft > 0) {
+          window.setTimeout(() => void arm(attemptsLeft - 1), 2_000)
+          return
+        }
+        console.error('[aevistle] could not arm the scheduler:', err)
+        setSchedulerUnreachable(true)
+      }
+    }
+    void arm(1)
+    return () => {
+      cancelled = true
+    }
     // Signatures, not the arrays themselves — otherwise every keystroke in a
     // draft would re-arm every alarm on the device.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1475,6 +1579,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     bridge,
     i18n,
     dispatch,
+    bootError,
+    schedulerUnreachable,
     addLog,
     saveAccount,
     deleteAccount,

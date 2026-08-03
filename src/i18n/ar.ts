@@ -552,6 +552,9 @@ export const ar: Translations = {
 
   // --- health board ---
   "health.orphanedAccount": "{n} تذكير يشير إلى حساب محذوف — سيفشل إرساله",
+  "boot.failedTitle": "تعذّر بدء تشغيل Aevistle",
+  "boot.failedHint": "لم تتغيّر بياناتك. إذا تكرر ذلك، فإعادة تثبيت التطبيق تحلّ المشكلة عادةً.",
+  "health.schedulerUnreachable": "التذكيرات غير مُفعّلة: لم يقبل هذا الجهاز الجدولة، ولن يُرسل شيء",
   "health.noSecret": "{n} حساب بلا كلمة مرور محفوظة — كل إرسال سيفشل عند تسجيل الدخول",
   "health.failing": "{n} تذكير فشل في آخر تشغيل",
   "health.spent": "{n} تذكير مُفعّل لكن لم يعد لديه ما يُرسل",

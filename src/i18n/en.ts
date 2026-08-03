@@ -562,6 +562,9 @@ export const en = {
 
   // --- health board ---
   "health.orphanedAccount": "Pointing at an account that no longer exists: {n} — these will fail",
+  "boot.failedTitle": "Aevistle could not start",
+  "boot.failedHint": "Your data has not been changed. If this keeps happening, reinstalling the app usually fixes it.",
+  "health.schedulerUnreachable": "Reminders are not armed — this device did not accept the schedule, so nothing will send",
   "health.noSecret": "Accounts with no saved password: {n} — every send will fail at sign-in",
   "health.failing": "Failed on their last run: {n}",
   "health.spent": "On, but with nothing left to send: {n}",

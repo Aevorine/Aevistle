@@ -554,6 +554,9 @@ export const es: Translations = {
 
   // --- health board ---
   "health.orphanedAccount": "{n} recordatorio(s) apuntan a una cuenta eliminada: fallarán",
+  "boot.failedTitle": "Aevistle no ha podido iniciarse",
+  "boot.failedHint": "Tus datos no se han modificado. Si sigue ocurriendo, reinstalar la aplicación suele bastar.",
+  "health.schedulerUnreachable": "Los recordatorios no están activos: este dispositivo no aceptó la programación y no se enviará nada",
   "health.noSecret": "{n} cuenta(s) sin contraseña guardada: todo envío fallará al iniciar sesión",
   "health.failing": "{n} recordatorio(s) fallaron en su último envío",
   "health.spent": "{n} recordatorio(s) están activos pero ya no tienen nada que enviar",

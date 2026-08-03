@@ -554,6 +554,9 @@ export const fr: Translations = {
 
   // --- health board ---
   "health.orphanedAccount": "{n} rappel(s) pointent vers un compte supprimé — ils échoueront",
+  "boot.failedTitle": "Aevistle n’a pas pu démarrer",
+  "boot.failedHint": "Vos données n’ont pas été modifiées. Si cela persiste, réinstaller l’application suffit généralement.",
+  "health.schedulerUnreachable": "Les rappels ne sont pas armés : cet appareil n’a pas accepté la planification, rien ne partira",
   "health.noSecret": "{n} compte(s) sans mot de passe enregistré — chaque envoi échouera à la connexion",
   "health.failing": "{n} rappel(s) ont échoué au dernier envoi",
   "health.spent": "{n} rappel(s) sont actifs mais n’ont plus rien à envoyer",

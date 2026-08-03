@@ -100,7 +100,7 @@ const NAV: Array<{ id: ViewId; labelKey: TranslationKey; icon: typeof IconMail }
 const COLLAPSE_KEY = 'aevistle.sidebar.collapsed'
 
 function Shell() {
-  const { state, ready, bridge, dispatch, undo, toggleJob } = useApp()
+  const { state, ready, bridge, bootError, dispatch, undo, toggleJob } = useApp()
   const { t } = useI18n()
   const toast = useToast()
   const [view, setView] = useState<ViewId>('compose')
@@ -233,6 +233,27 @@ function Shell() {
    * state), they make the wait legible, and they mean the layout does not jump
    * when the real screen replaces them, because it is the same layout.
    */
+  /**
+   * Start-up gave up. Say so.
+   *
+   * `ready` never becomes true when boot fails, so this branch used to fall
+   * through to the loading skeleton below and stay there — an app that looked
+   * like it was still starting, forever, with an empty window and no error.
+   * That is indistinguishable from a hang, and it is the one state where the
+   * user most needs to be told what happened.
+   */
+  if (bootError) {
+    return (
+      <div className="shell shell--boot-error">
+        <div className="bootfail" role="alert">
+          <h1 className="bootfail__title">{t('boot.failedTitle')}</h1>
+          <p className="bootfail__detail">{bootError}</p>
+          <p className="bootfail__hint">{t('boot.failedHint')}</p>
+        </div>
+      </div>
+    )
+  }
+
   if (!ready) {
     return (
       <div className="shell" data-collapsed={collapsed}>
