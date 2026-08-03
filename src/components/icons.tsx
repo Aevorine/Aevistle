@@ -302,3 +302,76 @@ export const IconStar = (p: IconProps) => (
     <path d="M12 3.6l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8-4.3-4.1 5.9-.9Z" />
   </Svg>
 )
+
+/* --- the image viewer ------------------------------------------------------
+   Everything below exists for the full-screen picture viewer. Same 24×24
+   stroke grid as the rest; nothing here is decorative, each one labels a
+   control that also has a keyboard shortcut. */
+
+export const IconImage = (p: IconProps) => (
+  <Svg {...p}>
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <circle cx="8.5" cy="9.5" r="1.5" />
+    <path d="M21 16l-5-5-5.5 5.5L8 14l-5 5" />
+  </Svg>
+)
+
+export const IconZoomIn = (p: IconProps) => (
+  <Svg {...p}>
+    <circle cx="10.5" cy="10.5" r="6.5" />
+    <path d="M15.5 15.5L21 21" />
+    <path d="M10.5 7.5v6M7.5 10.5h6" />
+  </Svg>
+)
+
+export const IconZoomOut = (p: IconProps) => (
+  <Svg {...p}>
+    <circle cx="10.5" cy="10.5" r="6.5" />
+    <path d="M15.5 15.5L21 21" />
+    <path d="M7.5 10.5h6" />
+  </Svg>
+)
+
+/** Turn a quarter clockwise. The mirrored variant is the same path flipped. */
+export const IconRotateRight = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M20 5v5h-5" />
+    <path d="M19.4 10a7.5 7.5 0 1 0-1.1 6.6" />
+  </Svg>
+)
+
+export const IconRotateLeft = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M4 5v5h5" />
+    <path d="M4.6 10a7.5 7.5 0 1 1 1.1 6.6" />
+  </Svg>
+)
+
+/** Mirror left-to-right: a dashed axis with a solid shape either side of it. */
+export const IconFlipH = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M12 3v18" strokeDasharray="2.5 2.5" />
+    <path d="M9 6L4 12l5 6z" />
+    <path d="M15 6l5 6-5 6z" />
+  </Svg>
+)
+
+export const IconFlipV = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M3 12h18" strokeDasharray="2.5 2.5" />
+    <path d="M6 9l6-5 6 5z" />
+    <path d="M6 15l6 5 6-5z" />
+  </Svg>
+)
+
+export const IconChevronLeft = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M15 5l-7 7 7 7" />
+  </Svg>
+)
+
+export const IconChevronRight = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M9 5l7 7-7 7" />
+  </Svg>
+)

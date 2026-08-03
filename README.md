@@ -69,6 +69,7 @@ own and collects nothing.
 | 🔑 **Verification codes, on their own screen** | Codes and sign-in links are lifted out of arriving mail automatically and collected on a screen of their own — sender, subject, arrival time and the code itself, set large enough to read at a glance. Click anywhere on a card to copy. A notification carries the code so you need not open anything at all, and the history survives deleting the mail it came from. |
 | ⚡ **Burst sending** | A single scheduled fire can send the same message several times in a row, paced by however many milliseconds you set — for stress-testing your own send path, not for spamming anyone. |
 | 📎 **Any attachment, pictures in the body** | Documents, images, archives — anything up to your provider's limit. Paste a copied image straight into the message and it lands inline; any attached image can also be switched from a file to one shown inside the message, and back. Aevistle shows the real size on the wire, because base64 makes a 20 MB file into 27 MB and that is why "under the limit" attachments get bounced. |
+| 🖼️ **Pictures you can actually see** | Every image on a message — embedded in the body, riding along as an attachment, or arriving in your inbox — shows as a thumbnail you can look at instead of a filename you have to guess from. Click one for a full-screen viewer: scroll to zoom, drag to pan, double-click to swap between fitted and actual size, rotate a quarter turn either way, mirror it, step through the rest of the message with the arrow keys, and read off the pixel dimensions, file size and format before saving it anywhere or copying it to the clipboard. `Esc` closes the picture and nothing else. |
 | 🔁 **Real recurrence** | Once · every N minutes · daily · weekly on chosen days · monthly (with a sane rule for the 31st) · yearly · full 5-field cron. |
 | 🔒 **Attachment snapshots** | Schedule a reminder for next month and Aevistle keeps its own copy of the files, so moving or renaming the originals does not silently break it. |
 | ⏰ **Fires when closed** | Windows keeps a tray process; Android uses an exact alarm plus WorkManager. Closing the window does not cancel your reminders. |
@@ -89,9 +90,9 @@ Grab the latest build from **[Releases](https://github.com/Aevorine/Aevistle/rel
 
 | Platform | File | Notes |
 |---|---|---|
-| Windows 10/11 (x64) | `Aevistle-0.1.0-win-x64-setup.exe` | Installer, adds a Start-menu and desktop shortcut |
-| Windows 10/11 (x64) | `Aevistle-0.1.0-win-x64-portable.exe` | Single file, no installation, runs from a USB stick |
-| Android 7.0+ | `Aevistle-0.1.0.apk` | Phones and tablets. Enable "install unknown apps" for your browser or file manager first. |
+| Windows 10/11 (x64) | `Aevistle-0.1.3-win-x64-setup.exe` | Installer, adds a Start-menu and desktop shortcut |
+| Windows 10/11 (x64) | `Aevistle-0.1.3-win-x64-portable.exe` | Single file, no installation, runs from a USB stick |
+| Android 7.0+ | `Aevistle-0.1.3.apk` | Phones and tablets. Enable "install unknown apps" for your browser or file manager first. |
 
 > Windows SmartScreen will warn about an unrecognised publisher. That is what a
 > release without a paid code-signing certificate looks like; choose

@@ -643,6 +643,18 @@ textarea {
     box-shadow var(--dur-fast) var(--ease),
     background var(--dur-fast) var(--ease);
 }
+/*
+ * The date and time pickers are 2px taller than every other input, because
+ * Chromium lays their internal spin fields out on their own metrics and
+ * ignores the line-height around them. Two pixels is not visible on its own;
+ * it is visible when the picker sits in a row beside a text field, which is
+ * exactly where the send-time control lives.
+ */
+.input[type='datetime-local'],
+.input[type='date'],
+.input[type='time'] {
+  padding-block: 10px;
+}
 .input::placeholder,
 .textarea::placeholder {
   color: var(--text-3);
@@ -682,21 +694,11 @@ textarea {
   line-height: var(--leading-relaxed);
   font-family: inherit;
 }
-/**
- * The compose body: the one field the whole screen exists to collect, so it
- * gets a box sized like it — not the same height as a subject line. This
- * trades some of the "fits one screen with no scroll" work done elsewhere in
- * this form for a body a person can actually see more than four lines of;
- * the surrounding card still scrolls rather than clipping it.
- */
-.textarea--body {
-  min-height: 320px;
-}
-@media (max-height: 720px) {
-  .textarea--body {
-    min-height: 220px;
-  }
-}
+/* The compose body's own sizing lives with the compose layout — see
+   `.compose-layout > .field:has(.textarea--body)`. There were three sets of
+   rules for this one box at one point, two of them dead: the most specific
+   won, and the `min-height: 320px` here and the `max(45vh, 300px)` further
+   down had no effect on anything while reading as though they did. */
 .textarea--mono {
   font-family: var(--font-mono);
   font-size: var(--text-base);
@@ -977,6 +979,13 @@ textarea {
   gap: var(--sp-2);
   padding: 9px var(--sp-4);
   min-height: var(--control-h);
+  /* Set here rather than inherited. A button placed inside a banner picked up
+     that banner's paragraph leading and came out 48.4px against the 46px every
+     other button on the screen was — measured by `scripts/ui-consistency.mjs`,
+     invisible to the eye, and exactly the kind of drift that adds up to "the
+     interface is not uniform". A control's height is a property of the
+     control, not of whatever it happens to sit in. */
+  line-height: var(--leading-tight);
   border: 1px solid transparent;
   border-radius: var(--r-sm);
   font-size: var(--text-base);
@@ -1085,7 +1094,11 @@ textarea {
   display: flex;
   align-items: center;
   gap: var(--sp-3);
-  padding: var(--sp-4) var(--sp-5);
+  /* Tighter vertically than horizontally on purpose: this bar sits directly
+     under the compose form, and every pixel of padding here is a pixel off
+     the message box above it. The buttons keep their own 44px height, so the
+     touch target is unchanged — only the air around it. */
+  padding: var(--sp-3) var(--sp-5);
   border-top: 1px solid var(--border-subtle);
   background: color-mix(in srgb, var(--surface-1) 88%, transparent);
   backdrop-filter: blur(14px) saturate(150%);
@@ -3053,23 +3066,17 @@ textarea {
 /**
  * The single most-used input in the application, sized like it.
  *
- * It was 320px against a 900px-tall window — roughly a third of the space, for
- * the field that receives everything the user came here to write, while the
- * form around it had room to spare. Now it takes the leftover height with a
- * floor of 45vh, and the drag handle still works for anyone who wants more
- * (the height is remembered — see `BODY_HEIGHT_KEY`).
+ * Padding and leading only. The height is decided by one rule, in the compose
+ * layout section, because two places deciding it is how this box ended up with
+ * three `min-height` declarations and an effective value none of them stated.
+ * The drag handle still works, and the height is remembered — see
+ * `BODY_HEIGHT_KEY`.
  */
 .textarea--body {
   flex: 1;
-  min-height: max(45vh, 300px);
   resize: vertical;
   padding: var(--sp-4);
   line-height: var(--leading-relaxed);
-}
-@media (max-height: 720px) {
-  .textarea--body {
-    min-height: 240px;
-  }
 }
 
 /* --- 3. nothing leaves its box ------------------------------------------- */
@@ -3818,6 +3825,12 @@ textarea {
    * window, and the first thing to go was the send button. Ten lines of
    * Chinese at 小四 still fit here, and anything taller is space the box will
    * have been given anyway.
+   *
+   * The number stayed where it is; what changed is how much lands here. See
+   * "reclaiming height for the message" below — the box measured 200px on that
+   * same window, which is eight lines of 小四 for the field the entire screen
+   * exists to fill, and every pixel taken off the chrome around it arrives
+   * here without touching this floor.
    */
   min-height: 160px;
   height: auto;
@@ -3826,10 +3839,22 @@ textarea {
 
 /* --- band 3: attachments and the send time -------------------------------- */
 
+/*
+ * Stacked, and measured that way.
+ *
+ * Putting the dropzone and the send time side by side to save a row was tried
+ * and is worse: two halves of a 977px card are ~478px, and after the 5.5em
+ * label gutter the time bar had 358px for a datetime input (15em), a sentence
+ * and a button. It wrapped to three lines. The row that was supposed to cost
+ * 52px cost 148, and the message box lost 8px rather than gaining 60.
+ *
+ * Same lesson as the settings grid and the narrow left column before it: a
+ * control does not get smaller when its column does, it gets taller.
+ */
 .compose-foot {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-3);
+  gap: var(--sp-2);
 }
 
 /*
@@ -3932,6 +3957,63 @@ textarea {
     width: 100%;
     min-width: 0;
   }
+}
+
+/* --- reclaiming height for the message ------------------------------------ */
+
+/**
+ * Measured, not estimated. `scripts/layout-probe.mjs` on a 1266×827 window,
+ * account configured, disclosure closed:
+ *
+ *   viewport 744px = page head 72 + health strip 52 + card 552 + gaps 32
+ *                    + the scroller's own bottom padding 32
+ *   card 552px     = padding 40 + addressing 89 + body field 239 + foot 167
+ *                    + gaps 24
+ *
+ * which left the message box at **200px** — eight lines of 小四 for the one
+ * field the whole screen exists to fill, while five separate pieces of chrome
+ * around it each held on to a comfortable margin.
+ *
+ * Nothing below removes a control or shrinks any text. It takes the padding
+ * that had accumulated around a form which is required to fit one screen, and
+ * every pixel of it lands in the message box, because that box is the only
+ * thing on the card with `flex-grow`.
+ */
+
+/* The scroller's bottom padding is generous for a list that ends mid-row. This
+   form ends at a card edge with the action bar directly under it. */
+.view--compose {
+  padding-bottom: var(--sp-4);
+}
+
+/* The gap between the page head, the health strip and the card. They are three
+   separated things already — a rule, a tinted strip and a bordered card. */
+.view--compose .view__inner {
+  gap: var(--sp-3);
+}
+
+/* A screen title does not need a 72px band to be read as a screen title. The
+   type sizes are untouched; this is the padding around them. */
+.view--compose .page-head {
+  min-height: 0;
+  padding-block: var(--sp-1);
+  margin-bottom: 0;
+}
+
+/* The card's own breathing room. `--sp-3` still reads as a card rather than a
+   panel, and the eight pixels come straight off the top and bottom of the one
+   box on this screen that is short of them. */
+.compose-card > .card__body {
+  padding: var(--sp-3) var(--sp-4);
+  gap: var(--sp-2);
+}
+
+/* Labels here are one line and always will be — nothing on this form has a
+   two-line label — so they are set at the tight leading the page title uses
+   instead of the paragraph leading meant for wrapping prose. Four labels on
+   the screen, ten pixels each. */
+.compose-layout .field > .field__label {
+  line-height: var(--leading-tight);
 }
 
 /* --- one type size on this screen ----------------------------------------- */
@@ -4086,4 +4168,290 @@ textarea {
   font-size: var(--text-sm);
   color: var(--text-3);
   line-height: 1.6;
+}
+
+/* ==========================================================================
+   Pictures
+
+   Two surfaces, one job: make an image in a message something you can look at
+   rather than something you can only read the filename of.
+
+     `.imagestrip`  a row of thumbnails under the compose body, under the send
+                    preview, and in the message reader. Absent when the draft
+                    carries no pictures, so a text-only message pays nothing.
+     `.lightbox`    the full-screen viewer, with the controls the strip's
+                    thumbnails cannot offer — zoom, pan, rotate, mirror, and
+                    the rest of the message's pictures under the arrow keys.
+   ========================================================================== */
+
+.imagestrip {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  /* Never grows. It sits between the message box and the attachment row on a
+     form whose whole requirement is to fit one screen; letting it take a share
+     of the leftover height would be taking it straight off the body. */
+  flex: 0 0 auto;
+}
+.imagestrip__head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+.imagestrip__label {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-1);
+}
+.imagestrip__hint {
+  font-size: var(--text-xs);
+  color: var(--text-3);
+  min-width: 0;
+}
+/* One row that scrolls sideways rather than wrapping: eight screenshots on a
+   draft would otherwise add four rows of thumbnails and push the send button
+   off the screen. */
+.imagestrip__items {
+  display: flex;
+  gap: var(--sp-3);
+  overflow-x: auto;
+  scrollbar-width: thin;
+  padding-bottom: var(--sp-1);
+}
+.imagestrip__item {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  width: 104px;
+  padding: var(--sp-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-1);
+  cursor: pointer;
+  text-align: start;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+.imagestrip__item:hover,
+.imagestrip__item:focus-visible {
+  border-color: var(--accent);
+  box-shadow: var(--shadow-sm);
+}
+.imagestrip__thumb {
+  width: 100%;
+  height: 72px;
+  /* `contain`, not `cover`: this is the one place in the application whose
+     whole purpose is showing what the picture actually is, and cropping a
+     screenshot to a square hides the half somebody needed to see. */
+  object-fit: contain;
+  border-radius: var(--r-sm);
+  background: var(--surface-inset);
+}
+.imagestrip__name {
+  font-size: var(--text-xs);
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A thumbnail in place of the file-type tag, same box, same alignment — the
+   rows stay a uniform height whether or not the bytes have arrived. */
+.attachment__icon--thumb {
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-inset);
+  overflow: hidden;
+  cursor: pointer;
+}
+.attachment__icon--thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+/* --- the viewer ----------------------------------------------------------- */
+
+.lightbox {
+  position: fixed;
+  inset: 0;
+  /* Above the dialogs (100) and below the toasts (200): "Image copied" has to
+     be readable, and it appears while this is open. */
+  z-index: 150;
+  display: flex;
+  flex-direction: column;
+  background: rgba(8, 10, 14, 0.94);
+  color: #f2f4f7;
+  /* Its own colours on purpose. A picture is judged against what surrounds it,
+     and a light theme's surface tints everything shown on it. */
+  color-scheme: dark;
+}
+.lightbox__bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-4);
+  background: rgba(0, 0, 0, 0.35);
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+}
+.lightbox__bar--bottom {
+  justify-content: center;
+}
+.lightbox__title {
+  font-size: var(--text-sm);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lightbox__counter,
+.lightbox__zoom {
+  font-size: var(--text-xs);
+  color: #c6ccd8;
+  font-variant-numeric: tabular-nums;
+  min-width: 4em;
+  text-align: center;
+}
+.lightbox__spacer {
+  flex: 1 1 auto;
+}
+.lightbox__sep {
+  width: 1px;
+  height: 20px;
+  background: rgba(255, 255, 255, 0.18);
+  margin-inline: var(--sp-2);
+}
+.lightbox__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 34px;
+  padding: 0 var(--sp-3);
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.lightbox__btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+.lightbox__btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+/* Pressed state is a border and a fill, not a colour change: neither 宋体 nor
+   Times New Roman has a variable weight, so bolding a label here does nothing
+   at all on the two fonts this application actually ships. */
+.lightbox__btn[aria-pressed='true'] {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.lightbox__stage {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+}
+.lightbox__stage[data-dragging] {
+  cursor: grabbing;
+}
+.lightbox__image {
+  position: absolute;
+  inset-block-start: 50%;
+  inset-inline-start: 50%;
+  /* The element keeps its natural pixel size; every bit of fitting, zooming,
+     turning and mirroring is one composited transform. Resizing the element
+     instead would re-layout the page on every wheel notch. */
+  transform-origin: center center;
+  user-select: none;
+  -webkit-user-drag: none;
+  max-width: none;
+  max-height: none;
+}
+
+.lightbox__nav {
+  position: absolute;
+  inset-block-start: 50%;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 72px;
+  border: 0;
+  border-radius: var(--r-md);
+  background: rgba(0, 0, 0, 0.4);
+  color: #f2f4f7;
+  cursor: pointer;
+}
+.lightbox__nav:hover {
+  background: rgba(0, 0, 0, 0.62);
+}
+.lightbox__nav--prev {
+  inset-inline-start: var(--sp-4);
+}
+.lightbox__nav--next {
+  inset-inline-end: var(--sp-4);
+}
+
+.lightbox__info {
+  position: absolute;
+  inset-block-end: var(--sp-4);
+  inset-inline-start: var(--sp-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  max-width: min(420px, calc(100% - var(--sp-8)));
+  padding: var(--sp-4);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: var(--r-md);
+  background: rgba(12, 14, 20, 0.92);
+  font-size: var(--text-sm);
+}
+.lightbox__inforow {
+  display: flex;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+.lightbox__infokey {
+  flex: 0 0 7em;
+  color: #a9b2c1;
+}
+.lightbox__infoval {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.lightbox__infoactions {
+  display: flex;
+  gap: var(--sp-2);
+  margin-top: var(--sp-1);
+}
+.lightbox__infoactions .lightbox__btn {
+  border-color: rgba(255, 255, 255, 0.24);
+}
+
+/* Phones: the toolbar is the first thing that runs out of room, so the labels
+   go and the icons stay. The nav arrows shrink rather than disappear — a
+   touch screen has no arrow keys to fall back on. */
+@media (max-width: 620px) {
+  .lightbox__bar {
+    padding-inline: var(--sp-2);
+  }
+  .lightbox__nav {
+    width: 38px;
+    height: 56px;
+  }
+  .lightbox__info {
+    inset-inline: var(--sp-2);
+    max-width: none;
+  }
 }

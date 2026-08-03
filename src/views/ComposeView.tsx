@@ -22,6 +22,12 @@ import {
   useToast,
 } from '../components/ui'
 import { AttachmentPicker, TagField } from '../components/inputs'
+import {
+  ImageLightbox,
+  ImageStrip,
+  isViewableImage,
+  useAttachmentImages,
+} from '../components/ImageLightbox'
 import { CHAIN_STAGES, buildChain, leadLabelKey } from '../core/chain'
 import { summarizeRecurrence } from '../core/schedule'
 import { HealthBoard } from '../components/HealthBoard'
@@ -183,6 +189,45 @@ export function ComposeView({
   const patch = (p: Partial<MessageDraft>) => dispatch({ type: 'setDraft', patch: p })
 
   /**
+   * The pictures on this draft, as pictures.
+   *
+   * The body is a plain textarea, so an embedded image was previously visible
+   * only as the literal text `<img src="cid:…">` — the attachment was there and
+   * would have arrived, but nothing on the screen showed what it was. These are
+   * the actual bytes, read back through the same size-capped, data-folder-only
+   * bridge call the inbox preview uses.
+   *
+   * Ordered inline-first: the ones that appear inside the message are the ones
+   * being asked about when someone looks here.
+   */
+  const imageSources = useMemo(
+    () =>
+      draft.attachments
+        .filter((a) => isViewableImage(a.name))
+        .map((a) => ({ id: a.id, name: a.name, path: a.path, size: a.size, inline: a.inline })),
+    [draft.attachments],
+  )
+  const loadedImages = useAttachmentImages(imageSources)
+  const gallery = useMemo(
+    () =>
+      imageSources
+        .map((s) => {
+          const bytes = loadedImages[s.path]
+          return bytes ? { ...s, ...bytes } : null
+        })
+        .filter((x): x is NonNullable<typeof x> => x !== null)
+        .sort((a, b) => Number(b.inline ?? false) - Number(a.inline ?? false)),
+    [imageSources, loadedImages],
+  )
+  /** Which picture the full-screen viewer is on; `null` when it is shut. */
+  const [lightboxAt, setLightboxAt] = useState<number | null>(null)
+  const thumbnails = useMemo(() => {
+    const map: Record<string, string> = {}
+    for (const img of gallery) map[img.path] = img.dataUrl
+    return map
+  }, [gallery])
+
+  /**
    * Open and authenticate as soon as this screen is on show.
    *
    * An SMTP send is DNS, TCP, TLS, EHLO, AUTH and only then the message — and
@@ -247,7 +292,15 @@ export function ComposeView({
       return
     }
     void bridge.attachPaths(paths).then((added) => {
-      if (added.length > 0) patch({ attachments: [...draft.attachments, ...added] })
+      if (added.length > 0) {
+        patch({ attachments: [...draft.attachments, ...added] })
+        return
+      }
+      // The main process skips anything it cannot stat or read. Dropping three
+      // files onto the form and having the list stay empty with no explanation
+      // is the shape of failure this application is supposed to be free of:
+      // it looks exactly like the drop not having registered at all.
+      toast.push({ tone: 'error', title: t('compose.dropNothingAdded', { n: paths.length }) })
     })
   }
 
@@ -278,6 +331,14 @@ export function ComposeView({
       const body = cid
         ? draft.body.replace(new RegExp(`\\s*<img[^>]*src=["']cid:${cid}["'][^>]*>`, 'gi'), '')
         : draft.body
+      // The tag can survive the strip — the body is an editable textarea, and
+      // a hand-edited tag stops matching. Left unsaid, the attachment becomes
+      // an ordinary file while the message still references a `cid:` that is
+      // no longer inline, and the recipient gets a broken image icon. Nothing
+      // in the app would have said a word about it.
+      if (cid && body.includes(`cid:${cid}`)) {
+        toast.push({ tone: 'error', title: t('compose.inlineRemoveFailed') })
+      }
       patch({
         body,
         attachments: draft.attachments.map((a) =>
@@ -311,15 +372,25 @@ export function ComposeView({
    */
   const handleBodyPaste = async (e: ClipboardEvent<HTMLTextAreaElement>) => {
     if (!bridge?.attachBlob) return
-    const images = Array.from(e.clipboardData.items).filter((item) => item.type.startsWith('image/'))
-    if (images.length === 0) return
+    /*
+     * Every file is taken out of the clipboard *before* the first `await`.
+     *
+     * `DataTransferItem` is only valid for the duration of the event dispatch:
+     * call `getAsFile()` after the handler has yielded and it answers `null`.
+     * Reading them lazily inside the loop therefore worked for one pasted
+     * image and silently dropped every image after the first — the paste
+     * appeared to succeed, one picture arrived, and nothing reported the rest.
+     */
+    const files = Array.from(e.clipboardData.items)
+      .filter((item) => item.type.startsWith('image/'))
+      .map((item) => item.getAsFile())
+      .filter((f): f is File => f !== null)
+    if (files.length === 0) return
     e.preventDefault()
 
     let body = draft.body
     const added: Attachment[] = []
-    for (const item of images) {
-      const file = item.getAsFile()
-      if (!file) continue
+    for (const file of files) {
       try {
         const data = await file.arrayBuffer()
         const saved = await bridge.attachBlob(file.name || `pasted-${Date.now()}.png`, file.type, data)
@@ -653,6 +724,18 @@ export function ComposeView({
                 />
               </Field>
 
+              {/* The pictures the message carries, as pictures.
+                  Absent entirely when there are none, so it costs the layout
+                  nothing on the ordinary text-only draft — and when there are
+                  some, seeing them is the whole point of having added them.
+                  One click opens the full-screen viewer. */}
+              <ImageStrip
+                images={gallery}
+                onOpen={setLightboxAt}
+                label={t('image.inBody')}
+                hint={t('image.openHint')}
+              />
+
               {/* Mail merge. Offered only once there is a `{{token}}` to merge:
                   a switch that does nothing until you learn an undocumented
                   syntax is a switch that teaches nobody anything. */}
@@ -689,6 +772,11 @@ export function ComposeView({
                     limitMb={limitMb}
                     presence={attachmentPresence}
                     onDropPaths={bridge?.pathForFile ? dropAttachments : undefined}
+                    thumbnails={thumbnails}
+                    onPreview={(id) => {
+                      const at = gallery.findIndex((g) => g.id === id)
+                      if (at >= 0) setLightboxAt(at)
+                    }}
                   />
                 </Field>
 
@@ -1072,6 +1160,18 @@ export function ComposeView({
           </Banner>
         ) : null}
       </Modal>
+
+      {/* Above everything, including the schedule dialog — a picture opened
+          from inside a dialog has to be readable, and Escape here closes the
+          picture only (see the capture-phase handler in `ImageLightbox`). */}
+      {lightboxAt !== null && gallery[lightboxAt] ? (
+        <ImageLightbox
+          images={gallery}
+          index={lightboxAt}
+          onIndex={setLightboxAt}
+          onClose={() => setLightboxAt(null)}
+        />
+      ) : null}
 
       {confirmElement}
     </>

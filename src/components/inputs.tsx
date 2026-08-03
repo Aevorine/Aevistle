@@ -375,12 +375,24 @@ export function AttachmentPicker({
   onDropPaths,
   limitMb,
   presence,
+  thumbnails,
+  onPreview,
 }: {
   attachments: Attachment[]
   onAdd: () => void
   onRemove: (id: string) => void
   /** Only offered for images — everything else can only ride along as a file. */
   onToggleInline?: (id: string) => void
+  /**
+   * Path → `data:` URL, for the ones that have been read back.
+   *
+   * A row showing "IMG" and a filename is a row that cannot answer "which
+   * picture is that?", which is the question people actually have when a draft
+   * carries four screenshots. Missing entries just keep the type tag.
+   */
+  thumbnails?: Record<string, string>
+  /** Open the full-screen viewer on this attachment. Only wired for images. */
+  onPreview?: (id: string) => void
   /**
    * Handle a real drop. Absent where the platform cannot resolve a dropped
    * file to a path, in which case the drop falls back to opening the picker —
@@ -438,15 +450,32 @@ export function AttachmentPicker({
         <div className="attachments">
           {attachments.map((a) => {
             const gone = presence?.[a.path] === false
+            const thumb = thumbnails?.[a.path]
+            const viewable = thumb !== undefined && onPreview !== undefined
             return (
             <div
               className={`attachment ${isRiskyAttachment(a.name) ? 'attachment--risky' : ''}`}
               data-missing={gone || undefined}
               key={a.id}
             >
-              <div className="attachment__icon attachment__icon--tag">
-                {kindLabel(a.name)}
-              </div>
+              {/* The picture itself where we have it, the file-type tag where
+                  we do not. Clickable only in the first case — a tag that
+                  opens nothing is the kind of dead control this app keeps
+                  finding in its own screens. */}
+              {viewable ? (
+                <button
+                  type="button"
+                  className="attachment__icon attachment__icon--thumb"
+                  onClick={() => onPreview(a.id)}
+                  title={t('image.openHint')}
+                >
+                  <img src={thumb} alt="" draggable={false} />
+                </button>
+              ) : (
+                <div className="attachment__icon attachment__icon--tag">
+                  {kindLabel(a.name)}
+                </div>
+              )}
               <div className="attachment__body">
                 <div className="attachment__name" title={gone ? a.path : a.name}>
                   {a.name}

@@ -309,6 +309,10 @@ function Shell() {
                 key={item.id}
                 type="button"
                 className="nav__item"
+                /* Names the screen for the measuring scripts. Clicking by
+                   label would break the moment the app is read in one of the
+                   other five languages. */
+                data-view={item.id}
                 aria-current={view === item.id ? 'page' : undefined}
                 title={t(item.labelKey)}
                 onClick={() => {

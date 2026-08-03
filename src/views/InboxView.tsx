@@ -45,6 +45,13 @@ import {
 import { VirtualList } from '../components/VirtualList'
 import { useApp } from '../state/AppState'
 import { SearchInput } from '../components/inputs'
+import {
+  ImageLightbox,
+  ImageStrip,
+  isViewableImage,
+  seedAttachmentImage,
+  useAttachmentImages,
+} from '../components/ImageLightbox'
 import { useI18n } from '../i18n'
 import { resolveRemoteImages } from '../core/remoteImagePlaceholder'
 import { resolveWithCache } from '../core/imageCache'
@@ -90,6 +97,14 @@ export function InboxView({ onGoToAccounts }: { onGoToAccounts?: () => void }) {
   const [findOpen, setFindOpen] = useState(false)
   const [findText, setFindText] = useState('')
   const [preview, setPreview] = useState<{ attachment: Attachment; dataUrl: string; mime: string } | null>(null)
+  /**
+   * The picture on show, by path rather than by index.
+   *
+   * An index would be wrong the moment the gallery changes underneath it, and
+   * it changes routinely: fetching one attachment on Android adds it to the
+   * run, which would silently shift what "picture 3" means while it is open.
+   */
+  const [lightboxPath, setLightboxPath] = useState<string | null>(null)
   /** Attachment id currently being fetched from the server, for the row spinner. */
   const [fetchingAttachment, setFetchingAttachment] = useState<string | null>(null)
 
@@ -347,6 +362,20 @@ export function InboxView({ onGoToAccounts }: { onGoToAccounts?: () => void }) {
       try {
         const result = await bridge.readAttachment(a.path)
         if (result) {
+          // Pictures get the full-screen viewer — zoom, rotate, and the rest of
+          // the message's images under the arrow keys. Everything else keeps
+          // the inert sandboxed frame.
+          //
+          // The read happens here rather than being left to the viewer's own
+          // loader because a refusal (too large, wrong type) has to be known
+          // *before* anything opens: that is the difference between showing the
+          // file and handing it to the operating system, and deciding it after
+          // the fact would leave a click that opens an empty black screen.
+          if (isViewableImage(a.name) && result.mime.startsWith('image/')) {
+            seedAttachmentImage(a.path, result)
+            setLightboxPath(a.path)
+            return
+          }
           setPreview({ attachment: a, ...result })
           return
         }
@@ -412,6 +441,7 @@ export function InboxView({ onGoToAccounts }: { onGoToAccounts?: () => void }) {
       setOpenMessage(m)
       setResolvedHtml(null)
       setPreview(null)
+      setLightboxPath(null)
       setFindOpen(false)
       setFindText('')
       setImmersive(true)
@@ -519,6 +549,44 @@ export function InboxView({ onGoToAccounts }: { onGoToAccounts?: () => void }) {
     else if (immersive) setImmersive(false)
     else setOpenMessage(null)
   }
+
+  /**
+   * The pictures on the open message, ready to be looked at.
+   *
+   * Above the "inbox not available" return on purpose: these are hooks, and a
+   * hook that only runs on some renders is the one bug React cannot recover
+   * from.
+   *
+   * Only attachments already on disk are included. On Android an inbox
+   * attachment is metadata until it is first opened — pre-fetching every image
+   * in a message the moment it is read would spend somebody's mobile data on
+   * pictures they may never scroll to. The others still open on click through
+   * the ordinary path; they simply join the previous/next run once fetched.
+   */
+  const inboxImageSources = useMemo(
+    () =>
+      (openBody?.attachments ?? [])
+        .filter((a) => a.path && isViewableImage(a.name))
+        .map((a) => ({ id: a.id, name: a.name, path: a.path, size: a.size })),
+    [openBody],
+  )
+  const inboxImages = useAttachmentImages(inboxImageSources)
+  const inboxGallery = useMemo(
+    () =>
+      inboxImageSources
+        .map((s) => {
+          const bytes = inboxImages[s.path]
+          return bytes ? { ...s, ...bytes } : null
+        })
+        .filter((x): x is NonNullable<typeof x> => x !== null),
+    [inboxImageSources, inboxImages],
+  )
+  const inboxThumbs = useMemo(() => {
+    const map: Record<string, string> = {}
+    for (const img of inboxGallery) map[img.path] = img.dataUrl
+    return map
+  }, [inboxGallery])
+  const lightboxAt = lightboxPath ? inboxGallery.findIndex((g) => g.path === lightboxPath) : -1
 
   if (!canUseInbox) {
     return (
@@ -808,6 +876,16 @@ export function InboxView({ onGoToAccounts }: { onGoToAccounts?: () => void }) {
                         </button>
                       ) : null}
                     </div>
+                    {/* Every picture in the message, as pictures. The rows
+                        below still list them as files — this is the answer to
+                        "which one is which" without opening four of them. */}
+                    <ImageStrip
+                      images={inboxGallery}
+                      onOpen={(i) => setLightboxPath(inboxGallery[i]?.path ?? null)}
+                      label={t('image.attached')}
+                      hint={t('image.openHint')}
+                    />
+
                     <div className="attachments">
                       {attachments.map((a) => (
                         <div className="attachment attachment--clickable" key={a.id}>
@@ -818,6 +896,11 @@ export function InboxView({ onGoToAccounts }: { onGoToAccounts?: () => void }) {
                             onClick={() => void previewAttachment(a)}
                             title={t('inbox.open')}
                           >
+                            {inboxThumbs[a.path] ? (
+                              <span className="attachment__icon attachment__icon--thumb">
+                                <img src={inboxThumbs[a.path]} alt="" draggable={false} />
+                              </span>
+                            ) : (
                             <span className="attachment__icon attachment__icon--tag">
                               {fetchingAttachment === a.id ? (
                                 <span className="spinner" style={{ width: 14, height: 14 }} />
@@ -825,6 +908,7 @@ export function InboxView({ onGoToAccounts }: { onGoToAccounts?: () => void }) {
                                 (a.name.split('.').pop() ?? '?').slice(0, 4).toUpperCase()
                               )}
                             </span>
+                            )}
                             <span className="attachment__body">
                               <span className="attachment__name">{a.name}</span>
                               <span className="attachment__meta">
@@ -883,20 +967,26 @@ export function InboxView({ onGoToAccounts }: { onGoToAccounts?: () => void }) {
         }
       >
         {preview ? (
-          preview.mime.startsWith('image/') ? (
-            <img className="preview__image" src={preview.dataUrl} alt={preview.attachment.name} />
-          ) : (
-            // PDFs and text both render inertly in a sandboxed frame. No
-            // `allow-scripts`, exactly as the message body frame below.
-            <iframe
-              className="preview__frame"
-              sandbox=""
-              src={preview.dataUrl}
-              title={preview.attachment.name}
-            />
-          )
+          // PDFs and text render inertly in a sandboxed frame. No
+          // `allow-scripts`, exactly as the message body frame below.
+          // Images never reach here — they get the full-screen viewer.
+          <iframe
+            className="preview__frame"
+            sandbox=""
+            src={preview.dataUrl}
+            title={preview.attachment.name}
+          />
         ) : null}
       </Modal>
+
+      {lightboxAt >= 0 ? (
+        <ImageLightbox
+          images={inboxGallery}
+          index={lightboxAt}
+          onIndex={(next) => setLightboxPath(inboxGallery[next]?.path ?? null)}
+          onClose={() => setLightboxPath(null)}
+        />
+      ) : null}
 
       {confirmElement}
     </div>

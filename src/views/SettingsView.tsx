@@ -74,9 +74,20 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
   const [dialogOpen, setDialogOpen] = useState(Boolean(openAccountOnMount))
   const [editing, setEditing] = useState<MailAccount | undefined>(undefined)
   const [info, setInfo] = useState<AppInfo | null>(null)
+  // Swallowed, this left the About card showing dashes where the platform and
+  // the data location should be — the one place a person looks to find out
+  // where their mail is actually stored, blank and with nothing to explain it.
+  const [infoError, setInfoError] = useState<string | null>(null)
 
   useEffect(() => {
-    void bridge?.appInfo().then(setInfo).catch(() => {})
+    if (!bridge) return
+    void bridge.appInfo().then(
+      (value) => {
+        setInfo(value)
+        setInfoError(null)
+      },
+      (e: unknown) => setInfoError(e instanceof Error ? e.message : String(e)),
+    )
   }, [bridge])
 
   const s = state.settings
@@ -526,6 +537,11 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
         <Card>
           <div className="card__body">
             <div className="section-label">{t('settings.about')}</div>
+            {infoError ? (
+              <Banner tone="warning">
+                {t('settings.aboutFailed')} — {infoError}
+              </Banner>
+            ) : null}
             <div className="kv">
               <div className="kv__k">{t('settings.version')}</div>
               <div className="kv__v">{info?.version ?? __APP_VERSION__}</div>

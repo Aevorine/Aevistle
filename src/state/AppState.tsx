@@ -35,6 +35,7 @@ import {
   type MailAccount,
   type MessageDraft,
   type ScheduledJob,
+  type SecretKind,
   type SendResult,
   type Settings,
   type Template,
@@ -98,6 +99,31 @@ function shapeOccurrences(
   const calendar = settings.workCalendar ?? DEFAULT_WORK_CALENDAR
   const shaped = applyWorkCalendar(occurrences, job.recurrence.workdayPolicy ?? 'off', calendar)
   return applyQuietHours(shaped, quietFrom(settings))
+}
+
+/**
+ * Delete a batch of stored credentials and report, in one string, whichever
+ * ones refused to go.
+ *
+ * Every caller here deletes secrets as the last step of removing something the
+ * user can see, so a rejected promise has no natural place to surface: the row
+ * is already gone. Returning the failures instead of swallowing them lets the
+ * caller say so, and the empty case stays cheap — `null` means "all clear".
+ */
+async function forgetSecrets(
+  bridge: PlatformBridge | null,
+  targets: Array<[accountId: string, kind?: SecretKind]>,
+): Promise<string | null> {
+  if (!bridge) return null
+  const failures: string[] = []
+  for (const [accountId, kind] of targets) {
+    try {
+      await bridge.deleteSecret(accountId, kind)
+    } catch (e) {
+      failures.push(`${accountId}${kind ? `/${kind}` : ''}: ${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+  return failures.length ? failures.join('; ') : null
 }
 
 function initialState(): AppState {
@@ -944,13 +970,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const deleteAccount = useCallback(
     async (id: string) => {
-      await bridge?.deleteSecret(id).catch(() => {})
       // A deleted account's IMAP credential and cached mail are dead weight —
       // there is no UI left that could ever ask for them again.
-      await bridge?.deleteSecret(id, 'imap').catch(() => {})
+      const failed = await forgetSecrets(bridge, [[id], [id, 'imap']])
       dispatch({ type: 'removeAccount', id })
+      // The row disappears either way, so a swallowed failure here reads as
+      // "the password is gone" while it is still sitting in the OS credential
+      // store. Logged after the dispatch so the entry survives it.
+      if (failed) {
+        addLog({
+          kind: 'security',
+          level: 'warn',
+          title: 'Account removed, but its saved password could not be deleted',
+          detail: failed,
+        })
+      }
     },
-    [bridge],
+    [bridge, addLog],
   )
 
   /**
@@ -1214,11 +1250,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
   )
 
   const resetEverything = useCallback(async () => {
-    for (const account of state.accounts) {
-      await bridge?.deleteSecret(account.id).catch(() => {})
-    }
+    const failed = await forgetSecrets(
+      bridge,
+      state.accounts.flatMap((a) => [[a.id], [a.id, 'imap'] as [string, SecretKind]]),
+    )
     dispatch({ type: 'reset' })
-  }, [bridge, state.accounts])
+    // "Reset everything" is the strongest promise in the app. If a password
+    // outlived it, that has to be said out loud rather than covered by the
+    // success toast the caller shows next.
+    if (failed) {
+      addLog({
+        kind: 'security',
+        level: 'warn',
+        title: 'Reset finished, but some saved passwords could not be deleted',
+        detail: failed,
+      })
+    }
+  }, [bridge, state.accounts, addLog])
 
   /**
    * Move the data folder and repair everything that pointed into the old one.
@@ -1249,9 +1297,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
             ),
           },
         }))
-      await bridge?.syncJobs(repaired, state.accounts).catch(() => {})
+      try {
+        await bridge?.syncJobs(repaired, state.accounts)
+      } catch (e) {
+        // The files did move, so the caller reports success and nothing else in
+        // this flow would ever mention that the scheduler is still holding
+        // paths into the old folder. Left silent, the first symptom is a
+        // scheduled send going out hours later with a missing attachment.
+        addLog({
+          kind: 'schedule',
+          level: 'error',
+          title: 'Data folder moved, but reminders still point at the old one',
+          detail: e instanceof Error ? e.message : String(e),
+        })
+      }
     },
-    [bridge, state.jobs, state.accounts],
+    [bridge, state.jobs, state.accounts, addLog],
   )
 
   const syncInboxAccount = useCallback(

@@ -1,6 +1,6 @@
 {
   "name": "aevistle",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "description": "Cross-platform scheduled email reminder — compose once, attach anything, deliver on time. Windows desktop + Android.",
   "author": "Fusheng201",
