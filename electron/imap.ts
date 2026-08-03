@@ -166,14 +166,21 @@ async function withConnection<T>(
   throw lastError
 }
 
-function buildClient(
+/**
+ * Exported for `scripts/check-socket-drop.mjs`, which resets the socket of a
+ * client sitting idle and asserts the app survives it. Testing that through a
+ * public function does not work: every one of them keeps a command in flight,
+ * and a command in flight makes `ImapFlow` *reject* rather than emit `'error'`
+ * — the case that crashed is the quiet one in between.
+ */
+export function buildClient(
   config: InboxAccountState,
   secret: string,
   resolvedHost: string,
   endpoint: Endpoint,
   perAttemptMs: number,
 ): ImapFlow {
-  return new ImapFlow({
+  const client = new ImapFlow({
     host: resolvedHost,
     port: endpoint.port,
     secure: endpoint.security === 'ssl',
@@ -192,6 +199,18 @@ function buildClient(
     greetingTimeout: Math.min(perAttemptMs, 10_000),
     socketTimeout: Math.max(perAttemptMs, 30_000),
   })
+
+  // Same reason as the SMTP transporter in `mailer.ts`: `ImapFlow` is an
+  // EventEmitter, and a reset socket emits `'error'` rather than rejecting the
+  // call that is in flight. Without a listener Node throws it at the top level,
+  // where it becomes a crash dialog about a mail connection the user never
+  // asked about. The operations here are awaited and report their own failures,
+  // so this only has to stop the throw.
+  client.on('error', (err) => {
+    console.error('[aevistle] IMAP connection error:', err instanceof Error ? err.message : err)
+  })
+
+  return client
 }
 
 async function runSync(client: ImapFlow, config: InboxAccountState): Promise<InboxAccountState> {

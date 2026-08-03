@@ -147,6 +147,30 @@ class Watcher {
         socketTimeout: RECYCLE_MS + 60_000,
       })
 
+      /*
+       * Before `connect()`, not after the handshake succeeds.
+       *
+       * `ImapFlow` is an EventEmitter, and an EventEmitter that emits `'error'`
+       * with no listener does not return the error — it throws it, out of
+       * whatever turn of the event loop the socket died in, past the try/catch
+       * around the call in flight and into `process.on('uncaughtException')`.
+       * There it became a modal reading "Aevistle hit an unexpected problem —
+       * read ECONNRESET" over an app in which nothing had gone wrong.
+       *
+       * The `drop` handler below cannot serve here: it reconnects, and it must
+       * not run until there is a connection worth replacing. So the window from
+       * construction until then gets a listener whose whole job is to stop the
+       * throw — `connect()` and `mailboxOpen()` already reject on failure and
+       * the `catch` below already handles that.
+       */
+      const swallowEarly = (err: unknown) => {
+        console.error(
+          '[aevistle] IMAP idle connection failed while opening:',
+          err instanceof Error ? err.message : err,
+        )
+      }
+      client.on('error', swallowEarly)
+
       try {
         await withDeadline(() => client.connect(), perRung, () => client.close())
         if (this.stopped) {
@@ -169,6 +193,8 @@ class Watcher {
           this.scheduleReconnect()
         }
         client.on('close', drop)
+        // The early listener stays attached — removing it would reopen the
+        // window it exists to close if `drop` ever stops being registered.
         client.on('error', drop)
 
         this.client = client

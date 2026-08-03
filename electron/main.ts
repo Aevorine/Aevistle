@@ -196,6 +196,40 @@ function isKeystoreError(message: string): boolean {
   return /BAD_DECRYPT|Cipher functions|bad decrypt|keystore/i.test(message)
 }
 
+/**
+ * A remote end went away. Expected, not exceptional.
+ *
+ * This application exists to talk to mail servers over the internet. Sockets
+ * get reset by servers reclaiming idle connections, by NAT tables expiring, by
+ * a laptop moving between access points, by a VPN reconnecting. Every one of
+ * those is a normal Tuesday, and every one of them is handled where it happens:
+ * a send retries on a fresh connection, a sync reports itself in the health
+ * strip, a warm connection is dropped and reopened on demand.
+ *
+ * What was not handled was the case where the error belongs to *no* call —
+ * a pooled connection dying while nothing was being sent. Those reached the
+ * crash reporter and produced "Aevistle hit an unexpected problem — read
+ * ECONNRESET" over an app in which nothing had gone wrong. The listeners in
+ * `mailer.ts` and `imap.ts` stop that at the source; this is the backstop for
+ * whatever socket nobody has thought of yet, because the right answer for a
+ * network error is never a modal.
+ */
+function isNetworkError(err: unknown, message: string): boolean {
+  const code = (err as { code?: unknown } | null)?.code
+  if (
+    typeof code === 'string' &&
+    /^(ECONNRESET|ECONNREFUSED|ECONNABORTED|EPIPE|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|ENETDOWN|ENOTFOUND|EAI_AGAIN|ERR_STREAM_PREMATURE_CLOSE)$/.test(
+      code,
+    )
+  ) {
+    return true
+  }
+  // Some layers stringify the code into the message and lose the property.
+  return /\b(ECONNRESET|ECONNREFUSED|ECONNABORTED|EPIPE|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|ENETDOWN|ENOTFOUND|EAI_AGAIN)\b|socket hang up|premature close/i.test(
+    message,
+  )
+}
+
 function describeMainProcessError(err: unknown): { title: string; detail: string } {
   const message = err instanceof Error ? err.message : String(err)
 
@@ -235,6 +269,9 @@ function reportMainProcessError(err: unknown): void {
    * So it is logged and dropped here, and the account list is left to say it.
    */
   if (isKeystoreError(message)) return
+
+  // Likewise a dead socket: logged, never modal. See `isNetworkError`.
+  if (isNetworkError(err, message)) return
 
   if (modalShown) return
   modalShown = true
