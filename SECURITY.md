@@ -227,7 +227,7 @@ sha256sum -c SHA256SUMS.txt
 Signing key fingerprint:
 
 ```
-<!-- AEVISTLE_GPG_FINGERPRINT -->not yet published
+<!-- AEVISTLE_GPG_FINGERPRINT -->0F4BCC451801F12081D04EB74DA15323A89A8783
 ```
 
 If `gpg --verify` reports anything other than a good signature from that

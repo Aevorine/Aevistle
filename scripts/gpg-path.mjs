@@ -39,7 +39,20 @@ export function findGpg() {
     encoding: 'utf8',
     shell: process.platform === 'win32',
   })
-  if (probe.status === 0) return 'gpg'
+  if (probe.status === 0) {
+    /*
+     * Resolved to a real path on Windows rather than returned as a bare name.
+     *
+     * `toGpgPath` has to know *which* gpg this is — the MSYS build wants POSIX
+     * paths and Gpg4win wants Windows ones — and a bare "gpg" answers neither
+     * question. Returning it unresolved made the conversion silently skip in
+     * Git Bash, where the gpg on PATH is precisely the one that needs it.
+     */
+    if (process.platform !== 'win32') return 'gpg'
+    const where = spawnSync('where', ['gpg'], { encoding: 'utf8', shell: true })
+    const first = (where.stdout ?? '').split(/\r?\n/).find((l) => l.trim().length > 0)
+    return first?.trim() || 'gpg'
+  }
 
   for (const candidate of CANDIDATES) {
     if (existsSync(candidate)) return path.normalize(candidate)
@@ -61,3 +74,27 @@ export function findGpg() {
 export const GPG_HINT =
   'gpg was not found. On Windows it ships with Git for Windows (usr/bin/gpg.exe) ' +
   'or Gpg4win; on macOS `brew install gnupg`; on Debian/Ubuntu `sudo apt install gnupg`.'
+
+/**
+ * A path in the form the resolved gpg will understand.
+ *
+ * Git for Windows' gpg is an MSYS binary and does not recognise a Windows
+ * absolute path. Handed `C:\Users\…` it reads a *relative* POSIX path and
+ * prepends the working directory, then reports "No such file or directory"
+ * naming a path that is a concatenation of two unrelated ones — which reads as
+ * a missing directory rather than as a path it never understood.
+ *
+ * Gpg4win's build takes Windows paths natively, so the conversion is applied
+ * only when the binary in use is the MSYS one.
+ */
+const SEP = /[\\/]/g
+
+export function toGpgPath(windowsPath, gpgExe) {
+  if (process.platform !== 'win32') return windowsPath
+  const msys = /[\\/](?:Git|usr)[\\/]/i.test(gpgExe ?? '')
+  if (!msys) return windowsPath
+  const resolved = path.resolve(windowsPath)
+  const m = /^([A-Za-z]):[\\/]?(.*)$/.exec(resolved)
+  if (!m) return windowsPath
+  return `/${m[1].toLowerCase()}/${m[2].replace(SEP, '/')}`
+}

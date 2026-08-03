@@ -93,8 +93,30 @@ try {
 # `use-keyboxd` into it on first use, which is the whole problem being avoided.
 Set-Content -Path (Join-Path $gnupgDir 'common.conf') -Value '' -Encoding ascii
 
+# --- the path gpg will actually understand -----------------------------------
+#
+# Git for Windows' gpg is an MSYS binary. Handed a Windows absolute path it does
+# not recognise one — it reads it as a *relative* POSIX path and prepends the
+# working directory, producing something like
+# `/d/Documents/.../C:\Users\<name>\.aevistle\gnupg` and a "No such file or
+# directory" naming a path nobody asked for. It wants `/c/Users/...`.
+#
+# Applied only to that build: Gpg4win takes Windows paths natively.
+
+function ConvertTo-GpgPath([string] $WindowsPath, [string] $GpgExe) {
+    if ($GpgExe -notlike '*\Git\*' -and $GpgExe -notlike '*\usr\bin\*') { return $WindowsPath }
+    $full = [System.IO.Path]::GetFullPath($WindowsPath)
+    if ($full -match '^([A-Za-z]):[\\/](.*)$') {
+        return '/' + $Matches[1].ToLower() + '/' + ($Matches[2] -replace '\\', '/')
+    }
+    return $WindowsPath
+}
+
+$gnupgArg = ConvertTo-GpgPath $gnupgDir $gpg
+
 Write-Output "Using $gpg"
 Write-Output "Key home: $gnupgDir"
+if ($gnupgArg -ne $gnupgDir) { Write-Output "  (given to gpg as $gnupgArg)" }
 Write-Output 'Generating a 4096-bit RSA signing key. This takes a minute or two.'
 
 # --- passphrase --------------------------------------------------------------
@@ -119,13 +141,13 @@ Passphrase: $pass
 "@ | Set-Content -Path $paramsFile -Encoding utf8
 
 try {
-    & $gpg --homedir $gnupgDir --batch --gen-key $paramsFile
+    & $gpg --homedir $gnupgArg --batch --gen-key $paramsFile
     if ($LASTEXITCODE -ne 0) { throw "gpg --gen-key failed with exit code $LASTEXITCODE" }
 } finally {
     Remove-Item $paramsFile -Force -ErrorAction SilentlyContinue
 }
 
-$fpr = (& $gpg --homedir $gnupgDir --list-keys --with-colons $email |
+$fpr = (& $gpg --homedir $gnupgArg --list-keys --with-colons $email |
         Where-Object { $_ -like 'fpr:*' } |
         Select-Object -First 1).Split(':')[9]
 if (-not $fpr) { Write-Error 'Could not read the fingerprint back — generation failed.'; exit 1 }
@@ -146,10 +168,10 @@ gnupghome=$gnupgDir
 
 # An armoured backup of the secret key, so losing the GnuPG home does not mean
 # losing the ability to sign.
-& $gpg --homedir $gnupgDir --batch --yes --pinentry-mode loopback --passphrase $pass `
+& $gpg --homedir $gnupgArg --batch --yes --pinentry-mode loopback --passphrase $pass `
        --export-secret-keys --armor $fpr |
     Set-Content -Path (Join-Path $homeDir 'aevistle-signing-key.asc') -Encoding ascii
-& $gpg --homedir $gnupgDir --armor --export $fpr |
+& $gpg --homedir $gnupgArg --armor --export $fpr |
     Set-Content -Path (Join-Path $homeDir 'aevistle-public-key.asc') -Encoding ascii
 
 Write-Output ''

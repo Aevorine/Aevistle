@@ -22,10 +22,10 @@
  */
 
 import { spawnSync } from 'node:child_process'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
-import os from 'node:os'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import os, { tmpdir } from 'node:os'
 import path from 'node:path'
-import { findGpg, GPG_HINT } from './gpg-path.mjs'
+import { findGpg, toGpgPath, GPG_HINT } from './gpg-path.mjs'
 
 const TAG = process.argv[2]
 if (!TAG) {
@@ -91,7 +91,7 @@ if (!fingerprint || !passphrase) die(`${PROPS} is missing fingerprint or passphr
  * for Linux and macOS where none of it applies.
  */
 const GNUPGHOME = props.gnupghome && existsSync(props.gnupghome) ? props.gnupghome : null
-const homeArgs = GNUPGHOME ? ['--homedir', GNUPGHOME] : []
+const homeArgs = GNUPGHOME ? ['--homedir', toGpgPath(GNUPGHOME, GPG)] : []
 
 if (!existsSync(SUMS)) die(`${SUMS} not found.`, 'Build the release first.')
 
@@ -113,26 +113,44 @@ const signed = run(GPG, [
   '--armor',
   '--detach-sign',
   '--output',
-  SIG,
-  SUMS,
+  toGpgPath(SIG, GPG),
+  toGpgPath(SUMS, GPG),
 ])
 if (signed.status !== 0) die('gpg refused to sign.', (signed.stderr || '').trim().split('\n').pop())
 
 // --- verify what was just produced -----------------------------------------
 //
-// Against the exported public key rather than the local keyring: the keyring
-// trusts its own secret key unconditionally, so verifying there would confirm
-// almost nothing. This is the check a stranger would run.
+// In a throwaway home holding nothing but the exported public key, rather than
+// in the signing keyring. The signing keyring trusts its own secret key
+// unconditionally, so a verification there would pass on a signature nobody
+// else could check — which is the one outcome this step exists to rule out.
+//
+// The key is *imported*, not handed to `--keyring`. That option wants a binary
+// keyring; given an armoured `.asc` it reads no keys at all and reports "Can't
+// check signature: No public key", which looks exactly like a bad signature.
 
-const verified = run(GPG, [
-  ...homeArgs,
-  '--no-default-keyring',
-  '--keyring',
-  PUBLIC_KEY,
-  '--verify',
-  SIG,
-  SUMS,
-])
+const scratch = mkdtempSync(path.join(tmpdir(), 'aevistle-verify-'))
+try {
+  // Empty rather than absent, so Git for Windows' gpg does not write
+  // `use-keyboxd` here and then fail to start a daemon it cannot name.
+  writeFileSync(path.join(scratch, 'common.conf'), '')
+  const scratchArgs = ['--homedir', toGpgPath(scratch, GPG)]
+
+  const imported = run(GPG, [...scratchArgs, '--batch', '--import', toGpgPath(PUBLIC_KEY, GPG)])
+  if (imported.status !== 0) {
+    die('Could not import the public key to verify against.', (imported.stderr || '').trim())
+  }
+
+  var verified = run(GPG, [
+    ...scratchArgs,
+    '--batch',
+    '--verify',
+    toGpgPath(SIG, GPG),
+    toGpgPath(SUMS, GPG),
+  ])
+} finally {
+  rmSync(scratch, { recursive: true, force: true })
+}
 const verifyOut = `${verified.stdout ?? ''}${verified.stderr ?? ''}`
 if (verified.status !== 0 || !/Good signature/i.test(verifyOut)) {
   die('The signature does not verify against the published public key.', verifyOut.trim().split('\n').pop())

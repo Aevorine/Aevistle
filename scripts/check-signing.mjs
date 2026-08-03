@@ -24,9 +24,12 @@ import { spawnSync } from 'node:child_process'
 import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { findGpg, GPG_HINT } from './gpg-path.mjs'
+import { findGpg, toGpgPath, GPG_HINT } from './gpg-path.mjs'
 
 const REPO = 'Aevorine/Aevistle'
+
+/** The useful line of a gpg failure: the last one, not the banner above it. */
+const lastLine = (text) => (text ?? '').trim().split(/\r?\n/).pop() ?? ''
 
 const run = (cmd, args, opts = {}) =>
   spawnSync(cmd, args, {
@@ -104,15 +107,29 @@ try {
    * `use-keyboxd` here and then failing to start the daemon.
    */
   writeFileSync(path.join(dir, 'common.conf'), '')
+  const homeArgs = ['--homedir', toGpgPath(dir, GPG)]
+
+  // Imported, not passed to `--keyring`: that option wants a binary keyring and
+  // silently reads nothing from an armoured `.asc`, then reports "No public
+  // key" — which is indistinguishable from a bad signature.
+  const imported = run(GPG, [
+    ...homeArgs,
+    '--batch',
+    '--import',
+    toGpgPath(path.join(dir, 'aevistle-public-key.asc'), GPG),
+  ])
+  if (imported.status !== 0) {
+    console.log('  ✗ The published public key could not be imported.')
+    console.log(`    ${lastLine(imported.stderr)}\n`)
+    process.exit(1)
+  }
+
   const verified = run(GPG, [
-    '--homedir',
-    dir,
-    '--no-default-keyring',
-    '--keyring',
-    path.join(dir, 'aevistle-public-key.asc'),
+    ...homeArgs,
+    '--batch',
     '--verify',
-    path.join(dir, 'SHA256SUMS.txt.asc'),
-    path.join(dir, 'SHA256SUMS.txt'),
+    toGpgPath(path.join(dir, 'SHA256SUMS.txt.asc'), GPG),
+    toGpgPath(path.join(dir, 'SHA256SUMS.txt'), GPG),
   ])
   const out = `${verified.stdout ?? ''}${verified.stderr ?? ''}`
 
