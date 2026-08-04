@@ -221,6 +221,7 @@ export const zhCN: Translations = {
   'account.deleteConfirm': '删除这个账号？用到它的定时提醒会一并停掉。',
   'account.storedSafely': '密码永远不离开这台设备，由操作系统加密保管，不会进入任何备份或导出文件。',
 
+  'provider.hint.microsoftNoPassword': '微软已经不接受邮件客户端用密码登录了。个人 Outlook.com / Hotmail / Live 账户自 2026 年 4 月 30 日起连「应用专用密码」也不再接受；企业账户的 IMAP 密码登录 2022–2023 年就关掉了。在本应用支持 OAuth2 之前，请改用仍接受应用专用密码的服务商。',
   'provider.hint.appPassword': '这家服务商要用「应用专用密码」，不是你平时登录的那个密码。',
   'provider.hint.authCode': '先在邮箱设置里开启 SMTP，然后用它给你的授权码。',
   'provider.hint.password': '直接用你平时的邮箱密码就行。',
@@ -704,6 +705,9 @@ export const zhCN: Translations = {
   "backup.hint": "一个文件装下你的账号、提醒、联系人和模板。换电脑时用，或者要折腾之前先存一份。",
   "backup.export": "导出备份",
   "backup.import": "从文件恢复",
+  "download.androidUnsupported": "安卓版还不能保存文件，请改用电脑版导出",
+  "download.cancelled": "已取消保存",
+  "download.failed": "文件没能保存成功",
   "backup.exported": "备份已导出",
   "backup.restored": "已恢复",
   "backup.cannotRead": "这个文件读不了",

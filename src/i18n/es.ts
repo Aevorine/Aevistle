@@ -221,6 +221,7 @@ export const es: Translations = {
   'account.deleteConfirm': '¿Eliminar esta cuenta? Los recordatorios programados que la usan dejarán de funcionar.',
   'account.storedSafely': 'Las contraseñas nunca salen de tu dispositivo. El sistema operativo las cifra y no aparecen en ninguna copia de seguridad ni exportación.',
 
+  'provider.hint.microsoftNoPassword': 'Microsoft ya no acepta contraseñas para clientes de correo. Las cuentas personales de Outlook.com, Hotmail y Live dejaron de aceptarlas — contraseñas de aplicación incluidas — el 30 de abril de 2026; las cuentas de trabajo perdieron el inicio de sesión IMAP con contraseña en 2022-2023. Hasta que esta aplicación admita OAuth2, usa un proveedor que aún acepte una contraseña de aplicación.',
   'provider.hint.appPassword': 'Este proveedor necesita una contraseña de aplicación, no la de tu cuenta habitual.',
   'provider.hint.authCode': 'Activa el SMTP en los ajustes de tu buzón y usa el código de autorización que te dé.',
   'provider.hint.password': 'Aquí funciona tu contraseña de correo habitual.',
@@ -708,6 +709,9 @@ export const es: Translations = {
   "backup.hint": "Un archivo con tus cuentas, recordatorios, contactos y plantillas. Para un equipo nuevo, o antes de experimentar.",
   "backup.export": "Guardar una copia",
   "backup.import": "Restaurar desde un archivo",
+  "download.androidUnsupported": "Guardar archivos aún no está disponible en Android; exporta desde la aplicación de escritorio",
+  "download.cancelled": "Guardado cancelado",
+  "download.failed": "No se pudo guardar el archivo",
   "backup.exported": "Copia guardada",
   "backup.restored": "Restaurado",
   "backup.cannotRead": "Ese archivo no se puede leer",

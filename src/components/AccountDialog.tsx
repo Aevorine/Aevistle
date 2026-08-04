@@ -15,9 +15,11 @@ import { useI18n, type TranslationKey } from '../i18n'
 import {
   PROVIDERS,
   autoConfigForAddress,
+  carryAutoFlags,
   providerById,
   providerForAddress,
   type AutoConfig,
+  type AutoField,
 } from '../core/providers'
 import { advisoryKey } from '../core/transport'
 import { hasErrors, validateAccount } from '../core/validate'
@@ -45,17 +47,6 @@ const SECURITY_LABEL: Record<TransportSecurity, TranslationKey> = {
  * would silently throw away a port someone corrected by hand. So each one
  * carries a flag, and auto-fill only ever writes the ones still unflagged.
  */
-type AutoField =
-  | 'providerId'
-  | 'label'
-  | 'host'
-  | 'port'
-  | 'security'
-  | 'username'
-  | 'imapHost'
-  | 'imapPort'
-  | 'imapSecurity'
-  | 'imapUsername'
 
 /** The subset worth telling the user about — label and provider are cosmetic. */
 const REPORTED_FIELDS: AutoField[] = [
@@ -70,6 +61,147 @@ const REPORTED_FIELDS: AutoField[] = [
 ]
 
 const ALL_AUTO_FIELDS: AutoField[] = ['providerId', 'label', ...REPORTED_FIELDS]
+
+
+/**
+ * A group-name box whose suggestion list we actually control the look of.
+ *
+ * This was a `<datalist>`, which is the right semantics and the wrong
+ * rendering. Chromium draws that popup as browser chrome — outside the
+ * document, at the platform's own type size — and no page CSS can reach it.
+ * So while every other piece of text in the app is 16px 宋体 / Times New Roman,
+ * the one list you use to *pick an existing group* was whatever the OS felt
+ * like, which is what "the group display text is too small" meant.
+ *
+ * It also explains why a DOM sweep found nothing below 16px: a datalist popup
+ * is not in the DOM to be measured. The list is rendered in the page now, so
+ * it inherits the same scale as everything around it.
+ *
+ * Behaviour is unchanged: free text, typing filters, suggestions optional.
+ */
+function GroupInput({
+  value,
+  options,
+  placeholder,
+  onChange,
+}: {
+  value: string
+  options: string[]
+  placeholder: string
+  onChange: (value: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [active, setActive] = useState(-1)
+  const wrap = useRef<HTMLDivElement>(null)
+
+  const matches = useMemo(() => {
+    const query = value.trim().toLowerCase()
+    const unique = [...new Set(options.filter(Boolean))]
+    /*
+     * A value that already *is* one of the groups means browsing, not typing.
+     *
+     * Filtering on it would leave one entry at best and, when the match is
+     * exact, nothing at all — so opening the box on an account already filed
+     * under "个人邮箱" showed an empty list, which is precisely the moment
+     * someone is trying to move it to a different group. Show the whole set
+     * then, and only narrow once what is typed is not a group yet.
+     */
+    if (!query || unique.some((o) => o.toLowerCase() === query)) return unique
+    return unique.filter((o) => o.toLowerCase().includes(query))
+  }, [options, value])
+
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => {
+      if (!wrap.current?.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [open])
+
+  const commit = (v: string) => {
+    onChange(v)
+    setOpen(false)
+    setActive(-1)
+  }
+
+  return (
+    <div className="suggest" ref={wrap}>
+      <input
+        className="input"
+        role="combobox"
+        aria-expanded={open && matches.length > 0}
+        aria-autocomplete="list"
+        placeholder={placeholder}
+        value={value}
+        onChange={(e) => {
+          onChange(e.target.value)
+          setOpen(true)
+          setActive(-1)
+        }}
+        onFocus={() => setOpen(true)}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape' && open) {
+            /*
+             * Close the list, not the dialog behind it.
+             *
+             * The modal listens for Escape on `document` in the bubble phase,
+             * and React's `stopPropagation` only stops React's own synthetic
+             * propagation — the native event would still reach it and throw
+             * away the whole form. Stopping the native event is the part that
+             * actually works. (Same shape as the full-screen image viewer,
+             * which lost a dialog to exactly this.)
+             */
+            e.nativeEvent.stopImmediatePropagation()
+            e.preventDefault()
+            setOpen(false)
+            setActive(-1)
+            return
+          }
+          if (e.key === 'ArrowDown' && !open) {
+            e.preventDefault()
+            setOpen(true)
+            return
+          }
+          if (!open || matches.length === 0) return
+          if (e.key === 'ArrowDown') {
+            e.preventDefault()
+            setActive((i) => (i + 1) % matches.length)
+          } else if (e.key === 'ArrowUp') {
+            e.preventDefault()
+            setActive((i) => (i <= 0 ? matches.length : i) - 1)
+          } else if (e.key === 'Enter' && active >= 0) {
+            // Only swallows Enter when something is highlighted, so Enter with
+            // the list merely open still submits the form.
+            e.preventDefault()
+            commit(matches[active])
+          }
+        }}
+      />
+      {open && matches.length > 0 ? (
+        <ul className="suggest__list" role="listbox">
+          {matches.map((m, i) => (
+            <li
+              key={m}
+              role="option"
+              aria-selected={i === active}
+              className={`suggest__item${i === active ? ' is-active' : ''}`}
+              // `mousedown` rather than `click`: the input's blur would close
+              // the list before a click ever landed.
+              onMouseDown={(e) => {
+                e.preventDefault()
+                commit(m)
+              }}
+              onMouseEnter={() => setActive(i)}
+            >
+              {m}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  )
+}
 
 function blankAccount(): MailAccount {
   const now = Date.now()
@@ -289,7 +421,27 @@ export function AccountDialog({
       return
     }
     const p = cfg.preset
-    const may = (f: AutoField) => force || !touched.has(f)
+
+    /*
+     * Changing the domain is not a typo fix — it is a different mailbox.
+     *
+     * Editing an existing account starts with every field flagged as
+     * hand-edited, on the reasoning that a stored config was chosen on
+     * purpose. That is right for `a@qq.com` → `ab@qq.com`, and wrong for
+     * `me@outlook.com` → `me@gmail.com`, where it left Microsoft's servers
+     * sitting under a Gmail address and nothing at all appeared to happen.
+     *
+     * So on a domain change the flags are recomputed rather than trusted:
+     * only fields that genuinely differ from what the *old* address implied
+     * were ever a customisation, and only those survive. Computed into a
+     * local because `setTouched` will not have landed by the time `may` runs.
+     */
+    const effective = force
+      ? touched
+      : carryAutoFlags(account.fromAddress, address, { ...account, ...inbox }, touched)
+    if (effective !== touched) setTouched(effective)
+
+    const may = (f: AutoField) => force || !effective.has(f)
 
     setAccount((a) => {
       const next: MailAccount = { ...a, fromAddress: address }
@@ -634,17 +786,11 @@ export function AccountDialog({
             Groups here are a filing device, and a filing device that makes you
             create the folder first is one people stop using. */}
         <Field label={t('account.group')} optional={t('common.optional')}>
-          <datalist id="aevistle-account-groups">
-            {knownGroups.map((g) => (
-              <option key={g} value={g} />
-            ))}
-          </datalist>
-          <input
-            className="input"
-            list="aevistle-account-groups"
-            placeholder={t('account.groupPlaceholder')}
+          <GroupInput
             value={account.group ?? ''}
-            onChange={(e) => patch({ group: e.target.value.trim() || undefined })}
+            options={knownGroups}
+            placeholder={t('account.groupPlaceholder')}
+            onChange={(v) => patch({ group: v.trim() || undefined })}
           />
         </Field>
       </div>

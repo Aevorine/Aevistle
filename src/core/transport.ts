@@ -387,13 +387,16 @@ export function summarizeTransportError(
   if (looksLikeMicrosoftAuthBlock(text) && (microsoft || m.includes('5.7.139'))) {
     return {
       summary:
-        'The server accepted the connection but refused the sign-in: Microsoft turns off ' +
-        'password-based SMTP/IMAP (SMTP AUTH) by default. For a work or school account an ' +
-        'administrator must tick Microsoft 365 admin center → Users → Active users → the ' +
-        'user → Mail → Manage email apps → Authenticated SMTP. For a personal Outlook.com ' +
-        'or Hotmail account, create an app password at ' +
-        'https://account.live.com/proofs/AppPassword and use that instead of your normal ' +
-        'password. Microsoft is retiring password sign-in for mail clients in favour of OAuth2.',
+        'The server accepted the connection but refused the sign-in, and no password can ' +
+        'fix this. Microsoft has withdrawn password-based mail sign-in. For a personal ' +
+        'Outlook.com, Hotmail or Live account, IMAP/POP/SMTP stopped accepting passwords — ' +
+        'including app passwords — on 30 April 2026; OAuth2 is the only way in. For a work ' +
+        'or school account, IMAP and POP lost password sign-in in 2022–2023 and cannot be ' +
+        're-enabled by anyone, including Microsoft support; SMTP AUTH still accepts a ' +
+        'password until the end of 2026, and only if an administrator has ticked Microsoft ' +
+        '365 admin center → Users → Active users → the user → Mail → Manage email apps → ' +
+        'Authenticated SMTP. Until this app ships OAuth2, use a provider that still accepts ' +
+        'an app password (Gmail, QQ, 163, iCloud) for scheduled sending.',
       detail: text,
     }
   }

@@ -1821,7 +1821,13 @@ textarea {
 }
 .modal {
   width: min(560px, 100%);
-  max-height: min(85vh, 760px);
+  /* Measured on the account dialog at an 827px viewport: 1334px of content in
+     a 548px window, so 41% of the form was visible at once and the rest was
+     "content that does not show". The old `min(85vh, 760px)` capped the box at
+     703px and left 124px of viewport unused — a fixed pixel ceiling shrinking
+     the box on exactly the screens that had room to spare. 94vh keeps a scrim
+     margin without spending the rest of the screen on nothing. */
+  max-height: 94vh;
   display: flex;
   flex-direction: column;
   background: var(--surface-1);
@@ -1964,9 +1970,66 @@ textarea {
   text-underline-offset: 2px;
 }
 
+/* --- in-page suggestion list ----------------------------------------------
+
+   Replaces `<datalist>`, whose popup Chromium draws as browser chrome at the
+   platform's own type size — unreachable by page CSS and unmeasurable in the
+   DOM. Rendered here instead so a group name in the list is the same 16px
+   宋体 / Times New Roman as the box it drops out of. */
+
+.suggest {
+  position: relative;
+}
+.suggest__list {
+  position: absolute;
+  inset-inline: 0;
+  top: calc(100% + 4px);
+  z-index: 30;
+  margin: 0;
+  padding: var(--sp-1);
+  list-style: none;
+  max-height: 260px;
+  overflow-y: auto;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-lg);
+}
+.suggest__item {
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-sm);
+  /* Inherited rather than set: the point of this component is that the list
+     matches the rest of the interface instead of the platform's idea of it. */
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  color: var(--text-1);
+  cursor: pointer;
+  /* A group name can be long and there is no room to lose the end of it. */
+  overflow-wrap: anywhere;
+}
+.suggest__item.is-active,
+.suggest__item:hover {
+  background: var(--surface-2);
+}
+
 .mono {
   font-family: var(--font-mono);
   font-size: var(--text-sm);
+  /* Machine strings are the one kind of text that will not wrap on its own.
+     The error a user actually reported —
+
+       1090880:error:100000f7:SSL routines:OPENSSL_internal:
+       WRONG_VERSION_NUMBER:..\..\third_party\boringssl\src\ssl\
+       tls_record.cc:127:
+
+     is a single 120-character token with no spaces in it, and normal wrapping
+     only breaks at spaces. So it ran straight out of the account dialog and
+     was clipped: that is what "the text is cut off" meant. `anywhere` rather
+     than `break-word` because only `anywhere` also lets the box shrink below
+     the token's own width, which is what a flex/grid parent needs in order to
+     stop the whole dialog from growing instead. File paths and long URLs in
+     `.mono` get the same treatment for the same reason. */
+  overflow-wrap: anywhere;
 }
 
 /* --- data folder ---------------------------------------------------------- */

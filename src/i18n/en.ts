@@ -245,6 +245,7 @@ export const en = {
   'account.deleteConfirm': 'Delete this account? Scheduled reminders using it will stop.',
   'account.storedSafely': 'Passwords never leave your device. They are encrypted by the operating system and are not part of any backup or export.',
 
+  'provider.hint.microsoftNoPassword': 'Microsoft no longer accepts passwords for mail apps. Personal Outlook.com, Hotmail and Live accounts stopped accepting them — app passwords included — on 30 April 2026; work accounts lost IMAP password sign-in in 2022-2023. Until this app supports OAuth2, use a provider that still accepts an app password.',
   'provider.hint.appPassword': 'This provider needs an app password, not your normal login password.',
   'provider.hint.authCode': 'Enable SMTP in your mailbox settings and use the authorisation code it gives you.',
   'provider.hint.password': 'Your normal mailbox password works here.',
@@ -717,6 +718,9 @@ export const en = {
   "backup.hint": "One file with your accounts, reminders, contacts and templates. For a new machine, or before you try something.",
   "backup.export": "Save a backup",
   "backup.import": "Restore from a file",
+  "download.androidUnsupported": "Saving a file is not available on Android yet — export from the desktop app instead",
+  "download.cancelled": "Save cancelled",
+  "download.failed": "The file could not be saved",
   "backup.exported": "Backup saved",
   "backup.restored": "Restored",
   "backup.cannotRead": "That file cannot be read",

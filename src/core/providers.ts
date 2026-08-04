@@ -65,8 +65,18 @@ export const PROVIDERS: ProviderPreset[] = [
     host: 'smtp.office365.com',
     port: 587,
     security: 'starttls',
-    hintKey: 'provider.hint.appPassword',
-    appPasswordUrl: 'https://account.live.com/proofs/AppPassword',
+    /*
+     * No `appPasswordUrl`, deliberately.
+     *
+     * It used to point at https://account.live.com/proofs/AppPassword, and
+     * sending someone there is now worse than sending them nowhere: Microsoft
+     * stopped accepting app passwords for IMAP/POP/SMTP on personal accounts
+     * on 30 April 2026, so the page either does not issue one or issues one
+     * that will be refused. A "get an app password" button that leads to a
+     * dead end reads as the app being broken rather than the method being
+     * withdrawn, so the hint says what happened instead.
+     */
+    hintKey: 'provider.hint.microsoftNoPassword',
     attachmentLimitMb: 20,
     dailyLimit: 300,
     imapHost: 'outlook.office365.com',
@@ -438,6 +448,103 @@ export function autoConfigForAddress(address: string): AutoConfig | null {
       imapSecurity: 'ssl',
     },
   }
+}
+
+/** The fields an address can fill in on its own. */
+export type AutoField =
+  | 'providerId'
+  | 'label'
+  | 'host'
+  | 'port'
+  | 'security'
+  | 'username'
+  | 'imapHost'
+  | 'imapPort'
+  | 'imapSecurity'
+  | 'imapUsername'
+
+/**
+ * The current form values, as far as this module needs to care.
+ *
+ * Structural rather than `MailAccount` + `InboxAccountState` so the rule can
+ * be exercised without building two full records — and so `scripts/
+ * check-autoconfig.mjs` can call it directly instead of testing a copy of it.
+ */
+export interface AutoFieldValues {
+  providerId?: string
+  label?: string
+  host?: string
+  port?: number
+  security?: TransportSecurity
+  username?: string
+  fromAddress?: string
+  imapHost?: string
+  imapPort?: number
+  imapSecurity?: TransportSecurity
+  imapUsername?: string
+}
+
+/**
+ * Which fields actually disagree with what `cfg` would have filled in.
+ *
+ * The distinction this draws is the whole reason changing a domain can be
+ * safe. A host box reading `smtp.office365.com` under an Outlook address is
+ * not a decision anybody made — it is the preset sitting where the preset put
+ * it. Only a value moved *away* from the preset is a customisation worth
+ * carrying across to a different mailbox.
+ *
+ * Returns an empty set for an address no preset knows, deliberately: with
+ * nothing to compare against, "did they customise this?" is unanswerable, and
+ * the caller should keep whatever flags it already had rather than guess.
+ */
+export function deviationsFrom(cfg: AutoConfig | null, values: AutoFieldValues): Set<AutoField> {
+  const out = new Set<AutoField>()
+  if (!cfg) return out
+  const p = cfg.preset
+  const add = (f: AutoField, actual: unknown, wanted: unknown) => {
+    if (actual !== wanted) out.add(f)
+  }
+  add('providerId', values.providerId, cfg.guessed ? undefined : p.id)
+  add('label', values.label, cfg.guessed ? cfg.domain : p.name)
+  add('host', values.host, p.host)
+  add('port', values.port, p.port)
+  add('security', values.security, p.security)
+  add('username', values.username, values.fromAddress)
+  if (p.imapHost) {
+    add('imapHost', values.imapHost, p.imapHost)
+    add('imapPort', values.imapPort, p.imapPort)
+    add('imapSecurity', values.imapSecurity, p.imapSecurity)
+  }
+  add('imapUsername', values.imapUsername, values.fromAddress)
+  return out
+}
+
+/**
+ * The hand-edit flags to carry into a new address.
+ *
+ * Same domain — a typo fix, a plus-tag, a different mailbox on one server —
+ * keeps every flag: the stored config was chosen on purpose and re-typing the
+ * local part is not a request to rewrite it.
+ *
+ * Different domain is a different mailbox, and the servers that went with the
+ * old one stop being a deliberate choice. Editing an existing account used to
+ * flag *every* field up front, so `me@outlook.com` → `me@gmail.com` left
+ * Microsoft's servers under a Gmail address and looked like nothing happened
+ * at all. Now the flags are recomputed from what genuinely deviated.
+ */
+export function carryAutoFlags(
+  previousAddress: string,
+  nextAddress: string,
+  values: AutoFieldValues,
+  current: ReadonlySet<AutoField>,
+): ReadonlySet<AutoField> {
+  const previousDomain = domainOfAddress(previousAddress)
+  const nextDomain = domainOfAddress(nextAddress)
+  if (!previousDomain || !nextDomain || previousDomain === nextDomain) return current
+
+  const previous = autoConfigForAddress(previousAddress)
+  if (!previous) return current
+  return deviationsFrom(previous, values)
 }
 
 /** The attachment ceiling to enforce for an account, in bytes. */

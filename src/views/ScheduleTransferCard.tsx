@@ -20,6 +20,7 @@ import { useI18n } from '../i18n'
 import { accountLabel } from '../core/accounts'
 import { exportJobs, materialise, parseImport, type ParsedImport } from '../core/jobTransfer'
 import { DEFAULT_WORK_CALENDAR, mergeCalendars } from '../core/workCalendar'
+import { saveGeneratedFile } from '../core/download'
 
 declare const __APP_VERSION__: string
 
@@ -39,7 +40,7 @@ export function ScheduleTransferCard() {
   const [accountId, setAccountId] = useState('')
   const [error, setError] = useState('')
 
-  const exportNow = () => {
+  const exportNow = async () => {
     if (state.jobs.length === 0) return
     // The calendar rides along whenever a job in the file reads it — a
     // `workdayPolicy` that lands on an install with no matching holiday list is
@@ -50,15 +51,30 @@ export function ScheduleTransferCard() {
       Date.now(),
       state.settings.workCalendar ?? DEFAULT_WORK_CALENDAR,
     )
-    const blob = new Blob([JSON.stringify(file, null, 2)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = fileName()
-    link.click()
-    // Revoking immediately can cancel the download in some builds.
-    setTimeout(() => URL.revokeObjectURL(url), 1000)
-    toast.push({ tone: 'success', title: t('transfer.exported', { n: state.jobs.length }) })
+    // Same reason as the backup card: the shell owns the save dialog, so it
+    // is the only party that can tell us a recognisable file exists on disk.
+    const { outcome, unsupported } = await saveGeneratedFile(JSON.stringify(file, null, 2), fileName())
+    if (unsupported) {
+      toast.push({ tone: 'error', title: t('download.androidUnsupported') })
+      return
+    }
+    if (!outcome) {
+      toast.push({ tone: 'success', title: t('transfer.exported', { n: state.jobs.length }) })
+      return
+    }
+    if (outcome.cancelled) {
+      toast.push({ tone: 'info', title: t('download.cancelled') })
+      return
+    }
+    toast.push(
+      outcome.ok
+        ? {
+            tone: 'success',
+            title: t('transfer.exported', { n: state.jobs.length }),
+            detail: outcome.name,
+          }
+        : { tone: 'error', title: t('download.failed'), detail: outcome.name },
+    )
   }
 
   const pick = async (file: File) => {
@@ -143,7 +159,7 @@ export function ScheduleTransferCard() {
         <div className="btn-row">
           <Button
             icon={<IconDownload size={15} />}
-            onClick={exportNow}
+            onClick={() => void exportNow()}
             disabled={state.jobs.length === 0}
           >
             {t('transfer.export', { n: state.jobs.length })}

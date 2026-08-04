@@ -1,10 +1,16 @@
 /**
  * Export and restore, in Settings.
  *
- * Both halves are plain browser file handling rather than an IPC round trip:
- * a Blob download and a hidden `<input type="file">` work identically in the
- * desktop build, the Android build and the browser preview, and they do not
- * need a new hole in the preload bridge to exist.
+ * Importing is plain browser file handling — a hidden `<input type="file">`
+ * needs no new hole in the preload bridge.
+ *
+ * Exporting used to make the same claim, and it was wrong. A Blob download
+ * does *not* behave identically across the three builds: in the packaged
+ * desktop app it saved as `<random-guid>.tmp` with the suggested name thrown
+ * away (so the file could not even be picked back up by the importer above,
+ * which filters on `.aevistle`), and in the Android WebView it does nothing at
+ * all. `core/download.ts` handles that spread — the shell now owns the save
+ * dialog and reports back, and Android says so rather than pretending.
  *
  * Restoring shows what is in the file *before* doing anything with it. A
  * restore is one of the few actions in this app that can quietly lose work,
@@ -16,6 +22,7 @@ import { useRef, useState } from 'react'
 import { Banner, Button, Card, CardHeader, Modal, useToast } from '../components/ui'
 import { IconDownload, IconFolder } from '../components/icons'
 import { useApp } from '../state/AppState'
+import { saveGeneratedFile } from '../core/download'
 import { useI18n } from '../i18n'
 import {
   applyBackup,
@@ -35,18 +42,32 @@ export function BackupCard() {
   const [pending, setPending] = useState<{ backup: BackupFile; summary: BackupSummary } | null>(null)
   const [error, setError] = useState('')
 
-  const exportNow = () => {
+  const exportNow = async () => {
     const backup = buildBackup(state, __APP_VERSION__)
-    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = backupFileName()
-    link.click()
-    // Revoking immediately can cancel the download in some builds; a tick is
-    // enough for the browser to have taken the blob.
-    setTimeout(() => URL.revokeObjectURL(url), 1000)
-    toast.push({ tone: 'success', title: t('backup.exported') })
+    // The toast waits for the shell's verdict. It used to fire on the click,
+    // which said "exported" even when the save dialog was cancelled — and
+    // that false success is part of why this feature read as broken.
+    const { outcome, unsupported } = await saveGeneratedFile(
+      JSON.stringify(backup, null, 2),
+      backupFileName(),
+    )
+    if (unsupported) {
+      toast.push({ tone: 'error', title: t('download.androidUnsupported') })
+      return
+    }
+    if (!outcome) {
+      toast.push({ tone: 'success', title: t('backup.exported') })
+      return
+    }
+    if (outcome.cancelled) {
+      toast.push({ tone: 'info', title: t('download.cancelled') })
+      return
+    }
+    toast.push(
+      outcome.ok
+        ? { tone: 'success', title: t('backup.exported'), detail: outcome.name }
+        : { tone: 'error', title: t('download.failed'), detail: outcome.name },
+    )
   }
 
   const pick = async (file: File) => {
@@ -74,7 +95,7 @@ export function BackupCard() {
           on the same grid instead of on its own ad-hoc stack. */}
       <div className="card__body">
       <div className="btn-row">
-        <Button icon={<IconDownload size={15} />} onClick={exportNow}>
+        <Button icon={<IconDownload size={15} />} onClick={() => void exportNow()}>
           {t('backup.export')}
         </Button>
         <Button icon={<IconFolder size={15} />} onClick={() => fileInput.current?.click()}>

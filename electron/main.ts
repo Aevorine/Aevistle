@@ -434,6 +434,71 @@ function createWindow(): void {
     return { action: 'deny' }
   })
 
+  // Saving a file the renderer produced.
+  //
+  // "Back up" and "move reminders to another device" both hand the user a
+  // Blob through `<a download>`. Without this handler, that measurably does
+  // the wrong thing in the packaged build: no dialog appears, and the file
+  // lands in the Downloads folder named `<random-guid>.tmp` — the
+  // `suggestedFilename` is discarded entirely. Measured on 0.1.7: a 23-byte
+  // payload arrived as `3901de1a-…-884a3f6db676.tmp`, 23 bytes, correct
+  // content, unrecognisable name.
+  //
+  // That is why both features read as broken. Nothing visibly happens; and
+  // even someone who finds the file cannot restore it, because the restore
+  // picker filters on `.aevistle,application/json` and a `.tmp` is not
+  // offered. Export appearing to fail and import appearing to fail were the
+  // same defect seen from two ends.
+  //
+  // `showSaveDialogSync` rather than the promise form because `setSavePath`
+  // is only honoured inside this callback — returning first and resolving
+  // later puts us back on the default path. It blocks the main process while
+  // the dialog is open, which is acceptable for an explicitly user-initiated
+  // save and is bounded by how long they take to click.
+  mainWindow.webContents.session.on('will-download', (_event, item) => {
+    const suggested = item.getFilename() || 'aevistle-export'
+    const ext = path.extname(suggested).replace(/^\./, '')
+    const saveOptions = {
+      defaultPath: path.join(app.getPath('downloads'), suggested),
+      ...(ext
+        ? {
+            filters: [
+              { name: ext.toUpperCase(), extensions: [ext] },
+              { name: 'All files', extensions: ['*'] },
+            ],
+          }
+        : {}),
+    }
+    // Parented to the window when there is one, so the dialog is modal to it
+    // rather than a stray top-level window someone can lose behind the app.
+    const owner = mainWindow
+    const target = owner
+      ? dialog.showSaveDialogSync(owner, saveOptions)
+      : dialog.showSaveDialogSync(saveOptions)
+
+    if (!target) {
+      // Cancelling is a normal outcome, not a failure, but it must not leave
+      // the half-written temp file behind.
+      item.cancel()
+      mainWindow?.webContents.send(IPC.downloadDone, { ok: false, cancelled: true, name: suggested })
+      return
+    }
+
+    item.setSavePath(target)
+    item.once('done', (_e, state) => {
+      // The renderer used to toast "exported" the instant the click handler
+      // ran, which said "saved" even when the dialog was cancelled or the
+      // disk was full. Now it waits to be told what actually happened.
+      mainWindow?.webContents.send(IPC.downloadDone, {
+        ok: state === 'completed',
+        cancelled: false,
+        name: path.basename(target),
+        path: target,
+        state,
+      })
+    })
+  })
+
   mainWindow.webContents.on('will-navigate', (event, url) => {
     const current = mainWindow?.webContents.getURL() ?? ''
     if (new URL(url).origin !== new URL(current).origin) {

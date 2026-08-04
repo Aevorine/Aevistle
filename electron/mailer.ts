@@ -393,6 +393,11 @@ async function overLadder<T>(
 
   const startedAll = Date.now()
 
+  // One entry per rung that failed. Collected rather than discarded because
+  // the ladder ends on the least conventional endpoint, so `last` on its own
+  // describes the least informative attempt of the set.
+  const notes: AttemptNote[] = []
+
   // Resolved once, outside the ladder: the address does not change between
   // ports, and paying for a lookup on every rung would be the same mistake in
   // a different place.
@@ -416,11 +421,12 @@ async function overLadder<T>(
     try {
       const value = await withDeadline(() => run(transporter), budget, () => transporter.close())
       succeeded = true
-      return { value, endpoint, attempts, ...(keepOpen ? { transporter } : {}) }
+      return { value, endpoint, attempts, notes, ...(keepOpen ? { transporter } : {}) }
     } catch (e) {
       last = e instanceof Error ? e : new Error(String(e))
+      notes.push({ port: endpoint.port, security: endpoint.security, error: last.message })
       if (!isNegotiable(classifyError(last.message), last.message)) {
-        return { error: last, endpoint, attempts }
+        return { error: last, endpoint, attempts, notes }
       }
     } finally {
       // A pooled connection that worked is the caller's to keep; everything
@@ -435,7 +441,12 @@ async function overLadder<T>(
     }
   }
 
-  return { error: last, endpoint: ladder[ladder.length - 1] ?? { port: account.port, security: account.security }, attempts }
+  return {
+    error: last,
+    endpoint: ladder[ladder.length - 1] ?? { port: account.port, security: account.security },
+    attempts,
+    notes,
+  }
 }
 
 function diagnosticsFor(
@@ -460,9 +471,24 @@ function failure(
   account: MailAccount,
   endpoint: Endpoint,
   attempts: number,
+  notes: AttemptNote[] = [],
 ): SendResult {
-  const message = error.message || String(error)
-  const kind = classifyError(message)
+  const raw = error.message || String(error)
+  // Classification stays on the raw text: `classifyError` matches on provider
+  // and OpenSSL wording, and a sentence written for a person would defeat it.
+  const kind = classifyError(raw)
+  // What reaches the screen is the other way round — a sentence first, the
+  // per-rung trace next, the OpenSSL dump last. Before this, `error` was the
+  // raw text, which is how a BoringSSL stack offset ended up as the headline
+  // of the account dialog and overflowed it.
+  const message = renderTransportError(
+    summarizeTransportError(raw, {
+      host: account.host,
+      port: endpoint.port,
+      security: endpoint.security,
+    }),
+    formatAttempts(notes),
+  )
   return {
     ok: false,
     accepted: [],
@@ -644,6 +670,7 @@ export async function testConnection(
         account,
         outcome.endpoint,
         outcome.attempts,
+        outcome.notes,
       )
     }
 

@@ -8,7 +8,12 @@
  */
 
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import { IPC, type DesktopApi, type TrayCommand } from '../src/core/ipc-contract'
+import {
+  IPC,
+  type DesktopApi,
+  type DownloadOutcome,
+  type TrayCommand,
+} from '../src/core/ipc-contract'
 import type { InboxEvent, JobEvent } from '../src/core/bridge'
 import type { DownloadProgress } from '../src/core/update'
 import type { ControlRequest } from '../src/core/control'
@@ -76,6 +81,12 @@ const api: DesktopApi = {
     const listener = (_event: unknown, command: TrayCommand) => handler(command)
     ipcRenderer.on(IPC.trayCommand, listener)
     return () => ipcRenderer.removeListener(IPC.trayCommand, listener)
+  },
+
+  onDownloadDone: (handler) => {
+    const listener = (_event: unknown, outcome: DownloadOutcome) => handler(outcome)
+    ipcRenderer.on(IPC.downloadDone, listener)
+    return () => ipcRenderer.removeListener(IPC.downloadDone, listener)
   },
 
   notify: (title, body) => ipcRenderer.invoke(IPC.notify, title, body),

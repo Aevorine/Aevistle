@@ -22,6 +22,7 @@ export function createDesktopBridge(): PlatformBridge {
     prewarm: (account) => api.prewarm(account),
     setUiLocale: (locale) => api.setUiLocale(locale),
     onTrayCommand: (handler) => api.onTrayCommand(handler),
+    onDownloadDone: (handler) => api.onDownloadDone(handler),
 
     applyControl: (settings) => api.applyControl(settings),
     onControlRequest: (handler) => api.onControlRequest(handler),

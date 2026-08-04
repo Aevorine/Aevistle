@@ -1741,10 +1741,28 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (!bridge) return
       if (secret) await bridge.setSecret(config.accountId, secret, 'imap')
       dispatch({ type: 'upsertInboxAccount', inbox: config })
-      // Called even when disabling: syncInbox() is a no-op for a disabled
-      // config on every platform, but a platform with a native background
-      // sync (Android) needs the round trip to learn the account turned off.
-      await syncInboxAccount(config.accountId, config)
+
+      /*
+       * The sync runs behind the user, not in front of them.
+       *
+       * It is a full IMAP connect, login, mailbox open and header fetch — up
+       * to 50 headers and 15 bodies on a first run. Awaiting it here is what
+       * "saving an account takes ages" was: the dialog stayed open with the
+       * button spinning for however long the server took, having already
+       * written everything the user typed.
+       *
+       * Safe to detach because it is not the thing being saved. The dispatch
+       * above is the save, and it has already happened. And it cannot become a
+       * sync that silently never ran: `syncInboxAccount` catches its own
+       * failures and writes `lastSyncError` into the account, which the inbox
+       * UI and the health board both read — so a failure is still reported,
+       * just not by holding a dialog open.
+       *
+       * Still called when disabling: `syncInbox()` no-ops for a disabled
+       * config everywhere, but a platform with a native background sync
+       * (Android) needs the round trip to learn the account turned off.
+       */
+      void syncInboxAccount(config.accountId, config)
     },
     [bridge, syncInboxAccount],
   )

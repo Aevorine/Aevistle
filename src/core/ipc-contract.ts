@@ -45,6 +45,19 @@ import type { ControlEndpoint, ControlRequest, ControlResponse } from './control
  */
 export type TrayCommand = 'compose' | 'schedule' | 'logs' | 'pauseAll' | 'resumeAll'
 
+/** The result of a `<a download>` the main process took responsibility for. */
+export interface DownloadOutcome {
+  /** True only when a file is on disk under `path`. */
+  ok: boolean
+  /** The user closed the save dialog. Not an error — nothing should look alarmed. */
+  cancelled: boolean
+  /** The file name as saved, so the toast can say where it went. */
+  name: string
+  path?: string
+  /** Electron's own word for it: `completed` | `cancelled` | `interrupted`. */
+  state?: string
+}
+
 export interface DesktopApi {
   loadState(): Promise<Partial<AppState> | null>
   saveState(state: AppState): Promise<void>
@@ -61,6 +74,14 @@ export interface DesktopApi {
   setUiLocale(locale: LocaleId): Promise<void>
   /** Menu items that need the window to do something. Returns an unsubscribe. */
   onTrayCommand(handler: (command: TrayCommand) => void): () => void
+  /**
+   * What became of a file the renderer handed over via `<a download>`.
+   *
+   * Exists because "we started a download" and "a file exists on disk with a
+   * name you will recognise" are different claims, and only the main process
+   * knows the second one. Returns an unsubscribe.
+   */
+  onDownloadDone(handler: (outcome: DownloadOutcome) => void): () => void
 
   pickFiles(): Promise<Attachment[]>
   snapshotAttachments(attachments: Attachment[], jobId: string): Promise<Attachment[]>
@@ -184,6 +205,7 @@ export const IPC = {
   prewarm: 'aevistle:prewarm',
   setUiLocale: 'aevistle:set-ui-locale',
   trayCommand: 'aevistle:tray-command',
+  downloadDone: 'aevistle:download-done',
   pickFiles: 'aevistle:pick-files',
   snapshotAttachments: 'aevistle:snapshot-attachments',
   revealPath: 'aevistle:reveal-path',

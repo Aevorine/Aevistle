@@ -221,6 +221,7 @@ export const ar: Translations = {
   'account.deleteConfirm': 'حذف هذا الحساب؟ ستتوقف التذكيرات المجدولة التي تستخدمه.',
   'account.storedSafely': 'كلمات المرور لا تغادر جهازك أبداً. يشفّرها نظام التشغيل ولا تظهر في أي نسخة احتياطية أو ملف تصدير.',
 
+  'provider.hint.microsoftNoPassword': 'لم تعد Microsoft تقبل كلمات المرور لتطبيقات البريد. توقّفت حسابات Outlook.com وHotmail وLive الشخصية عن قبولها — بما في ذلك كلمات مرور التطبيقات — في 30 أبريل 2026؛ وفقدت حسابات العمل تسجيل الدخول بكلمة المرور عبر IMAP في 2022-2023. وإلى أن يدعم هذا التطبيق OAuth2، استخدم مزوّدًا لا يزال يقبل كلمة مرور تطبيق.',
   'provider.hint.appPassword': 'يتطلب هذا المزوّد كلمة مرور خاصة بالتطبيقات، لا كلمة مرور حسابك المعتادة.',
   'provider.hint.authCode': 'فعّل SMTP في إعدادات بريدك واستخدم رمز التفويض الذي يمنحك إياه.',
   'provider.hint.password': 'كلمة مرور بريدك المعتادة تعمل هنا.',
@@ -705,6 +706,9 @@ export const ar: Translations = {
   "backup.hint": "ملف واحد يضم حساباتك وتذكيراتك وجهات اتصالك وقوالبك.",
   "backup.export": "حفظ نسخة",
   "backup.import": "استعادة من ملف",
+  "download.androidUnsupported": "حفظ الملفات غير متاح بعد على أندرويد — صدّر من تطبيق سطح المكتب",
+  "download.cancelled": "تم إلغاء الحفظ",
+  "download.failed": "تعذّر حفظ الملف",
   "backup.exported": "تم حفظ النسخة",
   "backup.restored": "تمت الاستعادة",
   "backup.cannotRead": "تعذّر قراءة هذا الملف",

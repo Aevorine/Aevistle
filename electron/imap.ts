@@ -19,7 +19,7 @@
  *     the first sync — the rest load on demand when opened.
  */
 
-import { ImapFlow, AuthenticationFailure } from 'imapflow'
+import { ImapFlow } from 'imapflow'
 import { simpleParser } from 'mailparser'
 import type {
   InboxAccountState,
@@ -47,6 +47,28 @@ const LIST_FETCH_LIMIT = 50
 const BODY_PREFETCH_LIMIT = 15
 /** Skip eager prefetch above this size; the message is still listed, its body just loads on demand. */
 const PREFETCH_MAX_BYTES = 5 * 1024 * 1024
+
+/**
+ * True when imapflow rejected the credentials, as opposed to failing to reach
+ * the server at all.
+ *
+ * Deliberately duck-typed rather than an `instanceof` against imapflow's
+ * `AuthenticationFailure`: that class is declared in the package's `.d.ts` but
+ * never re-exported from its entry point, so importing it typechecks and then
+ * evaluates to `undefined` at runtime. See the call site in `withConnection`.
+ *
+ * `serverResponseCode` covers the servers that answer
+ * `NO [AUTHENTICATIONFAILED] …` without imapflow tagging the error itself.
+ */
+function isAuthFailure(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false
+  const e = err as { authenticationFailed?: unknown; serverResponseCode?: unknown }
+  if (e.authenticationFailed === true) return true
+  return (
+    typeof e.serverResponseCode === 'string' &&
+    e.serverResponseCode.toUpperCase() === 'AUTHENTICATIONFAILED'
+  )
+}
 
 function assertSafeConfig(config: InboxAccountState): void {
   if (!/^[A-Za-z0-9.\-_]+$/.test(config.imapHost)) throw new Error('Invalid IMAP host')
@@ -158,7 +180,19 @@ async function withConnection<T>(
       }
       // A rejected password fails identically on every port — trying the
       // next rung would only spend the provider's lockout budget for nothing.
-      if (err instanceof AuthenticationFailure) throw err
+      //
+      // This used to read `err instanceof AuthenticationFailure`, importing
+      // that class from 'imapflow'. It typechecked forever because
+      // `lib/imap-flow.d.ts` declares `export class AuthenticationFailure`,
+      // but the real entry point never re-exports it — the class only exists
+      // inside `lib/tools.js`, so at runtime the binding was `undefined` and
+      // `x instanceof undefined` throws "Right-hand side of 'instanceof' is
+      // not an object". Thrown from inside this catch, it *replaced* the real
+      // connection error and escaped the endpoint ladder, so every failure
+      // surfaced as that TypeError instead of "wrong port for this security
+      // mode". Duck-type on the flag imapflow actually sets (tools.js:51,
+      // login.js:38, authenticate.js:17) — no import to go stale.
+      if (isAuthFailure(err)) throw err
       if (connected && classifyError(err.message) === 'auth') throw err
     }
   }

@@ -22,7 +22,7 @@ import type {
   SendResult,
 } from './types'
 import type { DownloadProgress, UpdateAsset, UpdateInfo } from './update'
-import type { TrayCommand } from './ipc-contract'
+import type { DownloadOutcome, TrayCommand } from './ipc-contract'
 
 export interface AppInfo {
   version: string
@@ -169,6 +169,12 @@ export interface PlatformBridge {
 
   /** Tray menu items that ask the window to do something. Desktop only. */
   onTrayCommand?(handler: (command: TrayCommand) => void): () => void
+  /**
+   * Optional: only the desktop shell can say whether a `<a download>` became a
+   * real file. Where it is absent (browser preview), the browser's own
+   * download UI is the feedback and callers keep their optimistic toast.
+   */
+  onDownloadDone?(handler: (outcome: DownloadOutcome) => void): () => void
 
   // --- control interface (desktop only) ------------------------------------
   // Optional because only the desktop build can listen on a socket or watch a

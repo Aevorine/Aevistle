@@ -221,6 +221,7 @@ export const fr: Translations = {
   'account.deleteConfirm': 'Supprimer ce compte ? Les rappels programmés qui l’utilisent s’arrêteront.',
   'account.storedSafely': 'Les mots de passe ne quittent jamais votre appareil. Ils sont chiffrés par le système et ne figurent dans aucune sauvegarde ni export.',
 
+  'provider.hint.microsoftNoPassword': "Microsoft n'accepte plus les mots de passe pour les clients de messagerie. Les comptes personnels Outlook.com, Hotmail et Live les refusent — mots de passe d'application compris — depuis le 30 avril 2026 ; les comptes professionnels ont perdu la connexion IMAP par mot de passe en 2022-2023. En attendant qu'OAuth2 soit pris en charge ici, utilisez un fournisseur qui accepte encore un mot de passe d'application.",
   'provider.hint.appPassword': 'Ce fournisseur exige un mot de passe d’application, pas votre mot de passe habituel.',
   'provider.hint.authCode': 'Activez le SMTP dans les réglages de votre boîte et utilisez le code d’autorisation fourni.',
   'provider.hint.password': 'Votre mot de passe de messagerie habituel fonctionne ici.',
@@ -708,6 +709,9 @@ export const fr: Translations = {
   "backup.hint": "Un fichier avec vos comptes, rappels, contacts et modèles. Pour une nouvelle machine, ou avant d’essayer quelque chose.",
   "backup.export": "Enregistrer une sauvegarde",
   "backup.import": "Restaurer depuis un fichier",
+  "download.androidUnsupported": "L'enregistrement de fichiers n'est pas encore disponible sur Android — exportez depuis l'application de bureau",
+  "download.cancelled": "Enregistrement annulé",
+  "download.failed": "Le fichier n'a pas pu être enregistré",
   "backup.exported": "Sauvegarde enregistrée",
   "backup.restored": "Restauré",
   "backup.cannotRead": "Ce fichier est illisible",
