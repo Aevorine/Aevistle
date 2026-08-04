@@ -237,9 +237,21 @@ come from this project's key.
 Maintainers: the key is created once with `scripts/setup-signing-key.ps1`
 (Windows) or `scripts/setup-signing-key.sh`. On Windows use the PowerShell one
 — typing `bash` there resolves to WSL, which has a different home directory, so
-the key would land where nothing else can find it. After that `npm run
-release:sign -- <tag>` signs and publishes, and `npm run check:signing` fails
-if a published release is missing its signature.
+the key would land where nothing else can find it.
+
+After that, publishing is one command:
+
+```bash
+npm run release -- v0.1.6
+```
+
+It hashes the artifacts, signs the manifest, verifies that signature in a
+keyring holding only the published public key, uploads, then downloads
+everything back and verifies again from the published copies. Signing is not a
+step in it — it happens before anything is uploaded, so a run that cannot sign
+stops without publishing rather than leaving an unsigned release behind for
+someone to notice later. `npm run check:signing` is the backstop, and it runs
+as part of `npm run check`.
 
 ### The Android package
 

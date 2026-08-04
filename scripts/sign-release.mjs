@@ -32,6 +32,15 @@ if (!TAG) {
   console.error('Usage: npm run release:sign -- <tag>')
   process.exit(2)
 }
+/*
+ * Sign without publishing.
+ *
+ * `release.mjs` signs *before* it uploads, so that a failure here cannot leave
+ * a published release sitting there unsigned waiting for someone to notice.
+ * Run on its own — to sign a release that already exists — it uploads as
+ * before.
+ */
+const NO_UPLOAD = process.argv.includes('--no-upload')
 
 const HOME_DIR = path.join(os.homedir(), '.aevistle')
 const PROPS = path.join(HOME_DIR, 'gpg.properties')
@@ -190,6 +199,11 @@ if (existsSync('SECURITY.md')) {
 }
 
 // --- publish ----------------------------------------------------------------
+
+if (NO_UPLOAD) {
+  console.log('  ✓ signed; upload left to the release script')
+  process.exit(0)
+}
 
 const assets = [SIG]
 if (existsSync(PUBLIC_KEY)) assets.push(PUBLIC_KEY)
