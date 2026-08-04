@@ -49,8 +49,27 @@ const fail = (why, hint) => {
 
 /** Run a child step, streaming its output, and stop the release if it fails. */
 function must(cmd, args, why) {
-  const r = spawnSync(cmd, args, { stdio: 'inherit', shell: process.platform === 'win32' })
+  const r = spawnSync(cmd, quoted(args), { stdio: 'inherit', shell: process.platform === 'win32' })
   if (r.status !== 0) fail(why)
+}
+
+/**
+ * Quote arguments that contain spaces, because `shell: true` means the shell
+ * re-splits them.
+ *
+ * `--title` `Aevistle 0.1.6` arrived at gh as `--title Aevistle` plus a stray
+ * `0.1.6`, which gh read as an asset pattern and rejected with "no matches
+ * found for 0.1.6" — a message about the *title* that names a version number
+ * and mentions neither. It went unnoticed because it only affects the
+ * `release create` path: every release so far updated a tag that already
+ * existed, and `release upload` takes no title.
+ *
+ * Quoting rather than dropping `shell: true`: on Windows the tools this runs
+ * are `.cmd` shims that only resolve through a shell.
+ */
+function quoted(args) {
+  if (process.platform !== 'win32') return args
+  return args.map((a) => (/[\s]/.test(a) && !/^".*"$/.test(a) ? `"${a}"` : a))
 }
 
 const ARTIFACTS = [
@@ -118,7 +137,7 @@ step(4, 'Verifying what was published')
 const dir = mkdtempSync(path.join(tmpdir(), 'aevistle-release-'))
 try {
   for (const name of [...ARTIFACTS, 'SHA256SUMS.txt']) {
-    const got = spawnSync('gh', ['release', 'download', TAG, '-p', name, '-D', dir], {
+    const got = spawnSync('gh', quoted(['release', 'download', TAG, '-p', name, '-D', dir]), {
       encoding: 'utf8',
       shell: process.platform === 'win32',
     })
