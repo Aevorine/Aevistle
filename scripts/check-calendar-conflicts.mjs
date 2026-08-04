@@ -572,11 +572,39 @@ if (present('cn: parseStatutoryPayload is exported', cn.parseStatutoryPayload)) 
 
 if (present('cn: fetchStatutoryYear is exported', cn.fetchStatutoryYear)) {
   // 404 is the ordinary answer for a year that has not been announced, and it
-  // must read as "not published", not as a failure the user should retry.
+  // must be reported as "not published" rather than as a failure to retry.
+  // Asserted on the flag, not on the wording: the screen has to be able to say
+  // this in six languages, so an English sentence is the wrong carrier.
   const missing = await cn.fetchStatutoryYear(2031, {
     fetchImpl: async () => ({ ok: false, status: 404 }),
   })
-  ok('cn fetch: a 404 says the year is not published yet', /not been published/.test(missing.error ?? ''))
+  ok('cn fetch: a 404 is reported as "not published yet"', missing.unpublished === true)
+  ok('cn fetch: a 404 yields no year', missing.year === undefined)
+
+  // The shape that actually happens. `holiday-cn` commits
+  // `{"year": Y, "days": []}` as a placeholder, served as a 200, months before
+  // the notice exists — and reporting that as a parse failure told the reader
+  // their app was broken. This is the case the 2027 row hit in a real build.
+  const placeholder = await cn.fetchStatutoryYear(2027, {
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ year: 2027, papers: [], days: [] }),
+    }),
+  })
+  ok('cn fetch: an empty published file is "not published yet"', placeholder.unpublished === true)
+  ok('cn fetch: and installs nothing', placeholder.year === undefined)
+
+  // …but a file that is empty *because it was unreadable* is still an error.
+  const garbled = await cn.fetchStatutoryYear(2027, {
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ year: 2027, days: [{ date: 'nonsense' }, { date: 'also-not' }] }),
+    }),
+  })
+  ok('cn fetch: an unreadable file is NOT reported as unpublished', garbled.unpublished !== true)
+  ok('cn fetch: and does say something went wrong', (garbled.error ?? '').length > 0)
 
   const offline = await cn.fetchStatutoryYear(2027, {
     fetchImpl: async () => {

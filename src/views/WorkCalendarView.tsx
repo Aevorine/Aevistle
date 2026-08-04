@@ -822,6 +822,14 @@ export function WorkCalendarView({ onCompose }: { onCompose?: () => void } = {})
       fetchImpl: bridge?.fetchFeed ? feedFetchVia(bridge.fetchFeed) : undefined,
     })
     setFetching(null)
+    if (outcome.unpublished) {
+      // Answered, and the answer is "not yet". Not an error, and it gets the
+      // sentence this screen already uses for that — the same one the row
+      // shows before the button is pressed, so pressing it cannot contradict
+      // what the row said.
+      toast.push({ tone: 'info', title: t('cal.cn.missing', { year }) })
+      return
+    }
     if (outcome.error || !outcome.year) {
       toast.push({
         tone: 'error',

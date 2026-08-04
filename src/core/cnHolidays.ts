@@ -188,7 +188,7 @@ export function parseStatutoryPayload(
   payload: unknown,
   expectedYear: number,
   at: number,
-): { year: StatutoryYear } | { error: string } {
+): { year: StatutoryYear } | { error: string; unpublished?: boolean } {
   if (typeof payload !== 'object' || payload === null) return { error: 'not an object' }
   const record = payload as Record<string, unknown>
 
@@ -221,7 +221,17 @@ export function parseStatutoryPayload(
     })
   }
 
-  if (days.length === 0) return { error: 'no usable dates in the file' }
+  if (days.length === 0) {
+    // Not a parse failure, and it must not read like one. `holiday-cn` commits
+    // a placeholder for the coming year — `{"year": 2027, "days": []}`, served
+    // as a perfectly good 200 — as soon as the file exists, months before the
+    // State Council publishes the notice that fills it. Reporting that as
+    // "no usable dates in the file" is technically true and tells the reader
+    // their app is broken, when the honest answer is that nobody has decided
+    // 2027's holidays yet.
+    if (rejected === 0) return { error: 'not published yet', unpublished: true }
+    return { error: 'no usable dates in the file' }
+  }
   // A year with no make-up workdays at all has never happened, and it is the
   // shape a half-parsed file takes. Better to refuse than to install a calendar
   // that is missing every 调休 day.
@@ -363,6 +373,15 @@ export function statutoryNames(cached = loadCachedYears()): Map<IsoDate, string>
 export interface FetchOutcome {
   year?: StatutoryYear
   error?: string
+  /**
+   * The feed answered, and the answer is "this year does not exist yet".
+   *
+   * Kept apart from `error` because the screen has a sentence for this already
+   * — the same one the row shows before the button is pressed — and because it
+   * is not a failure of anything. A 404 and a published-but-empty file are the
+   * same fact wearing two shapes.
+   */
+  unpublished?: boolean
 }
 
 /**
@@ -394,16 +413,14 @@ export async function fetchStatutoryYear(
       headers: { accept: 'application/json' },
     })
     if (!response.ok) {
-      return {
-        error:
-          response.status === 404
-            ? `${year} has not been published yet`
-            : `the server answered ${response.status}`,
-      }
+      if (response.status === 404) return { error: 'not published yet', unpublished: true }
+      return { error: `the server answered ${response.status}` }
     }
     const payload: unknown = await response.json()
     const parsed = parseStatutoryPayload(payload, year, opts.now ?? Date.now())
-    return 'error' in parsed ? { error: parsed.error } : { year: parsed.year }
+    return 'error' in parsed
+      ? { error: parsed.error, unpublished: parsed.unpublished }
+      : { year: parsed.year }
   } catch (error) {
     return { error: error instanceof Error ? error.message : 'the request failed' }
   } finally {
