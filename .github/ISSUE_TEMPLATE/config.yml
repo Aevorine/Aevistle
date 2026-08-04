@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/Aevorine/Aevistle/security/advisories/new
+    about: Report privately instead of opening an issue. Anything touching credentials, the mail path or the update check belongs here.
+  - name: Question, or not sure it is a bug
+    url: https://github.com/Aevorine/Aevistle/discussions
+    about: Setup trouble, provider quirks, app passwords, "is this supposed to work like this" — ask in Discussions.
+  - name: Setup and provider help
+    url: https://github.com/Aevorine/Aevistle#getting-started
+    about: Most send failures are an app password the provider never issued. The README walks through it.

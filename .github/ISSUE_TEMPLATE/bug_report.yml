@@ -1,0 +1,109 @@
+name: Bug report
+description: Something behaved differently from how it is documented, or from how it obviously should.
+labels: ['bug']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before anything else: **do not paste a password, an app password, or an
+        OAuth token into this form.** A mail bug report is exactly the place
+        people accidentally do that, and an issue is public the moment you
+        press the button. Redact addresses too if you would rather not have
+        them indexed — `me@example.com` is enough for us to follow along.
+
+        If the bug is a security vulnerability, close this and use
+        [private reporting](https://github.com/Aevorine/Aevistle/security/advisories/new)
+        instead. See [SECURITY.md](https://github.com/Aevorine/Aevistle/blob/main/SECURITY.md).
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you saw, in your own words. Screenshots help.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: >
+        As close to a recipe as you can manage. "It sometimes does not send" is
+        much harder to act on than "schedule anything for two minutes out, close
+        the window, wait".
+      placeholder: |
+        1. Settings → Add account, Gmail, app password
+        2. Compose, attach a 12 MB PDF
+        3. Schedule for +2 minutes, close the window
+        4. Nothing arrives
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Windows (installer)
+        - Windows (portable)
+        - Android
+        - Browser (npm run dev)
+        - Built from source
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Aevistle version
+      description: Settings → About, or the filename you downloaded.
+      placeholder: 0.1.7
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system version
+      placeholder: Windows 11 23H2 / Android 14, Pixel 7
+    validations:
+      required: false
+
+  - type: input
+    id: provider
+    attributes:
+      label: Mail provider
+      description: Only if the bug involves sending or receiving. The provider, not your address.
+      placeholder: Gmail / Outlook / QQ / 163 / company Exchange
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Anything the app told you
+      description: >
+        The error text, the connection-test result, or a line from the activity
+        screen. This is rendered as a code block, so no formatting needed.
+      render: text
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Before submitting
+      options:
+        - label: This report contains no password, app password or token.
+          required: true
+        - label: I searched the existing issues and this is not already reported.
+          required: true
+        - label: I am on the latest release, or I have said above which older one I am on.
+          required: true

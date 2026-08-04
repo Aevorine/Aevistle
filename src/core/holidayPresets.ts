@@ -18,6 +18,16 @@
 
 import type { IsoDate, WorkCalendar } from './workCalendar'
 
+/**
+ * How many years either side of the cursor a preset may be asked to fill.
+ *
+ * Generous, because the alternative was worse: filling three years used to mean
+ * paging the grid 36 times and pressing the button three times. Not unbounded,
+ * because "every year from now to 2099" is 800 date strings in a settings file
+ * that is read on every launch.
+ */
+export const PRESET_MAX_YEARS = 10
+
 export interface HolidayPreset {
   id: string
   /** Translation key for the country's name. */
@@ -139,6 +149,35 @@ export function presetDates(preset: HolidayPreset, year: number): IsoDate[] {
   return preset.fixed.map((h) => `${year}-${h.md}`)
 }
 
+/** The same, with the names the tables have carried all along. */
+export function presetEntries(
+  preset: HolidayPreset,
+  year: number,
+): Array<{ date: IsoDate; name: string }> {
+  return preset.fixed.map((h) => ({ date: `${year}-${h.md}`, name: h.name }))
+}
+
+/**
+ * Every year from `from` to `to` inclusive, clamped to `PRESET_MAX_YEARS`.
+ *
+ * Reversed inputs are accepted and sorted rather than returning nothing: a
+ * range control where dragging the wrong end silently produces an empty result
+ * is a control people press twice and then stop trusting.
+ */
+export function yearRange(from: number, to: number): number[] {
+  const lo = Math.min(from, to)
+  const hi = Math.min(Math.max(from, to), lo + PRESET_MAX_YEARS - 1)
+  const out: number[] = []
+  for (let y = lo; y <= hi; y++) out.push(y)
+  return out
+}
+
+export function presetDatesRange(preset: HolidayPreset, from: number, to: number): IsoDate[] {
+  return yearRange(from, to)
+    .flatMap((y) => presetDates(preset, y))
+    .sort()
+}
+
 /**
  * Merge a preset into an existing calendar.
  *
@@ -156,6 +195,111 @@ export function applyPreset(
   preset: HolidayPreset,
   year: number,
 ): WorkCalendar {
-  const holidays = [...new Set([...calendar.holidays, ...presetDates(preset, year)])].sort()
+  return applyPresetRange(calendar, preset, year, year)
+}
+
+/** `applyPreset` across a span of years — see `yearRange` for the clamp. */
+export function applyPresetRange(
+  calendar: WorkCalendar,
+  preset: HolidayPreset,
+  from: number,
+  to: number,
+): WorkCalendar {
+  const holidays = [
+    ...new Set([...calendar.holidays, ...presetDatesRange(preset, from, to)]),
+  ].sort()
   return { ...calendar, weekend: [...preset.weekend].sort(), holidays }
+}
+
+/**
+ * Take one year back out again.
+ *
+ * The gap this fills: applying CN in 2026 and again in 2027 left both years in
+ * the list with no way to remove either — the only control was "Clear", which
+ * wiped dates the user had typed by hand along with the generated ones. A year
+ * is the unit people actually think in ("last year's holidays are clutter"),
+ * and it is the unit the presets generate in.
+ */
+export function clearYear(
+  calendar: WorkCalendar,
+  year: number,
+  lists: Array<'holidays' | 'workdays'> = ['holidays', 'workdays'],
+): WorkCalendar {
+  const prefix = `${year}-`
+  const next = { ...calendar }
+  for (const list of lists) next[list] = calendar[list].filter((d) => !d.startsWith(prefix))
+  return next
+}
+
+/** Which years the calendar currently has any dates in, ascending. */
+export function yearsInCalendar(calendar: WorkCalendar): number[] {
+  const years = new Set<number>()
+  for (const date of [...calendar.holidays, ...calendar.workdays]) {
+    const year = Number(date.slice(0, 4))
+    if (Number.isFinite(year) && year > 0) years.add(year)
+  }
+  return [...years].sort((a, b) => a - b)
+}
+
+/** How many dates of each list fall in a given year. */
+export function countInYear(
+  calendar: WorkCalendar,
+  year: number,
+): { holidays: number; workdays: number } {
+  const prefix = `${year}-`
+  return {
+    holidays: calendar.holidays.filter((d) => d.startsWith(prefix)).length,
+    workdays: calendar.workdays.filter((d) => d.startsWith(prefix)).length,
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Names
+// ---------------------------------------------------------------------------
+
+/**
+ * What to consult when naming a date, most specific first.
+ *
+ * `statutory` is an exact date → name map (the Chinese tables, which are per
+ * date and unambiguous). `presetId` narrows the fixed-date lookup to one
+ * country, which matters because 1 January and 1 May are named by five of the
+ * six presets and blending them produces a chip nobody can read.
+ */
+export interface HolidayNameContext {
+  presetId?: string
+  statutory?: Map<IsoDate, string>
+}
+
+/**
+ * The name of a holiday, or `undefined` when nothing knows one.
+ *
+ * `undefined` and not the date string: the caller already has the date, and a
+ * function that returns its own input dressed up as an answer makes "we know
+ * what this day is called" indistinguishable from "we do not".
+ *
+ * Without a `presetId` the lookup spans every preset and joins the distinct
+ * names it finds, capped at two. That is deliberately a little untidy — it is
+ * the honest rendering of "several countries call this date something, and
+ * nothing here records which one you meant".
+ */
+export function holidayNameFor(iso: IsoDate, ctx: HolidayNameContext = {}): string | undefined {
+  const exact = ctx.statutory?.get(iso)
+  if (exact) return exact
+
+  const md = iso.slice(5)
+  if (md.length !== 5) return undefined
+
+  if (ctx.presetId) {
+    const preset = HOLIDAY_PRESETS.find((p) => p.id === ctx.presetId)
+    return preset?.fixed.find((h) => h.md === md)?.name
+  }
+
+  const names: string[] = []
+  for (const preset of HOLIDAY_PRESETS) {
+    for (const holiday of preset.fixed) {
+      if (holiday.md === md && !names.includes(holiday.name)) names.push(holiday.name)
+    }
+  }
+  if (names.length === 0) return undefined
+  return names.length > 2 ? `${names.slice(0, 2).join(' / ')}…` : names.join(' / ')
 }

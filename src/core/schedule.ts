@@ -10,6 +10,7 @@
  */
 
 import type { Recurrence } from './types'
+import { DEFAULT_WORK_CALENDAR, isWorkingDay, type WorkCalendar } from './workCalendar'
 
 /** Bound on how far ahead we are willing to search for the next match. */
 const MAX_SEARCH_DAYS = 366 * 5
@@ -183,23 +184,72 @@ function lastDayOfMonth(year: number, monthIndex: number): number {
   return new Date(year, monthIndex + 1, 0).getDate()
 }
 
-function isWeekend(d: Date): boolean {
-  const day = d.getDay()
-  return day === 0 || day === 6
+/**
+ * Push a non-working fire time forward to the next working day, same time.
+ *
+ * The weekend used to be hard-coded Saturday and Sunday here, which made the
+ * legacy `skipWeekends` flag blind to everything the working calendar knows: a
+ * Friday/Saturday weekend was invisible to it, and so was every public holiday.
+ * The default calendar is still `[0, 6]`, so nothing changes for a caller that
+ * does not pass one.
+ *
+ * Bounded, and it fails *open*: a calendar with no working day within a month
+ * returns the original instant rather than null. Sending on a day off is a
+ * nuisance; not sending at all is the failure this application exists to
+ * prevent, and there is nowhere in this call path to report it.
+ */
+function shiftOffWeekend(t: number, cal: WorkCalendar): number {
+  const d = new Date(t)
+  for (let i = 0; i < 31; i++) {
+    if (isWorkingDay(d.getTime(), cal)) return d.getTime()
+    d.setDate(d.getDate() + 1)
+  }
+  return t
 }
 
-/** Push a weekend fire time forward to the following Monday, same time. */
-function shiftOffWeekend(t: number): number {
-  const d = new Date(t)
-  while (isWeekend(d)) d.setDate(d.getDate() + 1)
-  return d.getTime()
+/**
+ * Retire the legacy `skipWeekends` flag into `workdayPolicy`.
+ *
+ * Two bugs, one migration. `skipWeekends` ran inside `nextFireAfter` against a
+ * hard-coded Sat/Sun, so it ignored `calendar.weekend` and every holiday; and
+ * because the editor only *hides* the toggle once a policy is set, a job could
+ * carry both and get shifted twice.
+ *
+ * It becomes `'after'`, not `'skip'`. The old flag moved a weekend fire to the
+ * following Monday — it never cancelled anything — so `'skip'` would turn a
+ * "remind me on the 15th" into months of silence the first time the 15th fell
+ * on a Saturday. `'after'` is what the flag already meant, now aware of the
+ * calendar. An explicit policy always wins; the flag is simply dropped.
+ *
+ * Safe to run on every hydrate: it clears `skipWeekends`, so a second pass is
+ * a no-op and returns the identical object. Nothing is lost — the only thing
+ * that changes is that "weekend" now means what the calendar says.
+ */
+export function migrateSkipWeekends(rec: Recurrence): Recurrence {
+  if (!rec.skipWeekends) return rec
+  // The flag was never applied to one-off sends (`rec.kind !== 'once'` below),
+  // so carrying it into a policy would change behaviour rather than preserve it.
+  if (rec.kind === 'once') return { ...rec, skipWeekends: false }
+  const existing = rec.workdayPolicy ?? 'off'
+  return {
+    ...rec,
+    skipWeekends: false,
+    workdayPolicy: existing === 'off' ? 'after' : existing,
+  }
 }
 
 /**
  * The next fire time strictly after `afterMs`, ignoring end conditions.
  * Returns null when the rule can never fire again.
+ *
+ * `cal` is only consulted by the legacy `skipWeekends` path; the modern
+ * `workdayPolicy` is applied to the finished list by `applyWorkCalendar`.
  */
-export function nextFireAfter(rec: Recurrence, afterMs: number): number | null {
+export function nextFireAfter(
+  rec: Recurrence,
+  afterMs: number,
+  cal: WorkCalendar = DEFAULT_WORK_CALENDAR,
+): number | null {
   const floor = Math.max(afterMs, rec.startAt - 1)
 
   let result: number | null = null
@@ -264,9 +314,9 @@ export function nextFireAfter(rec: Recurrence, afterMs: number): number | null {
   if (result === null) return null
 
   if (rec.skipWeekends && rec.kind !== 'once') {
-    const shifted = shiftOffWeekend(result)
+    const shifted = shiftOffWeekend(result, cal)
     // Shifting can land us on or before `afterMs`; step forward if so.
-    if (shifted <= afterMs) return nextFireAfter(rec, shifted)
+    if (shifted <= afterMs) return nextFireAfter(rec, shifted, cal)
     result = shifted
   }
 
@@ -322,6 +372,11 @@ export interface OccurrenceOptions {
   count?: number
   /** Compute occurrences strictly after this instant. */
   after?: number
+  /**
+   * Which days are not worked, for the legacy `skipWeekends` flag only. Jobs
+   * that have been through `migrateSkipWeekends` never reach that branch.
+   */
+  calendar?: WorkCalendar
 }
 
 /**
@@ -332,6 +387,7 @@ export function computeOccurrences(rec: Recurrence, opts: OccurrenceOptions = {}
   const count = Math.max(1, opts.count ?? 24)
   const runsSoFar = opts.runsSoFar ?? 0
   const after = opts.after ?? Date.now()
+  const calendar = opts.calendar ?? DEFAULT_WORK_CALENDAR
 
   const out: number[] = []
   let cursor = after
@@ -339,7 +395,7 @@ export function computeOccurrences(rec: Recurrence, opts: OccurrenceOptions = {}
 
   // A hard iteration ceiling so a pathological rule can never spin forever.
   for (let guard = 0; guard < count * 64 && produced < count; guard++) {
-    const next = nextFireAfter(rec, cursor)
+    const next = nextFireAfter(rec, cursor, calendar)
     if (next === null) break
 
     if (rec.endMode === 'onDate' && rec.endDate !== undefined && next > rec.endDate) break
@@ -372,7 +428,7 @@ export interface RearmResult {
 export function rearm(
   rec: Recurrence,
   storedOccurrences: number[],
-  opts: { now?: number; runsSoFar?: number; count?: number } = {},
+  opts: { now?: number; runsSoFar?: number; count?: number; calendar?: WorkCalendar } = {},
 ): RearmResult {
   const now = opts.now ?? Date.now()
   const missed = storedOccurrences.filter((t) => t <= now)
@@ -390,6 +446,7 @@ export function rearm(
     after: seed,
     count: needed - stillFuture.length,
     runsSoFar: (opts.runsSoFar ?? 0) + missed.length,
+    calendar: opts.calendar,
   })
 
   return { dueNow, upcoming: [...stillFuture, ...more] }
@@ -475,10 +532,16 @@ export function applyQuietHours(occurrences: number[], quiet: QuietHours): numbe
   const seen = new Set<number>()
   const out: number[] = []
   for (const at of occurrences) {
-    let shifted = shiftPastQuiet(at, quiet)
+    const landed = shiftPastQuiet(at, quiet)
     // A minute apart is enough to keep them distinct without drifting far from
-    // the boundary the user chose.
-    while (seen.has(shifted)) shifted += 60_000
+    // the boundary the user chose. Capped, because uncapped it is not a nudge:
+    // sixty-one occurrences collapsing onto one boundary would walk the last of
+    // them an hour past it and possibly back into the quiet window the shift
+    // existed to escape. At the cap the duplicate timestamp is kept — two mails
+    // in the same minute is visible, a send moved back into the small hours is
+    // not. Same reasoning, and the same cap, as the working-calendar path.
+    let shifted = landed
+    while (seen.has(shifted) && shifted - landed < 60 * 60_000) shifted += 60_000
     seen.add(shifted)
     out.push(shifted)
   }

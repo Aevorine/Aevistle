@@ -7,14 +7,20 @@
 **Recordatorios por correo programados que sí llegan.**
 
 Escribe un correo una vez —con archivos, imágenes o comprimidos adjuntos— y
-Aevistle lo envía a su hora. Una sola vez, cada día laborable a las 09:00, el
-día 1 de cada mes o según cualquier expresión cron. La misma aplicación en
-Windows y en Android.
+Aevistle lo envía a su hora, incluso con la ventana cerrada. Una sola vez, cada
+día laborable a las 09:00, el día 1 de cada mes o según cualquier expresión
+cron. Windows y Android, sin cuenta, sin servidor, sin telemetría.
+
+*El informe semanal del viernes. La factura del día 1. La felicitación de
+cumpleaños a medianoche, mientras duermes.*
 
 [![Release](https://img.shields.io/github/v/release/Aevorine/Aevistle?style=flat-square&color=4f46e5)](https://github.com/Aevorine/Aevistle/releases/latest)
+[![CI](https://img.shields.io/github/actions/workflow/status/Aevorine/Aevistle/ci.yml?branch=main&style=flat-square&color=4f46e5&label=checks)](https://github.com/Aevorine/Aevistle/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT-4f46e5?style=flat-square)](../LICENSE)
 [![Windows](https://img.shields.io/badge/Windows-x64-4f46e5?style=flat-square&logo=windows)](https://github.com/Aevorine/Aevistle/releases/latest)
 [![Android](https://img.shields.io/badge/Android-7.0%2B-4f46e5?style=flat-square&logo=android)](https://github.com/Aevorine/Aevistle/releases/latest)
+
+### [⬇ Descargar](https://github.com/Aevorine/Aevistle/releases/latest) · [Qué hace](#qué-hace) · [Privacidad](#privacidad) · [Seguridad](#seguridad)
 
 [English](../README.md) ·
 [简体中文](README.zh-CN.md) ·
@@ -84,9 +90,14 @@ La última versión está en **[Releases](https://github.com/Aevorine/Aevistle/r
 
 | Plataforma | Archivo | Notas |
 |---|---|---|
-| Windows 10/11 (x64) | `Aevistle-0.1.5-win-x64-setup.exe` | Instalador, crea accesos directos en el menú Inicio y el escritorio |
-| Windows 10/11 (x64) | `Aevistle-0.1.5-win-x64-portable.exe` | Un solo archivo, sin instalación, funciona desde un USB |
-| Android 7.0+ | `Aevistle-0.1.5.apk` | Móviles y tabletas. Activa antes «instalar aplicaciones desconocidas» para tu navegador o gestor de archivos. |
+| Windows 10/11 (x64) | `Aevistle-<version>-win-x64-setup.exe` | Instalador, crea accesos directos en el menú Inicio y el escritorio |
+| Windows 10/11 (x64) | `Aevistle-<version>-win-x64-portable.exe` | Un solo archivo, sin instalación, funciona desde un USB |
+| Android 7.0+ | `Aevistle-<version>.apk` | Móviles y tabletas. Activa antes «instalar aplicaciones desconocidas» para tu navegador o gestor de archivos. |
+
+`<version>` es el número que muestre la página de la
+[última versión](https://github.com/Aevorine/Aevistle/releases/latest); la
+insignia de arriba lo lee del mismo sitio. A propósito no se escribe aquí, para
+que esta tabla no pueda quedarse anticuada.
 
 > Windows SmartScreen avisará de un editor desconocido. Así se ve una versión
 > sin certificado de firma de pago: elige **Más información → Ejecutar de todas
@@ -245,9 +256,14 @@ las peticiones de funciones son bienvenidas de verdad.
 
 ## Contribuir
 
-Las pull requests son bienvenidas. Consulta **[CONTRIBUTING.md](../CONTRIBUTING.md)**.
+Las pull requests son bienvenidas. Consulta **[CONTRIBUTING.md](../CONTRIBUTING.md)**
+y **[CODE_OF_CONDUCT.md](../CODE_OF_CONDUCT.md)**.
 Añadir un séptimo idioma es un solo archivo y no necesita herramientas de
 compilación: el sistema de tipos te dice exactamente qué cadenas faltan.
+
+Los informes de error y las peticiones de funciones tienen
+[plantillas](https://github.com/Aevorine/Aevistle/issues/new/choose); cada pull
+request ejecuta el mismo `npm run check` que ejecutarías en local.
 
 ## Licencia
 

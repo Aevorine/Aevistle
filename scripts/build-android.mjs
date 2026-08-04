@@ -300,6 +300,14 @@ for (const apk of apks) {
 
 // Signature check, when the SDK has build-tools. An unsigned APK installs
 // nowhere, and finding that out from a user is the expensive way.
+//
+// Gradle now refuses to produce a debug-signed release at all unless
+// AEVISTLE_ALLOW_UNSIGNED_RELEASE is set (see android/app/build.gradle). This
+// is the second lock on the same door, and it is worth having: it reads the
+// signature off the artifact rather than trusting the build that made it, so a
+// misconfiguration that slipped past the Gradle check still cannot leave this
+// script looking like a successful release build.
+let signature = null
 try {
   const buildTools = path.join(sdk, 'build-tools')
   const version = readdirSync(buildTools).sort().reverse()[0]
@@ -313,14 +321,28 @@ try {
       env,
       encoding: 'utf8',
     })
-    const owner = /Signer #1 certificate DN: (.+)/.exec(out)?.[1] ?? 'unknown'
-    console.log(`  Signed by    ${owner.trim()}`)
-    if (/CN=Android Debug/i.test(owner)) {
-      console.log(
-        '  Note: signed with the debug key. Installable, but set AEVISTLE_KEYSTORE to publish.',
-      )
-    }
+    signature = /Signer #1 certificate DN: (.+)/.exec(out)?.[1]?.trim() ?? 'unknown'
+    console.log(`  Signed by    ${signature}`)
   }
 } catch {
   console.log('  Signature not verified (apksigner unavailable) — check before publishing.')
+}
+
+const allowUnsigned = ['1', 'true', 'yes'].includes(
+  (process.env.AEVISTLE_ALLOW_UNSIGNED_RELEASE ?? '').trim().toLowerCase(),
+)
+
+if (signature && /CN=Android Debug/i.test(signature)) {
+  if (!allowUnsigned) {
+    console.error(
+      '\nThis APK is signed with the Android debug key, which should no longer be\n' +
+        'possible. Do not publish it: an APK signed with that key can never be\n' +
+        'updated over a real release. Check android/app/build.gradle.',
+    )
+    process.exit(1)
+  }
+  console.log(
+    '\n  AEVISTLE_ALLOW_UNSIGNED_RELEASE is set, so this APK carries the debug key.\n' +
+      '  Installable for testing. Never publish it.',
+  )
 }

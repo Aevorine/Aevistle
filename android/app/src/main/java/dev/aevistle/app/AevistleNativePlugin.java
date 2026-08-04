@@ -11,11 +11,14 @@ import androidx.activity.result.ActivityResult;
 
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
+import com.getcapacitor.PermissionState;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.ActivityCallback;
 import com.getcapacitor.annotation.CapacitorPlugin;
+import com.getcapacitor.annotation.Permission;
+import com.getcapacitor.annotation.PermissionCallback;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -25,7 +28,9 @@ import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -36,7 +41,28 @@ import java.util.concurrent.Executors;
  * that file is the contract. Anything touching the network runs on a worker
  * thread — Android throws NetworkOnMainThreadException, and rightly so.
  */
-@CapacitorPlugin(name = "AevistleNative")
+@CapacitorPlugin(
+        name = "AevistleNative",
+        permissions = {
+                /*
+                 * POST_NOTIFICATIONS was in the manifest and was never once
+                 * requested, which on Android 13+ means it was never held —
+                 * see Permissions.java. Declaring it here is what gives this
+                 * plugin Capacitor's request plumbing: the alias below is the
+                 * handle for `requestPermissionForAlias`, and Capacitor's own
+                 * cache of a permanent refusal (the only place Android exposes
+                 * that distinction) is keyed off it too.
+                 *
+                 * SCHEDULE_EXACT_ALARM is deliberately NOT listed. It is a
+                 * special app access, not a runtime permission: there is no
+                 * dialog to request, and pretending otherwise here would make
+                 * `checkPermissions` report a state no request could ever
+                 * change. It is handled through the settings intent instead.
+                 */
+                @Permission(
+                        strings = {Permissions.POST_NOTIFICATIONS},
+                        alias = Permissions.ALIAS_NOTIFICATIONS)
+        })
 public class AevistleNativePlugin extends Plugin {
 
     /**
@@ -216,9 +242,18 @@ public class AevistleNativePlugin extends Plugin {
             try {
                 JSONObject configJson = new JSONObject(config.toString());
                 String accountId = configJson.optString("accountId", "");
-                String secret = configJson.optBoolean("enabled", false)
-                        ? inboxSecret(accountId)
-                        : null;
+                boolean enabled = configJson.optBoolean("enabled", false);
+                String secret = enabled ? inboxSecret(accountId) : null;
+
+                // The other moment notifications become worth asking about:
+                // receiving was just switched on, and the thing this app
+                // notifies about most urgently — a verification code arriving —
+                // only exists once an inbox does. Only on the transition, so a
+                // routine refresh of an already-enabled account asks nothing.
+                JSONObject known = cache.account(accountId);
+                if (enabled && (known == null || !known.optBoolean("enabled", false))) {
+                    Permissions.notePromptDue(getContext());
+                }
 
                 JSONObject updated = MailFetcher.sync(getContext(), configJson, secret);
                 cache.upsert(updated);
@@ -691,12 +726,35 @@ public class AevistleNativePlugin extends Plugin {
         JSArray accounts = call.getArray("accounts");
 
         JobStore store = new JobStore(getContext());
-        store.save(
-                jobs == null ? new JSONArray() : jobs,
-                accounts == null ? new JSONArray() : accounts);
+        // Which reminders were armed a moment ago, and which are armed now.
+        // The difference is the only thing separating "the user just armed
+        // their first reminder" — a moment where asking for notification
+        // permission explains itself — from "the app just started and re-sent
+        // the same list", which is the moment people deny by reflex.
+        // `ensureNotificationPermission` acts on the flag this sets; see there.
+        Set<String> before = jobIds(store.jobs());
+        JSONArray incoming = jobs == null ? new JSONArray() : jobs;
+        Permissions.noteNewlyArmed(getContext(), before, jobIds(incoming));
+
+        store.save(incoming, accounts == null ? new JSONArray() : accounts);
 
         AevistleScheduler.rearmAll(getContext());
         call.resolve();
+    }
+
+    private static Set<String> jobIds(JSONArray jobs) {
+        Set<String> ids = new HashSet<>();
+        for (int i = 0; i < jobs.length(); i++) {
+            JSONObject job = jobs.optJSONObject(i);
+            if (job == null) continue;
+            // Only jobs that will actually fire count. The web layer already
+            // filters to enabled before it calls, but a disabled one arriving
+            // here must not be read as a reason to ask for permission.
+            if (!job.optBoolean("enabled", false)) continue;
+            String id = job.optString("id", "");
+            if (!id.isEmpty()) ids.add(id);
+        }
+        return ids;
     }
 
     /**
@@ -749,6 +807,140 @@ public class AevistleNativePlugin extends Plugin {
             // the code is already on the codes screen either way.
         }
         call.resolve();
+    }
+
+    // -----------------------------------------------------------------------
+    // Permissions
+    //
+    // Two of them, behaving nothing alike, and the UI has to be able to say
+    // which is which — see Permissions.java for what each one costs when it is
+    // missing. Everything below is a report or a response to a tap; nothing
+    // here raises a dialog or opens a settings screen on its own.
+    // -----------------------------------------------------------------------
+
+    /**
+     * What the app is actually allowed to do right now.
+     *
+     * The health strip used to infer this. It could see that arming had failed
+     * and guessed at exact alarms as the likely reason, and it had no way at
+     * all to know notifications were off — so the one failure that silences
+     * every send report on a modern phone was invisible to the screen whose
+     * job is to list what is wrong.
+     */
+    @PluginMethod
+    public void permissionState(PluginCall call) {
+        call.resolve(permissionSnapshot());
+    }
+
+    private String notificationState() {
+        PermissionState state = getPermissionState(Permissions.ALIAS_NOTIFICATIONS);
+        return Permissions.notifications(getContext(), state == null ? null : state.toString());
+    }
+
+    /**
+     * Would {@code requestNotificationPermission} actually produce a dialog?
+     *
+     * False for granted, for blocked, and for every Android below 13. Blocked
+     * is the one that matters: a button offering to ask again would do nothing
+     * at all there, and {@code openNotificationSettings} is the only honest
+     * offer left.
+     */
+    private boolean canAskNotifications() {
+        return android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU
+                && Permissions.PROMPT.equals(notificationState());
+    }
+
+    private JSObject permissionSnapshot() {
+        JSObject result = new JSObject();
+        result.put("notifications", notificationState());
+        result.put("exactAlarms", Permissions.exactAlarms(getContext()));
+        result.put("canAskNotifications", canAskNotifications());
+        return result;
+    }
+
+    /**
+     * Ask for notifications, now, because the user asked us to.
+     *
+     * The explicit route: a button in the app. Resolves with the state
+     * afterwards either way, so a refusal updates the screen rather than
+     * leaving it claiming the request is still in flight.
+     */
+    @PluginMethod
+    public void requestNotificationPermission(PluginCall call) {
+        if (!canAskNotifications()) {
+            // Granted, blocked, or a platform with no such permission. In all
+            // three cases the dialog will not appear, and launching the request
+            // anyway would resolve instantly with an unchanged state that looks
+            // like the user declined.
+            JSObject result = permissionSnapshot();
+            result.put("prompted", false);
+            call.resolve(result);
+            return;
+        }
+        requestPermissionForAlias(Permissions.ALIAS_NOTIFICATIONS, call, "notificationPermissionResult");
+    }
+
+    /**
+     * Ask only if this is a moment that earns it.
+     *
+     * The bridge calls this straight after arming a schedule or enabling an
+     * inbox, and the native side decides whether anything actually changed —
+     * {@link Permissions#takePromptDue}. Cold start re-sends the jobs that were
+     * already armed, so without that check every launch would open with a
+     * permission dialog and no visible reason for it, which is the pattern
+     * people deny by reflex.
+     */
+    @PluginMethod
+    public void ensureNotificationPermission(PluginCall call) {
+        boolean askable = canAskNotifications();
+        // Consumed only when it could have been used: a moment that earned a
+        // prompt on an Android that cannot show one must not burn the flag,
+        // or upgrading the phone would lose the prompt it was saving up.
+        boolean due = askable && Permissions.takePromptDue(getContext());
+        if (!due) {
+            JSObject result = permissionSnapshot();
+            result.put("prompted", false);
+            call.resolve(result);
+            return;
+        }
+        requestPermissionForAlias(Permissions.ALIAS_NOTIFICATIONS, call, "notificationPermissionResult");
+    }
+
+    @PermissionCallback
+    private void notificationPermissionResult(PluginCall call) {
+        JSObject result = permissionSnapshot();
+        result.put("prompted", true);
+        call.resolve(result);
+    }
+
+    /**
+     * The route out of a permanent refusal.
+     *
+     * Once Android has recorded "don't ask again" there is no dialog left; the
+     * app's only remaining honest move is to say so and offer to open the
+     * screen where it can be undone.
+     */
+    @PluginMethod
+    public void openNotificationSettings(PluginCall call) {
+        JSObject result = new JSObject();
+        result.put("opened", Permissions.openNotificationSettings(getContext(), getActivity()));
+        call.resolve(result);
+    }
+
+    /**
+     * The equivalent for exact alarms — which is the *only* route, since this
+     * one never had a dialog.
+     *
+     * Fired from a tap, never from launch. `ACTION_REQUEST_SCHEDULE_EXACT_ALARM`
+     * on app start is exactly the behaviour Google's own guidance calls out,
+     * and it is also useless: a user who has not yet been told why they are
+     * looking at a settings screen backs out of it.
+     */
+    @PluginMethod
+    public void openExactAlarmSettings(PluginCall call) {
+        JSObject result = new JSObject();
+        result.put("opened", Permissions.openExactAlarmSettings(getContext(), getActivity()));
+        call.resolve(result);
     }
 
     @PluginMethod

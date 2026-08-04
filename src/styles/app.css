@@ -587,6 +587,21 @@ textarea {
   color: var(--text-3);
   line-height: var(--leading-relaxed);
 }
+/* A hint whose tail is a run of removable chips — the per-account remote-image
+   allowlist. The element also carries `.field__hint`, so the row still reads
+   correctly without this; laying it out as a flex row is what stops the chips
+   sitting on the text baseline and losing a couple of pixels off the top of
+   each one when the run wraps. */
+.settings-allowlist {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-1);
+  margin-block-start: var(--sp-1);
+  /* The chips are interactive; the label in front of them is not, so it keeps
+     the hint's muted colour while they keep the chip's. */
+  padding-inline-start: var(--sp-1);
+}
 .field__row {
   display: flex;
   gap: var(--sp-3);
@@ -1026,8 +1041,37 @@ textarea {
   /* Occupies its column so the following days stay under the right weekday. */
   min-height: 1px;
 }
-.monthgrid__day {
+/* -------------------------------------------------------------------------
+   1. REPLACE the existing `.monthgrid__day { … }` block (app.css ~line 1029,
+      the one starting `position: relative;` and ending at the closing brace
+      before `.monthgrid__day:hover`).
+
+      Why it has to change: a day cell now holds TWO buttons — the cell itself
+      (click = switch the day between working and off) and the reminder badge
+      (click = open the reminder, drag = move it). A `<button>` inside a
+      `<button>` is invalid HTML and browsers resolve it by ignoring the inner
+      one, so the badge would silently have toggled the holiday instead. The
+      button is therefore a sibling of the badge inside a positioned wrapper.
+   ------------------------------------------------------------------------- */
+
+/* ARIA needs `grid > row > gridcell`, but the seven-column layout belongs to
+   `.monthgrid__body`. `display: contents` gives the rows to the accessibility
+   tree and the cells to the grid — without it the weeks would each become a
+   single grid item and the month would render as five stacked rows of one. */
+.monthgrid__row {
+  display: contents;
+}
+
+.monthgrid__cell {
   position: relative;
+  display: flex;
+  min-width: 0;
+}
+
+.monthgrid__day {
+  /* Fills its cell; the wrapper is what the grid lays out now. */
+  flex: 1;
+  min-width: 0;
   /* Squarish without being fragile: the aspect ratio does the work, the
      min-height keeps a narrow phone column from collapsing to a sliver. */
   aspect-ratio: 1 / 0.82;
@@ -1045,7 +1089,17 @@ textarea {
   cursor: pointer;
   transition:
     background var(--dur-fast) var(--ease),
-    border-color var(--dur-fast) var(--ease);
+    border-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
+}
+
+/* The grid is one tab stop with arrow keys inside (a roving tabindex), so the
+   focused cell must be unmistakable — it is the only thing telling a keyboard
+   user where they are in a 42-cell grid. */
+.monthgrid__day:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  z-index: 1;
 }
 .monthgrid__day:hover {
   border-color: var(--accent);
@@ -1075,19 +1129,57 @@ textarea {
 }
 /* How many reminders land here. Filled when the calendar moved one onto this
    day, so "it did something" is visible without reading a tooltip. */
+/* -------------------------------------------------------------------------
+   3. REPLACE the existing `.monthgrid__marks { … }` and
+      `.monthgrid__marks[data-shifted='true'] { … }` blocks (app.css ~line 1078).
+
+      It is a button now — clickable to open the day, draggable to move the
+      reminder — and it sits over the cell rather than inside it.
+   ------------------------------------------------------------------------- */
+
 .monthgrid__marks {
+  position: absolute;
+  /* Logical, not `right`: in Arabic this belongs on the other side, and the
+     browser should decide that, not this stylesheet. */
+  inset-block-start: 4px;
+  inset-inline-end: 4px;
   min-width: 18px;
-  padding: 0 5px;
+  padding: 1px 5px;
+  border: 0;
   border-radius: 999px;
   font-size: var(--text-xs);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
+  line-height: 1.4;
   background: color-mix(in srgb, var(--accent) 20%, transparent);
   color: var(--accent);
+  cursor: pointer;
+  transition: transform var(--dur-fast) var(--ease);
+}
+.monthgrid__marks:hover {
+  transform: scale(1.12);
+}
+.monthgrid__marks:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.monthgrid__marks[draggable='true'] {
+  cursor: grab;
+}
+.monthgrid__marks[draggable='true']:active {
+  cursor: grabbing;
 }
 .monthgrid__marks[data-shifted='true'] {
   background: var(--accent);
   color: var(--accent-text);
+}
+.monthgrid__marks[data-conflict='warning'] {
+  background: var(--warning);
+  color: var(--text-inverse);
+}
+.monthgrid__marks[data-conflict='error'] {
+  background: var(--danger);
+  color: var(--text-inverse);
 }
 .monthgrid__legend {
   display: flex;
@@ -1140,7 +1232,23 @@ textarea {
   gap: 5px;
   flex-wrap: wrap;
 }
+/**
+ * The seven days share the row they are given.
+ *
+ * They used to be seven fixed 50px buttons, which meant the picker painted
+ * 378px of ink no matter how wide the card was — measured 378px in a 1196px
+ * container and the same 378px in a 2358px one, i.e. 72% of the row blank at
+ * the window this is actually used at. A day button is a target, not a label:
+ * there is nothing to gain by keeping it small and a lot to gain by making it
+ * easy to hit.
+ *
+ * `flex: 1 1 42px` rather than a seven-track grid because the wrap has to
+ * survive: the same picker renders inside a `Field` in the recurrence editor,
+ * which can be half a card wide, and there four-and-three across two rows is
+ * better than seven crushed tracks.
+ */
 .daypicker__day {
+  flex: 1 1 42px;
   min-width: 42px;
   padding: 7px var(--sp-2);
   border: 1px solid var(--border);
@@ -1726,8 +1834,19 @@ textarea {
 .modal--wide {
   width: min(760px, 100%);
 }
+/**
+ * Full screen means full screen.
+ *
+ * The width was `min(1160px, 96vw)`, and the 1160 bound from 1209px upward —
+ * so on the 1536px-wide window this is actually used on, a dialog labelled
+ * "full screen" covered 75.5% of it and left 188px of scrim down each side.
+ * A cap on the thing whose entire job is to be as large as possible is the
+ * bug; 1600 is here only so that a 2560px monitor does not get a 2.4k-wide
+ * line of body text, and it is a ceiling nobody reaches at the sizes this app
+ * is used at.
+ */
 .modal--fullscreen {
-  width: min(1160px, 96vw);
+  width: min(1600px, 96vw);
   height: 92vh;
   max-height: 92vh;
 }
@@ -3577,6 +3696,32 @@ textarea {
 
 /* --- message reader ------------------------------------------------------ */
 
+/**
+ * Leaving full screen must not leave half a screen.
+ *
+ * The reader opens full screen and `Esc` steps out of it before it closes —
+ * that ladder was asked for explicitly and stays. What was wrong is where the
+ * step landed: without full screen the dialog fell back to plain `.modal--wide`,
+ * 760px, which on the 1536px window this app is used on is 49.5% — the reader
+ * became literally half the screen the moment you pressed `Esc` once. "Exit
+ * full screen" has to mean "a window", not "a postage stamp".
+ *
+ * So the windowed reader gets its own width: never below 1240px or 78% of the
+ * window (whichever is larger, so the step keeps up with a big monitor), never
+ * above 1500px or 94vw (so it stays visibly smaller than full screen, which is
+ * the entire point of the step). Measured against full screen it is 1034 vs
+ * 1056 at 1100, 1240 vs 1311 at 1366, 1240 vs 1474 at 1536, 1497 vs 1600 at
+ * 1920 — smaller everywhere, and never the half-screen it used to be.
+ *
+ * Hooked off `.modal__body--reader` rather than a new modifier because `Modal`
+ * belongs to another file; `:has()` is already load-bearing in this stylesheet
+ * (see the settings grid), so this adds no new requirement.
+ */
+.modal:has(> .modal__body--reader):not(.modal--fullscreen) {
+  width: min(1500px, 94vw, max(1240px, 78vw));
+  max-height: 88vh;
+}
+
 /* The reader's own body: no gap-driven stack, the frame does the growing. */
 .modal__body--reader {
   padding: 0;
@@ -3929,13 +4074,35 @@ textarea {
  * wider fields — and two is the honest maximum: at three, a label and its
  * control stop reading as a pair and start reading as a table.
  */
+/**
+ * …and a pair is two, or it is one that takes the whole line.
+ *
+ * The version this replaced used a real two-track grid, and a grid track is
+ * there whether anything is in it or not. Measured on a 1536px window: six
+ * rows across the settings screen held a single `.switch` or `.field` in the
+ * left track with 712px — 51% of the card — blank beside it, and it read
+ * exactly as "the right half of the page is missing", which is what was
+ * reported. It was not the sidebar, not a container cap, not the window: it
+ * was an empty grid track, at every width from 1000px up.
+ *
+ * Flex wrap instead of grid, for the one property grid does not have: an item
+ * that ends up alone on its line *grows*. Two controls beside each other still
+ * split the card down the middle (`flex-grow: 1` from a `50% - gap` basis
+ * settles both at exactly half), and the odd one out fills its line instead of
+ * leaving a hole. Nothing about the authoring rule below changes — this is the
+ * same policy, expressed in the layout mode that can honour it.
+ *
+ * The basis subtracts a whole gap rather than half of one so that two items
+ * can never round their way onto separate lines; `flex-grow` gives the slack
+ * straight back.
+ */
 @media (min-width: 1000px) {
   .view--settings .card__body {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    flex-direction: row;
+    flex-wrap: wrap;
     column-gap: var(--sp-6);
     row-gap: var(--sp-3);
-    align-items: start;
+    align-items: flex-start;
   }
 
   /* Span by default; pair up only where it is known to help.
@@ -3945,15 +4112,16 @@ textarea {
      chips, crushed into a 300px column). Defaulting to full width means a new
      element is merely wide, never broken. */
   .view--settings .card__body > * {
-    grid-column: 1 / -1;
+    flex: 1 0 100%;
+    min-width: 0;
   }
   .view--settings .card__body > .switch,
   .view--settings .card__body > .field {
-    grid-column: auto;
+    flex: 1 1 calc(50% - var(--sp-6));
   }
   /* …except a field wrapping a free-text box, which wants the room. */
   .view--settings .card__body > .field:has(.textarea) {
-    grid-column: 1 / -1;
+    flex-basis: 100%;
   }
 }
 
@@ -4986,12 +5154,35 @@ textarea {
   padding: var(--sp-4);
 }
 
-/* Scope chips beside the inbox search box. Wrap under it on a narrow window
-   rather than squeezing the input, which is the thing being typed into. */
+/**
+ * Scope chips beside the inbox search box. Wrap under it on a narrow window
+ * rather than squeezing the input, which is the thing being typed into.
+ *
+ * That is what the comment said for a long time while `.search-wrap` had no
+ * layout rule at all — the only selector naming it in this file was the pending
+ * state at `.search-wrap[data-pending]` — so the chips sat on their own row at
+ * every width, right up to 2560px, and cost a row of height on the one screen
+ * that is nothing but a list. The row exists now: the input takes the space and
+ * the chips take what they need, and the wrap the comment promises happens when
+ * the input would drop under 320px.
+ */
+.search-wrap {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-3);
+}
+.search-wrap > .search {
+  flex: 1 1 320px;
+  min-width: 0;
+}
 .search-scope {
   display: flex;
   flex-wrap: wrap;
   gap: var(--sp-2);
+}
+.search-wrap > .search-scope {
+  flex: 0 1 auto;
 }
 
 /* The schedule outlook in the send preview: how many, over what span, on which
@@ -5133,4 +5324,302 @@ textarea {
   .pull {
     transition: none;
   }
+}
+
+/* -------------------------------------------------------------------------
+   2. ADD immediately after the existing `.monthgrid__day[data-today='true']`
+      block (app.css ~line 1068).
+   ------------------------------------------------------------------------- */
+
+/* Part of a shift-click / shift-arrow span. Deliberately an inset ring rather
+   than a border colour: the cell may already be showing a holiday border, and
+   losing that while selecting would hide what you are about to overwrite. */
+.monthgrid__day[data-selected='true'] {
+  box-shadow: inset 0 0 0 2px var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface-inset));
+}
+
+/* A day the conflict scan flagged. Border only, so it composes with the
+   holiday/make-up background instead of fighting it. */
+.monthgrid__day[data-conflict='warning'] {
+  border-color: var(--warning);
+}
+.monthgrid__day[data-conflict='error'] {
+  border-color: var(--danger);
+  border-width: 2px;
+}
+
+/* The week zoom: same grid, taller cells, because a week has room to show
+   more than a number. */
+.monthgrid[data-scope='week'] .monthgrid__day {
+  aspect-ratio: auto;
+  min-height: 88px;
+}
+
+/* -------------------------------------------------------------------------
+   4. ADD after the existing `.swatch--shifted` block (app.css ~line 1123).
+   ------------------------------------------------------------------------- */
+
+.swatch--conflict {
+  background: var(--danger-bg);
+  border-color: var(--danger);
+}
+
+/* -------------------------------------------------------------------------
+   6. ADD to the "Working calendar" section (app.css ~line 2891, after the
+      existing `.workcal__dates` block).
+   ------------------------------------------------------------------------- */
+
+/* The name beside a date on a chip — "2026-10-01 · National Day". Secondary
+   weight, because the date is still the identity of the entry. */
+.chip__note {
+  margin-inline-start: var(--sp-2);
+  color: var(--text-3);
+  font-weight: 400;
+}
+
+/* The bar that appears once a span is selected. */
+.rangebar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.rangebar__count {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-1);
+  margin-inline-end: auto;
+}
+
+/* --- the day zoom -------------------------------------------------------- */
+
+.dayview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+.dayview__head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+}
+.dayview__date {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-weight: 600;
+  color: var(--text-1);
+}
+.dayview__chips {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-inline-end: auto;
+}
+.dayview__empty {
+  margin: 0;
+  padding: var(--sp-5) 0;
+  text-align: center;
+  color: var(--text-3);
+}
+.dayview__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.dayview__move {
+  padding-top: var(--sp-2);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.dayrow {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-inset);
+  cursor: grab;
+}
+.dayrow:active {
+  cursor: grabbing;
+}
+.dayrow[data-shifted='true'] {
+  /* The calendar put this one here; it is not where the rule asked for.
+     Inline-start so the marker follows the reading direction. */
+  border-inline-start: 3px solid var(--accent);
+}
+.dayrow__time {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 5.5em;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+  font-size: var(--text-sm);
+}
+.dayrow__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+.dayrow__name {
+  text-align: start;
+  font-weight: 600;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+.dayrow__meta {
+  font-size: var(--text-xs);
+  color: var(--text-3);
+  overflow-wrap: anywhere;
+}
+.dayrow__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+/* --- a reminder, opened from the calendar -------------------------------- */
+
+.jobsheet {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+.jobsheet__row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  font-size: var(--text-sm);
+  color: var(--text-2);
+}
+.jobsheet__subject {
+  font-weight: 600;
+  color: var(--text-1);
+  overflow-wrap: anywhere;
+}
+.jobsheet__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.jobsheet__times {
+  margin: 0;
+  padding-inline-start: var(--sp-5);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--text-sm);
+  color: var(--text-2);
+}
+.jobsheet__stamp {
+  margin-top: var(--sp-1);
+  font-size: var(--text-xs);
+  color: var(--text-3);
+}
+
+/* --- conflicts ----------------------------------------------------------- */
+
+.conflictlist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.conflict {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-sm);
+  font-size: var(--text-sm);
+  background: var(--warning-bg);
+  color: var(--text-1);
+}
+.conflict[data-severity='error'] {
+  background: var(--danger-bg);
+}
+.conflict--clear {
+  background: var(--success-bg);
+  color: var(--text-2);
+}
+.conflict__text {
+  flex: 1;
+  min-width: 0;
+  text-align: start;
+  overflow-wrap: anywhere;
+}
+.conflict__when {
+  flex-shrink: 0;
+  font-size: var(--text-xs);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- years, and the Chinese statutory tables ----------------------------- */
+
+.yearlist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.yearlist__row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-sm);
+  background: var(--surface-inset);
+}
+.yearlist__year {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  min-width: 3.5em;
+}
+.yearlist__meta {
+  font-size: var(--text-sm);
+  color: var(--text-2);
+  margin-inline-end: auto;
+}
+.yearlist__missing {
+  font-size: var(--text-sm);
+  color: var(--text-3);
+  margin-inline-end: auto;
+}
+.yearlist__url {
+  display: inline-block;
+  margin-top: var(--sp-1);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  color: var(--text-3);
+  /* A URL is one long unbreakable token; without this it widens the card. */
+  overflow-wrap: anywhere;
+  direction: ltr;
+  text-align: start;
+  unicode-bidi: embed;
 }

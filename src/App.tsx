@@ -20,6 +20,7 @@ import {
 } from './components/icons'
 import { CommandPalette, type PaletteTarget } from './components/CommandPalette'
 import { useCodeWatcher } from './state/useCodeWatcher'
+import { claimStartupUpdateCheck, runUpdateCheck } from './core/update'
 import brandMark from './assets/brand.png'
 import { Skeleton } from './components/Skeleton'
 import { freshHits } from './core/codeHistory'
@@ -210,6 +211,64 @@ function Shell() {
   useEffect(() => {
     if (ready) prefetchScreens()
   }, [ready])
+
+  /**
+   * The update check, at startup, for real.
+   *
+   * It used to live in the Settings card, which meant it ran when *Settings*
+   * started, not when the app did. Someone who installs a build and never opens
+   * that screen — which is most people, once their accounts are set up — was
+   * never told a newer version existed, while a switch labelled "check for
+   * updates when Aevistle starts" sat there saying otherwise.
+   *
+   * Four things this is careful about:
+   *
+   *   - `ready` gates it, so the stored settings have replaced the defaults
+   *     before the switch is read. `updateCheckOnStart` defaults to *true*, so
+   *     running any earlier would mean a network request on behalf of someone
+   *     who had turned it off.
+   *   - `claimStartupUpdateCheck` is module-level, so this fires once per
+   *     launch no matter how many times anything remounts. The Settings card
+   *     no longer checks on mount at all; it reads the result from the same
+   *     module.
+   *   - it waits for idle. An update check is the least urgent thing the app
+   *     does and the first paint is the most urgent, so it is not allowed to
+   *     compete — same reasoning, and the same mechanism, as the prefetch above.
+   *   - `runUpdateCheck` cannot reject. A bare `void promise` here would be one
+   *     bad IPC reply away from an `unhandledRejection`, which on the desktop
+   *     means a native error dialog over a working app.
+   *
+   * And deliberately *no* cleanup. The obvious "cancel the pending check on
+   * unmount" is wrong here, in a way that only shows up in development: React's
+   * StrictMode mounts every effect, tears it down, and mounts it again. A
+   * cleanup that cancelled the scheduled run would cancel the one the *claim*
+   * had already been spent on, and the second mount would decline to re-claim
+   * it — so the check would never run at all, and only in dev, which is the
+   * worst place to lose it. Letting the scheduled call stand costs, at worst,
+   * one toast pushed while the window is closing.
+   *
+   * Silent unless it finds something: a toast every launch saying "still up to
+   * date" is a notification nobody asked for. The manual button in Settings is
+   * the opposite case and still always reports, because a button that produces
+   * no visible change reads as a button that did nothing.
+   */
+  useEffect(() => {
+    if (!ready || !bridge || !state.settings.updateCheckOnStart) return
+    if (!claimStartupUpdateCheck()) return
+
+    const run = () => {
+      void runUpdateCheck(() => bridge.checkForUpdate(), __APP_VERSION__).then((info) => {
+        if (!info.available) return
+        toast.push({
+          tone: 'info',
+          title: t('update.newVersionToast', { version: info.latest }),
+          detail: t('update.newVersionToastHint'),
+        })
+      })
+    }
+    if (typeof requestIdleCallback === 'function') requestIdleCallback(run, { timeout: 5000 })
+    else setTimeout(run, 2000)
+  }, [ready, bridge, state.settings.updateCheckOnStart, toast, t])
 
   const goToAccounts = () => {
     setOpenAccountOnMount(true)

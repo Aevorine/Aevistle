@@ -34,10 +34,14 @@ import type {
 import { classifyError } from '../src/core/bridge'
 import {
   endpointLadder,
+  formatAttempts,
   isNegotiable,
+  renderTransportError,
   rungBudgetMs,
+  summarizeTransportError,
   totalBudgetMs,
   withDeadline,
+  type AttemptNote,
   type Endpoint,
 } from '../src/core/transport'
 import { isHeaderSafe, isValidAddress, plainToHtml } from '../src/core/validate'
@@ -335,6 +339,12 @@ interface AttemptOutcome<T> {
   endpoint: Endpoint
   /** Only returned for pooled runs, where the caller keeps the connection. */
   transporter?: Transporter
+  /**
+   * What every rung ran into. The last error alone is misleading — the ladder
+   * ends on the least conventional endpoint, so its failure is the least
+   * informative one of the set.
+   */
+  notes: AttemptNote[]
 }
 
 /**

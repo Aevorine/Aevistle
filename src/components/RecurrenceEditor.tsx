@@ -18,7 +18,11 @@ import { useApp } from '../state/AppState'
 import { parseNaturalTime } from '../core/naturalTime'
 import { useI18n, type TranslationKey } from '../i18n'
 import { applyQuietHours, computeOccurrences, summarizeRecurrence, validateCron } from '../core/schedule'
-import { applyWorkCalendar, DEFAULT_WORK_CALENDAR } from '../core/workCalendar'
+import {
+  applyWorkCalendarDetailed,
+  calendarWarning,
+  DEFAULT_WORK_CALENDAR,
+} from '../core/workCalendar'
 import { validateBurst, validateRecurrence } from '../core/validate'
 import type { WorkdayPolicy } from '../core/workCalendar'
 import {
@@ -192,13 +196,31 @@ export function RecurrenceEditor({
     [recurrence, runsSoFar],
   )
   const calendar = settings.workCalendar ?? DEFAULT_WORK_CALENDAR
-  const preview = useMemo(() => {
-    const shaped = applyWorkCalendar(rawPreview, recurrence.workdayPolicy ?? 'off', calendar)
-    return applyQuietHours(shaped, {
+  /**
+   * The preview, and what it cost.
+   *
+   * `applyWorkCalendarDetailed` rather than `applyWorkCalendar`, because the
+   * plain one throws away the half of the answer that matters here: a fire time
+   * the calendar had **no working day to move to** simply vanishes from the
+   * list, and a preview showing three dates instead of four with no explanation
+   * is exactly how a reminder disappears in silence. The detailed call reports
+   * it; the block below prints it.
+   */
+  const { preview, warning } = useMemo(() => {
+    const detailed = applyWorkCalendarDetailed(
+      rawPreview,
+      recurrence.workdayPolicy ?? 'off',
+      calendar,
+    )
+    const quieted = applyQuietHours(detailed.occurrences, {
       enabled: settings.quietHoursEnabled,
       start: settings.quietStart,
       end: settings.quietEnd,
-    }).slice(0, 4)
+    })
+    return {
+      preview: quieted.slice(0, 4),
+      warning: calendarWarning(detailed.adjustment),
+    }
   }, [rawPreview, recurrence.workdayPolicy, calendar, settings])
 
   /** Did the calendar or the quiet window move anything? Worth saying if so. */
@@ -508,6 +530,26 @@ export function RecurrenceEditor({
               }}
             >
               {t('describe.shifted')}
+            </div>
+          ) : null}
+          {/*
+            The sends that will not happen, named at the point they are being
+            created rather than discovered on the day they do not arrive.
+            `CalendarWarning` has been computed on every save since the calendar
+            shipped and rendered by nothing at all.
+          */}
+          {warning ? (
+            <div className="banner banner--danger" style={{ marginBottom: 'var(--sp-2)' }} role="alert">
+              <span className="banner__body">
+                {warning.dropped.length > 0
+                  ? t('cal.job.dropped', {
+                      n: warning.dropped.length,
+                      when: formatDateTime(warning.dropped[0]),
+                    })
+                  : warning.crowded > 0
+                    ? t('cal.job.crowded', { n: warning.crowded })
+                    : t('cal.job.spread', { min: Math.round(warning.spreadMs / 60_000) })}
+              </span>
             </div>
           ) : null}
           {preview.length === 0 ? (

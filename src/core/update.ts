@@ -201,6 +201,98 @@ export async function fetchLatest(
   }
 }
 
+// ---------------------------------------------------------------------------
+// One check per launch, shared between whoever runs it and whoever shows it
+// ---------------------------------------------------------------------------
+
+/**
+ * The check used to live inside the Settings card, which meant it only ever ran
+ * for someone who opened Settings — the setting is called "check when Aevistle
+ * starts" and it did not do that. Anyone who installed a build and never went
+ * near Settings was never told about the next one.
+ *
+ * Moving the trigger to `App` splits it in two: the shell decides *when* to
+ * check, the card decides *how to draw* the answer. This module is where the
+ * answer sits in between, because it is the one place both already import and
+ * because it keeps the plumbing out of `AppState` — a check result is not part
+ * of the document that gets written to disk, and putting it there would mean
+ * persisting a timestamp that is meaningless on the next launch.
+ */
+let lastCheck: UpdateInfo | null = null
+const listeners = new Set<(info: UpdateInfo) => void>()
+
+/** What the last check said, for a card that mounts after it finished. */
+export function lastUpdateCheck(): UpdateInfo | null {
+  return lastCheck
+}
+
+/** …and for a card that is already open when it finishes. */
+export function onUpdateCheck(listener: (info: UpdateInfo) => void): () => void {
+  listeners.add(listener)
+  return () => {
+    listeners.delete(listener)
+  }
+}
+
+let startupCheckClaimed = false
+
+/**
+ * True exactly once per launch, for the caller that owns the startup check.
+ *
+ * A module-level flag rather than a ref, deliberately: a ref lives and dies
+ * with the component holding it, which is how the old version ended up firing
+ * again on every visit to Settings despite a comment claiming it ran once.
+ * This one survives any amount of mounting and unmounting.
+ */
+export function claimStartupUpdateCheck(): boolean {
+  if (startupCheckClaimed) return false
+  startupCheckClaimed = true
+  return true
+}
+
+/**
+ * Run a check, publish the result, and never reject.
+ *
+ * `checkForUpdate` is documented as never throwing and `fetchLatest` honours
+ * that, but the desktop route is an `ipcRenderer.invoke` — a main process that
+ * throws, or a channel that is not registered, rejects. A rejection from a
+ * fire-and-forget update check surfaces as `unhandledRejection`, and this app
+ * has already shipped one of those once: Electron puts a native error dialog on
+ * top of an otherwise perfectly working window. So the failure is turned into
+ * the same `error`-bearing `UpdateInfo` a network failure produces, which the
+ * card already knows how to draw.
+ */
+export async function runUpdateCheck(
+  check: () => Promise<UpdateInfo>,
+  current: string,
+): Promise<UpdateInfo> {
+  let info: UpdateInfo
+  try {
+    info = await check()
+  } catch (e) {
+    info = {
+      current,
+      latest: current,
+      available: false,
+      pageUrl: RELEASES_PAGE,
+      checkedAt: Date.now(),
+      error: e instanceof Error ? e.message : String(e),
+    }
+  }
+  lastCheck = info
+  // Copied first: a listener that unsubscribes on notify would otherwise
+  // mutate the set being iterated.
+  for (const listener of [...listeners]) listener(info)
+  return info
+}
+
+/** Test seam, matching `__setBridge` — lets a check script start from clean. */
+export function __resetUpdateChecks(): void {
+  lastCheck = null
+  startupCheckClaimed = false
+  listeners.clear()
+}
+
 export interface DownloadProgress {
   receivedBytes: number
   totalBytes: number

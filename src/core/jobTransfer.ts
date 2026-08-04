@@ -20,8 +20,22 @@
  * what happened on the machine that ran them. Carrying them across would make
  * an imported job claim a history it does not have — and, worse, an "after N
  * sends" rule would arrive already spent.
+ *
+ * **The working calendar travels with them.** A job can carry
+ * `recurrence.workdayPolicy`, which is a pointer into `Settings.workCalendar` —
+ * and that used to stay behind. The reminder landed on the new machine still
+ * saying "only on working days" and quietly meaning a different set of days, or
+ * none. It is carried, but never applied without the caller deciding: see
+ * `diffCalendars` in `core/workCalendar.ts`.
  */
 
+import { migrateSkipWeekends } from './schedule'
+import {
+  diffCalendars,
+  DEFAULT_WORK_CALENDAR,
+  type CalendarDiff,
+  type WorkCalendar,
+} from './workCalendar'
 import { defaultRecurrence, DEFAULT_RETRY, type MessageDraft, type ScheduledJob } from './types'
 
 /** Bumped only for a change that an older importer would read *wrongly*. */
@@ -34,6 +48,15 @@ export interface TransferFile {
   /** Purely informational; never used to decide anything on import. */
   appVersion?: string
   jobs: TransferJob[]
+  /**
+   * The exporting install's working calendar, when any job in the file actually
+   * depends on one. Never applied on import without being asked about.
+   *
+   * Not a version bump: an older importer ignores the extra key and gets the
+   * behaviour it already had. A newer importer reading an older file sees
+   * `undefined` and says the calendar is missing, which it is.
+   */
+  workCalendar?: WorkCalendar
 }
 
 /** A job stripped of everything local to one install. */
@@ -49,12 +72,32 @@ export interface TransferJob {
   attachmentPaths: string[]
 }
 
-export function exportJobs(jobs: ScheduledJob[], appVersion?: string, now = Date.now()): TransferFile {
+/** True when at least one of these jobs would read the working calendar. */
+export function needsCalendar(
+  jobs: Array<{ recurrence: Pick<ScheduledJob['recurrence'], 'workdayPolicy' | 'skipWeekends'> }>,
+): boolean {
+  return jobs.some(
+    (j) => (j.recurrence.workdayPolicy ?? 'off') !== 'off' || j.recurrence.skipWeekends === true,
+  )
+}
+
+export function exportJobs(
+  jobs: ScheduledJob[],
+  appVersion?: string,
+  now = Date.now(),
+  /**
+   * This install's calendar. Included only when a job in the file would read
+   * it — an export of three plain daily reminders has no business carrying
+   * somebody's list of public holidays.
+   */
+  calendar?: WorkCalendar,
+): TransferFile {
   return {
     format: 'aevistle.jobs',
     version: TRANSFER_VERSION,
     exportedAt: now,
     appVersion,
+    workCalendar: calendar && needsCalendar(jobs) ? calendar : undefined,
     jobs: jobs.map((job) => {
       // `accountId` is dropped rather than blanked: an id from another install
       // means nothing here, and leaving it in place would let an import silently
@@ -85,6 +128,32 @@ export interface ParsedImport {
   problems: ImportProblem[]
   /** Every attachment path mentioned, deduplicated, for an existence check. */
   attachmentPaths: string[]
+  /** The calendar the file carried, if any. Not applied — see `calendar`. */
+  workCalendar?: WorkCalendar
+  /**
+   * What the caller has to decide about the calendar before importing, or
+   * `undefined` when there is nothing to decide.
+   *
+   * This module cannot show a dialog, so it answers the questions a dialog
+   * would need to ask: does anything in this file depend on a calendar, is one
+   * present, and what would taking it change here. The caller picks a
+   * `CalendarMergeChoice` and calls `mergeCalendars`.
+   */
+  calendar?: CalendarDecision
+}
+
+export interface CalendarDecision {
+  /** At least one incoming job has a `workdayPolicy` (or the legacy flag). */
+  needed: boolean
+  /**
+   * The file depends on a calendar and did not bring one. The jobs will import
+   * and fall back to this install's calendar, which is very likely not the one
+   * they were written against — worth saying out loud rather than discovering
+   * when a reminder moves to the wrong Monday.
+   */
+  missing: boolean
+  /** What adopting the incoming calendar would change. Absent when none came. */
+  diff?: CalendarDiff
 }
 
 /**
@@ -96,7 +165,31 @@ export interface ParsedImport {
  * the thirty-nine good ones and be told about the one that was wrong, not lose
  * the lot to a single bad row.
  */
-export function parseImport(text: string): ParsedImport {
+/**
+ * Everything in the file is untrusted, and a calendar is the easiest part to
+ * get wrong by hand: a weekday of `9`, a date of `"next friday"`, a string
+ * where an array belongs. A malformed entry is dropped rather than allowed to
+ * become a holiday that matches nothing and a weekend that matches everything.
+ */
+function readCalendar(raw: unknown): WorkCalendar | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const c = raw as Partial<WorkCalendar>
+  const weekend = Array.isArray(c.weekend)
+    ? [...new Set(c.weekend.filter((d) => Number.isInteger(d) && d >= 0 && d <= 6))]
+    : []
+  const dates = (v: unknown): string[] =>
+    Array.isArray(v) ? [...new Set(v.filter((d) => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d)))].sort() : []
+  const holidays = dates(c.holidays)
+  const workdays = dates(c.workdays)
+  if (weekend.length === 0 && holidays.length === 0 && workdays.length === 0) return undefined
+  return { weekend, holidays, workdays }
+}
+
+export function parseImport(
+  text: string,
+  /** This install's calendar, so the diff can be computed here rather than twice. */
+  localCalendar: WorkCalendar = DEFAULT_WORK_CALENDAR,
+): ParsedImport {
   let raw: unknown
   try {
     raw = JSON.parse(text)
@@ -138,7 +231,17 @@ export function parseImport(text: string): ParsedImport {
     jobs.push(job)
   })
 
-  return { jobs, problems, attachmentPaths: [...paths] }
+  const workCalendar = readCalendar(file.workCalendar)
+  const needed = needsCalendar(jobs)
+  const diff = workCalendar ? diffCalendars(localCalendar, workCalendar) : undefined
+  // Nothing to decide is reported as nothing, so a caller can branch on the
+  // presence of `calendar` alone rather than on three booleans.
+  const calendar: CalendarDecision | undefined =
+    needed || (diff && !diff.identical)
+      ? { needed, missing: needed && !workCalendar, diff }
+      : undefined
+
+  return { jobs, problems, attachmentPaths: [...paths], workCalendar, calendar }
 }
 
 /**
@@ -164,7 +267,11 @@ export function materialise(
       id: newId('job'),
       name: entry.name || `Imported ${i + 1}`,
       enabled: entry.enabled !== false,
-      recurrence: entry.recurrence ?? defaultRecurrence(),
+      // Migrated on the way in, not left for the next hydrate: a file written
+      // by an older build carries the legacy `skipWeekends` flag, and importing
+      // it unchanged would arm a job against a hard-coded Sat/Sun weekend on a
+      // machine whose calendar may say otherwise.
+      recurrence: migrateSkipWeekends(entry.recurrence ?? defaultRecurrence()),
       retry: entry.retry ?? DEFAULT_RETRY,
       burst: entry.burst,
       conditions: entry.conditions,

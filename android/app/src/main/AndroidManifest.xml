@@ -38,7 +38,15 @@
             </intent-filter>
         </receiver>
 
-        <!-- Alarms do not survive a reboot or an app update; this re-arms them. -->
+        <!--
+            Alarms do not survive a reboot or an app update; this re-arms them.
+
+            It also re-arms the moment "Alarms & reminders" is granted. Until
+            then every alarm was set inexact and Doze could batch it; without
+            this, granting the permission would visibly change nothing until the
+            app was next opened. Android delivers that broadcast to
+            manifest-declared receivers for exactly this purpose.
+        -->
         <receiver
             android:name=".BootReceiver"
             android:exported="true">
@@ -46,6 +54,7 @@
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
             </intent-filter>
         </receiver>
 
@@ -70,7 +79,14 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
-    <!-- Tell you whether a scheduled send succeeded. -->
+    <!--
+        Tell you whether a scheduled send succeeded, and hand you a verification
+        code without making you switch apps.
+
+        Runtime-granted from Android 13 (API 33) onward, which means declaring
+        it here does nothing on its own — it is asked for at the point a
+        reminder is armed or an inbox is switched on. See Permissions.java.
+    -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!-- Re-arm schedules after the device restarts. -->
@@ -78,8 +94,13 @@
 
     <!--
         Fire at the minute you asked for, rather than whenever the system feels
-        like batching work. Revocable on Android 12+; the app falls back to an
-        inexact alarm instead of failing.
+        like batching work.
+
+        Not USE_EXACT_ALARM, which is pre-granted but reserved for alarm clocks
+        and calendars — this is neither, and claiming it would be a Play policy
+        violation. So: revocable, granted on install on Android 12/13 and denied
+        by default from Android 14. The app degrades to an inexact alarm rather
+        than failing, says so, and offers the settings screen that fixes it.
     -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
 

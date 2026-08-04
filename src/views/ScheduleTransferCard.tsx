@@ -19,6 +19,7 @@ import { useApp } from '../state/AppState'
 import { useI18n } from '../i18n'
 import { accountLabel } from '../core/accounts'
 import { exportJobs, materialise, parseImport, type ParsedImport } from '../core/jobTransfer'
+import { DEFAULT_WORK_CALENDAR, mergeCalendars } from '../core/workCalendar'
 
 declare const __APP_VERSION__: string
 
@@ -40,7 +41,15 @@ export function ScheduleTransferCard() {
 
   const exportNow = () => {
     if (state.jobs.length === 0) return
-    const file = exportJobs(state.jobs, __APP_VERSION__)
+    // The calendar rides along whenever a job in the file reads it — a
+    // `workdayPolicy` that lands on an install with no matching holiday list is
+    // a reminder pointing at days that do not exist there.
+    const file = exportJobs(
+      state.jobs,
+      __APP_VERSION__,
+      Date.now(),
+      state.settings.workCalendar ?? DEFAULT_WORK_CALENDAR,
+    )
     const blob = new Blob([JSON.stringify(file, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
@@ -56,7 +65,10 @@ export function ScheduleTransferCard() {
     setError('')
     setParsed(null)
     try {
-      const result = parseImport(await file.text())
+      const result = parseImport(
+        await file.text(),
+        state.settings.workCalendar ?? DEFAULT_WORK_CALENDAR,
+      )
       setParsed(result)
       setAccountId(state.accounts[0]?.id ?? '')
       /*
@@ -88,14 +100,39 @@ export function ScheduleTransferCard() {
       (prefix) => `${prefix}_${Date.now().toString(36)}_${Math.floor(Math.random() * 1e6).toString(36)}`,
       missing,
     )
+    /*
+     * The calendar is merged *before* the jobs, and only ever additively.
+     *
+     * `'merge'` adds the file's holidays and make-up days and keeps this
+     * machine's working week, so nothing the user already had is removed and
+     * no reminder unrelated to this import changes shape. Adopting the file's
+     * `weekend` wholesale is the one thing that would do real damage — a
+     * colleague's Friday/Saturday week silently rewriting every schedule here —
+     * so it is deliberately not done without being asked, and the ask is a
+     * dialog this card does not have yet. `parsed.calendar.diff.weekendDiffers`
+     * is what that dialog would branch on.
+     */
+    let mergedDates = 0
+    if (parsed.workCalendar) {
+      const local = state.settings.workCalendar ?? DEFAULT_WORK_CALENDAR
+      const next = mergeCalendars(local, parsed.workCalendar, 'merge')
+      mergedDates =
+        next.holidays.length - local.holidays.length + (next.workdays.length - local.workdays.length)
+      if (mergedDates > 0) dispatch({ type: 'patchSettings', patch: { workCalendar: next } })
+    }
+
     for (const job of jobs) dispatch({ type: 'upsertJob', job })
     setParsed(null)
     setMissing(new Set())
+    const notes = [
+      droppedAttachments > 0 ? t('transfer.droppedAttachments', { n: droppedAttachments }) : '',
+      mergedDates > 0 ? t('transfer.calendarMerged', { n: mergedDates }) : '',
+      parsed.calendar?.missing ? t('transfer.calendarMissing') : '',
+    ].filter(Boolean)
     toast.push({
       tone: 'success',
       title: t('transfer.imported', { n: jobs.length }),
-      detail:
-        droppedAttachments > 0 ? t('transfer.droppedAttachments', { n: droppedAttachments }) : undefined,
+      detail: notes.length > 0 ? notes.join(' · ') : undefined,
     })
   }
 
@@ -153,6 +190,27 @@ export function ScheduleTransferCard() {
                     tone="warning"
                     label={t('transfer.missingFilesN', { n: missing.size })}
                     title={[...missing].slice(0, 10).join('\n')}
+                  />
+                ) : null}
+                {/* Said before the import, not after: a reminder that depends
+                    on a calendar this machine does not have will move to days
+                    nobody chose, and that is not visible once it is armed. */}
+                {parsed.calendar?.missing ? (
+                  <StatusChip tone="warning" label={t('transfer.calendarMissing')} />
+                ) : null}
+                {parsed.calendar?.diff && !parsed.calendar.diff.identical ? (
+                  <StatusChip
+                    tone="accent"
+                    label={t('transfer.calendarInFile', {
+                      n:
+                        parsed.calendar.diff.newHolidays.length +
+                        parsed.calendar.diff.newWorkdays.length,
+                    })}
+                    title={
+                      parsed.calendar.diff.weekendDiffers
+                        ? t('transfer.calendarWeekendDiffers')
+                        : undefined
+                    }
                   />
                 ) : null}
               </div>

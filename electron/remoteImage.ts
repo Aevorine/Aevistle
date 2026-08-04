@@ -4,8 +4,13 @@
  * tracking pixel loaded from inside the sandboxed body iframe would still
  * leak the reader's IP and confirm the message was opened, which is exactly
  * what remote-image blocking (see `sanitizeHtml.ts`) exists to prevent. This
- * function is what runs when the user (or an account/sender policy) has
- * explicitly opted back into loading a specific image anyway.
+ * function is what runs when an account's policy — `always` by default, see
+ * `RemoteImagePolicy` — or an explicit "load images" click says the message's
+ * pictures should be fetched after all. The sanitizer still strips every
+ * remote `src`; what changed is who asks for them back, not who fetches them.
+ *
+ * Results are cached on disk (bottom of this file) so that "load by default"
+ * costs one request per image ever rather than one per reopen.
  *
  * A "download an attacker-chosen URL" primitive is an SSRF vector against the
  * user's own LAN — a `<img src="http://192.168.1.1/admin">` embedded in a
@@ -20,9 +25,13 @@
 
 import { request as httpRequest } from 'node:http'
 import { request as httpsRequest } from 'node:https'
+import { promises as fs } from 'node:fs'
+import { createHash } from 'node:crypto'
+import path from 'node:path'
 import dns from 'node:dns'
 import net from 'node:net'
 import type { LookupFunction } from 'node:net'
+import { dataLocation } from './store'
 
 const FETCH_TIMEOUT_MS = 8_000
 const MAX_BYTES = 5 * 1024 * 1024
@@ -111,7 +120,7 @@ function safeLookup(
   })
 }
 
-export async function downloadRemoteImage(url: string): Promise<string> {
+async function fetchOverNetwork(url: string): Promise<string> {
   const parsed = new URL(url)
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
     throw new Error('Unsupported URL scheme')
@@ -189,4 +198,155 @@ export async function downloadRemoteImage(url: string): Promise<string> {
     req.on('error', reject)
     req.end()
   })
+}
+
+// ---------------------------------------------------------------------------
+// On-disk cache
+// ---------------------------------------------------------------------------
+
+/**
+ * Images survive a restart now, because they have to.
+ *
+ * Remote images load by default (see `RemoteImagePolicy`), so every reopen of
+ * every HTML message used to mean re-fetching the whole set — the renderer's
+ * memo is per session, and quitting the app threw it away. That is slow on a
+ * bad link and, more to the point, it re-announces the reader to the sender's
+ * server every single time; a cache that persists means one hit per image
+ * ever, which is *fewer* pings than blocking-then-clicking used to produce.
+ *
+ * Keyed by a hash of the URL and nothing else — not by message, not by
+ * account. The same tracking pixel appears in a hundred newsletters, and
+ * fetching it once is the point. That also means nothing here reveals which
+ * message an entry came from: the directory is a pile of hashes.
+ *
+ * It is a cache, not data: the server still has the picture, so eviction is
+ * free and everything below fails soft. A cache that cannot be written to
+ * must never be a reason a message fails to render.
+ */
+const CACHE_DIR = 'imagecache'
+/** Total bytes before the least recently used entries are dropped. */
+const CACHE_MAX_BYTES = 200 * 1024 * 1024
+/** Prune down to this much, so a full cache does not re-prune on every write. */
+const CACHE_TARGET_BYTES = Math.floor(CACHE_MAX_BYTES * 0.8)
+/** One entry is a whole data URI; anything near the fetch ceiling is fine, past it is not ours. */
+const CACHE_MAX_ENTRY_BYTES = 8 * 1024 * 1024
+
+function cacheDir(): string {
+  return path.join(dataLocation(), CACHE_DIR)
+}
+
+/**
+ * The filename for a URL. SHA-256 rather than anything reversible: the folder
+ * is then a list of hashes instead of a browsable history of everywhere the
+ * user's mail has pointed.
+ */
+function cacheFile(url: string): string {
+  return path.join(cacheDir(), `${createHash('sha256').update(url).digest('hex')}.txt`)
+}
+
+async function readCached(url: string): Promise<string | null> {
+  try {
+    const file = cacheFile(url)
+    const text = await fs.readFile(file, 'utf8')
+    if (!text.startsWith('data:image/')) return null // truncated or foreign file — refetch
+    // mtime is the LRU clock, so a hit has to touch it. Failing to is not
+    // worth reporting: the worst case is the entry looks older than it is.
+    const now = new Date()
+    void fs.utimes(file, now, now).catch(() => {})
+    return text
+  } catch {
+    return null // a miss and an unreadable cache are the same thing to the caller
+  }
+}
+
+async function writeCached(url: string, dataUri: string): Promise<void> {
+  if (Buffer.byteLength(dataUri) > CACHE_MAX_ENTRY_BYTES) return
+  try {
+    const dir = cacheDir()
+    await fs.mkdir(dir, { recursive: true })
+    const file = cacheFile(url)
+    // Write-then-rename, so a crash mid-write cannot leave a half-file that
+    // reads back as a corrupt image.
+    const tmp = `${file}.${process.pid}.tmp`
+    await fs.writeFile(tmp, dataUri, 'utf8')
+    await fs.rename(tmp, file)
+  } catch {
+    /* the picture still displays; it just will not be there next time */
+  }
+  void prune()
+}
+
+/** One sweep at a time — a burst of thirty images must not start thirty of them. */
+let pruning: Promise<void> | null = null
+
+async function prune(): Promise<void> {
+  if (pruning) return pruning
+  pruning = (async () => {
+    try {
+      const dir = cacheDir()
+      const names = await fs.readdir(dir)
+      const entries: Array<{ file: string; size: number; mtime: number }> = []
+      let total = 0
+      for (const name of names) {
+        const file = path.join(dir, name)
+        try {
+          const stat = await fs.stat(file)
+          if (!stat.isFile()) continue
+          entries.push({ file, size: stat.size, mtime: stat.mtimeMs })
+          total += stat.size
+        } catch {
+          /* vanished under us — nothing to count */
+        }
+      }
+      if (total <= CACHE_MAX_BYTES) return
+      // Oldest touch first: `readCached` bumps mtime on every hit, which is
+      // what makes this least-recently-*used* rather than oldest-fetched.
+      entries.sort((a, b) => a.mtime - b.mtime)
+      for (const entry of entries) {
+        if (total <= CACHE_TARGET_BYTES) break
+        try {
+          await fs.unlink(entry.file)
+          total -= entry.size
+        } catch {
+          /* already gone */
+        }
+      }
+    } catch {
+      /* no cache directory yet, or it is unreadable — nothing to prune */
+    } finally {
+      pruning = null
+    }
+  })()
+  return pruning
+}
+
+/**
+ * Fetch an image, from disk if it is already there.
+ *
+ * Only successes are stored. A failure is a moment in time — a dropped
+ * connection, a server having a bad minute — and writing those down would
+ * make one bad minute permanent.
+ */
+export async function downloadRemoteImage(url: string): Promise<string> {
+  const cached = await readCached(url)
+  if (cached) return cached
+  const dataUri = await fetchOverNetwork(url)
+  await writeCached(url, dataUri)
+  return dataUri
+}
+
+/**
+ * Delete every cached image.
+ *
+ * Called by "reset everything", which is the strongest promise this app makes.
+ * The cache holds only pictures that were already public on someone else's
+ * server — but the *set* of them is a record of which mail was opened, and a
+ * reset that leaves a folder of hashes behind has not done what it said.
+ *
+ * Resolves either way. A cache that cannot be emptied is not a reason to tell
+ * someone their reset failed when their accounts, secrets and schedule are all
+ * genuinely gone.
+ */
+export async function clearImageCache(): Promise<void> {
+  await fs.rm(cacheDir(), { recursive: true, force: true }).catch(() => {})
 }

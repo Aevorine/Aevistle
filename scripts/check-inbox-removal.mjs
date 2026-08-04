@@ -149,7 +149,7 @@ check(
 )
 check(
   'every sync result must be filtered through the tombstone list',
-  /case 'upsertInboxAccount'[\s\S]{0,1600}?withoutRemoved\(/.test(appState),
+  /case 'upsertInboxAccount'[\s\S]{0,2400}?withoutRemoved\(/.test(appState),
 )
 check(
   'a sync must merge tombstones, not overwrite them with its own stale copy',
@@ -182,6 +182,35 @@ const inbox = read('src/views/InboxView.tsx')
 check(
   'the delete buttons must no longer demand typed confirmation',
   !/requireTypedConfirmation/.test(inbox),
+)
+
+// The same shape of bug, a third time. A sync captures the account config in
+// a closure, awaits IMAP, and dispatches the reply back over the account —
+// so anything the user changed while it was in flight is overwritten with the
+// value from before. It cost us `removed` once; it would cost us the
+// remote-image choice next, since that switch is flipped from the reader
+// while a poll may well be running. The reducer has to know which writes come
+// from a sync, and a sync is authoritative about the mailbox and nothing else.
+check(
+  'a sync must identify itself to the reducer',
+  /type: 'upsertInboxAccount'; inbox: InboxAccountState; origin\?: 'sync'/.test(appState),
+)
+check(
+  "both of syncInboxAccount's dispatches must be tagged, including the failure path",
+  (appState.match(/origin: 'sync'/g) ?? []).length >= 2,
+)
+check(
+  'a sync result must not carry the user-owned image fields',
+  /action\.origin === 'sync' && prior[\s\S]{0,160}showRemoteImages: prior\.showRemoteImages[\s\S]{0,80}imageAllowlist: prior\.imageAllowlist/.test(
+    appState,
+  ),
+)
+// Computing the carry-forward and then not spreading it is the failure this
+// guard exists to catch — it looks right in review and does nothing at run
+// time. Assert the use, not just the declaration.
+check(
+  'the carried-forward fields must actually override the sync result',
+  /\.\.\.action\.inbox,\s*\n\s*\.\.\.preferences,/.test(appState),
 )
 
 // ---------------------------------------------------------------------------

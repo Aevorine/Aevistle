@@ -48,9 +48,24 @@ import {
   type JobRun,
   type PlatformBridge,
 } from '../core/bridge'
+// Type-only: a value import would pull the Capacitor runtime into the desktop
+// and web bundles for the sake of three methods that do not exist there.
+import type { AndroidPermissionApi } from '../core/bridge-android'
+import type { PermissionSnapshot } from '../core/health'
 import { pruneLogs } from '../core/logRetention'
-import { applyQuietHours, computeOccurrences, rearm, type QuietHours } from '../core/schedule'
-import { applyWorkCalendar, DEFAULT_WORK_CALENDAR } from '../core/workCalendar'
+import {
+  applyQuietHours,
+  computeOccurrences,
+  migrateSkipWeekends,
+  rearm,
+  type QuietHours,
+} from '../core/schedule'
+import {
+  applyWorkCalendarDetailed,
+  calendarWarning,
+  DEFAULT_WORK_CALENDAR,
+  type CalendarWarning,
+} from '../core/workCalendar'
 import { buildMergeMessages } from '../core/mergeVars'
 import { captureSnapshot, type SnapshotReason } from '../core/snapshots'
 import {
@@ -99,10 +114,67 @@ function shapeOccurrences(
   occurrences: number[],
   job: Pick<ScheduledJob, 'recurrence'>,
   settings: Settings,
-): number[] {
+  now = Date.now(),
+): { occurrences: number[]; warning?: CalendarWarning } {
   const calendar = settings.workCalendar ?? DEFAULT_WORK_CALENDAR
-  const shaped = applyWorkCalendar(occurrences, job.recurrence.workdayPolicy ?? 'off', calendar)
-  return applyQuietHours(shaped, quietFrom(settings))
+  const { occurrences: shaped, adjustment } = applyWorkCalendarDetailed(
+    occurrences,
+    job.recurrence.workdayPolicy ?? 'off',
+    calendar,
+  )
+  return {
+    occurrences: applyQuietHours(shaped, quietFrom(settings)),
+    warning: calendarWarning(adjustment, now),
+  }
+}
+
+/**
+ * Recompute one job's list from its *rule*, not from its stored list.
+ *
+ * Stored occurrences have already been shifted. Re-shaping them would apply
+ * the calendar twice, and — worse — the original time is not recoverable from
+ * them, so a user who removed a holiday could never get the reminder back on
+ * the day they had first asked for.
+ */
+function rebuildJob(job: ScheduledJob, settings: Settings, now = Date.now()): ScheduledJob {
+  const recurrence = migrateSkipWeekends(job.recurrence)
+  const { occurrences, warning } = shapeOccurrences(
+    computeOccurrences(recurrence, {
+      runsSoFar: job.runCount,
+      count: 24,
+      after: now,
+      calendar: settings.workCalendar ?? DEFAULT_WORK_CALENDAR,
+    }),
+    { recurrence },
+    settings,
+    now,
+  )
+  return { ...job, recurrence, occurrences, calendarWarning: warning }
+}
+
+/** Two occurrence lists that would arm the same alarms. */
+function sameList(a: number[], b: number[]): boolean {
+  return a.length === b.length && a.every((t, i) => t === b[i])
+}
+
+/**
+ * "N reminders have no working day to move to" — as an activity entry, because
+ * a dropped send is otherwise indistinguishable from a send that has not
+ * happened yet.
+ */
+function droppedLog(job: ScheduledJob, warning: CalendarWarning): LogEntry | null {
+  if (warning.dropped.length === 0) return null
+  return {
+    id: newId('log'),
+    at: warning.at,
+    kind: 'schedule',
+    level: 'error',
+    title: `Will not be sent: ${job.name}`,
+    detail:
+      `${warning.dropped.length} fire time(s) fall on days the working calendar has no ` +
+      `working day near — first ${new Date(warning.dropped[0]).toLocaleString()}.`,
+    jobId: job.id,
+  }
 }
 
 /**
@@ -169,7 +241,7 @@ type Action =
   | { type: 'log'; entry: LogEntry }
   | { type: 'clearLogs' }
   | { type: 'rebaseAttachments'; from: string; to: string }
-  | { type: 'upsertInboxAccount'; inbox: InboxAccountState }
+  | { type: 'upsertInboxAccount'; inbox: InboxAccountState; origin?: 'sync' }
   | { type: 'removeInboxAccount'; accountId: string }
   | {
       type: 'patchInboxMessages'
@@ -195,7 +267,13 @@ type Action =
   | { type: 'recordRecipients'; addresses: string[]; names?: Record<string, string> }
   | { type: 'reset' }
 
-function reducer(state: AppState, action: Action): AppState {
+/**
+ * Exported for `scripts/check-work-calendar.mjs`, which drives `patchSettings`
+ * directly. The alternative was asserting that the *source* contains a
+ * recompute, which is exactly the kind of guard that passes while the behaviour
+ * is broken. Nothing in the app imports it.
+ */
+export function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
     /*
      * Pruned on the way in, not only on the way out.
@@ -213,14 +291,74 @@ function reducer(state: AppState, action: Action): AppState {
      * to the `log` case, someone who set retention to 1 day would still be
      * carrying a month of recipients on disk until the next send happened.
      */
+    /*
+     * ...and so does moving a holiday.
+     *
+     * The working calendar and the quiet window are not display preferences:
+     * they are inputs to `job.occurrences`, which is the list the platform
+     * scheduler is actually holding. Left to be picked up "next time", editing
+     * the calendar changed what the preview drew and nothing about what would
+     * fire — until the next restart, or until each job happened to be saved or
+     * toggled by hand. Marking 1 October a holiday and watching the reminder go
+     * out on 1 October anyway is precisely the silent failure this application
+     * exists to prevent.
+     *
+     * Recomputed here, inside the reducer, on purpose. The obvious place was a
+     * callback that dispatches and then reads the calendar back out of state —
+     * which is the bug `saveInboxAccount` already shipped once, because
+     * `dispatch` is not synchronous and the read returns the *previous* value.
+     * The reducer is the one place that holds the new settings and the old jobs
+     * at the same time, so there is nothing to read back.
+     */
     case 'patchSettings': {
       const settings = { ...state.settings, ...action.patch }
       const touchesRetention =
         action.patch.logRetentionDays !== undefined || action.patch.logMaxEntries !== undefined
+      const touchesCalendar = action.patch.workCalendar !== undefined
+      const touchesQuiet =
+        action.patch.quietHoursEnabled !== undefined ||
+        action.patch.quietStart !== undefined ||
+        action.patch.quietEnd !== undefined
+
+      let jobs = state.jobs
+      let logs = state.logs
+      if (touchesCalendar || touchesQuiet) {
+        const now = Date.now()
+        const fresh: LogEntry[] = []
+        jobs = state.jobs.map((job) => {
+          // Quiet hours apply to every armed job; the calendar only reaches the
+          // ones that opted in, so the rest are left strictly untouched — no new
+          // `updatedAt`, no re-arm, no churn on the device.
+          if (!job.enabled) return job
+          if (touchesCalendar && !touchesQuiet && (job.recurrence.workdayPolicy ?? 'off') === 'off') {
+            return job
+          }
+          const next = rebuildJob(job, settings, now)
+          if (
+            sameList(next.occurrences, job.occurrences) &&
+            next.recurrence === job.recurrence &&
+            next.calendarWarning === undefined &&
+            job.calendarWarning === undefined
+          ) {
+            return job
+          }
+          // `updatedAt` is what the scheduler-sync signature watches. Without
+          // bumping it, a change that moved only the *later* occurrences would
+          // leave the device holding the old alarms.
+          if (next.calendarWarning) {
+            const entry = droppedLog(next, next.calendarWarning)
+            if (entry) fresh.push(entry)
+          }
+          return { ...next, updatedAt: now }
+        })
+        if (fresh.length > 0) logs = pruneLogs([...fresh, ...logs], settings)
+      }
+
       return {
         ...state,
         settings,
-        logs: touchesRetention ? pruneLogs(state.logs, settings) : state.logs,
+        jobs,
+        logs: touchesRetention ? pruneLogs(logs, settings) : logs,
       }
     }
 
@@ -370,10 +508,24 @@ function reducer(state: AppState, action: Action): AppState {
       // to fix.
       const prior = state.inboxAccounts.find((i) => i.accountId === action.inbox.accountId)
       const removed = mergeRemoved(prior?.removed, action.inbox.removed, Date.now())
+      // Same reasoning as `removed`, for the same reason, on the fields the
+      // user owns rather than the server: a sync captures its config in a
+      // closure, then awaits IMAP for however long that takes. Flip the
+      // remote-image switch while one is in flight and the reply lands
+      // afterwards carrying the value from before the flip — writing 'never'
+      // back over the 'always' the user just chose. Poll interval defaults to
+      // five minutes and IDLE can push at any moment, so the window is not
+      // theoretical. A sync result is authoritative about the mailbox and
+      // about nothing else.
+      const preferences =
+        action.origin === 'sync' && prior
+          ? { showRemoteImages: prior.showRemoteImages, imageAllowlist: prior.imageAllowlist }
+          : {}
       // Cap message rows here, not in the caller — every writer of this
       // action (a fresh sync, a future push-update) gets the ceiling for free.
       const inbox: InboxAccountState = {
         ...action.inbox,
+        ...preferences,
         removed,
         messages: withoutRemoved([...action.inbox.messages], removed)
           .sort((a, b) => b.date - a.date)
@@ -588,6 +740,20 @@ export interface AppApi {
    */
   schedulerUnreachable: boolean
 
+  /**
+   * What Android currently permits. `null` on desktop and web, where neither
+   * question exists, and until the first read comes back.
+   *
+   * Re-read when the window becomes visible again, because the only way to
+   * change either of these is to leave for a system settings screen and come
+   * back — and nothing tells the page that happened.
+   */
+  permissions: PermissionSnapshot | null
+  /** Raise the notification dialog, or open the settings screen for it. */
+  fixPermission: (
+    what: 'requestNotifications' | 'openNotificationSettings' | 'openExactAlarmSettings',
+  ) => Promise<void>
+
   addLog: (entry: Omit<LogEntry, 'id' | 'at'>) => void
   saveAccount: (account: MailAccount, secret?: string) => Promise<void>
   deleteAccount: (id: string) => Promise<void>
@@ -681,6 +847,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [bridge, setBridge] = useState<PlatformBridge | null>(null)
   const [ready, setReady] = useState(false)
   const [schedulerUnreachable, setSchedulerUnreachable] = useState(false)
+  const [permissions, setPermissions] = useState<PermissionSnapshot | null>(null)
   const [bootError, setBootError] = useState<string | null>(null)
   const hydrated = useRef(false)
 
@@ -758,12 +925,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // ago may be stale after a timezone change, a DST shift, or the device
         // simply being off past several fire times — and the holiday calendar
         // may have gained dates since they were last computed.
+        //
+        // Also where the legacy `skipWeekends` flag is retired. It runs on
+        // every boot and is idempotent by construction (it clears the flag it
+        // reads), so the migration needs no version marker and cannot half-run.
+        const calendar = merged.settings.workCalendar ?? DEFAULT_WORK_CALENDAR
         merged.jobs = merged.jobs.map((job) => {
-          if (!job.enabled) return job
-          const { upcoming } = rearm(job.recurrence, job.occurrences ?? [], {
+          const recurrence = migrateSkipWeekends(job.recurrence)
+          if (!job.enabled) return recurrence === job.recurrence ? job : { ...job, recurrence }
+          const { upcoming } = rearm(recurrence, job.occurrences ?? [], {
             runsSoFar: job.runCount,
+            calendar,
           })
-          return { ...job, occurrences: shapeOccurrences(upcoming, job, merged.settings) }
+          const shaped = shapeOccurrences(upcoming, { recurrence }, merged.settings)
+          return {
+            ...job,
+            recurrence,
+            occurrences: shaped.occurrences,
+            calendarWarning: shaped.warning,
+          }
         })
 
         // Anything left mid-flight by a crash or a quit is waiting again, not
@@ -1244,17 +1424,33 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
       }
 
-      const occurrences = shapeOccurrences(
+      // Saving is also a migration point: the editor still writes the legacy
+      // flag for jobs that had it, and a job saved with both it and a policy
+      // used to be shifted twice.
+      finalJob = { ...finalJob, recurrence: migrateSkipWeekends(finalJob.recurrence) }
+      const { occurrences, warning } = shapeOccurrences(
         computeOccurrences(finalJob.recurrence, {
           runsSoFar: finalJob.runCount,
           count: 24,
+          calendar: state.settings.workCalendar ?? DEFAULT_WORK_CALENDAR,
         }),
         finalJob,
         state.settings,
       )
-      finalJob = { ...finalJob, occurrences, updatedAt: Date.now() }
+      finalJob = { ...finalJob, occurrences, calendarWarning: warning, updatedAt: Date.now() }
 
       dispatch({ type: 'upsertJob', job: finalJob })
+      if (warning && warning.dropped.length > 0) {
+        addLog({
+          kind: 'schedule',
+          level: 'error',
+          title: `Will not be sent: ${finalJob.name}`,
+          detail:
+            `${warning.dropped.length} fire time(s) have no working day to move to — ` +
+            `first ${new Date(warning.dropped[0]).toLocaleString()}.`,
+          jobId: finalJob.id,
+        })
+      }
       addLog({
         kind: 'schedule',
         level: 'info',
@@ -1270,20 +1466,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
     async (id: string, enabled: boolean) => {
       const job = state.jobs.find((j) => j.id === id)
       if (!job) return
-      const occurrences = enabled
-        ? shapeOccurrences(
-            computeOccurrences(job.recurrence, { runsSoFar: job.runCount, count: 24 }),
-            job,
-            state.settings,
-          )
-        : []
+      const rebuilt = enabled ? rebuildJob(job, state.settings) : null
       dispatch({
         type: 'upsertJob',
         job: {
           ...job,
+          ...(rebuilt ?? {}),
           enabled,
           status: enabled ? 'armed' : 'paused',
-          occurrences,
+          // A paused job's warning describes a list that no longer exists.
+          ...(enabled ? {} : { occurrences: [], calendarWarning: undefined }),
           updatedAt: Date.now(),
         },
       })
@@ -1377,11 +1569,78 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [state.jobs, sendDraftNow, conditionContext, addLog],
   )
 
+  /**
+   * Read Android's view of its own permissions, now and whenever the window
+   * comes back to the foreground.
+   *
+   * The foreground check is the load-bearing half. Both of these are changed on
+   * a system settings screen, which means leaving the app — so the only moment
+   * the answer can have changed is the moment we return. Without it the strip
+   * would keep saying "notifications are off" after the user had just turned
+   * them on, which reads as the fix not working.
+   */
+  useEffect(() => {
+    if (!bridge) return
+    const android = bridge as Partial<AndroidPermissionApi>
+    if (!android.permissionState) return
+    let live = true
+    const read = () => {
+      android
+        .permissionState?.()
+        .then((s) => {
+          if (live) setPermissions(s)
+        })
+        // A permission read that fails tells us nothing, and there is nothing
+        // the user could do about it. Leaving the previous answer in place is
+        // better than flapping the strip.
+        .catch(() => {})
+    }
+    read()
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') read()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      live = false
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [bridge])
+
+  const fixPermission = useCallback(
+    async (what: 'requestNotifications' | 'openNotificationSettings' | 'openExactAlarmSettings') => {
+      const android = bridge as Partial<AndroidPermissionApi> | null
+      if (!android) return
+      try {
+        if (what === 'requestNotifications') {
+          const after = await android.requestNotificationPermission?.()
+          if (after) setPermissions(after)
+          return
+        }
+        // The two settings screens answer nothing themselves — the result
+        // arrives via the visibility listener above, when the user comes back.
+        if (what === 'openNotificationSettings') await android.openNotificationSettings?.()
+        else await android.openExactAlarmSettings?.()
+      } catch {
+        // Same reasoning as the read: an OEM build with no such screen is not
+        // something to throw a dialog about.
+      }
+    },
+    [bridge],
+  )
+
   const resetEverything = useCallback(async () => {
     const failed = await forgetSecrets(
       bridge,
       state.accounts.flatMap((a) => [[a.id], [a.id, 'imap'] as [string, SecretKind]]),
     )
+    // The cached copies of remote images live outside the state document, so
+    // clearing state does not touch them. The pictures themselves were public
+    // on someone else's server, but the folder of them is a record of which
+    // mail was opened — and a reset that leaves it behind has not done what it
+    // said. Failure is deliberately silent: unlike a password, nothing here is
+    // a secret, and a stubborn cache file is not a reason to report a reset as
+    // failed when the accounts and schedule really are gone.
+    await bridge?.clearImageCache?.().catch(() => {})
     dispatch({ type: 'reset' })
     // "Reset everything" is the strongest promise in the app. If a password
     // outlived it, that has to be said out loud rather than covered by the
@@ -1465,11 +1724,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
         defaultInboxAccountState(accountId)
       try {
         const result = await bridge.syncInbox(config)
-        dispatch({ type: 'upsertInboxAccount', inbox: result })
+        dispatch({ type: 'upsertInboxAccount', inbox: result, origin: 'sync' })
       } catch (e) {
         dispatch({
           type: 'upsertInboxAccount',
           inbox: { ...config, lastSyncError: e instanceof Error ? e.message : String(e) },
+          origin: 'sync',
         })
       }
     },
@@ -1842,6 +2102,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     dispatch,
     bootError,
     schedulerUnreachable,
+    permissions,
+    fixPermission,
     addLog,
     saveAccount,
     deleteAccount,

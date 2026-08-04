@@ -138,6 +138,8 @@ export interface DesktopApi {
     items: Array<{ folderPath: string; uid: number }>,
   ): Promise<void>
   fetchRemoteImage(url: string): Promise<string>
+  /** Drop the on-disk remote-image cache. Part of "reset everything". */
+  clearImageCache(): Promise<void>
   onInboxEvent(handler: (event: InboxEvent) => void): () => void
 
   notify(title: string, body: string): Promise<void>
@@ -201,6 +203,7 @@ export const IPC = {
   deleteInboxMessages: 'aevistle:delete-inbox-messages',
   purgeInboxMessages: 'aevistle:purge-inbox-messages',
   fetchRemoteImage: 'aevistle:fetch-remote-image',
+  clearImageCache: 'aevistle:clear-image-cache',
   inboxEvent: 'aevistle:inbox-event',
   notify: 'aevistle:notify',
   openExternal: 'aevistle:open-external',

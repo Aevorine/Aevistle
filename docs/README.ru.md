@@ -7,14 +7,20 @@
 **Отложенные письма-напоминания, которые действительно доходят.**
 
 Напишите письмо один раз — с файлами, изображениями или архивами во вложении —
-и Aevistle отправит его вовремя. Один раз, каждый будний день в 09:00, первого
-числа месяца или по любому выражению cron. Одно и то же приложение на Windows
-и Android.
+и Aevistle отправит его вовремя, даже если окно закрыто. Один раз, каждый
+будний день в 09:00, первого числа месяца или по любому выражению cron.
+Windows и Android, без аккаунта, без сервера, без телеметрии.
+
+*Еженедельный отчёт по пятницам. Счёт первого числа. Поздравление в полночь,
+пока вы спите.*
 
 [![Release](https://img.shields.io/github/v/release/Aevorine/Aevistle?style=flat-square&color=4f46e5)](https://github.com/Aevorine/Aevistle/releases/latest)
+[![CI](https://img.shields.io/github/actions/workflow/status/Aevorine/Aevistle/ci.yml?branch=main&style=flat-square&color=4f46e5&label=checks)](https://github.com/Aevorine/Aevistle/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT-4f46e5?style=flat-square)](../LICENSE)
 [![Windows](https://img.shields.io/badge/Windows-x64-4f46e5?style=flat-square&logo=windows)](https://github.com/Aevorine/Aevistle/releases/latest)
 [![Android](https://img.shields.io/badge/Android-7.0%2B-4f46e5?style=flat-square&logo=android)](https://github.com/Aevorine/Aevistle/releases/latest)
+
+### [⬇ Скачать](https://github.com/Aevorine/Aevistle/releases/latest) · [Что он умеет](#что-он-умеет) · [Приватность](#приватность) · [Безопасность](#безопасность)
 
 [English](../README.md) ·
 [简体中文](README.zh-CN.md) ·
@@ -84,9 +90,14 @@ Aevistle прежде всего выполняет именно это обещ
 
 | Платформа | Файл | Примечания |
 |---|---|---|
-| Windows 10/11 (x64) | `Aevistle-0.1.5-win-x64-setup.exe` | Установщик, создаёт ярлыки в меню «Пуск» и на рабочем столе |
-| Windows 10/11 (x64) | `Aevistle-0.1.5-win-x64-portable.exe` | Один файл, без установки, работает с флешки |
-| Android 7.0+ | `Aevistle-0.1.5.apk` | Телефоны и планшеты. Сначала разрешите «установку неизвестных приложений» для браузера или файлового менеджера. |
+| Windows 10/11 (x64) | `Aevistle-<version>-win-x64-setup.exe` | Установщик, создаёт ярлыки в меню «Пуск» и на рабочем столе |
+| Windows 10/11 (x64) | `Aevistle-<version>-win-x64-portable.exe` | Один файл, без установки, работает с флешки |
+| Android 7.0+ | `Aevistle-<version>.apk` | Телефоны и планшеты. Сначала разрешите «установку неизвестных приложений» для браузера или файлового менеджера. |
+
+`<version>` — это номер, указанный на странице
+[последнего выпуска](https://github.com/Aevorine/Aevistle/releases/latest);
+значок вверху страницы читает его оттуда же. Здесь он намеренно не записан,
+чтобы эта таблица не могла устареть.
 
 > Windows SmartScreen предупредит о неизвестном издателе. Так выглядит сборка
 > без платного сертификата подписи кода: выберите **Подробнее → Выполнить в
@@ -243,9 +254,14 @@ android/         Android: JavaMail (отправка и приём), Keystore, A
 
 ## Участие в разработке
 
-Pull request'ы приветствуются. См. **[CONTRIBUTING.md](../CONTRIBUTING.md)**.
+Pull request'ы приветствуются. См. **[CONTRIBUTING.md](../CONTRIBUTING.md)**
+и **[CODE_OF_CONDUCT.md](../CODE_OF_CONDUCT.md)**.
 Добавить седьмой язык — это один файл и никаких сборочных инструментов:
 система типов сама покажет, каких строк не хватает.
+
+У сообщений об ошибках и запросов возможностей есть
+[шаблоны](https://github.com/Aevorine/Aevistle/issues/new/choose); каждый pull
+request прогоняет тот же `npm run check`, что и вы локально.
 
 ## Лицензия
 

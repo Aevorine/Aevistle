@@ -56,11 +56,19 @@ import {
   useAttachmentImages,
 } from '../components/ImageLightbox'
 import { useI18n } from '../i18n'
-import { resolveRemoteImages } from '../core/remoteImagePlaceholder'
+import { BROKEN_IMAGE, resolveRemoteImages } from '../core/remoteImagePlaceholder'
 import { resolveWithCache } from '../core/imageCache'
 import { getCachedBody, putCachedBody } from '../core/bodyMemo'
 import type { InboxMessageBody } from '../core/bridge'
-import { REMOVED_RETENTION_MS, type Attachment, type InboxMessage, type InboxTag } from '../core/types'
+import {
+  REMOVED_RETENTION_MS,
+  effectiveImagePolicy,
+  senderDomain,
+  shouldAutoLoadImages,
+  type Attachment,
+  type InboxMessage,
+  type InboxTag,
+} from '../core/types'
 
 type AccountFilter = 'all' | string
 
@@ -101,7 +109,18 @@ export function InboxView({ onGoToAccounts }: { onGoToAccounts?: () => void }) {
   const [loadingBody, setLoadingBody] = useState(false)
   const [syncingIds, setSyncingIds] = useState<Set<string>>(new Set())
   const [resolvedHtml, setResolvedHtml] = useState<string | null>(null)
-  const [loadingImages, setLoadingImages] = useState(false)
+  /**
+   * Where this message's remote images have got to.
+   *
+   * `blocked` is the only state that offers a button, and it is reached only
+   * when the account's policy says so. Everything else has to be *visible*:
+   * `loading` says so on a slow link, `failed` says so instead of leaving
+   * blank rectangles, and a `partial` load names how many are missing rather
+   * than pretending the message rendered whole.
+   */
+  const [imageStage, setImageStage] = useState<'blocked' | 'loading' | 'done' | 'failed'>('blocked')
+  /** How many distinct URLs the last attempt could not fetch. */
+  const [imageFailures, setImageFailures] = useState(0)
   /** Reading starts full-screen; Escape steps out before it closes. */
   const [immersive, setImmersive] = useState(true)
   const [findOpen, setFindOpen] = useState(false)
@@ -558,12 +577,143 @@ export function InboxView({ onGoToAccounts }: { onGoToAccounts?: () => void }) {
     [confirm, bridge, t],
   )
 
+  // --- remote images ---
+
+  /** The receiving account the open message belongs to — where its image policy lives. */
+  const openInbox = useMemo(
+    () =>
+      openMessage
+        ? state.inboxAccounts.find((i) => i.accountId === openMessage.accountId)
+        : undefined,
+    [state.inboxAccounts, openMessage],
+  )
+  const imagePolicy = effectiveImagePolicy(
+    openInbox?.showRemoteImages,
+    state.settings.imagePolicyChosen,
+  )
+  const openSender = openMessage ? senderDomain(openMessage.from) : ''
+  const autoLoadImages = openMessage
+    ? shouldAutoLoadImages(imagePolicy, openMessage.from, openInbox?.imageAllowlist)
+    : false
+  const remoteImageCount = openBody?.remoteImages?.length ?? 0
+
+  /**
+   * Which load is the current one.
+   *
+   * Reading down a list with `j` starts a fetch per message, and the slow one
+   * finishes after the reader has moved on. Without this counter that stale
+   * result would splice message 3's pictures into message 5's body — the
+   * bodies are different strings, so it would mostly render as *nothing*
+   * happening, which is worse than a visible mistake.
+   */
+  const imageRun = useRef(0)
+
+  const loadRemoteImages = useCallback(
+    async (options?: { retry?: boolean }) => {
+      const body = openBody
+      const html = body?.sanitizedHtml
+      const urls = body?.remoteImages
+      if (!html || !urls?.length) return
+      const run = ++imageRun.current
+      // No proxy on this platform means no images, and saying so beats
+      // leaving the placeholders in place with nothing to explain them.
+      if (!bridge?.fetchRemoteImage) {
+        setImageFailures(new Set(urls).size)
+        setImageStage('failed')
+        return
+      }
+      setImageStage('loading')
+      setImageFailures(0)
+      try {
+        // Cached by URL, deduplicated, and persisted in the main process —
+        // see `core/imageCache` and `electron/remoteImage.ts`.
+        const resolved = await resolveWithCache(urls, (url) => bridge.fetchRemoteImage!(url), {
+          retryFailures: options?.retry,
+        })
+        if (run !== imageRun.current) return
+        const failed = new Set(urls.filter((_, i) => resolved[i] === null)).size
+        // Only now is `BROKEN_IMAGE` right: every URL has been tried, so a
+        // null really is a failure rather than a fetch still in flight.
+        setResolvedHtml(resolveRemoteImages(html, resolved, BROKEN_IMAGE))
+        setImageFailures(failed)
+        setImageStage(failed > 0 ? 'failed' : 'done')
+      } catch {
+        if (run !== imageRun.current) return
+        setImageFailures(urls.length)
+        setImageStage('failed')
+      }
+    },
+    [openBody, bridge],
+  )
+
+  /**
+   * Load them without being asked, when the policy allows it.
+   *
+   * This is the whole point of the default: a message full of pictures used to
+   * open as a wall of blank rectangles with a bar on top asking permission,
+   * which is the wrong trade for something the app can fetch safely on the
+   * user's behalf. Nothing about *how* they are fetched changed — the body
+   * frame still cannot reach the network, the CSP still forbids it, and every
+   * byte still comes through the main process's vetted path.
+   */
+  useEffect(() => {
+    if (!openMessage || !openBody) return
+    if (remoteImageCount === 0) return
+    if (!autoLoadImages) return
+    if (imageStage !== 'blocked') return
+    void loadRemoteImages()
+  }, [openMessage, openBody, remoteImageCount, autoLoadImages, imageStage, loadRemoteImages])
+
+  /**
+   * "Always show pictures from this sender."
+   *
+   * Writes the sender's domain into the account's allowlist and switches the
+   * account to `allowlist`, which is the only way that policy is ever reached
+   * — a mode you can select in Settings but never populate would be a control
+   * that does nothing.
+   */
+  const allowSenderImages = () => {
+    if (!openInbox || !openSender) return
+    // `imagePolicyChosen` is app-wide and about to become true, which changes
+    // how a stored 'never' reads for *every* account. Pin the others to what
+    // they show right now so this click only decides this mailbox.
+    if (!state.settings.imagePolicyChosen) {
+      for (const other of state.inboxAccounts) {
+        if (other.accountId === openInbox.accountId) continue
+        const pinned = effectiveImagePolicy(other.showRemoteImages, false)
+        if (other.showRemoteImages !== pinned) {
+          dispatch({ type: 'upsertInboxAccount', inbox: { ...other, showRemoteImages: pinned } })
+        }
+      }
+    }
+    const allowlist = openInbox.imageAllowlist ?? []
+    if (!allowlist.includes(openSender)) {
+      dispatch({
+        type: 'upsertInboxAccount',
+        inbox: { ...openInbox, showRemoteImages: 'allowlist', imageAllowlist: [...allowlist, openSender] },
+      })
+    } else if (openInbox.showRemoteImages !== 'allowlist') {
+      dispatch({ type: 'upsertInboxAccount', inbox: { ...openInbox, showRemoteImages: 'allowlist' } })
+    }
+    // The user has now answered the question, so a stored 'never' from before
+    // this control existed stops being treated as the old default.
+    dispatch({ type: 'patchSettings', patch: { imagePolicyChosen: true } })
+    void loadRemoteImages()
+  }
+
   // --- reading ---
 
   const openDetail = useCallback(
     async (m: InboxMessage) => {
       setOpenMessage(m)
       setResolvedHtml(null)
+      setImageStage('blocked')
+      setImageFailures(0)
+      // Retires any image load still in flight for the message being left. It
+      // has to happen here and not only when the next load starts: a message
+      // with no pictures never starts one, and the previous message's result
+      // would arrive to find nothing had superseded it.
+      imageRun.current += 1
       setPreview(null)
       setLightboxPath(null)
       setFindOpen(false)
@@ -644,21 +794,6 @@ export function InboxView({ onGoToAccounts }: { onGoToAccounts?: () => void }) {
     return () => window.removeEventListener('keydown', onKey)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openMessage, step])
-
-  const loadRemoteImages = async () => {
-    if (!openBody?.sanitizedHtml || !openBody.remoteImages?.length || !bridge?.fetchRemoteImage) return
-    setLoadingImages(true)
-    try {
-      // Cached by URL, deduplicated, failures remembered — see `core/imageCache`
-      // for why this is memory-only and why a `null` result is worth keeping.
-      const resolved = await resolveWithCache(openBody.remoteImages, (url) =>
-        bridge.fetchRemoteImage!(url),
-      )
-      setResolvedHtml(resolveRemoteImages(openBody.sanitizedHtml, resolved))
-    } finally {
-      setLoadingImages(false)
-    }
-  }
 
   /**
    * Escape has two jobs here, in order: leave full screen, then close.
@@ -1080,13 +1215,59 @@ export function InboxView({ onGoToAccounts }: { onGoToAccounts?: () => void }) {
               </div>
             ) : openBody ? (
               <>
-                {openBody.remoteImages && openBody.remoteImages.length > 0 && !resolvedHtml ? (
+                {/*
+                  One bar, four states, and never silent.
+
+                  It is absent only when there is nothing to say — no remote
+                  images, or every one of them arrived. A load in progress, a
+                  load that failed, and a load that was never attempted because
+                  the policy blocks it are three different things, and the
+                  previous version of this could only express the last of them.
+                */}
+                {/* `blocked && autoLoad` is the frame between the body arriving
+                    and the effect below it starting the fetch. Saying "loading"
+                    there rather than briefly offering a button the policy has
+                    already answered is the difference between a calm screen and
+                    a flicker. */}
+                {remoteImageCount > 0 &&
+                (imageStage === 'loading' || (imageStage === 'blocked' && autoLoadImages)) ? (
+                  <Banner
+                    tone="info"
+                    action={<span className="spinner" style={{ width: 16, height: 16 }} />}
+                  >
+                    {t('inbox.imagesLoading', { n: remoteImageCount })}
+                  </Banner>
+                ) : null}
+
+                {remoteImageCount > 0 && imageStage === 'failed' ? (
+                  <Banner
+                    tone="danger"
+                    action={
+                      bridge?.fetchRemoteImage ? (
+                        <Button variant="ghost" onClick={() => void loadRemoteImages({ retry: true })}>
+                          {t('inbox.imagesRetry')}
+                        </Button>
+                      ) : undefined
+                    }
+                  >
+                    {t('inbox.imagesFailed', { n: imageFailures })}
+                  </Banner>
+                ) : null}
+
+                {remoteImageCount > 0 && imageStage === 'blocked' && !autoLoadImages ? (
                   <Banner
                     tone="warning"
                     action={
-                      <Button variant="ghost" loading={loadingImages} onClick={loadRemoteImages}>
-                        {t('inbox.loadImages', { n: openBody.remoteImages.length })}
-                      </Button>
+                      <div className="btn-row">
+                        {openSender && openInbox ? (
+                          <Button variant="ghost" onClick={allowSenderImages}>
+                            {t('inbox.alwaysAllowSender', { domain: openSender })}
+                          </Button>
+                        ) : null}
+                        <Button variant="ghost" onClick={() => void loadRemoteImages()}>
+                          {t('inbox.loadImages', { n: remoteImageCount })}
+                        </Button>
+                      </div>
                     }
                   >
                     {t('inbox.remoteImagesBlocked')}
@@ -1284,10 +1465,43 @@ function MessageBodyFrame({
       doc.addEventListener('click', handler)
       // Match the app's own type so a plain-text mail does not arrive in
       // whatever the engine's default serif happens to be.
+      //
+      // The `margin-inline: auto` run is the fix for the oldest-looking
+      // complaint about this app: "only the left half of the window has
+      // anything in it". Bulk mail is built as a fixed `<table width="600">`,
+      // and a 600px table left-aligned in a reader that is 1474px wide on a
+      // 1536px screen paints 52% of the window and leaves the other 48% blank
+      // — all of it on the right, because the table hugs the start edge.
+      // Centring moves half that emptiness to the other side, which is the
+      // difference between a page that looks broken and a page that looks
+      // like every other mail client.
+      //
+      // Only the outermost box is touched, and only through `margin-inline`,
+      // which is inert on anything already as wide as its parent: fluid mail
+      // and plain text are bit-identical before and after. Sender HTML is not
+      // otherwise restyled — there is no safe general rule for it — and
+      // `margin-inline` rather than `margin-left/right` so an Arabic message
+      // in an RTL window centres the same way (measured: before this, an RTL
+      // 600px table pinned to the right and left the blank on the *left*).
+      //
+      // Two conditions, both load-bearing. `:not(table table)` picks the
+      // outer frame at whatever depth the sender buried it — a nested table
+      // is positioned by the design around it and must not move. And a
+      // declared width is what separates "this is a fixed-width layout" from
+      // "this is a small data table in a text mail": the second one belongs
+      // where the sender put it, and centring it would be this rule inventing
+      // a design decision rather than repairing one. `width="100%"` matches
+      // too and is harmless — there is no free margin to distribute.
+      const centreOuter =
+        'table[width]:not(table table),' +
+        'table[style*="width"]:not(table table),' +
+        'body>:is(div,center,section,article)[style*="width"]' +
+        '{margin-inline:auto}'
       const style = doc.createElement('style')
       style.textContent =
         'body{margin:0;padding:16px;font-family:inherit;color:#111;background:#fff;word-break:break-word}' +
         'img{max-width:100%;height:auto}table{max-width:100%}' +
+        centreOuter +
         'mark.aev-find{background:#ffe066;color:#111}'
       doc.head?.appendChild(style)
     }

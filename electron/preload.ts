@@ -64,6 +64,7 @@ const api: DesktopApi = {
   purgeInboxMessages: (accountId, config, items) =>
     ipcRenderer.invoke(IPC.purgeInboxMessages, accountId, config, items),
   fetchRemoteImage: (url) => ipcRenderer.invoke(IPC.fetchRemoteImage, url),
+  clearImageCache: () => ipcRenderer.invoke(IPC.clearImageCache),
 
   onInboxEvent: (handler) => {
     const listener = (_event: unknown, payload: InboxEvent) => handler(payload)

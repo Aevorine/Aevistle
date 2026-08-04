@@ -9,7 +9,7 @@
 import type { SendCondition } from './conditions'
 import type { OutboxItem } from './outbox'
 import type { DraftSnapshot } from './snapshots'
-import type { WorkCalendar, WorkdayPolicy } from './workCalendar'
+import type { CalendarWarning, WorkCalendar, WorkdayPolicy } from './workCalendar'
 
 export type Platform = 'desktop' | 'android' | 'web'
 
@@ -303,6 +303,16 @@ export interface ScheduledJob {
    * line saying which one blocked it, never in silence. See `core/conditions`.
    */
   conditions?: SendCondition[]
+  /**
+   * Set when the working calendar could not honour this job's `workdayPolicy`
+   * — a fire time it had to drop entirely, or a pile-up it had to leave sharing
+   * an instant. Absent means the last recomputation was clean.
+   *
+   * Stored on the job rather than only logged because a log line scrolls away
+   * and a reminder that will never be sent should keep saying so. See
+   * `core/workCalendar.ts`.
+   */
+  calendarWarning?: CalendarWarning
   createdAt: number
   updatedAt: number
 }
@@ -562,6 +572,15 @@ export interface Settings {
    * one only moves list rows, and the two are set from different places.
    */
   listDensity?: 'compact' | 'standard' | 'roomy'
+  /**
+   * Whether the remote-image control in Settings has ever been used.
+   *
+   * A migration marker, not a preference: see `effectiveImagePolicy`. It is
+   * app-wide because the thing it records — "the user has seen and answered
+   * this question" — is app-wide, while the answer itself is stored per
+   * account in `InboxAccountState.showRemoteImages`.
+   */
+  imagePolicyChosen?: boolean
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -596,6 +615,7 @@ export const DEFAULT_SETTINGS: Settings = {
   inboxPush: true,
   notifyOnCode: true,
   listDensity: 'standard',
+  imagePolicyChosen: false,
 }
 
 // ---------------------------------------------------------------------------
@@ -646,7 +666,76 @@ export interface InboxFolder {
   totalCount: number
 }
 
+/**
+ * What a received message is allowed to do about the images it points at.
+ *
+ * `always` is the default, and it does *not* mean the body iframe reaches the
+ * network — it never does. The sanitizer still replaces every remote `<img
+ * src>` with a blank pixel and hands the URLs back separately, and the CSP
+ * still forbids the frame from loading anything but `data:`; "always" only
+ * decides whether the reader kicks off the main-process fetch by itself
+ * instead of waiting for a click. The SSRF/private-address shield in
+ * `electron/remoteImage.ts` is on the same path either way.
+ *
+ * `never` keeps the blank pixels and the "load images" button.
+ * `allowlist` loads automatically only for senders in `imageAllowlist`.
+ */
 export type RemoteImagePolicy = 'never' | 'always' | 'allowlist'
+
+/**
+ * The policy actually in force, with one piece of history folded in.
+ *
+ * `showRemoteImages` shipped for two releases as scaffolding: it was declared,
+ * defaulted to `'never'`, and never read or written by anything. So a stored
+ * `'never'` in an install made before this was wired up is the old default,
+ * not a decision anyone made — and honouring it would leave existing users
+ * with images blocked while a fresh install shows them. `imagePolicyChosen`
+ * records the first time the user actually touches the control; until then a
+ * stored `'never'` is treated as the new default.
+ */
+export function effectiveImagePolicy(
+  stored: RemoteImagePolicy | undefined,
+  chosen: boolean | undefined,
+): RemoteImagePolicy {
+  const value = stored ?? 'always'
+  if (value === 'never' && !chosen) return 'always'
+  return value
+}
+
+/**
+ * The domain an address belongs to, lowercased — `"Bank <no-reply@Bank.com>"`
+ * becomes `"bank.com"`. Empty string when the header does not contain one,
+ * which callers must treat as "not allowlistable" rather than as a wildcard.
+ */
+export function senderDomain(from: string): string {
+  const angled = /<([^>]*)>/.exec(from)
+  const address = (angled ? angled[1] : from).trim()
+  const at = address.lastIndexOf('@')
+  if (at < 0) return ''
+  return address.slice(at + 1).trim().toLowerCase().replace(/[>\s]+$/, '')
+}
+
+/**
+ * Whether this message's images should load without being asked for.
+ *
+ * The allowlist matches the sender's domain and its subdomains, so adding
+ * `example.com` also covers `mail.example.com` — the alternative is a list
+ * that grows one entry per sending host and still misses the next one.
+ */
+export function shouldAutoLoadImages(
+  policy: RemoteImagePolicy,
+  from: string,
+  allowlist: string[] | undefined,
+): boolean {
+  if (policy === 'always') return true
+  if (policy !== 'allowlist') return false
+  const domain = senderDomain(from)
+  if (!domain) return false
+  return (allowlist ?? []).some((entry) => {
+    const allowed = entry.trim().toLowerCase()
+    return allowed.length > 0 && (domain === allowed || domain.endsWith(`.${allowed}`))
+  })
+}
 
 export interface InboxAccountState {
   accountId: string
@@ -707,7 +796,11 @@ export function defaultInboxAccountState(accountId: string): InboxAccountState {
     imapAllowInvalidCert: false,
     folders: [],
     messages: [],
-    showRemoteImages: 'never',
+    // Shown, not blocked. Blocking by default protected against a read receipt
+    // the sender gets for free, but it did it by making every HTML message
+    // arrive visibly broken — and the fetch goes through the main process's
+    // vetted path either way, so the iframe still never touches the network.
+    showRemoteImages: 'always',
     imageAllowlist: [],
   }
 }

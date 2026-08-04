@@ -117,8 +117,11 @@ export interface InboxMessageBody {
   /**
    * Remote image URLs stripped out by the sanitizer, in the order their
    * placeholders appear in `sanitizedHtml` (see `src/core/remoteImagePlaceholder.ts`).
-   * The renderer resolves these itself, on an explicit "load images" click,
-   * via `bridge.fetchRemoteImage` + `resolveRemoteImages` — never automatically.
+   * The renderer resolves these via `bridge.fetchRemoteImage` + `resolveRemoteImages`,
+   * automatically unless the account's `showRemoteImages` policy says otherwise.
+   * The fetch always happens in the main process: the sanitizer keeps the URLs out
+   * of the document and the CSP keeps the iframe off the network, so a message can
+   * never open a socket of its own no matter what policy is in force.
    */
   remoteImages?: string[]
 }
@@ -332,6 +335,11 @@ export interface PlatformBridge {
    * IP and confirm the message was opened).
    */
   fetchRemoteImage?(url: string): Promise<string>
+  /**
+   * Drop the on-disk remote-image cache. Optional because only the desktop
+   * build has one — Android fetches through the plugin without caching.
+   */
+  clearImageCache?(): Promise<void>
   /** New mail arrived while the app was open. */
   onInboxEvent?(handler: (event: InboxEvent) => void): () => void
 

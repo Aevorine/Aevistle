@@ -1,0 +1,66 @@
+# The checks a contributor is asked to run before opening a pull request, run
+# again by a machine that cannot forget.
+#
+# This deliberately does not build or publish a release. Releases are signed
+# with a GPG key that exists only on the maintainer's machine and is not going
+# to be copied into a CI secret — see SECURITY.md.
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/assets/**'
+      - LICENSE
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A second push to the same branch makes the first run's answer worthless.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Checks (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        # 20 is the documented floor; 22 is what a new contributor installs today.
+        node: ['20', '22']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      # .npmrc points at a mirror that is fast where the maintainer is and only
+      # usually fast from a GitHub runner. The lockfile carries integrity
+      # hashes either way, so falling back to the canonical registry changes
+      # where the bytes come from and nothing about what they are.
+      - name: Install
+        run: |
+          npm ci --no-audit --no-fund \
+            || npm ci --no-audit --no-fund \
+                 --registry=https://registry.npmjs.org \
+                 --replace-registry-host=always
+
+      # typecheck + the fourteen check:* scripts + audit:self + audit:deps.
+      # Same command CONTRIBUTING.md asks a contributor to run.
+      - name: npm run check
+        run: npm run check
+
+      # Type-correct code can still fail to bundle. This is the web and
+      # Electron main bundles only — no installer, no packaging, no signing.
+      - name: Build bundles
+        run: npm run build

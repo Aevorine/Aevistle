@@ -15,7 +15,13 @@
  */
 
 import { applyQuietHours, computeOccurrences, type QuietHours } from './schedule'
-import { applyWorkCalendar, toIsoDate, type WorkCalendar } from './workCalendar'
+import {
+  applyWorkCalendarDetailed,
+  calendarWarning,
+  toIsoDate,
+  type CalendarWarning,
+  type WorkCalendar,
+} from './workCalendar'
 import type { Recurrence } from './types'
 
 /** Default horizon. A month is the span people plan reminders over. */
@@ -44,6 +50,16 @@ export interface Upcoming {
   truncated: boolean
   /** How far ahead this looked. */
   days_ahead: number
+  /**
+   * Set when the working calendar could not place every fire time — one it had
+   * to drop outright, or a pile-up it had to leave sharing an instant.
+   *
+   * On the preview for the same reason the count is: the point of this screen
+   * is that nothing about a schedule is a surprise later. A preview that
+   * silently listed 29 of 30 sends would be the exact failure it exists to
+   * catch. `undefined` when there is nothing to say.
+   */
+  warning?: CalendarWarning
 }
 
 /**
@@ -68,10 +84,15 @@ export function upcoming(
   const sampleLimit = opts.sampleLimit ?? 500
   const until = now + daysAhead * 86_400_000
 
-  const raw = computeOccurrences(recurrence, { after: now, count: sampleLimit })
-  const shaped = opts.calendar
-    ? applyWorkCalendar(raw, recurrence.workdayPolicy ?? 'off', opts.calendar)
-    : raw
+  const raw = computeOccurrences(recurrence, {
+    after: now,
+    count: sampleLimit,
+    calendar: opts.calendar,
+  })
+  const detailed = opts.calendar
+    ? applyWorkCalendarDetailed(raw, recurrence.workdayPolicy ?? 'off', opts.calendar)
+    : null
+  const shaped = detailed ? detailed.occurrences : raw
   const final = opts.quiet ? applyQuietHours(shaped, opts.quiet) : shaped
 
   const inWindow = final.filter((at) => at >= now && at <= until).sort((a, b) => a - b)
@@ -94,6 +115,7 @@ export function upcoming(
     days: [...byDate.entries()].map(([date, times]) => ({ date, times })),
     truncated,
     days_ahead: daysAhead,
+    warning: detailed ? calendarWarning(detailed.adjustment, now) : undefined,
   }
 }
 

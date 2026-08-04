@@ -6,15 +6,22 @@
 
 **Scheduled email reminders that actually arrive.**
 
-Write an email once — with files, images or archives attached — and Aevistle
-delivers it on time. Once, every weekday at 09:00, on the 1st of the month, or
-on any cron expression you like. Same app on Windows and Android.
+Write an email once — attach files, images or archives — and Aevistle sends it
+on time, even with the window closed. Once, every weekday at 09:00, on the 1st
+of the month, or on any cron expression you like. Windows and Android, no
+account, no server, no telemetry.
+
+*The weekly report every Friday. The invoice on the 1st. The birthday message
+at midnight while you are asleep.*
 
 [![Release](https://img.shields.io/github/v/release/Aevorine/Aevistle?style=flat-square&color=4f46e5)](https://github.com/Aevorine/Aevistle/releases/latest)
+[![CI](https://img.shields.io/github/actions/workflow/status/Aevorine/Aevistle/ci.yml?branch=main&style=flat-square&color=4f46e5&label=checks)](https://github.com/Aevorine/Aevistle/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT-4f46e5?style=flat-square)](LICENSE)
 [![Windows](https://img.shields.io/badge/Windows-x64-4f46e5?style=flat-square&logo=windows)](https://github.com/Aevorine/Aevistle/releases/latest)
 [![Android](https://img.shields.io/badge/Android-7.0%2B-4f46e5?style=flat-square&logo=android)](https://github.com/Aevorine/Aevistle/releases/latest)
 [![Languages](https://img.shields.io/badge/languages-6-4f46e5?style=flat-square)](#language)
+
+### [⬇ Download](https://github.com/Aevorine/Aevistle/releases/latest) · [What it does](#what-it-does) · [Privacy](#privacy) · [Security](#security)
 
 **English** ·
 [简体中文](docs/README.zh-CN.md) ·
@@ -97,11 +104,15 @@ own and collects nothing.
 
 Grab the latest build from **[Releases](https://github.com/Aevorine/Aevistle/releases/latest)**.
 
-| Platform | File | Notes |
+| Platform | File to pick | Notes |
 |---|---|---|
-| Windows 10/11 (x64) | `Aevistle-0.1.5-win-x64-setup.exe` | Installer, adds a Start-menu and desktop shortcut |
-| Windows 10/11 (x64) | `Aevistle-0.1.5-win-x64-portable.exe` | Single file, no installation, runs from a USB stick |
-| Android 7.0+ | `Aevistle-0.1.5.apk` | Phones and tablets. Enable "install unknown apps" for your browser or file manager first. |
+| Windows 10/11 (x64) | `Aevistle-<version>-win-x64-setup.exe` | Installer, adds a Start-menu and desktop shortcut |
+| Windows 10/11 (x64) | `Aevistle-<version>-win-x64-portable.exe` | Single file, no installation, runs from a USB stick |
+| Android 7.0+ | `Aevistle-<version>.apk` | Phones and tablets. Enable "install unknown apps" for your browser or file manager first. |
+
+`<version>` is whatever the [latest release](https://github.com/Aevorine/Aevistle/releases/latest)
+page is showing — the badge at the top of this page reads it from the same
+place. Deliberately not written out here, so this table cannot go stale.
 
 > **Verifying a download.** Every release publishes `SHA256SUMS.txt`, a
 > detached signature `SHA256SUMS.txt.asc`, and the public key that made it:
@@ -268,9 +279,14 @@ feature requests are genuinely welcome.
 ## Contributing
 
 Pull requests are welcome. See **[CONTRIBUTING.md](CONTRIBUTING.md)** for the
-layout of the codebase and what a good change looks like. Adding a seventh
-language is one file and needs no build tooling — the type system tells you
-exactly which strings are missing.
+layout of the codebase and what a good change looks like, and
+**[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)** for how people are expected to
+treat each other here. Adding a seventh language is one file and needs no build
+tooling — the type system tells you exactly which strings are missing.
+
+Bug reports and feature requests have
+[templates](https://github.com/Aevorine/Aevistle/issues/new/choose); every pull
+request runs the same `npm run check` you would run locally.
 
 ## Language
 

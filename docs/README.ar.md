@@ -7,13 +7,20 @@
 **تذكيرات بريدية مجدولة تصل فعلًا في موعدها.**
 
 اكتب الرسالة مرة واحدة — مع ما تشاء من ملفات أو صور أو ملفات مضغوطة — ويتكفّل
-Aevistle بإرسالها في وقتها. مرة واحدة، أو كل يوم عمل في 09:00، أو في أول كل
-شهر، أو وفق أي تعبير cron تريده. التطبيق نفسه على Windows وعلى أندرويد.
+Aevistle بإرسالها في وقتها، حتى والنافذة مغلقة. مرة واحدة، أو كل يوم عمل في
+09:00، أو في أول كل شهر، أو وفق أي تعبير cron تريده. Windows وأندرويد، بلا
+حساب، وبلا خادم، وبلا أي تتبّع.
+
+*تقرير الأسبوع كل جمعة. الفاتورة في أول الشهر. رسالة عيد الميلاد عند منتصف
+الليل وأنت نائم.*
 
 [![Release](https://img.shields.io/github/v/release/Aevorine/Aevistle?style=flat-square&color=4f46e5)](https://github.com/Aevorine/Aevistle/releases/latest)
+[![CI](https://img.shields.io/github/actions/workflow/status/Aevorine/Aevistle/ci.yml?branch=main&style=flat-square&color=4f46e5&label=checks)](https://github.com/Aevorine/Aevistle/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT-4f46e5?style=flat-square)](../LICENSE)
 [![Windows](https://img.shields.io/badge/Windows-x64-4f46e5?style=flat-square&logo=windows)](https://github.com/Aevorine/Aevistle/releases/latest)
 [![Android](https://img.shields.io/badge/Android-7.0%2B-4f46e5?style=flat-square&logo=android)](https://github.com/Aevorine/Aevistle/releases/latest)
+
+### [⬇ التنزيل](https://github.com/Aevorine/Aevistle/releases/latest) · [ماذا يفعل](#ماذا-يفعل) · [الخصوصية](#الخصوصية) · [الأمان](#الأمان)
 
 [English](../README.md) ·
 [简体中文](README.zh-CN.md) ·
@@ -84,9 +91,14 @@ IMAP الخاص به، فيجمع لك Aevistle صندوق وارد موحّدً
 
 | المنصة | الملف | ملاحظات |
 |---|---|---|
-| Windows 10/11 (x64) | `Aevistle-0.1.5-win-x64-setup.exe` | مُثبِّت، ينشئ اختصارًا في قائمة ابدأ وعلى سطح المكتب |
-| Windows 10/11 (x64) | `Aevistle-0.1.5-win-x64-portable.exe` | ملف واحد بلا تثبيت، يعمل من ذاكرة USB |
-| أندرويد 7.0+ | `Aevistle-0.1.5.apk` | للهواتف والأجهزة اللوحية. فعّل أولًا «تثبيت التطبيقات غير المعروفة» لمتصفحك أو مدير الملفات. |
+| Windows 10/11 (x64) | `Aevistle-<version>-win-x64-setup.exe` | مُثبِّت، ينشئ اختصارًا في قائمة ابدأ وعلى سطح المكتب |
+| Windows 10/11 (x64) | `Aevistle-<version>-win-x64-portable.exe` | ملف واحد بلا تثبيت، يعمل من ذاكرة USB |
+| أندرويد 7.0+ | `Aevistle-<version>.apk` | للهواتف والأجهزة اللوحية. فعّل أولًا «تثبيت التطبيقات غير المعروفة» لمتصفحك أو مدير الملفات. |
+
+`<version>` هو الرقم المكتوب في صفحة
+[أحدث إصدار](https://github.com/Aevorine/Aevistle/releases/latest)، وهو نفسه ما
+تقرأه الشارة في أعلى الصفحة. لم يُكتب هنا صراحةً عن قصد، حتى لا يَقدُم هذا
+الجدول مع الوقت.
 
 > سينبّه SmartScreen في ويندوز إلى ناشر غير معروف؛ هكذا تبدو أي نسخة بلا شهادة
 > توقيع مدفوعة. اختر **مزيد من المعلومات ← تشغيل على أي حال**، أو تحقّق أولًا من
@@ -233,9 +245,14 @@ android/         أندرويد: JavaMail (إرسال واستقبال)، Keysto
 
 ## المساهمة
 
-طلبات الدمج مرحّب بها؛ انظر **[CONTRIBUTING.md](../CONTRIBUTING.md)**.
+طلبات الدمج مرحّب بها؛ انظر **[CONTRIBUTING.md](../CONTRIBUTING.md)**
+و**[CODE_OF_CONDUCT.md](../CODE_OF_CONDUCT.md)**.
 وإضافة لغة سابعة تعني ملفًا واحدًا دون أي أدوات بناء، إذ يخبرك نظام الأنواع
 بالضبط بالنصوص الناقصة.
+
+ولبلاغات الأخطاء وطلبات الميزات
+[قوالب جاهزة](https://github.com/Aevorine/Aevistle/issues/new/choose)، وكل طلب
+دمج يمرّ على الأمر `npm run check` نفسه الذي تشغّله محليًا.
 
 ## الرخصة
 

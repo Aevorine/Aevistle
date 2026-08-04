@@ -42,6 +42,14 @@ const PATH_HINT_FILE = 'datapath.txt'
 /** What follows the user when the data folder moves. */
 const MOVABLE = [STATE_FILE, SECRET_FILE, ATTACHMENTS_DIR, PASTED_DIR] as const
 
+/**
+ * Rebuildable on demand, so it is discarded at the old location rather than
+ * carried to the new one. Copying up to 200 MB of downloaded remote images to
+ * save re-fetching them is a bad trade; leaving them behind to rot in a folder
+ * the user has stopped using is worse.
+ */
+const DISPOSABLE = ['imagecache'] as const
+
 let activeRoot: string | null = null
 
 // ---------------------------------------------------------------------------
@@ -236,6 +244,13 @@ export async function setDataRoot(target: string, move: boolean): Promise<MoveOu
           warning = 'The data was copied, but the old folder could not be emptied.'
         })
       }
+    }
+
+    // Caches are dropped whether or not anything else moved: they cost nothing
+    // to rebuild, and a failure to delete one is not worth telling the user
+    // about when their actual data arrived safely.
+    for (const entry of DISPOSABLE) {
+      await fs.rm(path.join(current, entry), { recursive: true, force: true }).catch(() => {})
     }
   }
 

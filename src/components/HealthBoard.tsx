@@ -23,7 +23,7 @@ const ICONS: Record<HealthLevel, typeof IconAlert> = {
 }
 
 export function HealthBoard({ onGo }: { onGo?: (where: NonNullable<HealthIssue['goTo']>) => void }) {
-  const { state, schedulerUnreachable } = useApp()
+  const { state, schedulerUnreachable, permissions, fixPermission } = useApp()
   const { t } = useI18n()
   /**
    * Keyed on what it actually reads, not on the whole store.
@@ -33,9 +33,17 @@ export function HealthBoard({ onGo }: { onGo?: (where: NonNullable<HealthIssue['
    * work whose answer cannot change while someone is typing a sentence.
    */
   const issues = useMemo(
-    () => collectHealth(state, Date.now(), schedulerUnreachable),
+    () => collectHealth(state, Date.now(), schedulerUnreachable, permissions ?? undefined),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [state.jobs, state.accounts, state.settings, state.inboxAccounts, state.logs, schedulerUnreachable],
+    [
+      state.jobs,
+      state.accounts,
+      state.settings,
+      state.inboxAccounts,
+      state.logs,
+      schedulerUnreachable,
+      permissions,
+    ],
   )
 
   // Nothing wrong and nothing scheduled is a new install, not a clean bill of
@@ -62,7 +70,19 @@ export function HealthBoard({ onGo }: { onGo?: (where: NonNullable<HealthIssue['
             <span className="health__text">{t(issue.key as TranslationKey, issue.values)}</span>
             {/* Only where there is something to do. "3 sends due this week"
                 with a Fix link beside it reads like an accusation. */}
-            {issue.goTo && onGo && issue.level !== 'info' ? (
+            {/* A fix that leaves the app entirely — the Android permission
+                screens. It takes precedence over `goTo`: sending someone to a
+                Settings tab that cannot grant the permission would be worse
+                than saying nothing. */}
+            {issue.fix ? (
+              <button
+                type="button"
+                className="health__go"
+                onClick={() => void fixPermission(issue.fix as NonNullable<HealthIssue['fix']>)}
+              >
+                {t((issue.fixKey ?? 'health.go') as TranslationKey)}
+              </button>
+            ) : issue.goTo && onGo && issue.level !== 'info' ? (
               <button
                 type="button"
                 className="health__go"
@@ -83,7 +103,7 @@ export function HealthBoard({ onGo }: { onGo?: (where: NonNullable<HealthIssue['
 
 /** The all-clear line, for the schedule screen where "nothing wrong" is news. */
 export function HealthAllClear() {
-  const { state, schedulerUnreachable } = useApp()
+  const { state, schedulerUnreachable, permissions } = useApp()
   const { t } = useI18n()
   /**
    * Keyed on what it actually reads, not on the whole store.
@@ -93,9 +113,17 @@ export function HealthAllClear() {
    * work whose answer cannot change while someone is typing a sentence.
    */
   const issues = useMemo(
-    () => collectHealth(state, Date.now(), schedulerUnreachable),
+    () => collectHealth(state, Date.now(), schedulerUnreachable, permissions ?? undefined),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [state.jobs, state.accounts, state.settings, state.inboxAccounts, state.logs, schedulerUnreachable],
+    [
+      state.jobs,
+      state.accounts,
+      state.settings,
+      state.inboxAccounts,
+      state.logs,
+      schedulerUnreachable,
+      permissions,
+    ],
   )
   if (issues.some((i) => i.level !== 'info')) return null
   if (state.jobs.length === 0) return null

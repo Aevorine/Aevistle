@@ -6,14 +6,19 @@
 
 **真的会准时到的定时邮件提醒。**
 
-写好一封邮件——可以带文件、图片、压缩包——Aevistle 负责按时发出去。发一次、
-每个工作日 09:00、每月 1 号，或者你自己写的任意 cron 表达式都行。
-Windows 和安卓上是同一个应用。
+写好一封邮件——可以带文件、图片、压缩包——Aevistle 负责按时发出去，窗口关着
+也照发。发一次、每个工作日 09:00、每月 1 号，或者你自己写的任意 cron 表达式
+都行。Windows 和安卓是同一个应用，不用注册账号，没有服务器，不收集任何数据。
+
+*每周五的周报。每月 1 号的账单。凌晨零点的生日祝福，那会儿你在睡觉。*
 
 [![Release](https://img.shields.io/github/v/release/Aevorine/Aevistle?style=flat-square&color=4f46e5)](https://github.com/Aevorine/Aevistle/releases/latest)
+[![CI](https://img.shields.io/github/actions/workflow/status/Aevorine/Aevistle/ci.yml?branch=main&style=flat-square&color=4f46e5&label=checks)](https://github.com/Aevorine/Aevistle/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT-4f46e5?style=flat-square)](../LICENSE)
 [![Windows](https://img.shields.io/badge/Windows-x64-4f46e5?style=flat-square&logo=windows)](https://github.com/Aevorine/Aevistle/releases/latest)
 [![Android](https://img.shields.io/badge/Android-7.0%2B-4f46e5?style=flat-square&logo=android)](https://github.com/Aevorine/Aevistle/releases/latest)
+
+### [⬇ 下载](https://github.com/Aevorine/Aevistle/releases/latest) · [它能做什么](#它能做什么) · [隐私](#隐私) · [安全](#安全)
 
 [English](../README.md) ·
 **简体中文** ·
@@ -86,9 +91,12 @@ IMAP 服务器，Aevistle 就会同步出一个统一收件箱，自动把验证
 
 | 平台 | 文件 | 说明 |
 |---|---|---|
-| Windows 10/11 (x64) | `Aevistle-0.1.5-win-x64-setup.exe` | 安装版，会建开始菜单和桌面快捷方式 |
-| Windows 10/11 (x64) | `Aevistle-0.1.5-win-x64-portable.exe` | 单文件免安装，可以放 U 盘里直接跑 |
-| Android 7.0+ | `Aevistle-0.1.5.apk` | 手机和平板都能装。先在浏览器或文件管理器里允许「安装未知应用」。 |
+| Windows 10/11 (x64) | `Aevistle-<version>-win-x64-setup.exe` | 安装版，会建开始菜单和桌面快捷方式 |
+| Windows 10/11 (x64) | `Aevistle-<version>-win-x64-portable.exe` | 单文件免安装，可以放 U 盘里直接跑 |
+| Android 7.0+ | `Aevistle-<version>.apk` | 手机和平板都能装。先在浏览器或文件管理器里允许「安装未知应用」。 |
+
+`<version>` 就是[最新发布页](https://github.com/Aevorine/Aevistle/releases/latest)上写的那个版本号，
+顶部那个徽章读的也是同一处。这里故意不写死，免得过一阵就对不上了。
 
 > Windows SmartScreen 会提示「未知发布者」。没有购买代码签名证书的软件就是这个样子，
 > 选 **更多信息 → 仍要运行**；不放心的话，先对一下 Release 页面上的 SHA-256 校验值。
@@ -221,9 +229,13 @@ android/         安卓：JavaMail（收发信）、Keystore、AlarmManager + Wo
 ## 参与开发
 
 欢迎提 PR。代码结构和「什么样的改动算好改动」写在
-**[CONTRIBUTING.md](../CONTRIBUTING.md)**。
+**[CONTRIBUTING.md](../CONTRIBUTING.md)**，相处方式写在
+**[CODE_OF_CONDUCT.md](../CODE_OF_CONDUCT.md)**。
 加第七种语言只需要改一个文件，也不需要任何构建工具——
 类型系统会直接告诉你还缺哪几条字符串。
+
+报 bug 和提需求都有[模板](https://github.com/Aevorine/Aevistle/issues/new/choose)；
+每个 PR 都会自动跑一遍你本地跑的那个 `npm run check`。
 
 ## 许可
 

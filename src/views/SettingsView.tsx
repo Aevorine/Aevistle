@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   Banner,
   Button,
@@ -9,6 +9,7 @@ import {
   IconButton,
   PageHead,
   Segmented,
+  StatusChip,
   Switch,
   useConfirm,
   useToast,
@@ -34,14 +35,17 @@ import { SectionNav } from '../components/SectionNav'
 import { groupAccounts, knownGroups } from '../core/accounts'
 import { useApp } from '../state/AppState'
 import { LOCALES, useI18n, type TranslationKey } from '../i18n'
+import { effectiveImagePolicy } from '../core/types'
 import type {
   AccentId,
   Density,
+  InboxAccountState,
   LocalePreference,
   MailAccount,
   ThemeMode,
 } from '../core/types'
 import type { AppInfo, DataFolder, DataFolderChange } from '../core/bridge'
+import { lastUpdateCheck, onUpdateCheck, runUpdateCheck } from '../core/update'
 import type { DownloadProgress, UpdateInfo } from '../core/update'
 
 const ACCENTS: Array<{ id: AccentId; light: string; dark: string }> = [
@@ -66,6 +70,8 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
     deleteAccount,
     bridge,
     resetEverything,
+    permissions,
+    fixPermission,
   } = useApp()
   const { t } = useI18n()
   const toast = useToast()
@@ -135,7 +141,14 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
             { id: 'set-data', label: t('data.title') },
             { id: 'set-backup', label: t('backup.title') },
             { id: 'set-control', label: t('control.title') },
-            { id: 'set-calendar', label: t('workcal.title') },
+            /* No calendar entry. It was a card on this screen once; it is a
+               top-level tab now (`core/nav.ts`), and what was left behind was
+               a jump-bar button pointing at an empty marker div sitting
+               immediately above the Updates card — so "Work calendar" silently
+               scrolled you to Updates, and the IntersectionObserver would
+               highlight it as the section you were reading. See the comment
+               where the marker used to be for why this is a removal rather
+               than a link. */
             { id: 'set-update', label: t('update.title') },
             { id: 'set-appearance', label: t('settings.appearance') },
             { id: 'set-sending', label: t('settings.sending') },
@@ -257,9 +270,15 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
         <div id="set-control" className="settings-section" />
         <ControlCard />
 
-        {/* Which days count as working days. Near the top because reminders
-            are the product and the calendar changes when they fire. */}
-        <div id="set-calendar" className="settings-section" />
+        {/* The work calendar used to be a card here, and its anchor outlived
+            it. Removed rather than turned into a link to the calendar tab:
+            every other entry in that bar scrolls this page, `SectionNav` is
+            built around exactly that (it highlights whichever anchor the
+            IntersectionObserver reports as on screen, which a link that leaves
+            the page can never satisfy), and one entry that navigates away
+            instead is a trap for anyone who clicked it to peek. Nothing
+            becomes unreachable: the calendar is the seventh sidebar tab and
+            Ctrl+7. */}
 
         <div id="set-update" className="settings-section" />
         <UpdateCard />
@@ -464,6 +483,84 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
               description={t('settings.notifyOnCodeHint')}
             />
 
+            {/*
+              Android only, and only worth showing at all because both of these
+              can be off while the app looks completely healthy. The switches
+              above promise notifications; if the system permission behind them
+              is missing, they promise nothing, and until this card existed
+              there was no screen anywhere that said so.
+
+              Read live rather than remembered: the only way to change either is
+              to leave for a system settings screen, so the value is re-read
+              whenever the window comes back to the foreground.
+            */}
+            {permissions ? (
+              <>
+                <div className="section-label" style={{ marginTop: 'var(--sp-2)' }}>
+                  {t('settings.androidPermissions')}
+                </div>
+                <div className="field">
+                  <div className="switch__text">
+                    <span className="switch__title">{t('settings.permNotifications')}</span>
+                    <span className="switch__desc">{t('settings.permNotificationsHint')}</span>
+                  </div>
+                  <div className="btn-row">
+                    <StatusChip
+                      tone={permissions.notifications === 'granted' ? 'success' : 'warning'}
+                      label={t(
+                        permissions.notifications === 'granted'
+                          ? 'settings.permGranted'
+                          : permissions.notifications === 'blocked'
+                            ? 'settings.permBlocked'
+                            : 'settings.permNotAsked',
+                      )}
+                    />
+                    {permissions.notifications !== 'granted' ? (
+                      <Button
+                        variant="ghost"
+                        onClick={() =>
+                          void fixPermission(
+                            permissions.canAskNotifications
+                              ? 'requestNotifications'
+                              : 'openNotificationSettings',
+                          )
+                        }
+                      >
+                        {t(
+                          permissions.canAskNotifications
+                            ? 'settings.permAsk'
+                            : 'settings.permOpenSettings',
+                        )}
+                      </Button>
+                    ) : null}
+                  </div>
+                </div>
+                <div className="field">
+                  <div className="switch__text">
+                    <span className="switch__title">{t('settings.permExactAlarms')}</span>
+                    <span className="switch__desc">{t('settings.permExactAlarmsHint')}</span>
+                  </div>
+                  <div className="btn-row">
+                    <StatusChip
+                      tone={permissions.exactAlarms === 'denied' ? 'warning' : 'success'}
+                      label={t(
+                        permissions.exactAlarms === 'granted'
+                          ? 'settings.permGranted'
+                          : permissions.exactAlarms === 'denied'
+                            ? 'settings.permDenied'
+                            : 'settings.permNotRequired',
+                      )}
+                    />
+                    {permissions.exactAlarms === 'denied' ? (
+                      <Button variant="ghost" onClick={() => void fixPermission('openExactAlarmSettings')}>
+                        {t('settings.permOpenSettings')}
+                      </Button>
+                    ) : null}
+                  </div>
+                </div>
+              </>
+            ) : null}
+
             <div className="section-label" style={{ marginTop: 'var(--sp-2)' }}>
               {t('settings.system')}
             </div>
@@ -528,6 +625,99 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
               onChange={(v) => patch({ redactLogs: v })}
               title={t('settings.redactLogs')}
             />
+
+            {/*
+              Remote images: off by default, meaning they are shown.
+
+              Worth being precise about what this switch does and does not
+              trade away, because "images are blocked for your privacy" hid a
+              cost nobody agreed to — every HTML message arriving as a grid of
+              blank rectangles. The images are never fetched by the message
+              itself: the body frame has no network access at all and the CSP
+              forbids it one. They come through the main process, which
+              refuses private addresses, refuses redirects, and caps the size.
+              What blocking still buys is the read receipt — the sender learns
+              the mail was opened, and roughly from where — which is a real
+              thing to want, per account, and is what this is here for.
+            */}
+            <div className="section-label" style={{ marginTop: 'var(--sp-2)' }}>
+              {t('settings.remoteImages')}
+            </div>
+            {state.inboxAccounts.length === 0 ? (
+              <div className="field__hint">{t('settings.remoteImagesNoAccounts')}</div>
+            ) : (
+              state.inboxAccounts.map((inbox) => {
+                const account = state.accounts.find((a) => a.id === inbox.accountId)
+                const name = account?.label || account?.fromAddress || inbox.accountId
+                const policy = effectiveImagePolicy(inbox.showRemoteImages, s.imagePolicyChosen)
+                const allowed = inbox.imageAllowlist ?? []
+                const write = (next: Partial<InboxAccountState>) => {
+                  // Pin every *other* account to what it shows right now,
+                  // first. `imagePolicyChosen` is app-wide, so flipping it
+                  // changes how a stored 'never' is read everywhere — and
+                  // answering the question for one mailbox must not silently
+                  // answer it for the rest.
+                  if (!s.imagePolicyChosen) {
+                    for (const other of state.inboxAccounts) {
+                      if (other.accountId === inbox.accountId) continue
+                      const pinned = effectiveImagePolicy(other.showRemoteImages, false)
+                      if (other.showRemoteImages !== pinned) {
+                        dispatch({
+                          type: 'upsertInboxAccount',
+                          inbox: { ...other, showRemoteImages: pinned },
+                        })
+                      }
+                    }
+                  }
+                  dispatch({ type: 'upsertInboxAccount', inbox: { ...inbox, ...next } })
+                  // Recording that the question has been answered is what stops
+                  // a pre-wiring 'never' being read as the old default forever.
+                  patch({ imagePolicyChosen: true })
+                }
+                return (
+                  <div key={inbox.accountId}>
+                    <Switch
+                      checked={policy !== 'always'}
+                      onChange={(v) =>
+                        write({
+                          // Turning it on with senders already allowed keeps
+                          // them allowed — "block, except these" is the state
+                          // the reader's own button produces, and flattening it
+                          // back to a plain block here would silently undo it.
+                          showRemoteImages: v ? (allowed.length > 0 ? 'allowlist' : 'never') : 'always',
+                        })
+                      }
+                      title={t('settings.blockRemoteImages', { name })}
+                      description={t('settings.blockRemoteImagesHint')}
+                    />
+                    {policy !== 'always' && allowed.length > 0 ? (
+                      <div className="field__hint settings-allowlist">
+                        {t('settings.imagesAllowedFrom')}
+                        {allowed.map((domain) => (
+                          <button
+                            key={domain}
+                            type="button"
+                            className="chip chip--toggle"
+                            aria-pressed
+                            title={t('settings.imagesStopAllowing', { domain })}
+                            onClick={() => {
+                              const next = allowed.filter((d) => d !== domain)
+                              write({
+                                imageAllowlist: next,
+                                showRemoteImages: next.length > 0 ? 'allowlist' : 'never',
+                              })
+                            }}
+                          >
+                            {domain} ✕
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                )
+              })
+            )}
+
             <Banner tone="success">
               <IconShield size={13} style={{ verticalAlign: -2, marginInlineEnd: 4 }} />
               {t('account.storedSafely')}
@@ -624,7 +814,16 @@ function UpdateCard() {
   const toast = useToast()
   const { confirm, confirmElement } = useConfirm()
 
-  const [info, setInfo] = useState<UpdateInfo | null>(null)
+  /**
+   * Seeded from the last check rather than from `null`.
+   *
+   * The check that matters happens at launch, in `App`, long before this card
+   * exists — see the effect there for why it had to move. So the card's job is
+   * to draw an answer somebody else already has, and starting empty would make
+   * a freshly opened Settings screen claim "not checked yet" seconds after the
+   * check ran.
+   */
+  const [info, setInfo] = useState<UpdateInfo | null>(() => lastUpdateCheck())
   const [checking, setChecking] = useState(false)
   const [progress, setProgress] = useState<DownloadProgress | null>(null)
   const [downloading, setDownloading] = useState(false)
@@ -636,45 +835,48 @@ function UpdateCard() {
     return bridge.onUpdateProgress(setProgress)
   }, [bridge])
 
+  // …and for the other order: Settings already open when the startup check
+  // lands. This card deliberately does *not* check on mount any more. It used
+  // to, guarded by a ref — but a ref dies with the component, so leaving
+  // Settings and coming back spent another request every time, which is
+  // exactly what the comment above it claimed was not happening.
+  useEffect(() => onUpdateCheck(setInfo), [])
+
   /**
-   * `announce` is what makes a check that changes nothing still visible.
+   * The manual check, which always says how it went.
    *
    * The startup check is silent unless it finds something — nobody wants a
    * notification every launch. A check the user *asked for* is the opposite
    * case: when the answer is "you already have the newest version", nothing on
    * the card moves, and a button that produces no visible change reads as a
-   * button that did nothing. It reported success without checking, as far as
-   * anyone watching could tell. So a manual check always says how it went.
+   * button that did nothing.
+   *
+   * That is not a hypothetical: this function used to take a `manual` flag and
+   * the button passed `false`, so the one path that needed a toast was the one
+   * path that never got one. Pressing "Check for updates" while already on the
+   * newest version changed nothing on screen at all. There is only one caller
+   * now, and it is always the button.
    */
-  const check = useCallback(
-    async (manual: boolean) => {
-      if (!bridge) return
-      setChecking(true)
-      try {
-        const result = await bridge.checkForUpdate()
-        setInfo(result)
-        if (result.available) {
-          toast.push({ tone: 'info', title: t('update.newVersionToast', { version: result.latest }) })
-        } else if (manual && result.error) {
-          toast.push({ tone: 'error', title: t('update.failed'), detail: result.error })
-        } else if (manual) {
-          toast.push({ tone: 'success', title: t('update.upToDate', { version: result.current }) })
-        }
-      } finally {
-        setChecking(false)
+  const check = useCallback(async () => {
+    if (!bridge) return
+    setChecking(true)
+    try {
+      // Publishes to the shared store, so `setInfo` below is belt-and-braces —
+      // and, unlike a bare `bridge.checkForUpdate()`, it cannot reject into an
+      // unhandled rejection when the IPC call itself fails.
+      const result = await runUpdateCheck(() => bridge.checkForUpdate(), __APP_VERSION__)
+      setInfo(result)
+      if (result.available) {
+        toast.push({ tone: 'info', title: t('update.newVersionToast', { version: result.latest }) })
+      } else if (result.error) {
+        toast.push({ tone: 'error', title: t('update.failed'), detail: result.error })
+      } else {
+        toast.push({ tone: 'success', title: t('update.upToDate', { version: result.current }) })
       }
-    },
-    [bridge, toast, t],
-  )
-
-  // One check at startup, opt-out in the same card. Running it on every visit
-  // to Settings would spend the user's rate limit for no extra information.
-  const autoChecked = useRef(false)
-  useEffect(() => {
-    if (autoChecked.current || !bridge || !state.settings.updateCheckOnStart) return
-    autoChecked.current = true
-    void check(false)
-  }, [bridge, state.settings.updateCheckOnStart, check])
+    } finally {
+      setChecking(false)
+    }
+  }, [bridge, toast, t])
 
   const download = async () => {
     if (!bridge?.downloadUpdate || !info?.asset) return
@@ -770,7 +972,7 @@ function UpdateCard() {
             </div>
           </div>
 
-          <Button icon={<IconRefresh size={16} />} disabled={checking} onClick={() => check(false)}>
+          <Button icon={<IconRefresh size={16} />} disabled={checking} onClick={() => check()}>
             {checking ? t('update.checking') : t('update.check')}
           </Button>
         </div>

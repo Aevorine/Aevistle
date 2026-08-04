@@ -12,7 +12,13 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { Banner, Button, Field, Modal, Switch } from './ui'
 import { IconExternal, IconShield } from './icons'
 import { useI18n, type TranslationKey } from '../i18n'
-import { PROVIDERS, providerById, providerForAddress } from '../core/providers'
+import {
+  PROVIDERS,
+  autoConfigForAddress,
+  providerById,
+  providerForAddress,
+  type AutoConfig,
+} from '../core/providers'
 import { advisoryKey } from '../core/transport'
 import { hasErrors, validateAccount } from '../core/validate'
 import {
@@ -29,6 +35,41 @@ const SECURITY_LABEL: Record<TransportSecurity, TranslationKey> = {
   starttls: 'account.securityStarttls',
   none: 'account.securityNone',
 }
+
+/**
+ * The fields the address can fill in on its own.
+ *
+ * Every one of them is also a field the user is allowed to type in, which is
+ * the entire difficulty: re-deriving them on each keystroke of the address is
+ * what makes "type your address and you are done" work, and it is also what
+ * would silently throw away a port someone corrected by hand. So each one
+ * carries a flag, and auto-fill only ever writes the ones still unflagged.
+ */
+type AutoField =
+  | 'providerId'
+  | 'label'
+  | 'host'
+  | 'port'
+  | 'security'
+  | 'username'
+  | 'imapHost'
+  | 'imapPort'
+  | 'imapSecurity'
+  | 'imapUsername'
+
+/** The subset worth telling the user about — label and provider are cosmetic. */
+const REPORTED_FIELDS: AutoField[] = [
+  'host',
+  'port',
+  'security',
+  'username',
+  'imapHost',
+  'imapPort',
+  'imapSecurity',
+  'imapUsername',
+]
+
+const ALL_AUTO_FIELDS: AutoField[] = ['providerId', 'label', ...REPORTED_FIELDS]
 
 function blankAccount(): MailAccount {
   const now = Date.now()
@@ -93,6 +134,29 @@ export function AccountDialog({
   const [inboxTestResult, setInboxTestResult] = useState<SendResult | null>(null)
 
   /**
+   * Which of the auto-fillable fields the user has taken over.
+   *
+   * An account being *edited* starts with all of them flagged: whatever is
+   * stored was configured on purpose, possibly years ago against a server that
+   * no preset knows about, and re-typing the address to fix a typo must not
+   * rewrite it. A new account starts with none flagged, so the address drives
+   * everything until the user disagrees with it.
+   */
+  const [touched, setTouched] = useState<ReadonlySet<AutoField>>(
+    () => new Set(initial ? ALL_AUTO_FIELDS : []),
+  )
+  const [auto, setAuto] = useState<AutoConfig | null>(() =>
+    initial ? autoConfigForAddress(initial.fromAddress) : null,
+  )
+
+  const markTouched = (...fields: AutoField[]) =>
+    setTouched((prev) => {
+      const next = new Set(prev)
+      for (const f of fields) next.add(f)
+      return next
+    })
+
+  /**
    * Bumped every time a test starts, and checked when one finishes.
    *
    * Cancelling cannot abort the socket the main process is already holding, so
@@ -115,6 +179,8 @@ export function AccountDialog({
       setInboxTestResult(null)
       setInboxTesting(false)
       setInboxElapsed(0)
+      setTouched(new Set(initial ? ALL_AUTO_FIELDS : []))
+      setAuto(autoConfigForAddress(a.fromAddress))
       runId.current++
       inboxRunId.current++
     }
@@ -190,15 +256,93 @@ export function AccountDialog({
       port: p.port,
       security: p.security,
     })
-    if (p.imapHost && !inbox.imapHost) {
+    // Picking from the dropdown is a deliberate choice about the servers, so
+    // it overwrites and it counts as hand-editing them — a later address
+    // change must not quietly undo it.
+    markTouched('providerId', 'host', 'port', 'security')
+    if (p.imapHost) {
       inboxPatch({
         imapHost: p.imapHost,
         imapPort: p.imapPort,
         imapSecurity: p.imapSecurity,
         imapUsername: inbox.imapUsername || account.username || account.fromAddress,
       })
+      markTouched('imapHost', 'imapPort', 'imapSecurity')
     }
   }
+
+  /**
+   * Re-derive everything the address implies.
+   *
+   * `force` is the "go back to automatic" path: it ignores the hand-edit flags
+   * and rewrites the lot. Without it, a flagged field is left exactly as it is,
+   * which is what makes this safe to run on every keystroke.
+   */
+  const applyAuto = (address: string, force: boolean) => {
+    const cfg = autoConfigForAddress(address)
+    setAuto(cfg)
+    setTestResult(null)
+    setInboxTestResult(null)
+
+    if (!cfg) {
+      setAccount((a) => ({ ...a, fromAddress: address }))
+      return
+    }
+    const p = cfg.preset
+    const may = (f: AutoField) => force || !touched.has(f)
+
+    setAccount((a) => {
+      const next: MailAccount = { ...a, fromAddress: address }
+      // A guessed host is not a provider, so the dropdown goes back to "—"
+      // rather than claiming a preset that does not exist.
+      if (may('providerId')) next.providerId = cfg.guessed ? undefined : p.id
+      if (may('label')) next.label = cfg.guessed ? cfg.domain : p.name
+      if (may('host')) next.host = p.host
+      if (may('port')) next.port = p.port
+      if (may('security')) next.security = p.security
+      if (may('username')) next.username = address
+      return next
+    })
+
+    setInbox((i) => {
+      const next: InboxAccountState = { ...i }
+      if (p.imapHost) {
+        if (may('imapHost')) next.imapHost = p.imapHost
+        if (may('imapPort') && p.imapPort) next.imapPort = p.imapPort
+        if (may('imapSecurity') && p.imapSecurity) next.imapSecurity = p.imapSecurity
+      }
+      if (may('imapUsername')) next.imapUsername = address
+      return next
+    })
+  }
+
+  /**
+   * The fields the user has taken over *and* changed away from what the
+   * address would give them.
+   *
+   * Flagged-but-identical does not count: typing `993` into a box that already
+   * said 993 is not a disagreement, and offering to "restore" it would be
+   * offering to do nothing.
+   */
+  const autoOverrides = useMemo(() => {
+    if (!auto) return [] as AutoField[]
+    const p = auto.preset
+    const out: AutoField[] = []
+    const cmp = (f: AutoField, actual: unknown, wanted: unknown) => {
+      if (touched.has(f) && actual !== wanted) out.push(f)
+    }
+    cmp('host', account.host, p.host)
+    cmp('port', account.port, p.port)
+    cmp('security', account.security, p.security)
+    cmp('username', account.username, account.fromAddress)
+    if (p.imapHost) {
+      cmp('imapHost', inbox.imapHost, p.imapHost)
+      cmp('imapPort', inbox.imapPort, p.imapPort)
+      cmp('imapSecurity', inbox.imapSecurity, p.imapSecurity)
+    }
+    cmp('imapUsername', inbox.imapUsername, account.fromAddress)
+    return out
+  }, [auto, touched, account, inbox])
 
   /**
    * Turning receiving on fills the server in, rather than presenting four
@@ -218,38 +362,24 @@ export function AccountDialog({
     inboxPatch({ enabled: true, ...(inboxDefaults(false) ?? {}) })
   }
 
-  /** Filling in the address auto-selects a provider, once, when none is set. */
+  /**
+   * Every edit of the address re-configures the account, not just the first.
+   *
+   * The old rule was "fill in the blanks, once": it keyed off `!providerId` and
+   * `!inbox.imapHost`, so correcting `gmali.com` to `gmail.com` left the form
+   * pointing at whatever the typo had produced — and since the typo produced
+   * nothing, at nothing. Deriving it every time is the behaviour people expect
+   * from an address box; the hand-edit flags are what keeps that from being
+   * destructive.
+   */
   const onAddressChange = (value: string) => {
-    const next: Partial<MailAccount> = { fromAddress: value }
-    if (!account.username || account.username === account.fromAddress) {
-      next.username = value
-    }
-    if (!account.providerId) {
-      const guess = providerForAddress(value)
-      if (guess) {
-        next.providerId = guess.id
-        next.host = guess.host
-        next.port = guess.port
-        next.security = guess.security
-      }
-    }
-    if (!account.label) {
-      const guess = providerForAddress(value)
-      if (guess) next.label = guess.name
-    }
-    patch(next)
+    applyAuto(value, false)
+  }
 
-    if (!inbox.imapHost) {
-      const guess = providerForAddress(value)
-      if (guess?.imapHost) {
-        inboxPatch({
-          imapHost: guess.imapHost,
-          imapPort: guess.imapPort,
-          imapSecurity: guess.imapSecurity,
-          imapUsername: inbox.imapUsername || value,
-        })
-      }
-    }
+  /** Throw away every hand edit and go back to what the address implies. */
+  const restoreAuto = () => {
+    setTouched(new Set())
+    applyAuto(account.fromAddress, true)
   }
 
   const runTest = async () => {
@@ -331,8 +461,7 @@ export function AccountDialog({
 
   /** Fill server, port and encryption from the address, in one click. */
   const autoFill = () => {
-    const guess = providerForAddress(account.fromAddress)
-    if (!guess) {
+    if (!autoConfigForAddress(account.fromAddress)) {
       setTestResult({
         ok: false,
         accepted: [],
@@ -343,14 +472,7 @@ export function AccountDialog({
       })
       return
     }
-    patch({
-      providerId: guess.id,
-      host: guess.host,
-      port: guess.port,
-      security: guess.security,
-      label: account.label || guess.name,
-      username: account.username || account.fromAddress,
-    })
+    restoreAuto()
   }
 
   const save = async () => {
@@ -463,13 +585,49 @@ export function AccountDialog({
         </Field>
       </div>
 
+      {/*
+        Says what the address just did, and offers the way back.
+
+        Auto-fill that silently refuses to touch a field the user once edited is
+        indistinguishable from auto-fill that is broken — the address changes,
+        the server does not, and there is nothing on screen to explain why. This
+        banner is that explanation, and the button beside it is the one-click
+        undo for the hand edits it is respecting.
+      */}
+      {auto ? (
+        <Banner
+          tone={auto.guessed ? 'warning' : 'info'}
+          action={
+            autoOverrides.length > 0 ? (
+              <Button variant="ghost" onClick={restoreAuto}>
+                {t('account.autoRestore')}
+              </Button>
+            ) : undefined
+          }
+        >
+          <div>
+            {auto.guessed
+              ? t('account.autoGuessed', { domain: auto.domain })
+              : t('account.autoApplied', { provider: auto.preset.name })}
+          </div>
+          {autoOverrides.length > 0 ? (
+            <div className="banner__note">
+              {t('account.autoKept', { n: autoOverrides.length })}
+            </div>
+          ) : null}
+        </Banner>
+      ) : null}
+
       <div className="field__row">
         <Field label={t('account.label')}>
           <input
             className="input"
             placeholder={t('account.labelPlaceholder')}
             value={account.label}
-            onChange={(e) => patch({ label: e.target.value })}
+            onChange={(e) => {
+              markTouched('label')
+              patch({ label: e.target.value })
+            }}
           />
         </Field>
         {/* Free text with suggestions rather than a managed list of groups.
@@ -510,7 +668,10 @@ export function AccountDialog({
             spellCheck={false}
             placeholder="smtp.example.com"
             value={account.host}
-            onChange={(e) => patch({ host: e.target.value.trim() })}
+            onChange={(e) => {
+              markTouched('host')
+              patch({ host: e.target.value.trim() })
+            }}
           />
         </Field>
         <Field label={t('account.port')}>
@@ -520,14 +681,20 @@ export function AccountDialog({
             min={1}
             max={65535}
             value={account.port}
-            onChange={(e) => patch({ port: Number(e.target.value) })}
+            onChange={(e) => {
+              markTouched('port')
+              patch({ port: Number(e.target.value) })
+            }}
           />
         </Field>
         <Field label={t('account.security')}>
           <select
             className="select"
             value={account.security}
-            onChange={(e) => patch({ security: e.target.value as TransportSecurity })}
+            onChange={(e) => {
+              markTouched('security')
+              patch({ security: e.target.value as TransportSecurity })
+            }}
           >
             <option value="ssl">{t('account.securitySsl')}</option>
             <option value="starttls">{t('account.securityStarttls')}</option>
@@ -543,7 +710,10 @@ export function AccountDialog({
             autoComplete="off"
             spellCheck={false}
             value={account.username}
-            onChange={(e) => patch({ username: e.target.value })}
+            onChange={(e) => {
+              markTouched('username')
+              patch({ username: e.target.value })
+            }}
           />
         </Field>
         <Field
@@ -625,7 +795,10 @@ export function AccountDialog({
                 spellCheck={false}
                 placeholder="imap.example.com"
                 value={inbox.imapHost}
-                onChange={(e) => inboxPatch({ imapHost: e.target.value.trim() })}
+                onChange={(e) => {
+                  markTouched('imapHost')
+                  inboxPatch({ imapHost: e.target.value.trim() })
+                }}
               />
             </Field>
             <Field label={t('account.port')}>
@@ -635,14 +808,20 @@ export function AccountDialog({
                 min={1}
                 max={65535}
                 value={inbox.imapPort}
-                onChange={(e) => inboxPatch({ imapPort: Number(e.target.value) })}
+                onChange={(e) => {
+                  markTouched('imapPort')
+                  inboxPatch({ imapPort: Number(e.target.value) })
+                }}
               />
             </Field>
             <Field label={t('account.security')}>
               <select
                 className="select"
                 value={inbox.imapSecurity}
-                onChange={(e) => inboxPatch({ imapSecurity: e.target.value as TransportSecurity })}
+                onChange={(e) => {
+                  markTouched('imapSecurity')
+                  inboxPatch({ imapSecurity: e.target.value as TransportSecurity })
+                }}
               >
                 <option value="ssl">{t('account.securitySsl')}</option>
                 <option value="starttls">{t('account.securityStarttls')}</option>
@@ -658,7 +837,10 @@ export function AccountDialog({
                 autoComplete="off"
                 spellCheck={false}
                 value={inbox.imapUsername}
-                onChange={(e) => inboxPatch({ imapUsername: e.target.value })}
+                onChange={(e) => {
+                  markTouched('imapUsername')
+                  inboxPatch({ imapUsername: e.target.value })
+                }}
               />
             </Field>
             <Field

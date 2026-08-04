@@ -47,11 +47,22 @@ export const PROVIDERS: ProviderPreset[] = [
     imapPort: 993,
     imapSecurity: 'ssl',
   },
+  /**
+   * Every Microsoft mailbox, consumer and work alike, is one endpoint pair.
+   *
+   * `smtp-mail.outlook.com` used to be listed here for the consumer domains.
+   * It is the same service, but it is the name Microsoft is retiring, and it
+   * answers on 587 only — so a preset that also has to be right for work
+   * accounts would have had two spellings of one server. Both presets now
+   * point at `smtp.office365.com:587` (STARTTLS) and
+   * `outlook.office365.com:993` (SSL); anything else on this pair is a
+   * misconfiguration, not a variant.
+   */
   {
     id: 'outlook',
     name: 'Outlook / Hotmail',
-    domains: ['outlook.com', 'hotmail.com', 'live.com', 'msn.com'],
-    host: 'smtp-mail.outlook.com',
+    domains: ['outlook.com', 'hotmail.com', 'live.com', 'msn.com', 'passport.com'],
+    host: 'smtp.office365.com',
     port: 587,
     security: 'starttls',
     hintKey: 'provider.hint.appPassword',
@@ -65,7 +76,11 @@ export const PROVIDERS: ProviderPreset[] = [
   {
     id: 'office365',
     name: 'Microsoft 365 (work)',
-    domains: [],
+    // A work mailbox lives on the company's own domain, so there is no list to
+    // match on. `onmicrosoft.com` is the one Microsoft always issues, and the
+    // dropdown covers the rest — picking it by hand is the autodiscover this
+    // app does not do.
+    domains: ['onmicrosoft.com'],
     host: 'smtp.office365.com',
     port: 587,
     security: 'starttls',
@@ -78,7 +93,7 @@ export const PROVIDERS: ProviderPreset[] = [
   },
   {
     id: 'qq',
-    name: 'QQ 邮箱',
+    name: 'QQ 邮箱 / Foxmail',
     domains: ['qq.com', 'vip.qq.com', 'foxmail.com'],
     host: 'smtp.qq.com',
     port: 465,
@@ -121,9 +136,23 @@ export const PROVIDERS: ProviderPreset[] = [
     imapSecurity: 'ssl',
   },
   {
+    id: 'neteaseYeah',
+    name: '网易 yeah.net',
+    domains: ['yeah.net'],
+    host: 'smtp.yeah.net',
+    port: 465,
+    security: 'ssl',
+    hintKey: 'provider.hint.authCode',
+    attachmentLimitMb: 50,
+    dailyLimit: 200,
+    imapHost: 'imap.yeah.net',
+    imapPort: 993,
+    imapSecurity: 'ssl',
+  },
+  {
     id: 'sina',
     name: '新浪邮箱',
-    domains: ['sina.com', 'sina.cn'],
+    domains: ['sina.com', 'sina.cn', 'sina.com.cn', 'vip.sina.com'],
     host: 'smtp.sina.com',
     port: 465,
     security: 'ssl',
@@ -146,6 +175,52 @@ export const PROVIDERS: ProviderPreset[] = [
     imapPort: 993,
     imapSecurity: 'ssl',
   },
+  /* --- the three Chinese business-mail services -----------------------------
+     All three sell a mailbox on *your company's* domain, so `domains` can only
+     list the vendor's own name and everything else has to be picked from the
+     dropdown. They are separate entries rather than one because the servers
+     genuinely differ — this is the set a Chinese work address is on. */
+  {
+    id: 'tencentExmail',
+    name: '腾讯企业邮箱',
+    domains: ['exmail.qq.com'],
+    host: 'smtp.exmail.qq.com',
+    port: 465,
+    security: 'ssl',
+    hintKey: 'provider.hint.authCode',
+    appPasswordUrl: 'https://exmail.qq.com/qy_mng_logic/doc#10023',
+    attachmentLimitMb: 50,
+    dailyLimit: 500,
+    imapHost: 'imap.exmail.qq.com',
+    imapPort: 993,
+    imapSecurity: 'ssl',
+  },
+  {
+    id: 'neteaseQiye',
+    name: '网易企业邮箱',
+    domains: ['qiye.163.com'],
+    host: 'smtp.qiye.163.com',
+    port: 465,
+    security: 'ssl',
+    hintKey: 'provider.hint.authCode',
+    attachmentLimitMb: 50,
+    imapHost: 'imap.qiye.163.com',
+    imapPort: 993,
+    imapSecurity: 'ssl',
+  },
+  {
+    id: 'aliyunExmail',
+    name: '阿里云企业邮箱',
+    domains: ['mxhichina.com'],
+    host: 'smtp.mxhichina.com',
+    port: 465,
+    security: 'ssl',
+    hintKey: 'provider.hint.password',
+    attachmentLimitMb: 50,
+    imapHost: 'imap.mxhichina.com',
+    imapPort: 993,
+    imapSecurity: 'ssl',
+  },
   {
     id: 'yahoo',
     name: 'Yahoo Mail',
@@ -159,6 +234,41 @@ export const PROVIDERS: ProviderPreset[] = [
     imapHost: 'imap.mail.yahoo.com',
     imapPort: 993,
     imapSecurity: 'ssl',
+  },
+  {
+    id: 'aol',
+    name: 'AOL Mail',
+    domains: ['aol.com', 'aim.com', 'love.com', 'games.com'],
+    host: 'smtp.aol.com',
+    port: 465,
+    security: 'ssl',
+    hintKey: 'provider.hint.appPassword',
+    appPasswordUrl: 'https://login.aol.com/account/security',
+    attachmentLimitMb: 25,
+    imapHost: 'imap.aol.com',
+    imapPort: 993,
+    imapSecurity: 'ssl',
+  },
+  /**
+   * Proton has no public SMTP. The address below is Proton Bridge, the local
+   * proxy that runs on the user's own machine — which is why the port is a
+   * loopback one and the hint is a whole sentence: without Bridge installed
+   * and running there is nothing at 127.0.0.1:1025 and the test will simply
+   * refuse to connect, which reads as "the app is broken" unless we say so.
+   */
+  {
+    id: 'proton',
+    name: 'Proton Mail (Bridge)',
+    domains: ['protonmail.com', 'protonmail.ch', 'proton.me', 'pm.me'],
+    host: '127.0.0.1',
+    port: 1025,
+    security: 'starttls',
+    hintKey: 'provider.hint.bridge',
+    appPasswordUrl: 'https://proton.me/mail/bridge',
+    attachmentLimitMb: 25,
+    imapHost: '127.0.0.1',
+    imapPort: 1143,
+    imapSecurity: 'starttls',
   },
   {
     id: 'icloud',
@@ -256,13 +366,78 @@ export function providerById(id: string | undefined): ProviderPreset | undefined
   return PROVIDERS.find((p) => p.id === id)
 }
 
+/**
+ * The domain half of an address, normalised.
+ *
+ * Trailing dots (`a@qq.com.`) and stray whitespace are what a paste out of
+ * another mail client actually looks like, and either one turns an exact
+ * `domains.includes()` match into a miss.
+ */
+export function domainOfAddress(address: string): string {
+  const at = address.lastIndexOf('@')
+  if (at < 0) return ''
+  return address
+    .slice(at + 1)
+    .trim()
+    .toLowerCase()
+    .replace(/[>\s]+$/, '')
+    .replace(/\.+$/, '')
+}
+
 /** Guess a preset from an email address, e.g. `a@qq.com` → the QQ preset. */
 export function providerForAddress(address: string): ProviderPreset | undefined {
-  const at = address.lastIndexOf('@')
-  if (at < 0) return undefined
-  const domain = address.slice(at + 1).trim().toLowerCase()
+  const domain = domainOfAddress(address)
   if (!domain) return undefined
   return PROVIDERS.find((p) => p.domains.includes(domain))
+}
+
+/**
+ * What we would fill the form in with, and how sure we are.
+ *
+ * `guessed` is the whole point of this type. A domain nobody recognises still
+ * gets values — `smtp.<domain>` and `imap.<domain>` is the convention almost
+ * every hosting provider follows — but the UI has to be able to say so, because
+ * a guessed host that happens to be wrong looks exactly like a known-good one
+ * until the connection test fails.
+ */
+export interface AutoConfig {
+  domain: string
+  preset: ProviderPreset
+  guessed: boolean
+}
+
+/**
+ * Everything derivable from an address alone.
+ *
+ * Returns `null` only when there is no domain to work from yet — half-typed
+ * addresses ("me@") must not blank out fields the user is looking at.
+ */
+export function autoConfigForAddress(address: string): AutoConfig | null {
+  const domain = domainOfAddress(address)
+  if (!domain || !domain.includes('.')) return null
+
+  const known = PROVIDERS.find((p) => p.domains.includes(domain))
+  if (known) return { domain, preset: known, guessed: false }
+
+  // 587/STARTTLS out and 993/SSL in is what a mail host that publishes nothing
+  // else still answers on. It is a guess, and it is labelled as one.
+  return {
+    domain,
+    guessed: true,
+    preset: {
+      id: 'custom',
+      name: domain,
+      domains: [domain],
+      host: `smtp.${domain}`,
+      port: 587,
+      security: 'starttls',
+      hintKey: 'provider.hint.custom',
+      attachmentLimitMb: 25,
+      imapHost: `imap.${domain}`,
+      imapPort: 993,
+      imapSecurity: 'ssl',
+    },
+  }
 }
 
 /** The attachment ceiling to enforce for an account, in bytes. */

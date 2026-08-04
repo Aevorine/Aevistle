@@ -26,6 +26,32 @@ export interface HealthIssue {
   values?: Record<string, string | number>
   /** Where the fix is, so the card can offer a button rather than a shrug. */
   goTo?: 'schedule' | 'settings' | 'compose' | 'logs'
+  /**
+   * A fix that is an action rather than a place — the Android permission
+   * screens, which live outside this app entirely. Named rather than supplied
+   * as a callback so this module stays pure and platform-free; the strip maps
+   * the name onto the bridge call.
+   */
+  fix?: 'requestNotifications' | 'openNotificationSettings' | 'openExactAlarmSettings'
+  /** Label for the `fix` button. "Turn on" and "Open settings" are not the same offer. */
+  fixKey?: string
+}
+
+/**
+ * What Android knows about its own permissions.
+ *
+ * Passed in for the same reason `schedulerUnreachable` is: it cannot be derived
+ * from `state`. Nothing in the store changes when someone revokes notification
+ * access in the system settings, and the app looks identical either way — which
+ * is exactly how this shipped for four versions with notifications silently
+ * dead on every phone from 2022 onward.
+ *
+ * Undefined on desktop and web, where neither question applies.
+ */
+export interface PermissionSnapshot {
+  notifications: 'granted' | 'prompt' | 'blocked'
+  exactAlarms: 'granted' | 'denied' | 'not-required'
+  canAskNotifications: boolean
 }
 
 /** How far ahead "coming up" looks. A week is one planning horizon. */
@@ -40,6 +66,8 @@ export function collectHealth(
    * alarm exists behind them — so it has to be passed in.
    */
   schedulerUnreachable = false,
+  /** Android only; see `PermissionSnapshot`. */
+  permissions?: PermissionSnapshot,
 ): HealthIssue[] {
   const issues: HealthIssue[] = []
   const accountIds = new Set(state.accounts.map((a) => a.id))
@@ -91,7 +119,83 @@ export function collectHealth(
     })
   }
 
+  // A working calendar so full that an occurrence has nowhere to move to. The
+  // job still looks armed and the schedule screen still lists it; the send just
+  // never happens. That is the one failure this product exists to not have, so
+  // it sits with the definite failures rather than the warnings.
+  const dropped = state.jobs
+    .filter((j) => j.enabled)
+    .reduce((n, j) => n + (j.calendarWarning?.dropped.length ?? 0), 0)
+  if (dropped > 0) {
+    issues.push({
+      id: 'calendar-dropped',
+      level: 'danger',
+      key: 'health.calendarDropped',
+      values: { n: dropped },
+      goTo: 'schedule',
+    })
+  }
+
   // --- things that are probably not what was meant ------------------------
+
+  // Notifications the user will never see. Not "probably not what was meant" —
+  // the send happens and its result is announced to nobody, which is the same
+  // as not announcing it. Only worth saying once there is something to announce.
+  if (permissions && state.jobs.some((j) => j.enabled)) {
+    if (permissions.notifications === 'blocked') {
+      issues.push({
+        id: 'notifications-blocked',
+        level: 'warning',
+        key: 'health.notificationsBlocked',
+        fix: 'openNotificationSettings',
+        fixKey: 'health.notificationsBlockedFix',
+      })
+    } else if (permissions.notifications === 'prompt') {
+      issues.push({
+        id: 'notifications-off',
+        level: 'warning',
+        key: 'health.notificationsOff',
+        // Once Android has stopped allowing the dialog, offering "Turn on" is a
+        // button that does nothing. Send them where it can still be turned on.
+        fix: permissions.canAskNotifications ? 'requestNotifications' : 'openNotificationSettings',
+        fixKey: permissions.canAskNotifications
+          ? 'health.notificationsOffFix'
+          : 'health.notificationsBlockedFix',
+      })
+    }
+    // Sends still happen without this — they just drift, because the alarm
+    // gets batched into whatever window the system feels like. "On time" is
+    // the whole promise, so a silent hour of drift deserves a line.
+    if (permissions.exactAlarms === 'denied') {
+      issues.push({
+        id: 'exact-alarms-denied',
+        level: 'warning',
+        key: 'health.exactAlarmsDenied',
+        fix: 'openExactAlarmSettings',
+        fixKey: 'health.exactAlarmsFix',
+      })
+    }
+  }
+
+  // Everything landed on one day and had to be fanned out minute by minute.
+  // Nothing is lost, but a burst of near-identical mail is rarely what was
+  // meant, and without this the only clue is the send times themselves.
+  const crowdedJobs = state.jobs.filter(
+    (j) => j.enabled && ((j.calendarWarning?.crowded ?? 0) > 0 || (j.calendarWarning?.spreadMs ?? 0) >= 300_000),
+  )
+  if (crowdedJobs.length > 0) {
+    const spreadMs = Math.max(...crowdedJobs.map((j) => j.calendarWarning?.spreadMs ?? 0))
+    issues.push({
+      id: 'calendar-crowded',
+      level: 'warning',
+      key: 'health.calendarCrowded',
+      values: {
+        n: crowdedJobs.reduce((n, j) => n + (j.calendarWarning?.crowded ?? 0), 0),
+        minutes: Math.max(1, Math.round(spreadMs / 60_000)),
+      },
+      goTo: 'schedule',
+    })
+  }
 
   // Enabled, but with nothing left to fire: a one-off that has already run, or
   // a rule whose end condition has passed. It sits in the list looking armed.

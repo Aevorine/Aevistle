@@ -1,0 +1,61 @@
+name: Feature request
+description: Something Aevistle should be able to do and cannot.
+labels: ['enhancement']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Feature requests are genuinely welcome — the
+        [roadmap](https://github.com/Aevorine/Aevistle#roadmap) is mostly things
+        people asked for. Worth knowing what is deliberately out of scope:
+        server-side mailbox management, tracking pixels and open rates, and
+        anything that requires a hosted service to keep running while your
+        devices are off. Those are not oversights.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do
+      description: >
+        The situation, not the solution. Knowing the actual problem often turns
+        up a simpler answer than the feature you had in mind.
+      placeholder: >
+        I send the same three reminders to the same team every Monday and have
+        to build each one by hand.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like it to do
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you do instead today
+      description: A workaround, another app, or nothing.
+    validations:
+      required: false
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Where it matters
+      options:
+        - Both Windows and Android
+        - Windows only
+        - Android only
+        - Neither — a build, packaging or documentation change
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched the existing issues and the roadmap.
+          required: true
