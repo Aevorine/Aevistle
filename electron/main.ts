@@ -24,7 +24,7 @@ import {
   Tray,
 } from 'electron'
 import path from 'node:path'
-import { promises as fs } from 'node:fs'
+import { promises as fs, readFileSync, writeFileSync } from 'node:fs'
 import { IPC, type TrayCommand } from '../src/core/ipc-contract'
 import type {
   Attachment,
@@ -305,12 +305,86 @@ app.on('second-instance', () => {
 // Window
 // ---------------------------------------------------------------------------
 
+/**
+ * The window's own size, remembered across launches.
+ *
+ * Lives in `userData` and never in the data folder, for the same reason the
+ * folder pointer does: it is a property of this screen on this machine, and
+ * syncing it would have a laptop and a desktop fighting over one rectangle.
+ *
+ * It exists because the compose screen's message box is the only thing on that
+ * card with `flex-grow` — every pixel the window gains lands in it. Opening at
+ * a fixed 880px and forgetting that the user maximised was capping the box at
+ * about eleven lines however large their display was.
+ */
+type WindowState = { width: number; height: number; x?: number; y?: number; maximized?: boolean }
+
+function windowStatePath(): string {
+  return path.join(app.getPath('userData'), 'window.json')
+}
+
+function readWindowState(): WindowState | null {
+  try {
+    const parsed = JSON.parse(readFileSync(windowStatePath(), 'utf8')) as Partial<WindowState>
+    // A saved rectangle is only usable if it is still a rectangle. Corrupt or
+    // half-written JSON must degrade to the default size, never to a 0x0
+    // window the user cannot find or grab.
+    if (typeof parsed.width !== 'number' || typeof parsed.height !== 'number') return null
+    if (parsed.width < 880 || parsed.height < 620) return null
+    return {
+      width: Math.round(parsed.width),
+      height: Math.round(parsed.height),
+      x: typeof parsed.x === 'number' ? Math.round(parsed.x) : undefined,
+      y: typeof parsed.y === 'number' ? Math.round(parsed.y) : undefined,
+      maximized: parsed.maximized === true,
+    }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Saved on resize and on close, and deliberately not on every frame of a drag:
+ * `resize` fires continuously, and `writeFileSync` per frame would stutter a
+ * window someone is still dragging. The debounce means the last size wins.
+ *
+ * The *restored* bounds are what is stored, never the maximised ones — a
+ * maximised window reports the whole screen, and restoring that as a normal
+ * window on a smaller display would put the title bar off-screen.
+ */
+let saveWindowTimer: NodeJS.Timeout | null = null
+function saveWindowState(): void {
+  if (!mainWindow || mainWindow.isDestroyed() || mainWindow.isMinimized()) return
+  const bounds = mainWindow.getNormalBounds()
+  const state: WindowState = {
+    width: bounds.width,
+    height: bounds.height,
+    x: bounds.x,
+    y: bounds.y,
+    maximized: mainWindow.isMaximized(),
+  }
+  try {
+    writeFileSync(windowStatePath(), JSON.stringify(state), 'utf8')
+  } catch {
+    // A window size is not worth a dialog. Next launch uses the default.
+  }
+}
+
+function scheduleWindowSave(): void {
+  if (saveWindowTimer) clearTimeout(saveWindowTimer)
+  saveWindowTimer = setTimeout(saveWindowState, 400)
+}
+
 function createWindow(): void {
+  const saved = readWindowState()
   mainWindow = new BrowserWindow({
     // Sized for the serif type scale: 16 px body text needs more line length
     // than the 14 px it replaced before the layout starts feeling cramped.
-    width: 1280,
-    height: 880,
+    // Only the fallback: a remembered size wins, and a remembered maximised
+    // state is applied below once the window exists.
+    width: saved?.width ?? 1280,
+    height: saved?.height ?? 880,
+    ...(saved?.x !== undefined && saved?.y !== undefined ? { x: saved.x, y: saved.y } : {}),
     minWidth: 880,
     minHeight: 620,
     show: false,
@@ -335,7 +409,17 @@ function createWindow(): void {
     },
   })
 
+  /* Maximise before the first paint, not after: `show()` on a restored window
+     followed by `maximize()` is a visible jump, and the renderer would lay the
+     compose form out twice at two different heights. */
+  if (saved?.maximized) mainWindow.maximize()
+
   mainWindow.once('ready-to-show', () => mainWindow?.show())
+
+  mainWindow.on('resize', scheduleWindowSave)
+  mainWindow.on('move', scheduleWindowSave)
+  mainWindow.on('maximize', scheduleWindowSave)
+  mainWindow.on('unmaximize', scheduleWindowSave)
 
   if (DEV_SERVER) {
     void mainWindow.loadURL(DEV_SERVER)
@@ -362,6 +446,10 @@ function createWindow(): void {
   // explicit. Without this, "send at 3am" would only work if the user left the
   // window open, which nobody does.
   mainWindow.on('close', (event) => {
+    // Written straight away rather than through the debounce: on a real quit
+    // the timer would never fire, and the last resize before closing is
+    // exactly the size the user meant to keep.
+    saveWindowState()
     if (!quitting && tray) {
       event.preventDefault()
       mainWindow?.hide()

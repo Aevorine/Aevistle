@@ -1291,8 +1291,10 @@ textarea {
   /* Tighter vertically than horizontally on purpose: this bar sits directly
      under the compose form, and every pixel of padding here is a pixel off
      the message box above it. The buttons keep their own 44px height, so the
-     touch target is unchanged — only the air around it. */
-  padding: var(--sp-3) var(--sp-5);
+     touch target is unchanged — only the air around it. Now `--sp-2`, and the
+     bar measures 67px rather than 75 — see `--actionbar-h`, which the send
+     result banner sits on top of and which has to agree with this. */
+  padding: var(--sp-2) var(--sp-5);
   border-top: 1px solid var(--border-subtle);
   background: color-mix(in srgb, var(--surface-1) 88%, transparent);
   backdrop-filter: blur(14px) saturate(150%);
@@ -3230,34 +3232,18 @@ textarea {
   opacity: 0.45;
 }
 
-/* The compose form's disclosure for per-message rarities. Styled as a quiet
-   row, not a card: it must read as 'more of this form', not as a new section. */
+/* The compose form's panel for per-message rarities. Styled as a quiet row,
+   not a card: it must read as 'more of this form', not as a new section.
+
+   It is a panel and not a `<details>` any more, because the control that opens
+   it is up in the page head and the content it opens is down here in the
+   footer — one element cannot be in two bands. The summary styles that used to
+   live here went with it; the button in the head is an ordinary `Button` with
+   `aria-expanded`, which is the same affordance without a second look. */
 .moreoptions {
   border-top: 1px solid var(--border-subtle);
   padding-top: var(--sp-3);
 }
-.moreoptions__summary {
-  cursor: pointer;
-  list-style: none;
-  font-size: var(--text-sm);
-  color: var(--text-2);
-  padding: var(--sp-1) 0;
-}
-.moreoptions__summary::-webkit-details-marker { display: none; }
-.moreoptions__summary::before {
-  content: '';
-  display: inline-block;
-  width: 0;
-  height: 0;
-  margin-inline-end: var(--sp-2);
-  border-inline-start: 5px solid currentColor;
-  border-block: 4px solid transparent;
-  transition: rotate var(--motion-fast, 120ms) ease;
-  vertical-align: middle;
-}
-.moreoptions[open] > .moreoptions__summary::before { rotate: 90deg; }
-.moreoptions__summary:hover { color: var(--text-1); }
-.moreoptions[open] > .moreoptions__summary { margin-bottom: var(--sp-3); }
 .moreoptions > .field__row + .field__row { margin-top: var(--sp-3); }
 
 /* ==========================================================================
@@ -4080,21 +4066,49 @@ textarea {
    * Chinese at 小四 still fit here, and anything taller is space the box will
    * have been given anyway.
    *
-   * The number stayed where it is; what changed is how much lands here. See
-   * "reclaiming height for the message" below — the box measured 200px on that
-   * same window, which is eight lines of 小四 for the field the entire screen
-   * exists to fill, and every pixel taken off the chrome around it arrives
-   * here without touching this floor.
+   * Doubled, from 160px to 320px, and clamped against the window so it cannot
+   * become the thing that makes the form scroll. On any window taller than
+   * ~760px the flat 320 applies — twenty lines of 小四, and twice what the box
+   * was ever guaranteed before. Below that, 42vh takes over and the floor
+   * shrinks with the window instead of pushing the send time off the screen,
+   * which is the one thing this form is not allowed to do.
+   *
+   * In the ordinary case none of this is what decides the height: the box is
+   * the only thing on the card with `flex-grow`, so it takes everything the
+   * other two bands leave, and every pixel trimmed off the chrome around it
+   * arrives here without touching this floor.
    */
-  min-height: 160px;
+  min-height: min(320px, 42vh);
   height: auto;
   resize: vertical;
+}
+
+/*
+ * The floor gives way to a banner, rather than pushing the form into scroll.
+ *
+ * A banner on this screen is 72px the configured, valid draft does not carry —
+ * "no account yet" on first run, an oversized attachment later. Measured on a
+ * 1266x827 window: with the banner up, a 320px floor tips the column 9px past
+ * the viewport, which is the one thing this form is not allowed to do. The
+ * banner is also the only state where the box is at its floor at all: with the
+ * banner gone the box grows to 391px on that same window and this rule cannot
+ * be reached.
+ *
+ * So the floor is conditional on the banner rather than being lowered for
+ * everyone, which would hand the ordinary case a smaller guarantee to fix a
+ * state most people see once.
+ */
+.view--compose:has(.banner--warning, .banner--danger)
+  .compose-layout
+  > .field:has(.textarea--body)
+  > .textarea--body {
+  min-height: min(240px, 32vh);
 }
 
 /* --- reclaiming height for the message, part 2 ---------------------------- */
 
 /*
- * The compose heading, compacted.
+ * The compose heading, replaced rather than compacted.
  *
  * Measured before touching it (`scripts/layout-probe.mjs`, 1266x827, account
  * configured): the message box was 281px and the chrome around it 356px —
@@ -4104,18 +4118,14 @@ textarea {
  * the screen you are already looking at, plus a subtitle that has never told
  * anyone anything they did not know.
  *
- * The subtitle goes, on this screen only — the list screens keep theirs, where
- * vertical space is not the constraint and the line explains what the list
- * contains. Every pixel saved lands in the body box, which is the only thing
- * on the card with `flex-grow`.
+ * Trimming its padding took it to 40px and stopped there: a heading is mostly
+ * the air around the heading, and `--pagehead-h` is a shared floor the other
+ * six screens want. So this screen does not use one. `.composetop` below is
+ * the whole band — the screen's name set at body size on the left, the
+ * secondary controls on the right, and a height decided by the buttons rather
+ * than by a title. Every pixel saved lands in the body box, which is the only
+ * thing on the card with `flex-grow`.
  */
-.view--compose .page-head {
-  min-height: 0;
-  padding-block: var(--sp-1);
-}
-.view--compose .page-head .page-subtitle {
-  display: none;
-}
 
 /* --- focus mode ----------------------------------------------------------- */
 
@@ -4209,6 +4219,27 @@ textarea {
   margin-inline-start: calc(5.5em + var(--sp-4));
 }
 
+/*
+ * Still one column, and this is the second time that has been measured rather
+ * than assumed.
+ *
+ * Putting the two side by side was tried again for this round, gated at 1500px
+ * of window on the theory that the earlier failure was only about a card too
+ * narrow to halve. It is not. Emulated widths, account configured, foot height
+ * against the 102px it costs stacked:
+ *
+ *   1536px window → halves 591, time bar 488 wide → wrapped, foot 108
+ *   1700px window → halves 670, time bar 567 wide → wrapped, foot 108
+ *   1820px window → halves 728, time bar 624 wide → wrapped, foot 108
+ *   1920px window → halves 776, time bar 673 wide → one line, foot  50
+ *
+ * So the row only fits from about 1880px of window, and below that the "space
+ * saving" is a 6px loss. A rule that pays out on one monitor size and charges
+ * on every other one is not worth the breakpoint; the 52px it would win at
+ * 1920 lands on the window that already has the tallest message box in the
+ * table (656px). Stacked at every width, as before.
+ */
+
 /* Time picker, what it means in words, and the way to the full rules — one
    row, because all three are the same question. */
 .whenbar {
@@ -4299,29 +4330,90 @@ textarea {
 /* The scroller's bottom padding is generous for a list that ends mid-row. This
    form ends at a card edge with the action bar directly under it. */
 .view--compose {
-  padding-bottom: var(--sp-4);
+  padding-bottom: var(--sp-2);
 }
 
-/* The gap between the page head, the health strip and the card. They are three
+/* The gap between the top bar, the health strip and the card. They are three
    separated things already — a rule, a tinted strip and a bordered card. */
 .view--compose .view__inner {
-  gap: var(--sp-3);
-}
-
-/* A screen title does not need a 72px band to be read as a screen title. The
-   type sizes are untouched; this is the padding around them. */
-.view--compose .page-head {
-  min-height: 0;
-  padding-block: var(--sp-1);
-  margin-bottom: 0;
-}
-
-/* The card's own breathing room. `--sp-3` still reads as a card rather than a
-   panel, and the eight pixels come straight off the top and bottom of the one
-   box on this screen that is short of them. */
-.compose-card > .card__body {
-  padding: var(--sp-3) var(--sp-4);
   gap: var(--sp-2);
+}
+
+/* The card's own breathing room. Vertically `--sp-2`: the horizontal padding
+   is what makes this read as a card, and the eight pixels off the top and
+   bottom go straight into the one box on this screen that is short of them. */
+.compose-card > .card__body {
+  padding: var(--sp-2) var(--sp-4);
+  gap: var(--sp-2);
+}
+
+/**
+ * The top bar. One band, and the only one on this screen that is not a form.
+ *
+ * The screen's name on the left, everything secondary on the right: draft
+ * history, the send preview, the "more options" panel and the focus toggle.
+ * All of them were charging the form for space — the disclosure cost 67px of
+ * the card whether or not it was ever opened, and the buttons were competing
+ * with Send for a bar that should hold Send and nothing like it.
+ *
+ * It is not a `PageHead`. That component carries `--pagehead-h`, a floor the
+ * other six screens want and this one cannot afford, and its title is set two
+ * type steps up for a word that names the screen you are already looking at.
+ * Here the name is set at the size of a field label and the height is whatever
+ * the buttons need, which is 36px against the heading's 40 — and, unlike the
+ * heading, it holds four controls that would otherwise be inside the form.
+ *
+ * The bottom rule is what makes it read as a bar rather than as a stray row of
+ * buttons floating above a card.
+ */
+.composetop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  /* Four pixels, and they are not spare: the scroller has no top padding of
+     its own, so without this the screen's name sits flush against the window
+     edge. The band still measures less than the 40px heading it replaced. */
+  padding-block: var(--sp-1);
+  border-bottom: 1px solid var(--border-subtle);
+}
+/* The screen's name, at the size and colour of a field label rather than of a
+   title: on the one screen the app opens on, the heading is the least
+   informative thing in the window. */
+.composetop__title {
+  font-size: var(--text-lg);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+/*
+ * `flex-wrap` and not `overflow` on purpose: below ~900px the name and the four
+ * controls wrap onto a second line, which costs a row on a phone and is the
+ * right trade there — the alternative is a horizontally scrolling toolbar
+ * holding the only route back to a lost draft.
+ */
+.composebar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  flex-wrap: wrap;
+}
+/* Quieter than the form's own controls and shorter than the 46px they use:
+   these are the things you are not doing right now. The 小四 floor still
+   applies — this trims the padding, never the type. */
+.composebar .btn {
+  min-height: 34px;
+  padding-block: var(--sp-1);
+  color: var(--text-2);
+}
+.composebar .btn:hover:not(:disabled) {
+  color: var(--text-1);
+}
+/* Open reads as pressed, because the panel it opens is at the other end of the
+   card and cannot be seen from here on a short window. */
+.composebar .btn[aria-expanded='true'] {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
 /* Labels here are one line and always will be — nothing on this form has a

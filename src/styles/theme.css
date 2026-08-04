@@ -183,7 +183,10 @@
   --sidebar-w: 244px;
   --sidebar-w-collapsed: 68px;
   --pagehead-h: 60px;
-  --actionbar-h: 76px;
+  /* What `.actionbar` actually measures with its current padding — the send
+     result banner sticks to this number, so a bar that shrinks without it
+     leaves a gap of exactly the difference. */
+  --actionbar-h: 68px;
   /* No ceiling. The content column fills the window.
 
      This was `clamp(1060px, 80vw, 1500px)`, and the cap is what every
@@ -416,7 +419,7 @@
   --sp-6: 1.125rem;
   --sp-8: 1.5rem;
   --pagehead-h: 52px;
-  --actionbar-h: 68px;
+  --actionbar-h: 60px;
   /* Density tightens spacing, never the type: shrinking 小四 below 16px would
      break the one typographic rule this interface is held to. */
   --leading-normal: 1.5;

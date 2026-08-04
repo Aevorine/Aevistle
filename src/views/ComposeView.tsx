@@ -14,7 +14,6 @@ import {
   Card,
   Field,
   Modal,
-  PageHead,
   Segmented,
   Switch,
   useConfirm,
@@ -140,6 +139,7 @@ export function ComposeView({
   const toId = useFieldId('to')
   const subjectId = useFieldId('subject')
   const bodyId = useFieldId('body')
+  const moreId = useFieldId('more')
 
   /**
    * The body box remembers how tall it was dragged.
@@ -201,7 +201,33 @@ export function ComposeView({
     [scheduleSet, recurrence, state.settings],
   )
 
+  /**
+   * The secondary controls live in the top bar, not in the form.
+   *
+   * Draft history, the send preview, the focus toggle and the three
+   * rarely-touched switches are all things you reach for once and then leave
+   * alone for months, and they were charging the message box rent: the
+   * disclosure alone was 67px of the card (59 + its gap) whether or not anyone
+   * ever opened it, and the buttons were widening a bar that has to hold Send.
+   *
+   * The bar they moved to is the band the screen heading used to occupy, and
+   * it is smaller than the heading was — a title naming the screen you are
+   * already looking at does not need 40px, and a row sized by its own buttons
+   * has no minimum a heading has to respect.
+   *
+   * `moreOpen` replaces a `<details>`: the summary now sits in the top bar
+   * while the panel it controls stays down in the footer, which no single
+   * element can do. Not persisted, for the same reason the disclosure never
+   * was — it reopening because you once set a priority would defeat the point.
+   */
+  const [moreOpen, setMoreOpen] = useState(false)
   const [focusMode, setFocusMode] = useState(false)
+  /* Focus mode takes the top bar off the screen, and with it the button that
+     closes this panel. Leaving it open would be a strip of switches nobody
+     could dismiss without leaving the mode first. */
+  useEffect(() => {
+    if (focusMode) setMoreOpen(false)
+  }, [focusMode])
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       // F9 is not handled here. It is in the shared shortcut table like every
@@ -242,6 +268,25 @@ export function ComposeView({
     [draft, account, state.settings, limitBytes],
   )
   const blocked = hasErrors(issues)
+
+  /**
+   * What the banner under the card is allowed to say.
+   *
+   * "No subject" and "the body is empty" are advisory, and they fire on a draft
+   * that is simply half-written — the moment a recipient is typed, before a
+   * subject could reasonably exist. A two-line banner appearing there costs the
+   * message box ~70px, so the field the screen exists to fill shrinks as a
+   * reward for starting to use it.
+   *
+   * They are not lost: `preflight.warn.noSubject` and `preflight.warn.emptyBody`
+   * report both in the send preview, which is the screen for "check this before
+   * it goes out". This filter only drops them from the always-on banner; errors,
+   * which block Send, are untouched.
+   */
+  const bannerIssues = useMemo(
+    () => issues.filter((i) => i.key !== 'validate.noSubject' && i.key !== 'validate.emptyBody'),
+    [issues],
+  )
   const recipientCount = draft.to.length + draft.cc.length + draft.bcc.length
   /** Has the user put anything in the draft yet? Nothing is "wrong" until so. */
   const started =
@@ -644,7 +689,61 @@ export function ComposeView({
           */}
           {focusMode ? null : (
             <>
-              <PageHead title={t('compose.title')} subtitle={t('compose.subtitle')} />
+              {/*
+                The top bar. The screen's name on the left, everything
+                secondary on the right, in one 36px band.
+
+                It replaces the standard `PageHead`, which on this screen was a
+                40px band holding a title that names the screen you are already
+                looking at and a subtitle nobody has ever needed — and which
+                could not be shortened further without shrinking type, because
+                a heading is mostly the space around the heading. A bar sized
+                by its buttons has no such floor.
+              */}
+              <div className="composetop">
+                <span className="composetop__title">{t('compose.title')}</span>
+                <div className="composebar">
+                  <Button
+                    variant="ghost"
+                    icon={<IconFileText size={16} />}
+                    onClick={() => setHistoryOpen(true)}
+                    title={t('history.title')}
+                  >
+                    {t('history.title')}
+                    {state.draftSnapshots.length > 0
+                      ? ` (${state.draftSnapshots.length})`
+                      : ''}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    icon={<IconSearch size={16} />}
+                    disabled={!started}
+                    onClick={() => setPreflightOpen(true)}
+                  >
+                    {t('preflight.button')}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    onClick={() => setMoreOpen((v) => !v)}
+                    aria-expanded={moreOpen}
+                    aria-controls={moreId}
+                  >
+                    {t('compose.moreOptions')}
+                  </Button>
+                  {/* Up here with the rest of the secondary controls rather
+                      than on the body's own label line: it is a posture for
+                      the whole screen, not a property of the field, and the
+                      label line is now down to the two things that are about
+                      the text itself — the markup buttons and the count. */}
+                  <Button
+                    variant="ghost"
+                    onClick={() => setFocusMode((v) => !v)}
+                    title={t('compose.focusHint')}
+                  >
+                    {focusMode ? t('compose.focusExit') : t('compose.focusEnter')}
+                  </Button>
+                </div>
+              </div>
 
               {/* Whatever is quietly wrong, on the screen that gets opened most.
                   Absent entirely when there is nothing to report. */}
@@ -834,14 +933,21 @@ export function ComposeView({
                         b: formatBytes(new TextEncoder().encode(draft.body).length),
                       })}
                     </span>
-                    <button
-                      type="button"
-                      className="linkbtn"
-                      onClick={() => setFocusMode((v) => !v)}
-                      title={t('compose.focusHint')}
-                    >
-                      {focusMode ? t('compose.focusExit') : t('compose.focusEnter')}
-                    </button>
+                    {/* The way out, and only in the mode that needs one. The
+                        toggle lives in the top bar — which focus mode takes off
+                        the screen, so without this the only exits would be two
+                        keys nobody was told about. Entering is a button; leaving
+                        has to be one too. */}
+                    {focusMode ? (
+                      <button
+                        type="button"
+                        className="linkbtn"
+                        onClick={() => setFocusMode(false)}
+                        title={t('compose.focusHint')}
+                      >
+                        {t('compose.focusExit')}
+                      </button>
+                    ) : null}
                   </div>
                 }
               >
@@ -977,15 +1083,15 @@ export function ComposeView({
                   </div>
                 </Field>
 
-                {/* Folded away by default.
+                {/* Closed, this is nothing at all — not a collapsed row.
                     Priority, per-recipient delivery and read receipts are
-                    decided once and then left alone for months, but they were
-                    costing 149px of a form that is required to fit one screen.
-                    The disclosure remembers nothing on purpose: it reopening
-                    because you once used Bcc would defeat the point. */}
-                <details className="moreoptions">
-                  <summary className="moreoptions__summary">{t('compose.moreOptions')}</summary>
-                  {/* The body-format picker is gone on purpose. It asked people
+                    decided once and then left alone for months, and the
+                    disclosure that used to hold them charged the message box
+                    59px for the privilege of being closed. The control that
+                    opens this now lives in the page head, which was empty. */}
+                {moreOpen ? (
+                  <div className="moreoptions" id={moreId}>
+                    {/* The body-format picker is gone on purpose. It asked people
                       to choose between plain, HTML and Markdown before writing
                       a word, when the right answer is always derivable:
                       pasting or embedding an image needs HTML and switches to
@@ -993,31 +1099,32 @@ export function ComposeView({
                       and everything else is plain text. `draft.bodyFormat`
                       still exists and is still what the transport reads — it is
                       simply no longer a question anyone is asked. */}
-                  <div className="moreoptions__grid">
-                    <Field label={t('compose.priority')}>
-                      <Segmented
-                        value={draft.priority}
-                        onChange={(v: Priority) => patch({ priority: v })}
-                        options={[
-                          { value: 'low', label: t('compose.priorityLow') },
-                          { value: 'normal', label: t('compose.priorityNormal') },
-                          { value: 'high', label: t('compose.priorityHigh') },
-                        ]}
+                    <div className="moreoptions__grid">
+                      <Field label={t('compose.priority')}>
+                        <Segmented
+                          value={draft.priority}
+                          onChange={(v: Priority) => patch({ priority: v })}
+                          options={[
+                            { value: 'low', label: t('compose.priorityLow') },
+                            { value: 'normal', label: t('compose.priorityNormal') },
+                            { value: 'high', label: t('compose.priorityHigh') },
+                          ]}
+                        />
+                      </Field>
+                      <Switch
+                        checked={draft.individualDelivery}
+                        onChange={(v) => patch({ individualDelivery: v })}
+                        title={t('compose.individualDelivery')}
+                        description={t('compose.individualHint')}
                       />
-                    </Field>
-                    <Switch
-                      checked={draft.individualDelivery}
-                      onChange={(v) => patch({ individualDelivery: v })}
-                      title={t('compose.individualDelivery')}
-                      description={t('compose.individualHint')}
-                    />
-                    <Switch
-                      checked={draft.requestReadReceipt}
-                      onChange={(v) => patch({ requestReadReceipt: v })}
-                      title={t('compose.readReceipt')}
-                    />
+                      <Switch
+                        checked={draft.requestReadReceipt}
+                        onChange={(v) => patch({ requestReadReceipt: v })}
+                        title={t('compose.readReceipt')}
+                      />
+                    </div>
                   </div>
-                </details>
+                ) : null}
               </div>
             </div>
           </Card>
@@ -1027,12 +1134,12 @@ export function ComposeView({
               242px of alarm telling the user off for not having typed yet.
               Blank is not an error: the action bar already says what is
               missing, and Send is disabled until it is not. */}
-          {started && issues.length > 0 ? (
+          {started && bannerIssues.length > 0 ? (
             <div
-              className={`banner banner--${issues.some((i) => i.severity === 'error') ? 'danger' : 'warning'}`}
+              className={`banner banner--${bannerIssues.some((i) => i.severity === 'error') ? 'danger' : 'warning'}`}
             >
               <ul className="banner__list">
-                {issues.map((issue, i) => (
+                {bannerIssues.map((issue, i) => (
                   <li key={`${issue.key}-${i}`}>
                     {t(issue.key as 'validate.noRecipients', issue.values)}
                   </li>
@@ -1121,25 +1228,10 @@ export function ComposeView({
           ) : null}
         </div>
 
-        {/* Secondary, and deliberately not competing with the two that matter:
-            history is a recovery route, the preview is a check. Both are icon
-            buttons at this size so the primary pair keeps its weight. */}
-        <Button
-          variant="ghost"
-          icon={<IconFileText size={16} />}
-          onClick={() => setHistoryOpen(true)}
-          title={t('history.title')}
-        >
-          {state.draftSnapshots.length > 0 ? String(state.draftSnapshots.length) : ''}
-        </Button>
-        <Button
-          variant="secondary"
-          icon={<IconSearch size={16} />}
-          disabled={!started}
-          onClick={() => setPreflightOpen(true)}
-        >
-          {t('preflight.button')}
-        </Button>
+        {/* Draft history and the send preview used to sit here. They are a
+            recovery route and a check — neither is what this bar is for, and
+            both are now in the page head with the rest of the secondary
+            controls. What is left is the two buttons that send. */}
         <Button
           size="lg"
           variant="secondary"
