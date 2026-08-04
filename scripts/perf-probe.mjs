@@ -112,52 +112,107 @@ if (boot.jsChunksOnBoot > 0) {
 // --- view switching -------------------------------------------------------
 // Each screen is a separate lazily-loaded chunk, so the first switch includes
 // its fetch and parse. That is the number a user actually experiences.
-const views = ['inbox', 'schedule', 'contacts', 'templates', 'logs', 'settings']
+/*
+ * The screens are read out of the sidebar rather than listed here, and driven
+ * by clicking rather than by Ctrl+N.
+ *
+ * Both were wrong before, and wrong silently. The list was six hard-coded ids
+ * against a sidebar that has since grown to nine, so `Ctrl+2` stopped meaning
+ * "inbox"; and every measurement returned -1 because it waited on
+ * `.page-title`, which the screen it started from does not render. The -1s
+ * were then *filtered out*, leaving `Math.max()` of an empty array —
+ * `-Infinity`, which passed a `≤ 400 ms` target. A probe reporting PASS for a
+ * measurement that never happened is worse than no probe.
+ */
+const navLabels = JSON.parse(
+  await evaluate(
+    `JSON.stringify([...document.querySelectorAll('.nav__item')].map(e => e.textContent.trim()).filter(Boolean))`,
+  ),
+)
+if (navLabels.length === 0) {
+  console.error('No `.nav__item` elements — the sidebar markup changed; fix this probe.')
+  process.exit(1)
+}
+
+// Start somewhere that is not the first screen, so clicking the first screen
+// is a real switch. Without this the screen the app opens on is measured as
+// "never changed", which looks like a stall and is only a sampling artefact.
+await evaluate(
+  `(() => { const n = [...document.querySelectorAll('.nav__item')]; if (n.length > 1) n[n.length - 1].click() })()`,
+)
+await new Promise((r) => setTimeout(r, 400))
+
 const switchTimes = {}
-for (let i = 0; i < views.length; i++) {
+for (const label of navLabels) {
   const ms = await evaluate(`(async () => {
-    // Read the heading *before* switching. The first version compared against
-    // null, so it matched on its first check and returned ~0.2 ms for screens
-    // that had not switched yet — a number that measured nothing.
-    const before = document.querySelector('.page-title')?.textContent ?? ''
+    const target = [...document.querySelectorAll('.nav__item')]
+      .find(e => e.textContent.trim() === ${JSON.stringify(label)})
+    if (!target) return -1
+    // The whole main region, not one heading: the screen this starts from has
+    // no title element, so a title-only check can never see a change.
+    const main = document.querySelector('.main') || document.body
+    const before = main.textContent.slice(0, 400)
     const t0 = performance.now()
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: '${i + 2}', ctrlKey: true, bubbles: true }))
+    target.click()
     const deadline = performance.now() + 5000
-    let changed = false
     while (performance.now() < deadline) {
-      const h = document.querySelector('.page-title')
-      if (h && h.textContent && h.textContent !== before) { changed = true; break }
+      if (main.textContent.slice(0, 400) !== before) {
+        return Math.round((performance.now() - t0) * 10) / 10
+      }
       await new Promise(r => setTimeout(r, 2))
     }
-    return changed ? Math.round((performance.now() - t0) * 10) / 10 : -1
+    return -1
   })()`)
-  switchTimes[views[i]] = ms
+  switchTimes[label] = ms
 }
-const stalled = Object.entries(switchTimes).filter(([, ms]) => ms < 0)
-if (stalled.length > 0) {
-  console.error('Screens whose heading never changed:', stalled.map(([k]) => k).join(', '))
-}
-const worstSwitch = Math.max(...Object.values(switchTimes).filter((ms) => ms >= 0))
-record('slowest first-visit screen switch', worstSwitch, 'ms', 400)
 
-// Second visit: the chunk is cached, so this is pure render cost.
-await evaluate(`window.dispatchEvent(new KeyboardEvent('keydown', { key: '1', ctrlKey: true, bubbles: true }))`)
+const stalled = Object.entries(switchTimes).filter(([, ms]) => ms < 0)
+const measuredSwitches = Object.values(switchTimes).filter((ms) => ms >= 0)
+if (stalled.length > 0 || measuredSwitches.length === 0) {
+  // Recorded as a failure rather than skipped. "Nothing could be measured" is
+  // a result, and it is not a pass.
+  console.error('Screens that never changed:', stalled.map(([k]) => k).join(', ') || '(all)')
+  record(`screens measured (${navLabels.length - stalled.length}/${navLabels.length})`, stalled.length, 'stalled', 0)
+}
+if (measuredSwitches.length > 0) {
+  record('slowest first-visit screen switch', Math.max(...measuredSwitches), 'ms', 400)
+}
+
+// Second visit: the chunk is cached, so this is pure render cost. Measured
+// between two screens that both exist by name, and reported as unmeasurable
+// rather than as a fast number if the click never lands.
 const revisit = await evaluate(`(async () => {
+  const items = [...document.querySelectorAll('.nav__item')]
+  if (items.length < 2) return -1
+  const first = items[0], second = items[items.length - 1]
+  const main = document.querySelector('.main') || document.body
+  first.click()
+  await new Promise(r => setTimeout(r, 250))
+  const before = main.textContent.slice(0, 400)
   const t0 = performance.now()
-  window.dispatchEvent(new KeyboardEvent('keydown', { key: '6', ctrlKey: true, bubbles: true }))
+  second.click()
   const deadline = performance.now() + 2000
   while (performance.now() < deadline) {
-    if (document.querySelector('.listcontrols')) break
-    await new Promise(r => setTimeout(r, 4))
+    if (main.textContent.slice(0, 400) !== before) {
+      return Math.round((performance.now() - t0) * 10) / 10
+    }
+    await new Promise(r => setTimeout(r, 2))
   }
-  return Math.round((performance.now() - t0) * 10) / 10
+  return -1
 })()`)
-record('cached screen switch', revisit, 'ms', 150)
+if (revisit < 0) {
+  console.error('Cached screen switch never completed — reporting as a failure, not a fast number.')
+  record('cached screen switch', 'not measurable', '', null)
+  results[results.length - 1].pass = false
+} else {
+  record('cached screen switch', revisit, 'ms', 150)
+}
 
 // --- typing latency -------------------------------------------------------
 // Measured as the synchronous block each keystroke causes, plus any long task
 // it spawns. Neither uses rAF, so neither can be poisoned by frame throttling.
-await evaluate(`window.dispatchEvent(new KeyboardEvent('keydown', { key: '1', ctrlKey: true, bubbles: true }))`)
+await evaluate(`(() => { const n = document.querySelector('.nav__item'); if (n) n.click() })()`)
+await new Promise((r) => setTimeout(r, 400))
 const typing = await evaluate(`(async () => {
   const area = document.querySelector('textarea.textarea')
   if (!area) return null
@@ -190,6 +245,71 @@ if (typing) {
   record('worst keystroke block', t.worstBlockMs, 'ms', 50)
   record('median keystroke block', t.medianBlockMs, 'ms', 16)
   record('long tasks while typing', t.longTasks.length, 'tasks', 0)
+}
+
+// --- scrolling a long list ------------------------------------------------
+// The screens that hold real volume — a thousand log entries, hundreds of
+// messages — were not measured at all before, and a list is where jank lives.
+// Measured as the synchronous cost of each scroll step plus any long task it
+// causes: no rAF, so frame throttling cannot fake a good number.
+for (const label of navLabels) {
+  const stats = await evaluate(`(async () => {
+    const item = [...document.querySelectorAll('.nav__item')]
+      .find(e => e.textContent.trim() === ${JSON.stringify(label)})
+    if (!item) return null
+    item.click()
+    await new Promise(r => setTimeout(r, 350))
+
+    // The element that actually scrolls, not its parent. Measuring the parent
+    // is how an earlier probe got a constant zero out of a page that scrolls.
+    const scroller = [...document.querySelectorAll('*')]
+      .filter(el => {
+        const s = getComputedStyle(el)
+        return (s.overflowY === 'auto' || s.overflowY === 'scroll') &&
+               el.scrollHeight > el.clientHeight + 200
+      })
+      .sort((a, b) => b.scrollHeight - a.scrollHeight)[0]
+    if (!scroller) return null
+
+    const longTasks = []
+    const po = new PerformanceObserver(l => { for (const e of l.getEntries()) longTasks.push(Math.round(e.duration)) })
+    po.observe({ entryTypes: ['longtask'] })
+
+    const blocks = []
+    const step = Math.max(200, Math.floor(scroller.clientHeight * 0.9))
+    for (let i = 0; i < 25 && scroller.scrollTop + scroller.clientHeight < scroller.scrollHeight; i++) {
+      const t0 = performance.now()
+      scroller.scrollTop += step
+      // Force layout so the cost of the scroll is paid inside the measurement
+      // rather than after it.
+      void scroller.scrollHeight
+      blocks.push(performance.now() - t0)
+      await new Promise(r => setTimeout(r, 24))
+    }
+    await new Promise(r => setTimeout(r, 250))
+    po.disconnect()
+    if (blocks.length === 0) return null
+    const sorted = [...blocks].sort((a, b) => a - b)
+    return JSON.stringify({
+      steps: blocks.length,
+      rows: scroller.querySelectorAll('.log, .row, li, .msg').length,
+      scrollHeight: Math.round(scroller.scrollHeight),
+      medianMs: Math.round(sorted[Math.floor(sorted.length / 2)] * 100) / 100,
+      worstMs: Math.round(sorted[sorted.length - 1] * 100) / 100,
+      longTasks: longTasks.length,
+      worstLongTaskMs: longTasks.length ? Math.max(...longTasks) : 0,
+    })
+  })()`)
+  if (!stats) continue
+  const s = JSON.parse(stats)
+  // Only screens with something substantial to scroll are worth a verdict.
+  if (s.scrollHeight < 1500) continue
+  record(`scroll ${label} — worst block`, s.worstMs, 'ms', 50)
+  record(`scroll ${label} — long tasks`, s.longTasks, 'tasks', 0)
+  console.error(
+    `  [scroll] ${label}: ${s.steps} steps over ${s.scrollHeight}px, ${s.rows} rows in DOM, ` +
+      `median ${s.medianMs}ms worst ${s.worstMs}ms, ${s.longTasks} long task(s) worst ${s.worstLongTaskMs}ms`,
+  )
 }
 
 // --- memory ---------------------------------------------------------------

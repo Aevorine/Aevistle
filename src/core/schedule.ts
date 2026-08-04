@@ -373,6 +373,16 @@ export interface OccurrenceOptions {
   /** Compute occurrences strictly after this instant. */
   after?: number
   /**
+   * Stop once a fire time passes this instant, in addition to `count`.
+   *
+   * For a caller that only cares about a window — the conflict scan looks 60
+   * days ahead — `count` alone is the wrong bound: it asked for 200
+   * occurrences and threw away everything past the window. A weekly rule fits
+   * about nine occurrences into 60 days and a monthly one fits two, so
+   * roughly 95% of that work was computed and discarded.
+   */
+  until?: number
+  /**
    * Which days are not worked, for the legacy `skipWeekends` flag only. Jobs
    * that have been through `migrateSkipWeekends` never reach that branch.
    */
@@ -387,6 +397,7 @@ export function computeOccurrences(rec: Recurrence, opts: OccurrenceOptions = {}
   const count = Math.max(1, opts.count ?? 24)
   const runsSoFar = opts.runsSoFar ?? 0
   const after = opts.after ?? Date.now()
+  const until = opts.until
   const calendar = opts.calendar ?? DEFAULT_WORK_CALENDAR
 
   const out: number[] = []
@@ -398,6 +409,10 @@ export function computeOccurrences(rec: Recurrence, opts: OccurrenceOptions = {}
     const next = nextFireAfter(rec, cursor, calendar)
     if (next === null) break
 
+    // Stopping *before* pushing: an occurrence past the window is one the
+    // caller was going to discard anyway, and continuing to generate them is
+    // the whole cost this bound exists to remove.
+    if (until !== undefined && next > until) break
     if (rec.endMode === 'onDate' && rec.endDate !== undefined && next > rec.endDate) break
     if (rec.endMode === 'afterCount' && rec.maxRuns !== undefined) {
       if (runsSoFar + produced >= rec.maxRuns) break

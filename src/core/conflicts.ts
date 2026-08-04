@@ -89,8 +89,16 @@ export function findConflicts(
   for (const job of jobs) {
     if (!job.enabled) continue
     const policy = job.recurrence.workdayPolicy ?? 'off'
+    // `until` as well as `count`: the filter below used to be the only bound,
+    // so a weekly rule generated 200 occurrences — about four years — to keep
+    // the nine that fall inside a 60-day window. Measured over 300 jobs that
+    // was 263.7 ms of the work calendar's 392 ms first render.
+    //
+    // The filter stays. `computeOccurrences` stops at the first occurrence
+    // past `until`, and a shifted occurrence can land past it afterwards.
     const raw = computeOccurrences(job.recurrence, {
       after: now,
+      until,
       count: sampleLimit,
       runsSoFar: job.runCount,
       calendar,
