@@ -99,6 +99,19 @@ La última versión está en **[Releases](https://github.com/Aevorine/Aevistle/r
 insignia de arriba lo lee del mismo sitio. A propósito no se escribe aquí, para
 que esta tabla no pueda quedarse anticuada.
 
+> **Verificar una descarga.** Cada versión publica `SHA256SUMS.txt`, una firma
+> separada `SHA256SUMS.txt.asc` y la clave pública que la generó:
+>
+> ```bash
+> gpg --import aevistle-public-key.asc
+> gpg --verify SHA256SUMS.txt.asc SHA256SUMS.txt
+> sha256sum -c SHA256SUMS.txt
+> ```
+>
+> Las sumas de comprobación demuestran que el archivo llegó intacto; la firma
+> demuestra que procede de la clave de este proyecto. La huella está en
+> [SECURITY.md](../SECURITY.md).
+
 > Windows SmartScreen avisará de un editor desconocido. Así se ve una versión
 > sin certificado de firma de pago: elige **Más información → Ejecutar de todas
 > formas**, o comprueba antes el SHA-256 desde la página de la versión.

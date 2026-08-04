@@ -22,7 +22,7 @@ import type {
   SendResult,
 } from './types'
 import type { DownloadProgress, UpdateAsset, UpdateInfo } from './update'
-import type { DownloadOutcome, TrayCommand } from './ipc-contract'
+import type { DesktopPrefs, DownloadOutcome, TrayCommand } from './ipc-contract'
 
 export interface AppInfo {
   version: string
@@ -30,6 +30,14 @@ export interface AppInfo {
   os: string
   /** Human-readable location of the state file / preferences store. */
   dataLocation: string
+  /**
+   * Where an unreadable state file was moved to at startup, if that happened.
+   *
+   * Present so the app can say "your data could not be read, here is where it
+   * went" instead of simply opening empty. An app that comes up factory-fresh
+   * with no message looks exactly like one that lost everything.
+   */
+  recoveredFrom?: string
   /**
    * Absolute path of the bundled MCP server, so the Settings card can print a
    * command that works on this machine. Desktop only.
@@ -166,6 +174,14 @@ export interface PlatformBridge {
    * how an explicit in-app choice catches up with it.
    */
   setUiLocale?(locale: LocaleId): Promise<void>
+
+  /**
+   * Hand the shell the two settings it, not the window, has to act on.
+   *
+   * Absent on Android and in the browser preview, where neither a tray nor a
+   * login item exists — the settings screen hides both switches there.
+   */
+  setDesktopPrefs?(prefs: DesktopPrefs): Promise<void>
 
   /** Tray menu items that ask the window to do something. Desktop only. */
   onTrayCommand?(handler: (command: TrayCommand) => void): () => void

@@ -12,6 +12,7 @@ import { SearchInput } from '../components/inputs'
 import { VirtualList } from '../components/VirtualList'
 import { IconActivity, IconDownload, IconTrash } from '../components/icons'
 import { sendsFromLogs, summariseReceipts, trackReceipts } from '../core/receipts'
+import { saveGeneratedFile } from '../core/download'
 import { useApp } from '../state/AppState'
 import { useI18n } from '../i18n'
 import type { LogEntry } from '../core/types'
@@ -111,16 +112,27 @@ export function LogsView() {
    * kind of surprise that gets noticed only after the file has been sent to
    * someone else.
    */
-  const exportCsv = () => {
+  const exportCsv = async () => {
     const csv = toCsv(entries, (id) => receipts.get(id)?.status ?? '')
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `aevistle-activity-${new Date().toISOString().slice(0, 10)}.csv`
-    a.click()
-    URL.revokeObjectURL(url)
-    toast.push({ tone: 'success', title: t('logs.exported', { n: entries.length }) })
+    const name = `aevistle-activity-${new Date().toISOString().slice(0, 10)}.csv`
+    // Same fix as the backup card and the calendar: report what happened, not
+    // what was attempted. This one also revoked the object URL on the very
+    // next line, which is documented in `core/download.ts` as a way to cancel
+    // the download you just started.
+    const { outcome, unsupported } = await saveGeneratedFile(csv, name, 'text/csv')
+    if (unsupported) {
+      toast.push({ tone: 'error', title: t('download.androidUnsupported') })
+      return
+    }
+    if (!outcome || outcome.ok) {
+      toast.push({ tone: 'success', title: t('logs.exported', { n: entries.length }) })
+      return
+    }
+    toast.push(
+      outcome.cancelled
+        ? { tone: 'info', title: t('download.cancelled') }
+        : { tone: 'error', title: t('download.failed'), detail: outcome.name },
+    )
   }
 
   const clear = async () => {
@@ -175,7 +187,7 @@ export function LogsView() {
           action={
             state.logs.length > 0 ? (
               <div className="btn-row">
-                <Button variant="secondary" icon={<IconDownload size={15} />} onClick={exportCsv}>
+                <Button variant="secondary" icon={<IconDownload size={15} />} onClick={() => void exportCsv()}>
                   {t('logs.export')}
                 </Button>
                 <Button variant="ghost" icon={<IconTrash size={15} />} onClick={clear}>

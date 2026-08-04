@@ -98,6 +98,18 @@ IMAP 服务器，Aevistle 就会同步出一个统一收件箱，自动把验证
 `<version>` 就是[最新发布页](https://github.com/Aevorine/Aevistle/releases/latest)上写的那个版本号，
 顶部那个徽章读的也是同一处。这里故意不写死，免得过一阵就对不上了。
 
+> **校验下载的文件。** 每个 Release 都会发布 `SHA256SUMS.txt`、它的分离签名
+> `SHA256SUMS.txt.asc`，以及签名用的公钥：
+>
+> ```bash
+> gpg --import aevistle-public-key.asc
+> gpg --verify SHA256SUMS.txt.asc SHA256SUMS.txt
+> sha256sum -c SHA256SUMS.txt
+> ```
+>
+> 只对校验和能证明文件传输完整；对签名才能证明它出自本项目的密钥。
+> 指纹写在 [SECURITY.md](../SECURITY.md)。
+
 > Windows SmartScreen 会提示「未知发布者」。没有购买代码签名证书的软件就是这个样子，
 > 选 **更多信息 → 仍要运行**；不放心的话，先对一下 Release 页面上的 SHA-256 校验值。
 

@@ -299,6 +299,22 @@ export function ComposeView({
   const patch = (p: Partial<MessageDraft>) => dispatch({ type: 'setDraft', patch: p })
 
   /**
+   * The character and byte counts under the message box.
+   *
+   * Memoised because both were computed in the render body: a new
+   * `TextEncoder` allocated, the entire body re-encoded, and the whole string
+   * spread into an array of code points — twice the length of the message, on
+   * every keystroke *and* on every unrelated re-render of this screen.
+   */
+  const bodyCount = useMemo(
+    () => ({
+      c: [...draft.body].length,
+      b: formatBytes(new TextEncoder().encode(draft.body).length),
+    }),
+    [draft.body],
+  )
+
+  /**
    * The pictures on this draft, as pictures.
    *
    * The body is a plain textarea, so an embedded image was previously visible
@@ -840,7 +856,7 @@ export function ComposeView({
                     placeholder={t('compose.recipientPlaceholder')}
                     suggestions={state.contacts}
                     recents={state.recentRecipients}
-                    quickBar
+                    pickerLabel={t('compose.to')}
                   />
                 </Field>
 
@@ -864,6 +880,7 @@ export function ComposeView({
                       onChange={(v) => patch({ cc: v })}
                       suggestions={state.contacts}
                       recents={state.recentRecipients}
+                      pickerLabel={t('compose.cc')}
                     />
                   </Field>
                   <Field label={t('compose.bcc')}>
@@ -872,6 +889,7 @@ export function ComposeView({
                       onChange={(v) => patch({ bcc: v })}
                       suggestions={state.contacts}
                       recents={state.recentRecipients}
+                      pickerLabel={t('compose.bcc')}
                     />
                   </Field>
                 </div>
@@ -928,10 +946,7 @@ export function ComposeView({
                       information.
                     */}
                     <span className="field__count" aria-live="polite">
-                      {t('compose.bodyCount', {
-                        c: [...draft.body].length,
-                        b: formatBytes(new TextEncoder().encode(draft.body).length),
-                      })}
+                      {t('compose.bodyCount', bodyCount)}
                     </span>
                     {/* The way out, and only in the mode that needs one. The
                         toggle lives in the top bar — which focus mode takes off
@@ -1178,6 +1193,7 @@ export function ComposeView({
                     outcome.errorKind,
                     outcome.diagnostics?.port ?? account?.port ?? 0,
                     outcome.diagnostics?.securityUsed ?? account?.security ?? 'ssl',
+                    { host: outcome.diagnostics?.host ?? account?.host, message: outcome.error },
                   )
                   return key ? <div style={{ marginTop: 6 }}>{t(key as 'error.tlsHint')}</div> : null
                 })()}

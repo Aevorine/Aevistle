@@ -25,7 +25,7 @@ import {
 } from 'electron'
 import path from 'node:path'
 import { promises as fs, readFileSync, writeFileSync } from 'node:fs'
-import { IPC, type TrayCommand } from '../src/core/ipc-contract'
+import { IPC, type DesktopPrefs, type TrayCommand } from '../src/core/ipc-contract'
 import type {
   Attachment,
   InboxAccountState,
@@ -75,6 +75,7 @@ import {
   isDefaultLocation,
   loadState,
   pruneSnapshots,
+  recoveredFrom,
   saveState,
   setDataRoot,
   setSecret,
@@ -110,6 +111,19 @@ let tray: Tray | null = null
  * what the user actually picked.
  */
 let uiLocale: LocaleId = 'en'
+/**
+ * Mirrors the two settings-screen switches whose effect is out here.
+ *
+ * The defaults match `DEFAULT_SETTINGS` so behaviour before the renderer has
+ * booted is the behaviour the settings screen will claim. The renderer pushes
+ * the real values through `IPC.setDesktopPrefs`.
+ */
+let desktopPrefs: DesktopPrefs = { minimiseToTray: true, launchAtLogin: false }
+/**
+ * Started by the OS at login, so the first window should stay out of the way.
+ * Consumed once — see `ready-to-show`.
+ */
+let launchedHidden = process.argv.includes('--hidden')
 let quitting = false
 let dataFolderFellBack = false
 const scheduler = new Scheduler()
@@ -294,12 +308,48 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 app.on('second-instance', () => {
-  if (mainWindow) {
-    if (mainWindow.isMinimized()) mainWindow.restore()
-    mainWindow.show()
-    mainWindow.focus()
-  }
+  revealWindow()
 })
+
+/**
+ * Bring the window to the user, whatever state it is in.
+ *
+ * `show()` on its own is not enough: a *minimised* window still counts as
+ * shown, so `show()` does nothing and the click reads as broken. Restore
+ * first, then show, then focus.
+ */
+function revealWindow(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow()
+    return
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.show()
+  mainWindow.focus()
+}
+
+/**
+ * One click on the tray icon toggles the window.
+ *
+ * Three starting states and only one of them means "hide": the window is in
+ * front of the user and they clicked the icon to put it away. A window that is
+ * merely *visible* is not the same thing — it can be minimised (which Electron
+ * still reports as visible, the trap this function exists to avoid) or sitting
+ * behind a browser, and in both of those cases the click means "bring it here".
+ */
+function toggleWindowFromTray(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow()
+    return
+  }
+  const inFront =
+    mainWindow.isVisible() && !mainWindow.isMinimized() && mainWindow.isFocused()
+  if (inFront) {
+    mainWindow.hide()
+    return
+  }
+  revealWindow()
+}
 
 // ---------------------------------------------------------------------------
 // Window
@@ -414,7 +464,22 @@ function createWindow(): void {
      compose form out twice at two different heights. */
   if (saved?.maximized) mainWindow.maximize()
 
-  mainWindow.once('ready-to-show', () => mainWindow?.show())
+  /*
+   * Started by the OS at login means started for the schedule. Showing the
+   * window would make "start with the computer" feel like an intrusion every
+   * morning, and the tray icon is already there to open it.
+   */
+  mainWindow.once('ready-to-show', () => {
+    // Only the *first* window of the session may stay hidden. `--hidden` is
+    // still in `process.argv` for as long as the process lives, so re-reading
+    // it would mean that every later window — the one the tray icon asks for,
+    // most of all — also refused to appear.
+    if (launchedHidden && tray) {
+      launchedHidden = false
+      return
+    }
+    mainWindow?.show()
+  })
 
   mainWindow.on('resize', scheduleWindowSave)
   mainWindow.on('move', scheduleWindowSave)
@@ -515,9 +580,17 @@ function createWindow(): void {
     // the timer would never fire, and the last resize before closing is
     // exactly the size the user meant to keep.
     saveWindowState()
-    if (!quitting && tray) {
+    if (!quitting && tray && desktopPrefs.minimiseToTray) {
       event.preventDefault()
       mainWindow?.hide()
+      return
+    }
+    // The switch is off, so closing means closing. `window-all-closed` will
+    // not do it for us — it deliberately keeps the process alive whenever a
+    // tray icon exists, which is the behaviour the user just turned off.
+    if (!quitting) {
+      quitting = true
+      app.quit()
     }
   })
 
@@ -556,10 +629,13 @@ function createTray(): void {
 
   tray.setToolTip('Aevistle')
   refreshTrayMenu()
-  tray.on('double-click', () => {
-    mainWindow?.show()
-    mainWindow?.focus()
-  })
+
+  // Windows delivers a single left click as `click`, and a double click as
+  // `click` *followed by* `double-click`. Handling both with different
+  // behaviour would make one double click toggle twice and flicker, so the
+  // second gesture is deliberately left unbound here.
+  tray.on('click', toggleWindowFromTray)
+  if (process.platform === 'darwin') tray.on('double-click', revealWindow)
 }
 
 /**
@@ -583,14 +659,8 @@ function refreshTrayMenu(): void {
       | 'tray.nextAt',
   ) => tr(uiLocale, key)
 
-  const reveal = () => {
-    if (!mainWindow) createWindow()
-    mainWindow?.show()
-    mainWindow?.focus()
-  }
-
   const send = (command: TrayCommand) => () => {
-    reveal()
+    revealWindow()
     mainWindow?.webContents.send(IPC.trayCommand, command)
   }
 
@@ -620,7 +690,7 @@ function refreshTrayMenu(): void {
       // clickable would invite the guess that clicking sends it now.
       { label: nextLabel, enabled: false },
       { type: 'separator' },
-      { label: label('tray.open'), click: reveal },
+      { label: label('tray.open'), click: revealWindow },
       { label: label('tray.compose'), click: send('compose') },
       { label: label('tray.schedule'), click: send('schedule') },
       { label: label('tray.logs'), click: send('logs') },
@@ -718,6 +788,31 @@ function registerIpc(): void {
   ipcMain.handle(IPC.prewarm, async (_e, account: MailAccount) => {
     const secret = await getSecret(account.id)
     return prewarm(account, secret)
+  })
+
+  ipcMain.handle(IPC.setDesktopPrefs, (_e, prefs: DesktopPrefs) => {
+    // Coerced rather than trusted: `minimiseToTray` decides whether closing the
+    // window quits the app, and `undefined` there would read as "quit".
+    const next = {
+      minimiseToTray: prefs?.minimiseToTray !== false,
+      launchAtLogin: prefs?.launchAtLogin === true,
+    }
+    const loginChanged = next.launchAtLogin !== desktopPrefs.launchAtLogin
+    desktopPrefs = next
+    // Only written when it actually changes: this touches the registry on
+    // Windows, and the renderer pushes prefs on every settings edit.
+    if (loginChanged && process.platform !== 'linux') {
+      try {
+        app.setLoginItemSettings({
+          openAtLogin: next.launchAtLogin,
+          // Started by the OS means started for the schedule, not to be stared
+          // at — the tray icon is the whole point of the option.
+          args: next.launchAtLogin ? ['--hidden'] : [],
+        })
+      } catch (error) {
+        console.error('[aevistle] could not update the login item:', error)
+      }
+    }
   })
 
   ipcMain.handle(IPC.setUiLocale, (_e, locale: LocaleId) => {
@@ -1150,6 +1245,7 @@ function registerIpc(): void {
     platform: 'desktop' as const,
     os: `${process.platform} ${process.arch}`,
     dataLocation: dataLocation(),
+    recoveredFrom: recoveredFrom(),
     // Packaged builds get it from extraResources; a dev run reads it straight
     // out of the repo, so the Settings command is correct either way.
     mcpServerPath: app.isPackaged
@@ -1233,7 +1329,15 @@ function registerIpc(): void {
 
   ipcMain.handle(
     IPC.checkForUpdate,
-    (): Promise<UpdateInfo> => fetchLatest(app.getVersion(), 'desktop'),
+    (): Promise<UpdateInfo> =>
+      // electron-builder sets this only in the portable build, and it is the
+      // only signal there is: both builds are the same code in the same asar.
+      fetchLatest(
+        app.getVersion(),
+        'desktop',
+        undefined,
+        Boolean(process.env.PORTABLE_EXECUTABLE_DIR),
+      ),
   )
 
   ipcMain.handle(IPC.downloadUpdate, async (_e, asset: UpdateAsset) => {
@@ -1332,8 +1436,11 @@ void app.whenReady().then(() => {
   uiLocale = systemLocale()
 
   registerIpc()
-  createWindow()
+  // The tray comes first so that the window's `ready-to-show` can tell whether
+  // staying hidden would strand the user with no way to open the app. Building
+  // it needs nothing from the window.
   createTray()
+  createWindow()
 
   scheduler.on('jobEvent', (payload) => {
     mainWindow?.webContents.send(IPC.jobEvent, payload)
@@ -1371,6 +1478,12 @@ app.on('before-quit', () => {
 })
 
 app.on('window-all-closed', () => {
-  // With a tray icon the app deliberately keeps running so schedules fire.
+  // With a tray icon the app deliberately keeps running so schedules fire —
+  // unless the user has said they do not want that, in which case the last
+  // window closing is the end of the session.
+  if (!desktopPrefs.minimiseToTray) {
+    app.quit()
+    return
+  }
   if (!tray && process.platform !== 'darwin') app.quit()
 })

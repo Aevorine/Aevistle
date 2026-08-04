@@ -1,57 +1,17 @@
 /** Recipient chips and the attachment drop zone. */
 
 import { useMemo, useRef, useState } from 'react'
-import { IconPaperclip, IconSearch, IconStar, IconX } from './icons'
+import { IconPaperclip, IconSearch, IconUsers, IconX } from './icons'
 import { IconButton } from './ui'
+import { RecipientPicker } from './RecipientPicker'
 import { useI18n } from '../i18n'
 import { dedupeAddresses, isValidAddress, parseAddressList, extensionOf, isRiskyAttachment } from '../core/validate'
+import { buildPool } from '../core/recipients'
 import type { Attachment, Contact, RecentRecipient } from '../core/types'
 
 // ---------------------------------------------------------------------------
 // Recipient tag field
 // ---------------------------------------------------------------------------
-
-/**
- * One entry in the recipient picker, whoever it came from.
- *
- * The contact book and the sent-to history are two different lists answering
- * two different questions ("who do I know" and "who do I write to"), and the
- * field needs one ranked list. Flattening them here rather than at each call
- * site is what stops the two from being merged slightly differently in the
- * To, Cc and Bcc fields of the same form.
- */
-interface Pick {
-  key: string
-  name: string
-  address: string
-  /** Pinned contacts and frequent correspondents sort above the rest. */
-  weight: number
-  pinned?: boolean
-}
-
-/** Initials for the round badge: "Wei Chen" → "W", "wei@…" → "W". */
-function initialOf(pick: Pick): string {
-  const source = pick.name.trim() || pick.address
-  return source.slice(0, 1).toUpperCase()
-}
-
-/**
- * Would this contact match what has been typed?
- *
- * Matches on name and address, and on the *initials* of a multi-word name, so
- * "wc" finds "Wei Chen" — typing initials is how people actually reach for a
- * name they already know, and requiring the full spelling makes the completion
- * useful only to people who did not need it.
- */
-function matchesQuery(pick: Pick, q: string): boolean {
-  if (pick.name.toLowerCase().includes(q) || pick.address.toLowerCase().includes(q)) return true
-  const initials = pick.name
-    .split(/[\s·,]+/)
-    .filter(Boolean)
-    .map((part) => part[0]?.toLowerCase() ?? '')
-    .join('')
-  return initials.length > 1 && initials.startsWith(q)
-}
 
 export function TagField({
   values,
@@ -59,8 +19,14 @@ export function TagField({
   placeholder,
   suggestions = [],
   recents = [],
-  /** Show the always-visible quick-pick bar. Off for Cc/Bcc, which are secondary. */
-  quickBar,
+  /**
+   * The label the picker card announces itself with ("To", "Cc", "Bcc").
+   *
+   * Also the switch that turns the card on at all: a field without one keeps
+   * the plain typing behaviour, which is what the tests and any future
+   * non-recipient use of this component want.
+   */
+  pickerLabel,
   id,
 }: {
   values: string[]
@@ -68,14 +34,13 @@ export function TagField({
   placeholder?: string
   suggestions?: Contact[]
   recents?: RecentRecipient[]
-  quickBar?: boolean
+  pickerLabel?: string
   id?: string
 }) {
-  const { t } = useI18n()
   const [text, setText] = useState('')
-  const [focused, setFocused] = useState(false)
-  const [highlight, setHighlight] = useState(0)
+  const [pickerOpen, setPickerOpen] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
+  const wrapRef = useRef<HTMLDivElement>(null)
 
   const commit = (raw: string) => {
     const parsed = parseAddressList(raw)
@@ -84,91 +49,19 @@ export function TagField({
     setText('')
   }
 
-  const add = (address: string) => {
-    onChange(dedupeAddresses([...values, address]))
-    setText('')
-    setHighlight(0)
-  }
+  const pool = useMemo(() => buildPool(suggestions, recents), [suggestions, recents])
 
-  const taken = useMemo(() => new Set(values.map((v) => v.toLowerCase())), [values])
-
-  /**
-   * Everyone worth offering, ranked once.
-   *
-   * Contacts carry the names, the history carries the evidence of who is
-   * actually written to; an address in both keeps the contact's name and gains
-   * the history's weight. Weights are deliberately coarse — pinned beats
-   * frequent beats known — because the exact ordering inside a band matters
-   * far less than the bands being right.
-   */
-  const pool = useMemo((): Pick[] => {
-    const byAddress = new Map<string, Pick>()
-    for (const c of suggestions) {
-      const key = c.address.toLowerCase()
-      byAddress.set(key, {
-        key,
-        name: c.name,
-        address: c.address,
-        weight: c.pinned ? 1000 : 10,
-        pinned: c.pinned,
-      })
-    }
-    for (const r of recents) {
-      const key = r.address.toLowerCase()
-      const existing = byAddress.get(key)
-      // Damped, so one address written to forty times cannot bury everyone.
-      const bump = Math.min(400, Math.log2(r.count + 1) * 60)
-      if (existing) existing.weight += bump
-      else {
-        byAddress.set(key, {
-          key,
-          name: r.name ?? '',
-          address: r.address,
-          weight: bump,
-        })
-      }
-    }
-    return [...byAddress.values()].sort((a, b) => b.weight - a.weight || a.address.localeCompare(b.address))
-  }, [suggestions, recents])
-
-  const available = useMemo(() => pool.filter((p) => !taken.has(p.key)), [pool, taken])
-
-  const matches = useMemo(() => {
-    const q = text.trim().toLowerCase()
-    if (q.length === 0) return []
-    return available.filter((p) => matchesQuery(p, q)).slice(0, 8)
-  }, [text, available])
-
-  /**
-   * Common recipients, offered before anything is typed — "at least give me
-   * the common ones" was the ask, and a field that only helps once you have
-   * started spelling an address is not that.
-   */
-  const quickPicks = useMemo(() => available.slice(0, 8), [available])
-
-  /** Contact tags, so a whole group can be added in one click. */
-  const groups = useMemo(() => {
-    const map = new Map<string, string[]>()
-    for (const c of suggestions) {
-      for (const tag of c.tags) {
-        if (!tag) continue
-        const bucket = map.get(tag) ?? []
-        bucket.push(c.address)
-        map.set(tag, bucket)
-      }
-    }
-    return [...map.entries()]
-      .filter(([, addresses]) => addresses.some((a) => !taken.has(a.toLowerCase())))
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .slice(0, 6)
-  }, [suggestions, taken])
-
-  const dropdown = text.trim().length > 0 ? matches : focused ? quickPicks : []
-  const active = dropdown[Math.min(highlight, dropdown.length - 1)]
+  const showPicker = pickerLabel !== undefined && pickerOpen
 
   return (
-    <div className="tagfield-wrap">
-      <div className="tagfield" onClick={() => inputRef.current?.focus()}>
+    <div className="tagfield-wrap" ref={wrapRef}>
+      <div
+        className="tagfield"
+        onClick={() => {
+          inputRef.current?.focus()
+          if (pickerLabel !== undefined) setPickerOpen(true)
+        }}
+      >
         {values.map((address) => {
           const valid = isValidAddress(address)
           const known = pool.find((p) => p.key === address.toLowerCase())
@@ -202,25 +95,20 @@ export function TagField({
           autoComplete="off"
           spellCheck={false}
           role="combobox"
-          aria-expanded={dropdown.length > 0}
-          onChange={(e) => {
-            setText(e.target.value)
-            setHighlight(0)
-          }}
+          aria-expanded={showPicker}
+          onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
             // The IME owns Enter while a candidate window is open; committing
             // the raw pinyin there would put "weichen" in as an address.
             if (e.nativeEvent.isComposing) return
-            if (e.key === 'ArrowDown' && dropdown.length > 0) {
+            if (e.key === 'ArrowDown' && pickerLabel !== undefined && !pickerOpen) {
               e.preventDefault()
-              setHighlight((h) => (h + 1) % dropdown.length)
-            } else if (e.key === 'ArrowUp' && dropdown.length > 0) {
-              e.preventDefault()
-              setHighlight((h) => (h - 1 + dropdown.length) % dropdown.length)
-            } else if (e.key === 'Enter' && active) {
-              e.preventDefault()
-              add(active.address)
+              setPickerOpen(true)
             } else if (e.key === 'Enter' || e.key === ',' || e.key === ';' || e.key === 'Tab') {
+              // The card, when it is open and something is highlighted, has
+              // already handled Enter in the capture phase and stopped it.
+              // Reaching here means "commit what I typed", which is the whole
+              // point of a field that also accepts any address at all.
               if (text.trim()) {
                 e.preventDefault()
                 commit(text)
@@ -236,88 +124,52 @@ export function TagField({
               commit(pasted)
             }
           }}
-          onFocus={() => setFocused(true)}
+          onFocus={() => {
+            if (pickerLabel !== undefined) setPickerOpen(true)
+          }}
           onBlur={() => {
-            if (text.trim()) commit(text)
-            setFocused(false)
+            // Only commit leftover text when the card is not up. While it is,
+            // the same text is the card's filter — committing it would turn
+            // "fin" (meaning: show me the finance group) into an invalid
+            // recipient chip the moment focus moved.
+            if (text.trim() && !showPicker) commit(text)
           }}
         />
+        {pickerLabel !== undefined ? (
+          <button
+            type="button"
+            className="tagfield__open"
+            aria-label={pickerLabel}
+            aria-expanded={showPicker}
+            onClick={(e) => {
+              e.stopPropagation()
+              setPickerOpen((v) => !v)
+            }}
+          >
+            <IconUsers size={15} />
+          </button>
+        ) : null}
       </div>
 
-      {dropdown.length > 0 ? (
-        <div className="tagfield__menu" role="listbox">
-          {text.trim().length === 0 ? (
-            <div className="tagfield__suggestheader">{t('compose.commonRecipients')}</div>
-          ) : null}
-          {dropdown.map((p, i) => (
-            <button
-              key={p.key}
-              type="button"
-              role="option"
-              aria-selected={i === highlight}
-              className="tagfield__option"
-              data-active={i === highlight || undefined}
-              onMouseEnter={() => setHighlight(i)}
-              onMouseDown={(e) => {
-                e.preventDefault()
-                add(p.address)
-              }}
-            >
-              <span className="avatar" aria-hidden="true">
-                {initialOf(p)}
-              </span>
-              <span className="tagfield__optiontext">
-                <span className="tagfield__optionname">{p.name || p.address}</span>
-                <span className="tagfield__optionaddress">{p.address}</span>
-              </span>
-              {p.pinned ? <IconStar size={13} className="tagfield__pin" /> : null}
-            </button>
-          ))}
-        </div>
-      ) : null}
-
-      {/*
-        The always-on quick bar.
-        The dropdown only exists while the field has focus, which means the
-        common recipients are invisible exactly when someone is deciding who to
-        write to. This row is the answer to "give me the common ones": name and
-        address both on show, one click to add.
-      */}
-      {quickBar && (quickPicks.length > 0 || groups.length > 0) ? (
-        <div className="quickpicks">
-          <span className="quickpicks__label">{t('compose.commonRecipients')}</span>
-          {quickPicks.slice(0, 6).map((p) => (
-            <button
-              key={p.key}
-              type="button"
-              className="quickpick"
-              onClick={() => add(p.address)}
-              title={p.address}
-            >
-              <span className="avatar" aria-hidden="true">
-                {initialOf(p)}
-              </span>
-              <span className="quickpick__text">
-                <span className="quickpick__name">{p.name || p.address}</span>
-                {p.name ? <span className="quickpick__address">{p.address}</span> : null}
-              </span>
-            </button>
-          ))}
-          {groups.map(([tag, addresses]) => (
-            <button
-              key={`g_${tag}`}
-              type="button"
-              className="quickpick quickpick--group"
-              onClick={() => onChange(dedupeAddresses([...values, ...addresses]))}
-              title={t('compose.addGroupHint', { n: addresses.length })}
-            >
-              <span className="quickpick__text">
-                <span className="quickpick__name">{tag}</span>
-                <span className="quickpick__address">{t('compose.groupCount', { n: addresses.length })}</span>
-              </span>
-            </button>
-          ))}
-        </div>
+      {pickerLabel !== undefined ? (
+        <RecipientPicker
+          open={pickerOpen}
+          values={values}
+          onChange={onChange}
+          onClose={() => {
+            setPickerOpen(false)
+            // What is left in the box was doing double duty: an address to add
+            // *and* the card's filter. Only the first reading survives the card
+            // closing — "finance", typed to find a group, must not be left
+            // behind as a red invalid chip.
+            if (text.includes('@')) commit(text)
+            else setText('')
+          }}
+          pool={pool}
+          query={text}
+          anchorRef={wrapRef}
+          label={pickerLabel}
+        />
       ) : null}
     </div>
   )

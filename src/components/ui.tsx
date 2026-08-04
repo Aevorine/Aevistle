@@ -52,7 +52,10 @@ export function Button({
   return (
     <button className={classes} disabled={disabled || loading} {...rest}>
       {loading ? <span className="spinner" /> : icon}
-      {children}
+      {/* Wrapped so a narrow screen can drop the words and keep the icon.
+          Four labelled buttons in the compose header need 444px of text and
+          have 284px on a phone, which is how that row became two. */}
+      {children ? <span className="btn__label">{children}</span> : null}
     </button>
   )
 }

@@ -114,6 +114,19 @@ export function initDataRoot(): { root: string; fellBack: boolean } {
   return { root: activeRoot, fellBack }
 }
 
+/**
+ * Where an unreadable file was moved to, if that happened this session.
+ *
+ * Module state rather than a return value because the read that discovers it
+ * has to keep returning `null` — the app must still start. Reported through
+ * `appInfo` so the window can say what happened instead of opening empty.
+ */
+let recoveredPath: string | null = null
+
+export function recoveredFrom(): string | undefined {
+  return recoveredPath ?? undefined
+}
+
 export function dataLocation(): string {
   return activeRoot ?? defaultDataRoot()
 }
@@ -290,12 +303,24 @@ async function readJson<T>(file: string): Promise<T | null> {
   } catch (e) {
     const err = e as NodeJS.ErrnoException
     if (err.code === 'ENOENT') return null
-    // A corrupt file should not brick the app. Move it aside so the user can
-    // recover it manually, and start fresh.
+    /*
+     * A corrupt file should not brick the app. Move it aside so the user can
+     * recover it manually, and start fresh — but *say so*.
+     *
+     * Renaming silently and returning null gave the user an app that opened
+     * factory-fresh with no accounts, no reminders and no explanation, which
+     * from the inside is indistinguishable from having lost everything. The
+     * file is still there and still readable; nobody was ever told.
+     */
     if (e instanceof SyntaxError) {
-      await fs
-        .rename(dataPath(file), dataPath(`${file}.corrupt-${Date.now()}`))
-        .catch(() => {})
+      const moved = dataPath(`${file}.corrupt-${Date.now()}`)
+      try {
+        await fs.rename(dataPath(file), moved)
+        recoveredPath = moved
+      } catch {
+        // Could not even move it. Still worth reporting that it was unreadable.
+        recoveredPath = dataPath(file)
+      }
       return null
     }
     throw e

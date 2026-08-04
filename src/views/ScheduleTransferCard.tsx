@@ -30,7 +30,7 @@ function fileName(now = new Date()): string {
 }
 
 export function ScheduleTransferCard() {
-  const { state, dispatch, bridge } = useApp()
+  const { state, dispatch, bridge, scheduleDraft } = useApp()
   const { t } = useI18n()
   const toast = useToast()
   const fileInput = useRef<HTMLInputElement>(null)
@@ -108,7 +108,7 @@ export function ScheduleTransferCard() {
     }
   }
 
-  const doImport = () => {
+  const doImport = async () => {
     if (!parsed || !accountId) return
     const { jobs, droppedAttachments } = materialise(
       parsed,
@@ -137,7 +137,17 @@ export function ScheduleTransferCard() {
       if (mergedDates > 0) dispatch({ type: 'patchSettings', patch: { workCalendar: next } })
     }
 
-    for (const job of jobs) dispatch({ type: 'upsertJob', job })
+    /*
+     * `scheduleDraft`, not a bare `upsertJob`.
+     *
+     * The reducer stores a job exactly as given and computes nothing, so an
+     * imported job kept the empty `occurrences` array `materialise` hands
+     * back. The row then said "armed" with no next send, the health strip
+     * counted it among the reminders that can no longer fire, and on Android —
+     * where the alarm is set from `job.occurrences` — not one alarm was
+     * registered. Everything looked right and nothing was scheduled.
+     */
+    for (const job of jobs) await scheduleDraft(job)
     setParsed(null)
     setMissing(new Set())
     const notes = [
@@ -252,7 +262,7 @@ export function ScheduleTransferCard() {
             <div className="btn-row">
               <Button
                 variant="primary"
-                onClick={doImport}
+                onClick={() => void doImport()}
                 disabled={parsed.jobs.length === 0 || !accountId}
               >
                 {t('transfer.confirmImport', { n: parsed.jobs.length })}

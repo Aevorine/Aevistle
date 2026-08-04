@@ -197,6 +197,14 @@ export interface Recurrence {
   dayOfMonth?: number
   /** A 31st in a 30-day month: clamp to the last day, or skip that month. */
   monthDayFallback: 'last' | 'skip'
+  /**
+   * Which month a yearly rule fires in. **0 = January**, matching
+   * `Date.getMonth()`.
+   *
+   * Spelled out because it once was not: three of the four places that touch
+   * this field agreed on 0-based and the fourth — the one that decides whether
+   * a given day is a send day — read it as 1-based.
+   */
   month?: number
   /** Standard 5-field cron: minute hour day-of-month month day-of-week. */
   cron?: string

@@ -93,6 +93,7 @@ import {
 import { findConflicts, type Conflict } from '../core/conflicts'
 import { buildIcs, calendarToEvents, eventsToCalendarDates, jobsToEvents, parseIcs } from '../core/ics'
 import { planReschedule } from '../core/reschedule'
+import { saveGeneratedFile } from '../core/download'
 import {
   applyWorkCalendarDetailed,
   DEFAULT_WORK_CALENDAR,
@@ -391,16 +392,32 @@ export function WorkCalendarView() {
 
   // --- .ics -----------------------------------------------------------------
 
-  const downloadIcs = (text: string, name: string) => {
-    const blob = new Blob([text], { type: 'text/calendar;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = name
-    link.click()
-    // Revoking immediately can cancel the download in some builds.
-    setTimeout(() => URL.revokeObjectURL(url), 1000)
-    toast.push({ tone: 'success', title: t('cal.ics.exported', { name }) })
+  /*
+   * The third export in the app, and the one that was left behind when the
+   * other two learned to wait for an answer. It fired "exported" on the click:
+   * on the desktop the save dialog was still open, so cancelling it still
+   * produced a success toast, and on Android the WebView does nothing at all
+   * with a `blob:` URL, so the message was pure fiction.
+   */
+  const downloadIcs = async (text: string, name: string) => {
+    const { outcome, unsupported } = await saveGeneratedFile(text, name, 'text/calendar')
+    if (unsupported) {
+      toast.push({ tone: 'error', title: t('download.androidUnsupported') })
+      return
+    }
+    if (!outcome) {
+      toast.push({ tone: 'success', title: t('cal.ics.exported', { name }) })
+      return
+    }
+    if (outcome.cancelled) {
+      toast.push({ tone: 'info', title: t('download.cancelled') })
+      return
+    }
+    toast.push(
+      outcome.ok
+        ? { tone: 'success', title: t('cal.ics.exported', { name: outcome.name }) }
+        : { tone: 'error', title: t('download.failed'), detail: outcome.name },
+    )
   }
 
   const exportCalendarIcs = () => {
@@ -413,7 +430,7 @@ export function WorkCalendarView() {
       toast.push({ tone: 'info', title: t('workcal.none') })
       return
     }
-    downloadIcs(
+    void downloadIcs(
       buildIcs(events, { name: t('workcal.title') }),
       `aevistle-working-calendar-${todayIso}.ics`,
     )
@@ -425,7 +442,7 @@ export function WorkCalendarView() {
       return
     }
     const { events, expanded } = jobsToEvents(state.jobs)
-    downloadIcs(buildIcs(events, { name: t('schedule.title') }), `aevistle-reminders-${todayIso}.ics`)
+    void downloadIcs(buildIcs(events, { name: t('schedule.title') }), `aevistle-reminders-${todayIso}.ics`)
     if (expanded.length > 0) {
       toast.push({
         tone: 'info',

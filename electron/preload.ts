@@ -18,6 +18,20 @@ import type { InboxEvent, JobEvent } from '../src/core/bridge'
 import type { DownloadProgress } from '../src/core/update'
 import type { ControlRequest } from '../src/core/control'
 
+/**
+ * Tray commands that arrived before the page had a listener.
+ *
+ * Filled by the subscription below, which is installed as soon as this script
+ * runs — long before React exists — and drained by the first `onTrayCommand`
+ * caller.
+ */
+const pendingTrayCommands: TrayCommand[] = []
+let trayCommandDelivered = false
+ipcRenderer.on(IPC.trayCommand, (_event, command: TrayCommand) => {
+  if (trayCommandDelivered) return
+  pendingTrayCommands.push(command)
+})
+
 const api: DesktopApi = {
   loadState: () => ipcRenderer.invoke(IPC.loadState),
   saveState: (state) => ipcRenderer.invoke(IPC.saveState, state),
@@ -30,6 +44,7 @@ const api: DesktopApi = {
   testConnection: (account, secret) => ipcRenderer.invoke(IPC.testConnection, account, secret),
   prewarm: (account) => ipcRenderer.invoke(IPC.prewarm, account),
   setUiLocale: (locale) => ipcRenderer.invoke(IPC.setUiLocale, locale),
+  setDesktopPrefs: (prefs) => ipcRenderer.invoke(IPC.setDesktopPrefs, prefs),
 
   pickFiles: () => ipcRenderer.invoke(IPC.pickFiles),
   snapshotAttachments: (attachments, jobId) =>
@@ -78,8 +93,19 @@ const api: DesktopApi = {
   },
 
   onTrayCommand: (handler) => {
+    // Anything that arrived before React mounted is replayed here.
+    //
+    // "Compose" from the tray menu with the window closed used to do nothing
+    // visible: the main process opened a window and sent the command into a
+    // page that had not run a line of app code yet, so the message was
+    // dropped and the app came up on whatever screen it was last on. The
+    // preload script, unlike the page, is alive the whole time — so it is the
+    // one place that can hold the command until someone is listening.
+    trayCommandDelivered = true
+    const queued = pendingTrayCommands.splice(0)
     const listener = (_event: unknown, command: TrayCommand) => handler(command)
     ipcRenderer.on(IPC.trayCommand, listener)
+    for (const command of queued) handler(command)
     return () => ipcRenderer.removeListener(IPC.trayCommand, listener)
   },
 

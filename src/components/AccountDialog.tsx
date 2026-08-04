@@ -1076,9 +1076,16 @@ export function AccountDialog({
 function TestReport({ result, onApply }: { result: SendResult; onApply: () => void }) {
   const { t } = useI18n()
   const d = result.diagnostics
+  /*
+   * The host and the raw error text are what tell `advisoryKey` it is looking
+   * at a Microsoft account. Both call sites used to omit them, so the two
+   * advisories written specifically for Microsoft — the ones explaining that a
+   * password is no longer accepted at all — could never be reached.
+   */
+  const context = { host: d?.host, message: result.error }
   const advisory = d
-    ? advisoryKey(result.errorKind, d.port, d.securityUsed)
-    : advisoryKey(result.errorKind, 0, 'ssl')
+    ? advisoryKey(result.errorKind, d.port, d.securityUsed, context)
+    : advisoryKey(result.errorKind, 0, 'ssl', context)
 
   if (result.ok && d) {
     return (

@@ -30,7 +30,9 @@ import type {
 } from '../src/core/types'
 import {
   endpointLadder,
+  renderTransportError,
   rungBudgetMs,
+  summarizeTransportError,
   totalBudgetMs,
   withDeadline,
   type Endpoint,
@@ -548,19 +550,35 @@ export async function testInbox(
       },
     }
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e)
+    const raw = e instanceof Error ? e.message : String(e)
+    // Classification reads the raw text — `classifyError` matches on OpenSSL
+    // and provider wording, which a sentence written for a person would
+    // destroy. What reaches the screen is the other way round.
+    //
+    // The sending half was given this treatment and the receiving half was
+    // not, so a failed inbox test still put 120 unbroken characters of
+    // BoringSSL into the dialog, and a Microsoft account — which cannot sign
+    // in with a password at all any more — got a bare `AUTHENTICATIONFAILED`
+    // while the paragraph explaining exactly that sat unused.
+    const message = renderTransportError(
+      summarizeTransportError(raw, {
+        host: config.imapHost,
+        port: config.imapPort,
+        security: config.imapSecurity,
+      }),
+    )
     return {
       ok: false,
       accepted: [],
       rejected: [],
       durationMs: Date.now() - started,
       error: message,
-      errorKind: classifyError(message),
+      errorKind: classifyError(raw),
       diagnostics: {
         securityUsed: config.imapSecurity,
         port: config.imapPort,
         host: config.imapHost,
-        stage: classifyError(message) === 'auth' ? 'auth' : 'connect',
+        stage: classifyError(raw) === 'auth' ? 'auth' : 'connect',
         attempts: Math.max(attempts, 1),
       },
     }

@@ -86,9 +86,27 @@ export function VirtualList<T>({
   const [version, setVersion] = useState(0)
   const [range, setRange] = useState({ start: 0, end: 0 })
 
+  /**
+   * How many measure→re-render passes the current range has spent without
+   * settling. See the layout effect for why this exists.
+   */
+  const settling = useRef(0)
+
   const windowed = items.length >= threshold
 
-  const keys = useMemo(() => items.map(keyOf), [items, keyOf])
+  /**
+   * `keyOf` is an inline arrow at all six call sites, so it is a new function
+   * on every render of every list screen. Depending on it directly meant
+   * `keys`, `offsets` and `recompute` were all rebuilt every render — every
+   * `useMemo` below bought exactly nothing, and the effect that subscribes to
+   * scrolling tore itself down and built a fresh `ResizeObserver` each time.
+   * Holding it in a ref is what makes the memoisation real. It is safe to read
+   * during render because it is a pure function of the item.
+   */
+  const keyOfRef = useRef(keyOf)
+  keyOfRef.current = keyOf
+
+  const keys = useMemo(() => items.map((item) => keyOfRef.current(item)), [items])
 
   /** Running offsets, using measured heights where they exist. */
   const offsets = useMemo(() => {
@@ -123,25 +141,58 @@ export function VirtualList<T>({
 
     const start = Math.max(0, lo - overscan)
     const stop = Math.min(keys.length, end + overscan)
-    setRange((prev) => (prev.start === start && prev.end === stop ? prev : { start, end: stop }))
+    setRange((prev) => {
+      if (prev.start === start && prev.end === stop) return prev
+      // A genuine scroll deserves a fresh measuring budget; the cap below is
+      // only meant to catch a range that cannot settle where it is.
+      settling.current = 0
+      return { start, end: stop }
+    })
   }, [keys.length, offsets, overscan, windowed])
+
+  /**
+   * Subscribe once per list, not once per render.
+   *
+   * `ResizeObserver.observe` is specified to deliver a callback immediately,
+   * even with nothing resized. Rebuilding the observer on every render
+   * therefore scheduled another `recompute` on every render, which could set
+   * state, which rendered again — a pump that only stopped when everything
+   * else happened to be still. Reading the callback through a ref keeps the
+   * subscription alive across renders while still running the current logic.
+   */
+  const recomputeRef = useRef(recompute)
+  recomputeRef.current = recompute
 
   useEffect(() => {
     if (!windowed) return
     const scroller = scrollerRef.current
     if (!scroller) return
-    recompute()
-    scroller.addEventListener('scroll', recompute, { passive: true })
-    const observer = new ResizeObserver(recompute)
+    const run = () => recomputeRef.current()
+    run()
+    scroller.addEventListener('scroll', run, { passive: true })
+    const observer = new ResizeObserver(run)
     observer.observe(scroller)
     return () => {
-      scroller.removeEventListener('scroll', recompute)
+      scroller.removeEventListener('scroll', run)
       observer.disconnect()
     }
-  }, [recompute, windowed])
+  }, [windowed])
 
-  // After layout, before paint: a row never shows at the estimated height and
-  // then snaps to its real one.
+  /**
+   * Correct the estimated heights from the DOM, after layout and before paint,
+   * so a row never shows at its estimate and then snaps to its real height.
+   *
+   * This used to run with no dependency array at all — after *every* render,
+   * including ones caused by something else entirely — and its `setVersion`
+   * re-ran it synchronously. That is one half of React's "Maximum update depth
+   * exceeded"; the other half was the scroll window sliding out from under a
+   * fixed `scrollTop` as the rows above it were corrected, so a new set of
+   * unmeasured rows entered on every pass and there was always something left
+   * to change. Two things stop it now: the offsets above the window are
+   * compensated for in `scrollTop`, so the content stays put and the range
+   * stops moving; and if a range somehow still has not settled after a handful
+   * of passes, measuring stops rather than taking the whole app down.
+   */
   useLayoutEffect(() => {
     if (!windowed) return
     const container = rowsRef.current
@@ -156,14 +207,39 @@ export function VirtualList<T>({
       const height = (kids[i] as HTMLElement).getBoundingClientRect().height + gap
       if (!height) continue
       const known = heights.current.get(key)
-      if (known === undefined || Math.abs(known - height) > 0.5) {
+      // 1.5px rather than 0.5: a scrollbar appearing, or text rewrapping by a
+      // fraction, is not a row that changed height, and treating it as one is
+      // what kept the loop fed.
+      if (known === undefined || Math.abs(known - height) > 1.5) {
         heights.current.set(key, height)
         changed = true
       }
     }
+
+    if (!changed) {
+      settling.current = 0
+      return
+    }
+
+    // Hold the content still. Correcting the heights of rows *above* the
+    // window moves everything below them, and without this the same pixels
+    // would show a different row after every correction.
+    const scroller = scrollerRef.current
+    if (scroller) {
+      let corrected = 0
+      for (let i = 0; i < range.start; i++) {
+        corrected += heights.current.get(keys[i]) ?? estimate
+      }
+      const drift = corrected - offsets[range.start]
+      if (Math.abs(drift) > 0.5) scroller.scrollTop += drift
+    }
+
+    // Measurement settles in two or three passes. If it has not after eight,
+    // the layout is fighting itself and a ninth will not help.
+    if (settling.current++ > 8) return
     // One re-render per screenful of corrections, not one per row.
-    if (changed) setVersion((n) => n + 1)
-  })
+    setVersion((n) => n + 1)
+  }, [windowed, keys, range.start, range.end, version, estimate, offsets])
 
   if (!windowed) {
     return (

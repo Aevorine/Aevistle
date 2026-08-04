@@ -168,6 +168,15 @@
      pointer-target minimum, so the uniform value is also the accessible one. */
   --control-h: 46px;
 
+  /* The smallest a thing you tap is allowed to be.
+     Named rather than repeated because ten places had each picked their own
+     number — 16px chip crosses, 28px markup buttons, 38px row actions — and a
+     value spelled out ten times is a value nobody can raise once. */
+  --tap-min: 44px;
+  /* The bottom tab bar on a phone. `.toasts` and `.sendresult` sit above it,
+     and both used to hard-code a number that had stopped being true. */
+  --nav-h: 52px;
+
   /* ---- motion ----
      Short and eased-out. Anything longer than 220ms on a click feels like lag
      rather than polish. */

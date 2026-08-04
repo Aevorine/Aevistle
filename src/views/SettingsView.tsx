@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Banner,
   Button,
@@ -73,7 +73,33 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
     permissions,
     fixPermission,
   } = useApp()
+
   const { t } = useI18n()
+
+  /**
+   * The jump bar's entries.
+   *
+   * No calendar entry. It was a card on this screen once; it is a top-level
+   * tab now (`core/nav.ts`), and what was left behind was a jump-bar button
+   * pointing at an empty marker div sitting immediately above the Updates card
+   * — so "Work calendar" silently scrolled you to Updates, and the
+   * IntersectionObserver highlighted it as the section you were reading.
+   */
+  const navSections = useMemo(
+    () => [
+      { id: 'set-accounts', label: t('account.title') },
+      { id: 'set-data', label: t('data.title') },
+      { id: 'set-backup', label: t('backup.title') },
+      { id: 'set-control', label: t('control.title') },
+      { id: 'set-update', label: t('update.title') },
+      { id: 'set-appearance', label: t('settings.appearance') },
+      { id: 'set-sending', label: t('settings.sending') },
+      { id: 'set-notifications', label: t('settings.notifications') },
+      { id: 'set-privacy', label: t('settings.privacy') },
+      { id: 'set-about', label: t('settings.about') },
+    ],
+    [t],
+  )
   const toast = useToast()
   const { confirm, confirmElement } = useConfirm()
 
@@ -133,30 +159,23 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
       <div className="view__inner view__inner--grid">
         <PageHead title={t('settings.title')} subtitle={t('settings.subtitle')} />
 
+        {/* Top of the screen, not tucked into the data card: an app that came
+            up factory-fresh because its state file would not parse is
+            indistinguishable, from the inside, from one that lost everything.
+            It used to rename the file and say nothing at all. */}
+        {info?.recoveredFrom ? (
+          <Banner tone="warning">
+            {t('data.recovered')}
+            <code className="mono">{info.recoveredFrom}</code>
+          </Banner>
+        ) : null}
+
         {/* Nine cards and counting. The alternative to a jump bar is tabs, and
-            tabs hide settings behind a guess about which one they are under. */}
-        <SectionNav
-          sections={[
-            { id: 'set-accounts', label: t('account.title') },
-            { id: 'set-data', label: t('data.title') },
-            { id: 'set-backup', label: t('backup.title') },
-            { id: 'set-control', label: t('control.title') },
-            /* No calendar entry. It was a card on this screen once; it is a
-               top-level tab now (`core/nav.ts`), and what was left behind was
-               a jump-bar button pointing at an empty marker div sitting
-               immediately above the Updates card — so "Work calendar" silently
-               scrolled you to Updates, and the IntersectionObserver would
-               highlight it as the section you were reading. See the comment
-               where the marker used to be for why this is a removal rather
-               than a link. */
-            { id: 'set-update', label: t('update.title') },
-            { id: 'set-appearance', label: t('settings.appearance') },
-            { id: 'set-sending', label: t('settings.sending') },
-            { id: 'set-notifications', label: t('settings.notifications') },
-            { id: 'set-privacy', label: t('settings.privacy') },
-            { id: 'set-about', label: t('settings.about') },
-          ]}
-        />
+            tabs hide settings behind a guess about which one they are under.
+            The list itself is built once per language change, above — written
+            inline it was a new array on every render, and `SectionNav` keys an
+            IntersectionObserver over eight elements on exactly that value. */}
+        <SectionNav sections={navSections} />
 
         {/* --- accounts ---------------------------------------------------- */}
         <div id="set-accounts" className="settings-section" />

@@ -544,16 +544,35 @@ export function reducer(state: AppState, action: Action): AppState {
       }
 
     case 'patchInboxMessages': {
+      /*
+       * Returns the *same* state when the patch changes nothing.
+       *
+       * It used to allocate a new account list, a new message list and a new
+       * message object regardless, so marking an already-cached body as
+       * cached — which the code watcher does for every message it looks at —
+       * produced a brand-new `inboxAccounts` identity. The watcher's own
+       * effect depends on that identity, so it re-ran, cancelled itself before
+       * it could record which messages it had already examined, and fetched
+       * them all again. A quiet loop that burned IPC and re-rendered the tree
+       * on a timer, with nothing visibly wrong.
+       */
       const idSet = new Set(action.ids)
-      const inboxAccounts = state.inboxAccounts.map((i) =>
-        i.accountId !== action.accountId
-          ? i
-          : {
-              ...i,
-              messages: i.messages.map((m) => (idSet.has(m.id) ? { ...m, ...action.patch } : m)),
-            },
-      )
-      return { ...state, inboxAccounts }
+      const keys = Object.keys(action.patch) as Array<keyof typeof action.patch>
+      let touched = false
+      const inboxAccounts = state.inboxAccounts.map((i) => {
+        if (i.accountId !== action.accountId) return i
+        let accountTouched = false
+        const messages = i.messages.map((m) => {
+          if (!idSet.has(m.id)) return m
+          if (keys.every((k) => m[k] === action.patch[k])) return m
+          accountTouched = true
+          return { ...m, ...action.patch }
+        })
+        if (!accountTouched) return i
+        touched = true
+        return { ...i, messages }
+      })
+      return touched ? { ...state, inboxAccounts } : state
     }
 
     /**
@@ -741,6 +760,15 @@ export interface AppApi {
   schedulerUnreachable: boolean
 
   /**
+   * Two consecutive failures to write the document to disk.
+   *
+   * Same category as `schedulerUnreachable` and for the same reason: nothing
+   * on screen changes when a save fails, so everything the user has done this
+   * session looks saved and is not. The strip is where that gets said.
+   */
+  saveFailing: boolean
+
+  /**
    * What Android currently permits. `null` on desktop and web, where neither
    * question exists, and until the first read comes back.
    *
@@ -847,6 +875,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [bridge, setBridge] = useState<PlatformBridge | null>(null)
   const [ready, setReady] = useState(false)
   const [schedulerUnreachable, setSchedulerUnreachable] = useState(false)
+  /**
+   * The document could not be written, and the retry could not either.
+   *
+   * Surfaced rather than logged because of what it means: everything the user
+   * has done this session is on screen and none of it is on disk. An
+   * unwritable data folder produced exactly this and said nothing — the app
+   * fell back to the default folder at startup, every later write threw, and
+   * the only trace was a line in a console with no window.
+   */
+  const [saveFailing, setSaveFailing] = useState(false)
   const [permissions, setPermissions] = useState<PermissionSnapshot | null>(null)
   const [bootError, setBootError] = useState<string | null>(null)
   const hydrated = useRef(false)
@@ -873,6 +911,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     void bridge?.setUiLocale?.(locale)
   }, [bridge, locale])
+
+  /**
+   * Push the two switches whose effect is outside the window.
+   *
+   * Both were dead controls until now: the settings screen wrote them into
+   * state, nothing in the main process ever read them, and closing the window
+   * went to the tray regardless of what the user had chosen. Deliberately
+   * depends on the two booleans rather than on `state.settings`, which changes
+   * on almost every keystroke somewhere in the app.
+   */
+  const { minimiseToTray, launchAtLogin } = state.settings
+  useEffect(() => {
+    void bridge?.setDesktopPrefs?.({ minimiseToTray, launchAtLogin })
+  }, [bridge, minimiseToTray, launchAtLogin])
 
   // --- boot ---------------------------------------------------------------
   useEffect(() => {
@@ -1021,7 +1073,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
           .then(() => {
             // A newer save may have been issued while this one was in flight;
             // letting a stale success win would mark newer edits as persisted.
-            if (attempt === saveToken.current) lastSaved.current = state
+            if (attempt === saveToken.current) {
+              lastSaved.current = state
+              setSaveFailing(false)
+            }
           })
           .catch((err) => {
             console.error('[aevistle] could not save state:', err)
@@ -1033,9 +1088,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
               void bridge
                 .saveState(state)
                 .then(() => {
-                  if (attempt === saveToken.current) lastSaved.current = state
+                  if (attempt === saveToken.current) {
+                    lastSaved.current = state
+                    setSaveFailing(false)
+                  }
                 })
-                .catch(() => {})
+                // Two failures in a row is not a blip. Say so on the health
+                // strip; the console is not somewhere anyone is looking.
+                .catch(() => setSaveFailing(true))
             }, SAVE_RETRY_DELAY)
           })
       },
@@ -1062,7 +1122,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       void bridge
         .saveState(pending)
         .then(() => {
-          if (attempt === saveToken.current) lastSaved.current = pending
+          if (attempt === saveToken.current) {
+            lastSaved.current = pending
+            setSaveFailing(false)
+          }
         })
         // Same reasoning as the debounced save: only a write that landed counts
         // as saved. On `visibilitychange` the app is backgrounded rather than
@@ -1070,6 +1133,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // success would make every later flush skip it.
         .catch((err) => {
           console.error('[aevistle] could not flush state:', err)
+          setSaveFailing(true)
         })
     }
     const onHidden = () => {
@@ -2112,45 +2176,100 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // people reverse within seconds, not next Tuesday.
 
 
-  const api: AppApi = {
-    state,
-    ready,
-    bridge,
-    i18n,
-    dispatch,
-    bootError,
-    schedulerUnreachable,
-    permissions,
-    fixPermission,
-    addLog,
-    saveAccount,
-    deleteAccount,
-    sendDraftNow,
-    scheduleDraft,
-    toggleJob,
-    deleteJob,
-    runJobNow,
-    resetEverything,
-    relocateData,
-    saveInboxAccount,
-    syncInboxAccount,
-    testInboxAccount,
-    getInboxMessageBody,
-    ensureInboxAttachment,
-    markInboxMessagesRead,
-    tagInboxMessages,
-    deleteInboxMessages,
-    purgeInboxMessages,
-    restoreInboxMessages,
-    clearRemovedMessages,
-    snapshotDraft,
-    restoreSnapshot,
-    queueDraft,
-    flushOutbox,
-    pushUndo,
-    undo,
-    undoLabel: undoStack[0]?.label ?? null,
-  }
+  /**
+   * Memoised because this object *is* the context value.
+   *
+   * Built as a fresh literal, it was a new identity on every render of the
+   * provider — so every component calling `useApp()` re-rendered on every
+   * state change anywhere, whether or not it read the part that changed. One
+   * character typed into the message body re-rendered the whole tree,
+   * including the command palette (which stays mounted and rebuilds a list of
+   * every contact, template and job) and whichever windowed list was on
+   * screen. The actions below are all `useCallback`s already; only the values
+   * genuinely move.
+   */
+  const undoLabel = undoStack[0]?.label ?? null
+  const api = useMemo<AppApi>(
+    () => ({
+      state,
+      ready,
+      bridge,
+      i18n,
+      dispatch,
+      bootError,
+      schedulerUnreachable,
+      saveFailing,
+      permissions,
+      fixPermission,
+      addLog,
+      saveAccount,
+      deleteAccount,
+      sendDraftNow,
+      scheduleDraft,
+      toggleJob,
+      deleteJob,
+      runJobNow,
+      resetEverything,
+      relocateData,
+      saveInboxAccount,
+      syncInboxAccount,
+      testInboxAccount,
+      getInboxMessageBody,
+      ensureInboxAttachment,
+      markInboxMessagesRead,
+      tagInboxMessages,
+      deleteInboxMessages,
+      purgeInboxMessages,
+      restoreInboxMessages,
+      clearRemovedMessages,
+      snapshotDraft,
+      restoreSnapshot,
+      queueDraft,
+      flushOutbox,
+      pushUndo,
+      undo,
+      undoLabel,
+    }),
+    [
+      state,
+      ready,
+      bridge,
+      i18n,
+      bootError,
+      schedulerUnreachable,
+      saveFailing,
+      permissions,
+      fixPermission,
+      addLog,
+      saveAccount,
+      deleteAccount,
+      sendDraftNow,
+      scheduleDraft,
+      toggleJob,
+      deleteJob,
+      runJobNow,
+      resetEverything,
+      relocateData,
+      saveInboxAccount,
+      syncInboxAccount,
+      testInboxAccount,
+      getInboxMessageBody,
+      ensureInboxAttachment,
+      markInboxMessagesRead,
+      tagInboxMessages,
+      deleteInboxMessages,
+      purgeInboxMessages,
+      restoreInboxMessages,
+      clearRemovedMessages,
+      snapshotDraft,
+      restoreSnapshot,
+      queueDraft,
+      flushOutbox,
+      pushUndo,
+      undo,
+      undoLabel,
+    ],
+  )
 
   return <AppContext.Provider value={api}>{children}</AppContext.Provider>
 }

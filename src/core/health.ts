@@ -68,8 +68,28 @@ export function collectHealth(
   schedulerUnreachable = false,
   /** Android only; see `PermissionSnapshot`. */
   permissions?: PermissionSnapshot,
+  /**
+   * Set when the last attempt to write the document to disk failed, and the
+   * retry after it failed too.
+   *
+   * Not derivable from `state` for the worst possible reason: `state` is
+   * exactly what could not be written. Everything the user did is still on
+   * screen and none of it is on disk, which is the single most expensive kind
+   * of silence this app can produce — an unwritable data folder used to log to
+   * a console nobody opens and change nothing else at all.
+   */
+  saveFailing = false,
 ): HealthIssue[] {
   const issues: HealthIssue[] = []
+
+  if (saveFailing) {
+    issues.push({
+      id: 'save-failing',
+      level: 'danger',
+      key: 'health.saveFailing',
+      goTo: 'settings',
+    })
+  }
   const accountIds = new Set(state.accounts.map((a) => a.id))
 
   // --- things that will definitely fail ----------------------------------

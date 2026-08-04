@@ -100,6 +100,19 @@ La dernière version se trouve dans **[Releases](https://github.com/Aevorine/Aev
 badge en haut de cette page le lit au même endroit. Volontairement pas écrit en
 dur ici, pour que ce tableau ne puisse pas se périmer.
 
+> **Vérifier un téléchargement.** Chaque version publie `SHA256SUMS.txt`, une
+> signature détachée `SHA256SUMS.txt.asc` et la clé publique correspondante :
+>
+> ```bash
+> gpg --import aevistle-public-key.asc
+> gpg --verify SHA256SUMS.txt.asc SHA256SUMS.txt
+> sha256sum -c SHA256SUMS.txt
+> ```
+>
+> Les sommes de contrôle prouvent que le fichier est arrivé intact ; la
+> signature prouve qu'il vient de la clé de ce projet. L'empreinte se trouve
+> dans [SECURITY.md](../SECURITY.md).
+
 > Windows SmartScreen signalera un éditeur inconnu. C’est l’aspect normal d’une
 > version sans certificat de signature payant : choisissez **Informations
 > complémentaires → Exécuter quand même**, ou vérifiez d’abord l’empreinte

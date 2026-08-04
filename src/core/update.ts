@@ -93,7 +93,20 @@ interface GithubRelease {
  * the installer expects an update to replace what they installed, not to leave
  * a second copy in their Downloads folder.
  */
-export function pickAsset(release: GithubRelease, platform: Platform): UpdateAsset | undefined {
+export function pickAsset(
+  release: GithubRelease,
+  platform: Platform,
+  /**
+   * True when the running build is the portable one.
+   *
+   * Without it every desktop user was offered the installer, so someone
+   * running Aevistle from a USB stick who pressed Update ended up with a
+   * second, *installed* copy — and the portable one they were using still
+   * sitting there at the old version. Like for like is the only sane default
+   * for an update.
+   */
+  portable = false,
+): UpdateAsset | undefined {
   const assets = (release.assets ?? []).filter((a) => a.name && a.browser_download_url)
   const match = (test: (name: string) => boolean) =>
     assets.find((a) => test(a.name!.toLowerCase()))
@@ -101,8 +114,11 @@ export function pickAsset(release: GithubRelease, platform: Platform): UpdateAss
   const chosen =
     platform === 'android'
       ? match((n) => n.endsWith('.apk'))
-      : (match((n) => n.endsWith('.exe') && n.includes('setup')) ??
-        match((n) => n.endsWith('.exe')))
+      : portable
+        ? (match((n) => n.endsWith('.exe') && n.includes('portable')) ??
+          match((n) => n.endsWith('.exe')))
+        : (match((n) => n.endsWith('.exe') && n.includes('setup')) ??
+          match((n) => n.endsWith('.exe')))
 
   if (!chosen) return undefined
   return {
@@ -124,6 +140,8 @@ export function parseRelease(
   current: string,
   platform: Platform,
   now: number,
+  /** See `pickAsset`. */
+  portable = false,
 ): UpdateInfo {
   const release = (raw ?? {}) as GithubRelease
   const base: UpdateInfo = {
@@ -148,7 +166,7 @@ export function parseRelease(
     available,
     notes: release.body?.trim() || undefined,
     publishedAt: release.published_at ? Date.parse(release.published_at) : undefined,
-    asset: available ? pickAsset(release, platform) : undefined,
+    asset: available ? pickAsset(release, platform, portable) : undefined,
   }
 }
 
@@ -163,6 +181,8 @@ export async function fetchLatest(
   current: string,
   platform: Platform,
   timeoutMs = 10_000,
+  /** See `pickAsset`. Only the shell knows how this copy was installed. */
+  portable = false,
 ): Promise<UpdateInfo> {
   const now = Date.now()
   const controller = new AbortController()
@@ -186,7 +206,7 @@ export async function fetchLatest(
         error: `GitHub replied ${response.status}`,
       }
     }
-    return parseRelease(await response.json(), current, platform, now)
+    return parseRelease(await response.json(), current, platform, now, portable)
   } catch (e) {
     return {
       current,

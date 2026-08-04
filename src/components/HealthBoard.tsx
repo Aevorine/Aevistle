@@ -23,7 +23,7 @@ const ICONS: Record<HealthLevel, typeof IconAlert> = {
 }
 
 export function HealthBoard({ onGo }: { onGo?: (where: NonNullable<HealthIssue['goTo']>) => void }) {
-  const { state, schedulerUnreachable, permissions, fixPermission } = useApp()
+  const { state, schedulerUnreachable, permissions, fixPermission, saveFailing } = useApp()
   const { t } = useI18n()
   /**
    * Keyed on what it actually reads, not on the whole store.
@@ -33,7 +33,7 @@ export function HealthBoard({ onGo }: { onGo?: (where: NonNullable<HealthIssue['
    * work whose answer cannot change while someone is typing a sentence.
    */
   const issues = useMemo(
-    () => collectHealth(state, Date.now(), schedulerUnreachable, permissions ?? undefined),
+    () => collectHealth(state, Date.now(), schedulerUnreachable, permissions ?? undefined, saveFailing),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [
       state.jobs,
@@ -42,6 +42,7 @@ export function HealthBoard({ onGo }: { onGo?: (where: NonNullable<HealthIssue['
       state.inboxAccounts,
       state.logs,
       schedulerUnreachable,
+      saveFailing,
       permissions,
     ],
   )
@@ -103,7 +104,7 @@ export function HealthBoard({ onGo }: { onGo?: (where: NonNullable<HealthIssue['
 
 /** The all-clear line, for the schedule screen where "nothing wrong" is news. */
 export function HealthAllClear() {
-  const { state, schedulerUnreachable, permissions } = useApp()
+  const { state, schedulerUnreachable, permissions, saveFailing } = useApp()
   const { t } = useI18n()
   /**
    * Keyed on what it actually reads, not on the whole store.
@@ -113,7 +114,7 @@ export function HealthAllClear() {
    * work whose answer cannot change while someone is typing a sentence.
    */
   const issues = useMemo(
-    () => collectHealth(state, Date.now(), schedulerUnreachable, permissions ?? undefined),
+    () => collectHealth(state, Date.now(), schedulerUnreachable, permissions ?? undefined, saveFailing),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [
       state.jobs,
@@ -122,6 +123,7 @@ export function HealthAllClear() {
       state.inboxAccounts,
       state.logs,
       schedulerUnreachable,
+      saveFailing,
       permissions,
     ],
   )

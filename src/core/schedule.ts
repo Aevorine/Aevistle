@@ -346,7 +346,14 @@ function calendarDayMatches(rec: Recurrence, probe: Date): boolean {
 
     case 'yearly': {
       const ref = new Date(rec.startAt)
-      const wantMonth = (rec.month ?? ref.getMonth() + 1) - 1
+      // 0-based, like `Date.getMonth()` and like both of the places that write
+      // this field. This line used to subtract one, on the assumption that the
+      // stored value was 1-based, and nothing caught it: the editor never sets
+      // `month` at all, so only an ICS import or a drag on the calendar could
+      // produce a value here. Those sent an October reminder in September, and
+      // a January one — stored as 0, read as -1 — never matched any date at
+      // all, so it sat in the list marked armed with no next send, forever.
+      const wantMonth = rec.month ?? ref.getMonth()
       const wantDay = rec.dayOfMonth ?? ref.getDate()
       if (probe.getMonth() !== wantMonth) return false
       const last = lastDayOfMonth(probe.getFullYear(), probe.getMonth())

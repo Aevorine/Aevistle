@@ -79,7 +79,7 @@ textarea {
 :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--surface-0) 92%, transparent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--bg) 92%, transparent);
 }
 /* Inputs draw their own ring inside the border, so the outline would double up. */
 .input:focus-visible,
@@ -912,16 +912,6 @@ textarea {
 
 /* --- chips / tag input --- */
 
-.tagfield__suggestheader {
-  padding: var(--sp-2) var(--sp-3);
-  font-size: var(--text-xs);
-  font-weight: 600;
-  color: var(--text-3);
-  text-transform: uppercase;
-  letter-spacing: var(--tracking-tight);
-  border-bottom: 1px solid var(--border-subtle);
-}
-
 .tagfield {
   display: flex;
   flex-wrap: wrap;
@@ -1194,10 +1184,10 @@ textarea {
   align-items: center;
   gap: 6px;
 }
-.swatch {
+.monthgrid__legend .swatch {
   width: 12px;
   height: 12px;
-  border-radius: 3px;
+  border-radius: var(--r-xs);
   border: 1px solid var(--border);
   display: inline-block;
 }
@@ -1922,10 +1912,10 @@ textarea {
   gap: var(--sp-2);
   flex-wrap: wrap;
 }
-.swatch {
+.accent-swatches .swatch {
   width: 30px;
   height: 30px;
-  border-radius: 50%;
+  border-radius: var(--r-full);
   border: 2px solid transparent;
   cursor: pointer;
   padding: 3px;
@@ -2593,7 +2583,7 @@ textarea {
 }
 .chiprow__label {
   color: var(--text-3);
-  font-size: var(--fs-sm);
+  font-size: var(--text-sm);
   /* Matches the label gutter the fields above use, so the chips line up with
      the input they fill in rather than with the label beside it. */
   min-width: 5.5em;
@@ -2826,7 +2816,7 @@ textarea {
   color: var(--text-3);
 }
 .preflight__preview {
-  border: 1px solid var(--border-1);
+  border: 1px solid var(--border);
   border-radius: var(--r-md);
   padding: var(--sp-3);
   margin-top: var(--sp-3);
@@ -3030,13 +3020,13 @@ textarea {
   gap: var(--sp-1);
 }
 .condition {
-  border: 1px solid var(--border-1);
+  border: 1px solid var(--border);
   border-radius: var(--r-md);
   padding: var(--sp-2) var(--sp-3);
   background: var(--surface-1);
 }
 .condition[data-on="true"] {
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--border-1));
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
   background: color-mix(in srgb, var(--accent) 5%, var(--surface-1));
 }
 .condition__head {
@@ -3142,7 +3132,7 @@ textarea {
   flex: none;
   min-width: 9.5rem;
   padding: 2px var(--sp-2);
-  border: 1px solid var(--border-1);
+  border: 1px solid var(--border);
   border-bottom-width: 2px;
   border-radius: var(--r-xs);
   background: var(--surface-1);
@@ -3168,8 +3158,8 @@ textarea {
   flex-wrap: wrap;
   padding: var(--sp-2) 0;
   margin-bottom: var(--sp-3);
-  background: var(--surface-0);
-  border-bottom: 1px solid var(--border-1);
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
 }
 .settingsnav__link {
   padding: var(--sp-1) var(--sp-3);
@@ -3233,7 +3223,7 @@ textarea {
   margin-bottom: var(--sp-5);
 }
 .skeleton__card {
-  border: 1px solid var(--border-1);
+  border: 1px solid var(--border);
   border-radius: var(--r-lg);
   background: var(--surface-1);
   padding: var(--sp-4);
@@ -3307,7 +3297,7 @@ textarea {
 .senddetails {
   margin-top: var(--sp-3);
   padding-top: var(--sp-3);
-  border-top: 1px solid var(--border-1);
+  border-top: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   gap: var(--sp-3);
@@ -3509,20 +3499,14 @@ textarea {
 .log__body,
 .attachment__body,
 .page-head__text,
-.codecard__main,
-.quickpick__text,
-.tagfield__optiontext {
+.codecard__main {
   min-width: 0;
 }
 
 .job__name,
 .job__from,
 .log__title,
-.codecard__subject,
-.quickpick__name,
-.quickpick__address,
-.tagfield__optionname,
-.tagfield__optionaddress {
+.codecard__subject {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3857,12 +3841,6 @@ textarea {
   align-items: baseline;
   gap: var(--sp-3);
 }
-.attachments {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
-}
-
 /* An attachment row where the row itself opens the file. */
 .attachment--clickable {
   padding-inline-start: 0;
@@ -3918,49 +3896,23 @@ textarea {
   gap: var(--sp-2);
 }
 
-.tagfield__menu {
-  position: absolute;
-  inset-inline: 0;
-  top: calc(100% + 4px);
-  z-index: 30;
-  overflow: hidden;
-  background: var(--surface-1);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  box-shadow: var(--shadow-lg);
-}
-.tagfield__option {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-3);
-  width: 100%;
-  padding: var(--sp-2) var(--sp-3);
+/** The button inside the field that opens the picker card. */
+.tagfield__open {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  margin-inline-start: auto;
   background: none;
   border: 0;
-  color: inherit;
-  font: inherit;
-  text-align: start;
+  border-radius: var(--r-sm);
+  color: var(--text-3);
   cursor: pointer;
 }
-.tagfield__option[data-active] {
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-}
-.tagfield__optiontext {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  line-height: var(--leading-tight);
-}
-.tagfield__optionname {
-  color: var(--text-1);
-  font-weight: 700;
-}
-.tagfield__optionaddress {
-  color: var(--text-3);
-  font-size: var(--text-sm);
-}
-.tagfield__pin {
-  flex: none;
+.tagfield__open:hover,
+.tagfield__open[aria-expanded='true'] {
+  background: var(--surface-hover);
   color: var(--accent);
 }
 
@@ -3969,62 +3921,233 @@ textarea {
 }
 
 /**
- * The always-on quick bar.
+ * The recipient picker card.
  *
- * The dropdown only exists while the field has focus, which is precisely when
- * the common recipients are *not* visible to someone still deciding who to
- * write to. This row answers "at least give me the common ones": name over
- * address, one click to add, and contact tags on the same row so a whole group
- * goes in at once.
+ * Replaces a permanent row of quick-pick buttons that sat under the compose
+ * form, cost height on every screen, and could only ever add. Portalled to
+ * `body` and positioned from the field's own rect, because the compose header
+ * is a grid whose children scroll — an absolutely positioned panel inside it
+ * gets clipped, which is why the row it replaces had to live below the form
+ * instead of next to the field it belonged to.
  */
-.quickpicks {
+.recipicker {
+  position: fixed;
+  z-index: 120;
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
+  min-width: 320px;
+  max-height: 420px;
+  overflow: hidden;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg);
+}
+
+.recipicker__head {
+  display: flex;
   align-items: center;
-  gap: var(--sp-2);
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-3) var(--sp-2);
+  border-bottom: 1px solid var(--border-subtle);
 }
-.quickpicks__label {
-  font-size: var(--text-xs);
-  color: var(--text-3);
-  margin-inline-end: var(--sp-1);
-}
-.quickpick {
+.recipicker__title {
   display: inline-flex;
   align-items: center;
   gap: var(--sp-2);
-  max-width: 26ch;
-  padding: 4px var(--sp-3) 4px 4px;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: var(--r-full);
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-  transition:
-    border-color var(--dur-fast) var(--ease),
-    background var(--dur-fast) var(--ease);
-}
-.quickpick:hover {
-  border-color: var(--accent);
-  background: var(--surface-3);
-}
-.quickpick--group {
-  padding-inline-start: var(--sp-3);
-  border-style: dashed;
-}
-.quickpick__text {
-  display: flex;
-  flex-direction: column;
-  line-height: 1.25;
-  min-width: 0;
-}
-.quickpick__name {
-  font-size: var(--text-sm);
+  font-weight: 700;
   color: var(--text-1);
 }
-.quickpick__address {
-  font-size: var(--text-xs);
+.recipicker__count {
+  margin-inline-start: auto;
+  font-size: var(--text-sm);
   color: var(--text-3);
+  font-variant-numeric: var(--numeric);
+}
+.recipicker__close {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: var(--tap-min);
+  height: var(--tap-min);
+  background: none;
+  border: 0;
+  border-radius: var(--r-sm);
+  color: var(--text-3);
+  cursor: pointer;
+}
+.recipicker__close:hover {
+  background: var(--surface-hover);
+  color: var(--text-1);
+}
+
+.recipicker__bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.recipicker__all {
+  font-variant-numeric: var(--numeric);
+}
+
+.recipicker__list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--sp-2) 0;
+}
+.recipicker__empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: var(--sp-6) var(--sp-4);
+  color: var(--text-3);
+  text-align: center;
+}
+
+.recipicker__section {
+  display: block;
+}
+.recipicker__group {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  padding: var(--sp-2) var(--sp-3);
+  background: none;
+  border: 0;
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 700;
+  text-align: start;
+  cursor: pointer;
+}
+.recipicker__group:hover {
+  background: var(--surface-hover);
+}
+.recipicker__grouptitle {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.recipicker__groupcount {
+  flex: none;
+  color: var(--text-3);
+  font-variant-numeric: var(--numeric);
+  font-weight: 400;
+}
+
+.recipicker__row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  min-height: var(--tap-min);
+  padding: var(--sp-2) var(--sp-3);
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.recipicker__row[data-active] {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.recipicker__who {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  line-height: var(--leading-tight);
+}
+.recipicker__name {
+  color: var(--text-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.recipicker__address {
+  color: var(--text-3);
+  font-size: var(--text-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.recipicker__pin {
+  flex: none;
+  color: var(--accent);
+}
+
+/* The tick box. One rule per state, never two competing on the same box. */
+.recipicker__tick {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: 1.5px solid var(--border-strong);
+  border-radius: var(--r-xs);
+  color: var(--accent-text);
+  background: var(--surface-1);
+}
+.recipicker__tick--on,
+.recipicker__tick--all {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.recipicker__tick--some {
+  border-color: var(--accent);
+}
+.recipicker__dash {
+  width: 10px;
+  height: 2px;
+  border-radius: var(--r-full);
+  background: var(--accent);
+}
+
+.recipicker__hint {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border-top: 1px solid var(--border-subtle);
+  font-size: var(--text-sm);
+  color: var(--text-3);
+}
+
+/*
+ * On a phone the card becomes a sheet on the bottom edge.
+ *
+ * `dvh`, not `vh`: the Android WebView does not shrink `vh` when the soft
+ * keyboard comes up, and this card is opened *by* focusing a text field, so
+ * `vh` would put half of it under the keyboard every single time.
+ */
+.recipicker__scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 119;
+  background: var(--scrim);
+}
+.recipicker--sheet {
+  inset-inline: 0;
+  inset-block-end: 0;
+  top: auto;
+  width: auto;
+  min-width: 0;
+  max-height: 72dvh;
+  border-inline: 0;
+  border-block-end: 0;
+  border-start-start-radius: var(--r-lg);
+  border-start-end-radius: var(--r-lg);
+  border-end-start-radius: 0;
+  border-end-end-radius: 0;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 .avatar {
@@ -4260,20 +4383,6 @@ textarea {
 }
 .compose-head--extra {
   grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-/* The quick-recipient bar lives inside the recipient cell, which is now about a
-   third of the card rather than the whole of it. Left to wrap it would put two
-   rows of faces under the field and push the message down by ~90px every time
-   the contact list grew. One row that scrolls sideways keeps the height of this
-   band fixed no matter how many people are in it. */
-.compose-head .quickpicks {
-  flex-wrap: nowrap;
-  overflow-x: auto;
-  scrollbar-width: thin;
-}
-.compose-head .quickpick {
-  flex: 0 0 auto;
 }
 
 /* --- band 2: the message -------------------------------------------------- */
@@ -4527,10 +4636,6 @@ textarea {
   .compose-head--extra {
     grid-template-columns: minmax(0, 1fr);
   }
-  .compose-head .quickpicks {
-    flex-wrap: wrap;
-    overflow-x: visible;
-  }
   .whenbar__time {
     width: 100%;
     min-width: 0;
@@ -4694,11 +4799,6 @@ textarea {
 
 /* --- fields that are comfortable to type in ------------------------------- */
 
-/* Matches `.input` and `.select`, which are already 46px — the recipient box
-   was the odd one out at 40 and read as a different kind of control. */
-.tagfield {
-  min-height: var(--control-h);
-}
 .form-rows .field > .field__label {
   min-height: 46px;
 }
@@ -5685,4 +5785,232 @@ textarea {
   direction: ltr;
   text-align: start;
   unicode-bidi: embed;
+}
+
+/* ===========================================================================
+   The phone layer.
+
+   Everything above this point was written for a window. A 320px phone and a
+   719px tablet were being handed byte-identical CSS, and the four breakpoints
+   that did exist (620/720/760/900) each meant something different, so "it is
+   wrong on my phone" had four places to look and no place to change.
+
+   One breakpoint from here on. 560px sits above the widest phone in landscape
+   and below the narrowest real tablet, and it does not collide with the 620px
+   rule that only dresses the image viewer.
+
+   Measured before writing, at 360x800 with the default density: the compose
+   body sat at y=530 with 62px of it on screen — 7.8% of the display, on the
+   screen whose entire purpose is that box.
+   =========================================================================== */
+
+@media (max-width: 560px) {
+  :root {
+    /* The real measured height of a wrapped action bar. The old 68px was a
+       desktop number that `.sendresult` and `.toasts` both anchored to, so
+       both of them sat on top of the send button. */
+    --actionbar-h: 96px;
+    /* Height belongs to the content on a phone; a fixed 60px page head only
+       made some screens two rows and others one. */
+    --pagehead-h: 0px;
+  }
+
+  /* --- navigation: nine tabs, none of them off-screen ---------------------
+     Nine items at their natural width need 394-426px and the row had
+     `overflow-x: auto` with the scrollbar hidden — so on a 360px screen the
+     ninth tab (Settings) was unreachable and there was nothing to suggest it
+     existed. Dividing the row evenly is the only arrangement where every
+     destination is visible without a gesture nobody knows to make. */
+  .nav {
+    overflow-x: visible;
+  }
+  .nav__item,
+  .nav__item[aria-current='page'] {
+    flex: 1 1 0;
+    min-width: 0;
+    padding-inline: 0;
+    justify-content: center;
+  }
+  /* The active tab is already named by the page heading directly above it and
+     coloured differently from the rest; the word as well costs a third of the
+     row and pushes a sibling off the edge. */
+  .nav__item[aria-current='page'] .nav__label {
+    display: none;
+  }
+
+  /* --- compose: give the message back its screen ------------------------- */
+
+  /* Four secondary buttons wrapped to two rows because their labels needed
+     444px. As icons they are one row, and each one grows from 34px to a
+     proper target. */
+  .composebar .btn__label {
+    display: none;
+  }
+  .composebar .btn {
+    min-width: var(--tap-min);
+    min-height: var(--tap-min);
+    padding-inline: var(--sp-2);
+  }
+
+  /* The send time and the button that opens the full rules belong on one
+     line: 200px and 84px into a 296px row. This is not the two-column split
+     that was measured as a loss three times over — that one halved the card
+     and then paid a 5.5em label gutter out of each half. */
+  .whenbar__time {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0;
+  }
+  .whenbar__text {
+    flex: 1 1 100%;
+    font-size: var(--text-sm);
+  }
+
+  /* A panel indented by a label gutter that no longer exists at this width.
+     The same reset was done for `.form-rows` and for `.compose-foot > .field`
+     and this one was missed, so the options grid had 192px for a 220px track
+     and pushed 28px out of the side of the card. */
+  .compose-foot > .moreoptions {
+    margin-inline-start: 0;
+  }
+
+  /* The address bar and the byte count are the least actionable thing on the
+     screen and they were sharing a row with Send. */
+  .actionbar__meta {
+    display: none;
+  }
+  .actionbar .btn--lg {
+    min-height: var(--control-h);
+  }
+
+  /* --- list screens: let the list be most of the screen ------------------ */
+
+  /* Six bulk-action buttons, every one of them `nowrap`, needed 694px and got
+     328 — five rows of chrome above a two-and-a-half-row list. Scrolling the
+     row keeps every action reachable and costs one row instead of five. */
+  .view--list .btn-row {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: thin;
+    padding-bottom: var(--sp-1);
+  }
+  .view--list .btn-row > * {
+    flex: 0 0 auto;
+  }
+
+  /* A subtitle that restates the title, on the screen with the least room. */
+  .view--list .page-subtitle {
+    display: none;
+  }
+  /* Actions take their own row rather than squeezing the heading down to its
+     200px minimum and wrapping it. */
+  .page-head__actions {
+    flex: 1 1 100%;
+  }
+
+  /* Four 38px icon buttons pinned at `flex: none` were taking 164px of a
+     294px row, leaving the task its name in 90px — under five characters of
+     Chinese. Wrapping them onto their own line gives the name the full width
+     and the buttons a real target size.
+
+     Still one card per row: `VirtualList` positions rows by a prefix sum over
+     measured heights, so a taller row is fine and a second column is not. */
+  .job {
+    flex-wrap: wrap;
+  }
+  .job__body {
+    flex: 1 1 100%;
+  }
+  .job__actions {
+    width: 100%;
+    justify-content: flex-end;
+    gap: var(--sp-2);
+  }
+  .icon-btn {
+    width: var(--tap-min);
+    height: var(--tap-min);
+  }
+  .chip__remove {
+    width: 24px;
+    height: 24px;
+  }
+
+  /* --- calendar ---------------------------------------------------------- */
+
+  /* 36.9px cells with an absolutely positioned count badge printed over the
+     date. The badge becomes an underline: it still says "something is
+     scheduled" and it no longer sits on top of the number it refers to. */
+  .monthgrid__head,
+  .monthgrid__body {
+    gap: 3px;
+  }
+  .monthgrid__day {
+    aspect-ratio: auto;
+    min-height: var(--tap-min);
+  }
+  .monthgrid__marks {
+    inset-block-start: auto;
+    inset-block-end: 3px;
+    inset-inline: 32%;
+    min-width: 0;
+    height: 3px;
+    padding: 0;
+    font-size: 0;
+    line-height: 0;
+  }
+
+  /* --- dialogs ----------------------------------------------------------- */
+
+  .modal__footer > .btn {
+    flex: 1 1 auto;
+  }
+
+  /* --- everything you tap, measured ---------------------------------------
+     The list below is not a guess: it is what a probe walking all nine screens
+     at 360, 390 and 412 reported as under 44px. Two entries are deliberately
+     not on it and are called out at the end. */
+  .tagfield__open,
+  .markup__btn,
+  .icon-btn--sm,
+  .chip__remove {
+    min-width: var(--tap-min);
+    min-height: var(--tap-min);
+  }
+  .segmented__item,
+  .settingsnav__link,
+  .chip--toggle,
+  .health__go,
+  .daypicker__day {
+    min-height: var(--tap-min);
+  }
+  .swatch {
+    width: var(--tap-min);
+    height: var(--tap-min);
+  }
+  /* `.link` is a run of text inside a sentence — "Cc / Bcc" sits on the label
+     row of the recipient field. Padding it to 44px would push the field it
+     labels down by half a line, and an inline link is not a button. Left as
+     text on purpose. */
+
+  /* Two that cannot reach 44px and are honest about it:
+       - `.nav__item` is 36-42px wide because nine tabs divided by a 360px
+         screen is 38px. Making them wider means one goes off the edge again,
+         which is the bug this replaced. They are 52px tall, so the target
+         *area* is larger than a 44x44 square.
+       - `.monthgrid__day` is 38x44 for the same reason: seven columns, 360px.
+         A wider cell means a horizontally scrolling month. */
+
+  /* Both of these were pinned to numbers that stopped being true when the bar
+     below them learned to wrap. */
+  .toasts {
+    bottom: calc(
+      var(--sp-4) + var(--nav-h) + env(safe-area-inset-bottom, 0px) + var(--actionbar-h)
+    );
+  }
+}
+
+/* Buttons in a dialog footer may wrap at any width — three of them in a 278px
+   panel used to overflow, and the end that got cut off was Save. */
+.modal__footer {
+  flex-wrap: wrap;
 }

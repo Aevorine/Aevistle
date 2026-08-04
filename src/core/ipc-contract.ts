@@ -45,6 +45,21 @@ import type { ControlEndpoint, ControlRequest, ControlResponse } from './control
  */
 export type TrayCommand = 'compose' | 'schedule' | 'logs' | 'pauseAll' | 'resumeAll'
 
+/**
+ * The two settings whose effect lives entirely outside the window.
+ *
+ * Deliberately a separate shape from `Settings`: the whole settings object is
+ * large, changes on every keystroke somewhere, and contains account details
+ * that have no business crossing the boundary just so a checkbox can take
+ * effect.
+ */
+export interface DesktopPrefs {
+  /** Closing the window hides it instead of quitting. False means close quits. */
+  minimiseToTray: boolean
+  /** Register (or clear) the OS login item. */
+  launchAtLogin: boolean
+}
+
 /** The result of a `<a download>` the main process took responsibility for. */
 export interface DownloadOutcome {
   /** True only when a file is on disk under `path`. */
@@ -72,6 +87,16 @@ export interface DesktopApi {
   prewarm(account: MailAccount): Promise<boolean>
   /** Rebuild the tray menu in the language the window is showing. */
   setUiLocale(locale: LocaleId): Promise<void>
+  /**
+   * Settings only the main process can act on.
+   *
+   * Both of these were switches in the settings screen that nothing outside the
+   * renderer ever read: closing the window went to the tray whether or not the
+   * user had turned that off, and "start with the computer" never registered
+   * anything. A toggle that flips and does nothing is worse than no toggle, so
+   * they are pushed across here whenever they change.
+   */
+  setDesktopPrefs(prefs: DesktopPrefs): Promise<void>
   /** Menu items that need the window to do something. Returns an unsubscribe. */
   onTrayCommand(handler: (command: TrayCommand) => void): () => void
   /**
@@ -204,6 +229,7 @@ export const IPC = {
   testConnection: 'aevistle:test-connection',
   prewarm: 'aevistle:prewarm',
   setUiLocale: 'aevistle:set-ui-locale',
+  setDesktopPrefs: 'aevistle:set-desktop-prefs',
   trayCommand: 'aevistle:tray-command',
   downloadDone: 'aevistle:download-done',
   pickFiles: 'aevistle:pick-files',
