@@ -36,7 +36,36 @@
  */
 
 import { useEffect, useMemo, useRef } from 'react'
-import { addIsoDays, isWorkingDayIso, parseIsoDate, toIsoDate, type WorkCalendar } from '../core/workCalendar'
+import { addIsoDays, parseIsoDate, toIsoDate, type WorkCalendar } from '../core/workCalendar'
+
+/**
+ * One send, as a day square shows it: time · recipient · subject.
+ *
+ * Deliberately raw strings rather than a finished sentence. Building the label
+ * needs the locale's time format and two fallback words, and doing that where
+ * the marks are computed would put `t` and `formatDateTime` — both rebuilt on
+ * every render — into the dependency list of the memo that this whole screen's
+ * performance rests on. See `WorkCalendarView`.
+ */
+export interface DaySend {
+  jobId: string
+  /** When it fires, after the calendar and quiet hours have had their say. */
+  at: number
+  /** First recipient. Empty when the reminder has none yet. */
+  to: string
+  /** Empty when it has no subject yet. */
+  subject: string
+  /** True when the calendar moved this send onto this day. */
+  shifted: boolean
+  /**
+   * True when this send is one of a pile-up on a single minute.
+   *
+   * Per-send, not per-day. The square already got a border when *something* on
+   * it was in conflict, which on a day holding three sends says a problem is
+   * here and leaves the reader to work out which of the three it is about.
+   */
+  conflict?: boolean
+}
 
 export interface DayMark {
   /** Reminders landing on this day, for the impact preview. */
@@ -47,7 +76,30 @@ export interface DayMark {
   jobIds?: string[]
   /** Worst conflict on this day, if any — see `core/conflicts.ts`. */
   conflict?: 'error' | 'warning'
+  /**
+   * The sends themselves, earliest first — what the square lists.
+   *
+   * Prebuilt by the caller, so a cell reads one already-sorted array rather
+   * than filtering a flat list of every send in the month. Sorting 42 short
+   * arrays once beats sorting inside 42 renders.
+   */
+  lines?: DaySend[]
+  /**
+   * How busy this day is, 1–5, or absent for a day with nothing on it. The
+   * heatmap step — see `LOAD_STEPS` in `WorkCalendarView`.
+   */
+  level?: number
 }
+
+/**
+ * How many sends a square lists before it stops and says "+N more".
+ *
+ * Three, because that is what fits above the fold of a cell at every width the
+ * grid is drawn at without the month growing taller than the window. The rest
+ * are not hidden — the badge still counts all of them, "+N more" opens the day,
+ * and the day panel lists every one.
+ */
+export const MAX_CELL_SENDS = 3
 
 export type GridScope = 'month' | 'week'
 
@@ -121,6 +173,31 @@ export interface MonthGridProps {
   label: string
   /** Announced on the badge, e.g. "3 reminders — open". */
   badgeLabel: (iso: string, mark: DayMark) => string
+
+  // --- the scheduling console ------------------------------------------------
+
+  /**
+   * List each day's sends inside its square, rather than only counting them.
+   *
+   * Off at 560px and below by stylesheet, not by this flag: see the note on
+   * `.monthgrid__sends` in `app.css`. Seven columns of a 360px phone is a 38px
+   * cell, and 38px holds a date or a line of text, not both.
+   */
+  showSends?: boolean
+  /** The locale's short time, memoised by the caller. Called at most 3× per cell. */
+  formatTime?: (at: number) => string
+  /** Stands in for a reminder with no recipients yet. */
+  noRecipientLabel?: string
+  /** Stands in for a reminder with no subject yet. */
+  noSubjectLabel?: string
+  /** "+2 more" — the affordance that opens the day panel. */
+  moreLabel?: (n: number) => string
+  /** A listed send was clicked: open that reminder for editing. */
+  onOpenSend?: (jobId: string, iso: string) => void
+  /** An empty square was double-clicked: start a reminder for that day. */
+  onCreateDay?: (iso: string) => void
+  /** Announced on an empty square that can be double-clicked. */
+  createHint?: string
 }
 
 export function MonthGrid({
@@ -142,6 +219,14 @@ export function MonthGrid({
   rtl = false,
   label,
   badgeLabel,
+  showSends = false,
+  formatTime,
+  noRecipientLabel = '',
+  noSubjectLabel = '',
+  moreLabel,
+  onOpenSend,
+  onCreateDay,
+  createHint,
 }: MonthGridProps) {
   /**
    * Weeks start on the first day that is *not* a weekend, so a Friday–Saturday
@@ -151,26 +236,56 @@ export function MonthGrid({
    */
   const firstDay = useMemo(() => weekStartDay(calendar.weekend), [calendar.weekend])
 
+  // The weekday travels with the cell so the render below never has to parse
+  // the date again to ask whether it is a weekend.
   const cells = useMemo(() => {
     if (scope === 'week') {
       const anchor = anchorDate ?? toIsoDate(new Date(year, month, 1).getTime())
-      return weekOf(anchor, firstDay).map((iso) => ({ iso, day: parseIsoDate(iso).getDate() }))
+      return weekOf(anchor, firstDay).map((iso) => {
+        const date = parseIsoDate(iso)
+        return { iso, day: date.getDate(), weekday: date.getDay() }
+      })
     }
     const first = new Date(year, month, 1)
     const lead = (first.getDay() - firstDay + 7) % 7
     const days = new Date(year, month + 1, 0).getDate()
-    const out: Array<{ iso: string; day: number } | null> = []
+    const out: Array<{ iso: string; day: number; weekday: number } | null> = []
     for (let i = 0; i < lead; i++) out.push(null)
     for (let d = 1; d <= days; d++) {
-      out.push({ iso: toIsoDate(new Date(year, month, d).getTime()), day: d })
+      const date = new Date(year, month, d)
+      out.push({ iso: toIsoDate(date.getTime()), day: d, weekday: date.getDay() })
     }
     // Pad to whole weeks so the grid does not reflow as months change length.
     while (out.length % 7 !== 0) out.push(null)
     return out
   }, [year, month, firstDay, scope, anchorDate])
 
+  /*
+   * Membership as a set, once, rather than three linear scans per cell.
+   *
+   * A holiday preset fills these arrays over a three-year range by default —
+   * `WorkCalendarView` offers "from 2026 to 2028" out of the box — so
+   * `holidays` can hold tens of entries and `workdays` a similar number. Each
+   * of the 42 cells below asked `includes` of both, and `isWorkingDayIso`
+   * asked a third time on top of parsing the date. Set lookups make that
+   * constant, and the `weekend` set removes the last `includes` from the loop.
+   */
+  const holidaySet = useMemo(() => new Set(calendar.holidays), [calendar.holidays])
+  const workdaySet = useMemo(() => new Set(calendar.workdays), [calendar.workdays])
+  const weekendSet = useMemo(() => new Set(calendar.weekend), [calendar.weekend])
+
+  /**
+   * `isWorkingDayIso` without re-scanning the arrays. Same precedence, and the
+   * same answer: `holidays` beats `workdays` beats the weekend.
+   */
+  const workingOn = (iso: string, weekday: number): boolean => {
+    if (holidaySet.has(iso)) return false
+    if (workdaySet.has(iso)) return true
+    return !weekendSet.has(weekday)
+  }
+
   const todayIso = toIsoDate(Date.now())
-  const dayCells = cells.filter((c): c is { iso: string; day: number } => c !== null)
+  const dayCells = cells.filter((c): c is { iso: string; day: number; weekday: number } => c !== null)
 
   /**
    * The one cell in the tab order.
@@ -241,6 +356,19 @@ export function MonthGrid({
 
   const onCellClick = (event: React.MouseEvent, iso: string) => {
     onFocusDate?.(iso)
+    /*
+     * The second click of a double-click never toggles.
+     *
+     * Double-clicking an empty square starts a new reminder for that day, and
+     * the browser delivers that as click → click → dblclick. Left alone, the
+     * gesture would have marked the day as a holiday and then unmarked it — the
+     * square flashing red, and *two* entries on the undo stack for something
+     * the user never asked for. `detail` is the click count, so this drops the
+     * second one; `WorkCalendarView` undoes the first when the double-click
+     * turns out to be a create. Both halves are needed: this one alone still
+     * leaves one stray toggle behind.
+     */
+    if (event.detail > 1) return
     // Shift-click extends from wherever the selection was anchored — the
     // gesture every file list and spreadsheet already trained. Without it a
     // two-week shutdown is fourteen clicks.
@@ -253,12 +381,12 @@ export function MonthGrid({
   }
 
   return (
-    <div className="monthgrid" data-scope={scope}>
+    <div className="monthgrid" data-scope={scope} data-lines={showSends || undefined}>
       <div className="monthgrid__head" aria-hidden="true">
         {Array.from({ length: 7 }, (_, i) => {
           const day = (firstDay + i) % 7
           return (
-            <span key={day} className="monthgrid__weekday" data-weekend={calendar.weekend.includes(day)}>
+            <span key={day} className="monthgrid__weekday" data-weekend={weekendSet.has(day)}>
               {weekdayLabel(day)}
             </span>
           )
@@ -279,12 +407,18 @@ export function MonthGrid({
         <div key={`w-${w}`} className="monthgrid__row" role="row">
         {week.map((cell, i) => {
           if (!cell) return <span key={`pad-${w}-${i}`} className="monthgrid__pad" role="presentation" />
-          const working = isWorkingDayIso(cell.iso, calendar)
-          const holiday = calendar.holidays.includes(cell.iso)
-          const makeup = calendar.workdays.includes(cell.iso)
+          const holiday = holidaySet.has(cell.iso)
+          const makeup = workdaySet.has(cell.iso)
+          const working = workingOn(cell.iso, cell.weekday)
           const mark = marks?.get(cell.iso)
           const selected = range !== null && cell.iso >= range.from && cell.iso <= range.to
           const draggableJob = mark?.jobIds?.length === 1 ? mark.jobIds[0] : undefined
+          // O(1) per cell: an already-sorted array is read, sliced to at most
+          // three, and never scanned. The whole point of `lines` being prebuilt.
+          const lines = showSends ? (mark?.lines ?? EMPTY_SENDS) : EMPTY_SENDS
+          const listed = lines.length > MAX_CELL_SENDS ? lines.slice(0, MAX_CELL_SENDS) : lines
+          const hidden = lines.length - listed.length
+          const canCreate = Boolean(onCreateDay) && !mark?.count
 
           return (
             <div
@@ -292,6 +426,13 @@ export function MonthGrid({
               className="monthgrid__cell"
               role="gridcell"
               aria-selected={selected || undefined}
+              onDoubleClick={() => {
+                // Only an *empty* square. A double-click on a square that has
+                // sends on it is somebody aiming at one of them and missing,
+                // and answering that with a brand-new reminder for a day that
+                // already has three is not a guess worth making.
+                if (canCreate) onCreateDay?.(cell.iso)
+              }}
               onDragOver={(event) => {
                 if (!onMoveJob) return
                 if (!event.dataTransfer.types.includes(DRAG_TYPE)) return
@@ -324,9 +465,18 @@ export function MonthGrid({
                 data-today={cell.iso === todayIso}
                 data-selected={selected}
                 data-conflict={mark?.conflict ?? undefined}
+                /* The heatmap. A step, not a count: the square is tinted by how
+                   busy the day is, and the badge on top still says exactly how
+                   many. Absent — not zero — on a day with nothing on it, so the
+                   stylesheet never has to paint "no load" as a colour. */
+                data-load={mark?.level ?? undefined}
                 tabIndex={cell.iso === rovingDate ? 0 : -1}
                 aria-pressed={holiday || makeup}
-                title={dayTitle(cell.iso, working, mark)}
+                title={
+                  canCreate && createHint
+                    ? `${dayTitle(cell.iso, working, mark)} · ${createHint}`
+                    : dayTitle(cell.iso, working, mark)
+                }
                 onKeyDown={(event) => onKeyDown(event, cell.iso)}
                 onClick={(event) => onCellClick(event, cell.iso)}
               >
@@ -366,6 +516,87 @@ export function MonthGrid({
                   {mark.count}
                 </button>
               ) : null}
+
+              {/*
+                What actually happens on this day, in the square.
+
+                A number told you something was scheduled and nothing else — you
+                could see that the 2nd was busy and had no way to find out what
+                with, which made the calendar a picture of the schedule rather
+                than a way to work on it.
+
+                Buttons, and siblings of the day button rather than children of
+                it, for the reason the badge above is: a `<button>` inside a
+                `<button>` is invalid HTML and browsers resolve it by ignoring
+                the inner one, so every one of these would silently have toggled
+                the holiday instead of opening the reminder.
+
+                The container does not take pointer events; only the rows do. A
+                click on the gap between two rows still reaches the day button
+                underneath, so "click the square to mark it a holiday" keeps
+                working on a square that has sends on it.
+              */}
+              {listed.length > 0 ? (
+                <div className="monthgrid__sends">
+                  {listed.map((send) => {
+                    const who = send.to || noRecipientLabel
+                    const subject = send.subject || noSubjectLabel
+                    const time = formatTime ? formatTime(send.at) : ''
+                    const full = [time, who, subject].filter(Boolean).join(' · ')
+                    return (
+                      <button
+                        key={`${send.jobId}-${send.at}`}
+                        type="button"
+                        className="monthgrid__send"
+                        data-shifted={send.shifted || undefined}
+                        data-conflict={send.conflict ? 'true' : undefined}
+                        /* Part of the same single tab stop as the day it sits
+                           on. 42 squares × 3 sends is 126 new tab stops, which
+                           is the problem the roving tabindex was introduced to
+                           remove — reintroducing it here would have undone that
+                           on the one screen it was written for. */
+                        tabIndex={cell.iso === rovingDate ? 0 : -1}
+                        title={full}
+                        aria-label={full}
+                        draggable={Boolean(onMoveJob)}
+                        onDragStart={(event) => {
+                          // The specific send, not "the one reminder this
+                          // square happens to have". The badge can only be
+                          // dragged when a day holds exactly one reminder;
+                          // a row always knows which one it is.
+                          event.dataTransfer.setData(DRAG_TYPE, dragPayload(send.jobId, cell.iso))
+                          event.dataTransfer.effectAllowed = 'move'
+                        }}
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          onFocusDate?.(cell.iso)
+                          onOpenSend?.(send.jobId, cell.iso)
+                        }}
+                      >
+                        <span className="monthgrid__sendtime">{time}</span>
+                        <span className="monthgrid__sendtext">
+                          {who}
+                          <span className="monthgrid__sendsubject"> · {subject}</span>
+                        </span>
+                      </button>
+                    )
+                  })}
+                  {hidden > 0 && moreLabel ? (
+                    <button
+                      type="button"
+                      className="monthgrid__more"
+                      tabIndex={cell.iso === rovingDate ? 0 : -1}
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        onFocusDate?.(cell.iso)
+                        onOpenDay?.(cell.iso)
+                      }}
+                    >
+                      {moreLabel(hidden)}
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
           )
         })}
@@ -375,6 +606,9 @@ export function MonthGrid({
     </div>
   )
 }
+
+/** One shared empty array, so a day with nothing on it allocates nothing. */
+const EMPTY_SENDS: DaySend[] = []
 
 /** Split a flat list into fixed-size groups — one per week. */
 function chunk<T>(items: T[], size: number): T[][] {

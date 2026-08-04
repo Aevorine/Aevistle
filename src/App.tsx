@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import { ComposeView } from './views/ComposeView'
 import { AppProvider, useApp } from './state/AppState'
 import { I18nContext, useI18n } from './i18n'
@@ -266,6 +266,31 @@ function Shell() {
     setView('settings')
   }
 
+  /*
+   * The palette's three props are `useCallback`s and not inline arrows.
+   *
+   * `CommandPalette` lists `onNavigate` and `onCompose` in the dependencies of
+   * the memo that builds its action list — every navigation target, every
+   * contact, every template and every reminder — and its result list depends on
+   * that. Inline arrows are a new identity on every render of `Shell`, which
+   * includes every keystroke into the compose textarea, so the whole list was
+   * rebuilt and re-ranked between characters *while the palette was shut*.
+   * The palette also stands down on its own now (see its `open` guard); both
+   * ends are fixed because either one alone leaves the other half of the work.
+   */
+  const closePalette = useCallback(() => setPaletteOpen(false), [])
+  const paletteNavigate = useCallback((target: PaletteTarget) => {
+    setOpenAccountOnMount(false)
+    setView(target)
+  }, [])
+  const paletteCompose = useCallback(
+    (prefill?: { to?: string[]; subject?: string; body?: string }) => {
+      if (prefill) dispatch({ type: 'setDraft', patch: prefill })
+      setView('compose')
+    },
+    [dispatch],
+  )
+
   /**
    * The frame arrives before the data does.
    *
@@ -446,7 +471,11 @@ function Shell() {
         ) : null}
         {view === 'workcal' ? (
           <Suspense fallback={<Skeleton shape="form" />}>
-            <WorkCalendarView />
+            {/* Double-clicking an empty square starts a reminder for that day.
+                The *date* travels through `core/composeSeed`, which the compose
+                screen's send-time seed already reads; this only has to get the
+                user to the screen that reads it. */}
+            <WorkCalendarView onCompose={() => setView('compose')} />
           </Suspense>
         ) : null}
         {view === 'logs' ? (
@@ -463,15 +492,9 @@ function Shell() {
 
       <CommandPalette
         open={paletteOpen}
-        onClose={() => setPaletteOpen(false)}
-        onNavigate={(target: PaletteTarget) => {
-          setOpenAccountOnMount(false)
-          setView(target)
-        }}
-        onCompose={(prefill) => {
-          if (prefill) dispatch({ type: 'setDraft', patch: prefill })
-          setView('compose')
-        }}
+        onClose={closePalette}
+        onNavigate={paletteNavigate}
+        onCompose={paletteCompose}
       />
 
       <ShortcutsDialog open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />

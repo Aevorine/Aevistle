@@ -72,6 +72,15 @@ function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
+/**
+ * Returned by both memos while the palette is shut.
+ *
+ * Module-level so the identity is stable: a fresh `[]` each time would still
+ * invalidate everything downstream of it, which is the exact bug this guards.
+ */
+const NO_ACTIONS: PaletteAction[] = []
+const NO_RESULTS: Ranked[] = []
+
 export function CommandPalette({
   open,
   onClose,
@@ -100,7 +109,23 @@ export function CommandPalette({
     return () => window.clearTimeout(timer)
   }, [open])
 
+  /*
+   * Nothing below runs while the palette is shut.
+   *
+   * The hooks stay where they are — the early return is still after all of
+   * them, so the hook order never changes — but the *work* does not happen.
+   * Without this guard every render of the shell rebuilt an array of
+   * `8 + contacts + templates + jobs` action objects, mapped it into a second
+   * array of spreads, and (once anything had been typed) constructed a fresh
+   * `RegExp` per candidate to score it. That is the cost of a search box that
+   * is not on screen, paid on every keystroke into the compose textarea.
+   *
+   * Opening the palette clears the query first (the effect above), so there is
+   * nothing to show that this defers.
+   */
   const actions = useMemo<PaletteAction[]>(() => {
+    if (!open) return NO_ACTIONS
+
     const NAV: Array<[PaletteTarget, TranslationKey, typeof IconMail]> = [
       ['compose', 'nav.compose', IconMail],
       ['codes', 'nav.codes', IconKey],
@@ -152,9 +177,10 @@ export function CommandPalette({
       })
     }
     return out
-  }, [state.contacts, state.templates, state.jobs, t, onNavigate, onCompose])
+  }, [open, state.contacts, state.templates, state.jobs, t, onNavigate, onCompose])
 
   const results = useMemo<Ranked[]>(() => {
+    if (!open) return NO_RESULTS
     const trimmed = query.trim()
     return actions
       .map((action) => ({
@@ -164,7 +190,7 @@ export function CommandPalette({
       .filter((action) => action.score > 0)
       .sort((a, b) => b.score - a.score)
       .slice(0, 40)
-  }, [actions, query])
+  }, [open, actions, query])
 
   // Keep the highlighted row in view when arrowing past the fold.
   useEffect(() => {

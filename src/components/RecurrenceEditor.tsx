@@ -16,6 +16,7 @@ import { useMemo, useState } from 'react'
 import { Field, Segmented, Switch } from './ui'
 import { useApp } from '../state/AppState'
 import { parseNaturalTime } from '../core/naturalTime'
+import { nextComposeStart } from '../core/composeSeed'
 import { useI18n, type TranslationKey } from '../i18n'
 import { applyQuietHours, computeOccurrences, summarizeRecurrence, validateCron } from '../core/schedule'
 import {
@@ -51,6 +52,26 @@ export function fromLocalInput(value: string, fallback: number): number {
   return Number.isFinite(t) ? t : fallback
 }
 
+/**
+ * The next whole hour, seconds zeroed — or the day the calendar asked for.
+ *
+ * The seed for a new reminder's send time. It used to be "five minutes from
+ * now", which is a fine internal default and a poor thing to show anyone: the
+ * compose screen displayed it as `14:37` and the schedule dialog agreed, so
+ * every reminder that was scheduled without touching the time went out at a
+ * minute nobody chose. A whole hour is a time a person would have picked.
+ *
+ * It is also the *single point* every new reminder's start time comes through,
+ * which is why "double-click the 15th on the working calendar and get a
+ * reminder for the 15th" is implemented here rather than by a second seeding
+ * path that would have to be kept in step with this one. See
+ * `core/composeSeed.ts`: with nothing waiting there, this is the function it
+ * has always been.
+ */
+export function nextWholeHour(now: number): number {
+  return nextComposeStart(now)
+}
+
 /** `HH:mm` in local time — the shape `Recurrence.timeOfDay` stores. */
 export function hhmm(ms: number): string {
   const d = new Date(ms)
@@ -70,7 +91,7 @@ export function hhmm(ms: number): string {
  * when the chip was tapped fires at 09:00:37, which is not what "tomorrow at
  * nine" means to anyone.
  */
-function quickTimes(now: number): Array<{ key: string; at: number }> {
+export function quickTimes(now: number): Array<{ key: string; at: number }> {
   const at = (dayOffset: number, hour: number, minute = 0) => {
     const d = new Date(now)
     d.setDate(d.getDate() + dayOffset)

@@ -7,6 +7,7 @@
  */
 
 import type { CodeRule, ReasonCode } from './codeExtract'
+import type { DeliveryWindow } from './deliveryWindow'
 import type { LinkPurpose, LinkRisk } from './linkPurpose'
 import type { SendCondition } from './conditions'
 import type { OutboxItem } from './outbox'
@@ -441,6 +442,16 @@ export interface Contact {
   fields?: Record<string, string>
   /** Keep at the top of the list, above the alphabet. */
   pinned?: boolean
+  /**
+   * When this person's mail should land — their time zone and working hours.
+   *
+   * Optional, and absent means "no window", which is why adding it changes
+   * nothing for any contact that already exists: a reminder goes out when it
+   * was scheduled unless somebody has said otherwise about this recipient.
+   * See `core/deliveryWindow.ts` for what happens when several recipients'
+   * windows cannot all be satisfied.
+   */
+  deliveryWindow?: DeliveryWindow
   createdAt: number
 }
 
@@ -456,6 +467,15 @@ export interface Template {
 
 export type ThemeMode = 'system' | 'light' | 'dark'
 export type AccentId = 'azure' | 'indigo' | 'teal' | 'violet' | 'amber' | 'rose' | 'emerald'
+/**
+ * How the whole surface is drawn, one layer above `ThemeMode`.
+ *
+ * Theme decides bright or dim; this decides what the page is made of — the
+ * neutrals, the corner radius, how much shadow is allowed, how far apart the
+ * lines sit. `midnight` is dark-committed and `contrast` is the accessibility
+ * one; see the block comments in `styles/theme.css` for what each is for.
+ */
+export type VisualStyle = 'aurora' | 'graphite' | 'paper' | 'midnight' | 'nordic' | 'contrast'
 export type Density = 'comfortable' | 'compact'
 export type LocaleId = 'en' | 'zh-CN' | 'fr' | 'es' | 'ru' | 'ar'
 /**
@@ -467,6 +487,12 @@ export type LocalePreference = LocaleId | 'system'
 
 export interface Settings {
   themeMode: ThemeMode
+  /**
+   * Required, not optional, because `DEFAULT_SETTINGS` is merged under every
+   * stored settings object at boot — an install written before this existed
+   * reads as `'aurora'`, which is the look it already had.
+   */
+  visualStyle: VisualStyle
   accent: AccentId
   density: Density
   locale: LocalePreference
@@ -607,10 +633,47 @@ export interface Settings {
    * account in `InboxAccountState.showRemoteImages`.
    */
   imagePolicyChosen?: boolean
+
+  // --- daily digest ---------------------------------------------------------
+  /**
+   * Mail the user a summary of their own schedule once a day.
+   *
+   * Implemented as an ordinary scheduled reminder with a fixed id, not as a
+   * second timer: the app's whole design is one recurrence engine budgeting
+   * absolute timestamps while the two native schedulers only answer "wake me at
+   * T", and a digest with its own clock would be a second answer to the
+   * question that engine exists to own. See `core/digest.ts`.
+   */
+  digestEnabled: boolean
+  /** 'HH:mm', local. Fed straight into the recurrence as a daily rule. */
+  digestTime: string
+  /** Which account sends it. Unset falls back to `defaultAccountId`. */
+  digestAccountId?: string
+  /** Where it goes. Empty means the sending account's own address — yourself. */
+  digestTo?: string
+
+  // --- holiday greetings ----------------------------------------------------
+  /**
+   * Defaults for the greeting *planner*, which is a button and not a
+   * background task. Nothing in this group causes mail to exist; the user
+   * reviews a plan and confirms it, and what that creates is ordinary visible
+   * scheduled jobs. See `core/greetings.ts` for why that is not negotiable.
+   */
+  greetingCountry: string
+  /** 'HH:mm', local — when a created greeting leaves on its day. */
+  greetingTime: string
+  /**
+   * Templates. Empty means "use the translated default", so the suggestion
+   * arrives in the user's own language instead of in English forever.
+   */
+  greetingSubject: string
+  greetingBody: string
+  greetingAccountId?: string
 }
 
 export const DEFAULT_SETTINGS: Settings = {
   themeMode: 'system',
+  visualStyle: 'aurora',
   accent: 'azure',
   density: 'comfortable',
   locale: 'system',
@@ -644,6 +707,13 @@ export const DEFAULT_SETTINGS: Settings = {
   codeRules: [],
   listDensity: 'standard',
   imagePolicyChosen: false,
+  digestEnabled: false,
+  digestTime: '08:00',
+  digestTo: '',
+  greetingCountry: 'CN',
+  greetingTime: '09:00',
+  greetingSubject: '',
+  greetingBody: '',
 }
 
 // ---------------------------------------------------------------------------

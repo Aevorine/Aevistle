@@ -104,6 +104,37 @@ function hasAttachmentPart(node: unknown): boolean {
   return (n.childNodes ?? []).some(hasAttachmentPart)
 }
 
+/** Biggest `text/calendar` part worth carrying, and how many. */
+const MAX_ICS_BYTES = 256 * 1024
+const MAX_ICS_PARTS = 4
+
+/**
+ * The `text/calendar` parts of a message, as text.
+ *
+ * An invitation states its time in a `DTSTART` that the sending calendar wrote
+ * deliberately; the prose beside it ("see you Thursday") is a guess dressed up
+ * as a fact. So this is the primary source for `core/dateExtract.ts` and the
+ * prose reader is the fallback.
+ *
+ * Bounded on both axes because this is a stranger's file: a calendar export
+ * with ten years of history is a legitimate `text/calendar` part and has no
+ * business being parsed to find one meeting. Oversized parts are dropped
+ * rather than truncated — half an iCalendar file parses to nothing useful and
+ * would look like a parser bug rather than a size limit.
+ */
+function calendarParts(attachments: Array<{ contentType?: string; content?: Buffer }>): string[] {
+  const out: string[] = []
+  for (const part of attachments) {
+    if (out.length >= MAX_ICS_PARTS) break
+    const type = (part.contentType ?? '').toLowerCase()
+    if (!type.startsWith('text/calendar')) continue
+    const buffer = part.content
+    if (!buffer || buffer.length === 0 || buffer.length > MAX_ICS_BYTES) continue
+    out.push(buffer.toString('utf8'))
+  }
+  return out
+}
+
 /**
  * Parse a raw RFC822 source, sanitize its HTML, cache the result to disk, and
  * return it in the shape the bridge promises. Shared by the eager sync
@@ -125,10 +156,12 @@ async function parseCacheAndReturn(
       : []
 
   const remoteImages = sanitized?.remoteImages ?? []
+  const icsParts = calendarParts(parsed.attachments)
   await writeMessageBody(accountId, folderPath, uid, {
     text: parsed.text,
     sanitizedHtml: sanitized?.html,
     remoteImages,
+    icsParts,
   })
 
   return {
@@ -136,6 +169,7 @@ async function parseCacheAndReturn(
     sanitizedHtml: sanitized?.html,
     attachments,
     remoteImages,
+    icsParts,
     hasAttachments: attachments.length > 0,
   }
 }
@@ -606,6 +640,7 @@ export async function fetchMessageBody(
         sanitizedHtml: result.sanitizedHtml,
         attachments: result.attachments,
         remoteImages: result.remoteImages,
+        icsParts: result.icsParts,
       }
     } finally {
       lock.release()

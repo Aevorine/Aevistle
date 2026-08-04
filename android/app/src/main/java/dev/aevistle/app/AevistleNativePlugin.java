@@ -375,6 +375,32 @@ public class AevistleNativePlugin extends Plugin {
         });
     }
 
+    /**
+     * Read one of the two allow-listed public feeds on the WebView's behalf.
+     *
+     * The WebView cannot: `connect-src 'self'` refuses it. See
+     * {@link FeedFetcher} for why the policy was not simply widened.
+     */
+    @PluginMethod
+    public void fetchFeed(final PluginCall call) {
+        final String url = call.getString("url");
+        if (url == null) {
+            call.reject("url is required");
+            return;
+        }
+        io.execute(() -> {
+            try {
+                FeedFetcher.Result result = FeedFetcher.fetch(url);
+                JSObject payload = new JSObject();
+                payload.put("status", result.status);
+                payload.put("body", result.body);
+                call.resolve(payload);
+            } catch (Exception e) {
+                call.reject(e.getMessage() == null ? e.toString() : e.getMessage(), e);
+            }
+        });
+    }
+
     // -----------------------------------------------------------------------
     // Files
     // -----------------------------------------------------------------------

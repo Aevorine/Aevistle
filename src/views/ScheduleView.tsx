@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { HealthAllClear } from '../components/HealthBoard'
 import { VirtualList } from '../components/VirtualList'
 import {
@@ -15,6 +15,14 @@ import { useApp } from '../state/AppState'
 import { useI18n } from '../i18n'
 import { summarizeRecurrence } from '../core/schedule'
 import { isFinished } from '../core/jobRun'
+import type { ScheduledJob } from '../core/types'
+
+/** Soonest first; a reminder with nothing left to fire sorts to the bottom. */
+function byNextRun(a: ScheduledJob, b: ScheduledJob) {
+  const an = a.occurrences[0] ?? Number.MAX_SAFE_INTEGER
+  const bn = b.occurrences[0] ?? Number.MAX_SAFE_INTEGER
+  return an - bn
+}
 
 export function ScheduleView({ onCompose }: { onCompose: () => void }) {
   const { state, dispatch, toggleJob, deleteJob, runJobNow } = useApp()
@@ -37,17 +45,27 @@ export function ScheduleView({ onCompose }: { onCompose: () => void }) {
    * silently forgets.
    */
   const [showDone, setShowDone] = useState(false)
-  const byNextRun = (a: (typeof state.jobs)[number], b: (typeof state.jobs)[number]) => {
-    const an = a.occurrences[0] ?? Number.MAX_SAFE_INTEGER
-    const bn = b.occurrences[0] ?? Number.MAX_SAFE_INTEGER
-    return an - bn
-  }
-  const active = state.jobs.filter((j) => !isFinished(j)).sort(byNextRun)
+
+  /*
+   * Memoised, and not for the sort.
+   *
+   * These three lines used to run in the render body, so every render produced
+   * a *new array* even when nothing about the schedule had changed — and this
+   * screen reads the whole app context, so an inbox sync, a log line or the
+   * 20-second outbox tick renders it. `VirtualList` keys its `keys` memo, its
+   * `offsets` prefix sum and, worst, its measuring layout effect off that array
+   * identity; the effect calls `getBoundingClientRect()` on every mounted row,
+   * which is a forced synchronous layout, and can then bump its own version and
+   * do it again. Every other list screen in the app already memoises here —
+   * `InboxView`, `LogsView`, `ContactsView`, `CodesView`. This was the holdout.
+   */
+  const active = useMemo(() => state.jobs.filter((j) => !isFinished(j)).sort(byNextRun), [state.jobs])
   // Most recently completed first: the one that just fired is the one being
   // looked for.
-  const done = state.jobs
-    .filter((j) => isFinished(j))
-    .sort((a, b) => (b.lastRunAt ?? 0) - (a.lastRunAt ?? 0))
+  const done = useMemo(
+    () => state.jobs.filter((j) => isFinished(j)).sort((a, b) => (b.lastRunAt ?? 0) - (a.lastRunAt ?? 0)),
+    [state.jobs],
+  )
   const jobs = showDone ? done : active
 
   /**

@@ -10,6 +10,7 @@ import {
   useConfirm,
 } from '../components/ui'
 import { IconFlag, IconPlus, IconTrash, IconUsers } from '../components/icons'
+import { DeliveryWindowEditor } from '../components/DeliveryWindowEditor'
 import { useApp } from '../state/AppState'
 import { SearchInput } from '../components/inputs'
 import { useI18n } from '../i18n'
@@ -241,6 +242,23 @@ export function ContactsView() {
                 onChange={(e) => setEditing({ ...editing, note: e.target.value })}
               />
             </Field>
+
+            {/*
+              B3 · 送达窗口. The one field on this card that changes *when* mail
+              goes out rather than what it says — so it is the one field that
+              has to show its own consequence, and it does, live, underneath
+              itself. `deliveryWindow` is written straight onto the contact
+              being edited and saved by the same button as everything else;
+              `undefined` (the switch off) is what every existing contact means
+              and must keep meaning.
+            */}
+            <DeliveryWindowEditor
+              value={editing.deliveryWindow}
+              name={editing.name}
+              address={editing.address}
+              jobs={state.jobs}
+              onChange={(deliveryWindow) => setEditing({ ...editing, deliveryWindow })}
+            />
           </>
         ) : null}
       </Modal>

@@ -34,6 +34,7 @@ import type {
 } from './bridge'
 import type { DownloadProgress, UpdateAsset, UpdateInfo } from './update'
 import type { ControlEndpoint, ControlRequest, ControlResponse } from './control'
+import type { FeedResponse } from './feeds'
 
 /**
  * Tray menu items that are a request to the *window*, not to the app.
@@ -184,6 +185,8 @@ export interface DesktopApi {
     items: Array<{ folderPath: string; uid: number }>,
   ): Promise<void>
   fetchRemoteImage(url: string): Promise<string>
+  /** Read one of the two allow-listed public feeds. See `core/feeds.ts`. */
+  fetchFeed(url: string): Promise<FeedResponse>
   /** Drop the on-disk remote-image cache. Part of "reset everything". */
   clearImageCache(): Promise<void>
   onInboxEvent(handler: (event: InboxEvent) => void): () => void
@@ -251,6 +254,7 @@ export const IPC = {
   deleteInboxMessages: 'aevistle:delete-inbox-messages',
   purgeInboxMessages: 'aevistle:purge-inbox-messages',
   fetchRemoteImage: 'aevistle:fetch-remote-image',
+  fetchFeed: 'aevistle:fetch-feed',
   clearImageCache: 'aevistle:clear-image-cache',
   inboxEvent: 'aevistle:inbox-event',
   notify: 'aevistle:notify',

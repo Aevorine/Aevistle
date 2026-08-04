@@ -9,7 +9,9 @@
 Escribe un correo una vez —con archivos, imágenes o comprimidos adjuntos— y
 Aevistle lo envía a su hora, incluso con la ventana cerrada. Una sola vez, cada
 día laborable a las 09:00, el día 1 de cada mes o según cualquier expresión
-cron. Windows y Android, sin cuenta, sin servidor, sin telemetría.
+cron. Conoce tus festivos oficiales, así que el informe del lunes no sale un
+lunes en el que no trabaja nadie. Windows y Android, sin cuenta, sin servidor,
+sin telemetría.
 
 *El informe semanal del viernes. La factura del día 1. La felicitación de
 cumpleaños a medianoche, mientras duermes.*
@@ -60,13 +62,26 @@ enlaces de acceso, y deja todo lo demás tal cual por defecto.
 
 | | |
 |---|---|
-| 📮 **Enviar ahora o después** | Los dos botones que importan están fijos en la parte inferior de la pantalla de redacción, con cualquier tamaño de ventana. Nunca hay que desplazarse para enviar. |
+| 📮 **Enviar ahora o después** | Los dos botones que importan están fijos en la parte inferior de la pantalla de redacción, con cualquier tamaño de ventana. Nunca hay que desplazarse para enviar. La hora de envío está justo al lado, ya rellenada con la siguiente hora en punto en vez de dejarse en blanco, y cambia de forma según la regla: fecha y hora para un envío único, hora del día para uno diario, semanal, mensual o anual —que es el campo con el que esas reglas disparan de verdad— y ningún editor para una expresión cron, porque la expresión *es* la regla. |
 | 📥 **Bandeja de entrada opcional** | Activa IMAP en una cuenta y Aevistle rellena el servidor, lo prueba antes de guardar y luego sincroniza una bandeja unificada con todas las cuentas — vista conjunta o filtrada por cuenta, comprobada con el intervalo que elijas. Al abrir un mensaje ocupa toda la ventana; `Esc` retrocede. `J`/`K` van de un mensaje a otro y `Ctrl+F` busca dentro. Los adjuntos recibidos se previsualizan en el momento — imágenes, PDF y texto — o se abren con la aplicación del sistema, se guardan donde quieras o se muestran en el explorador de archivos. Las imágenes remotas siguen bloqueadas y cada enlace pasa por una confirmación que muestra el destino real. |
 | 🔑 **Códigos de verificación, en su propia pantalla** | Los códigos y enlaces de acceso se extraen automáticamente del correo que llega y se reúnen en una pantalla propia: remitente, asunto, hora de llegada y el código en un tamaño que se lee de un vistazo. Haz clic en cualquier parte de la tarjeta para copiarlo. Una notificación lleva el código consigo, así que no hace falta abrir nada, y el historial sobrevive al borrado del correo original. |
+| 📨 **Correo que se convierte en recordatorio** | Las reuniones, las citas y los plazos se leen del correo recibido en los seis idiomas de la aplicación, y un botón convierte uno de ellos en un recordatorio programado. La tarjeta enseña la frase de la que ha sacado la fecha, para que puedas comprobarla en vez de fiarte, y dice en voz alta cuándo la redacción dejaba la fecha abierta a más de una lectura. Una invitación de verdad lleva una parte `text/calendar` con la fecha ya indicada con exactitud: eso se lee antes que la prosa, en Windows; la bandeja de entrada de Android no conserva esas partes, así que allí se recurre al lector de prosa. Callar es el fallo preferible: una fecha que se escapa cuesta releer un correo, una fecha equivocada cuesta una reunión. |
 | ⚡ **Envío en ráfaga** | Un único disparo programado puede enviar el mismo mensaje varias veces seguidas, con el ritmo que fijes en milisegundos —para poner a prueba tu propio circuito de envío, no para hacer spam a nadie. |
 | 📎 **Adjuntos e imágenes en el cuerpo** | Documentos, imágenes, archivos comprimidos: todo lo que quepa en el límite de tu proveedor. Pega una imagen copiada directamente en el mensaje para insertarla en línea; cualquier imagen adjunta también puede pasar de archivo adjunto a imagen dentro del mensaje, y volver. Aevistle muestra el tamaño real transmitido, porque base64 convierte un archivo de 20 MB en 27 MB y por eso rebotan adjuntos que «no superaban el límite». |
 | 🖼️ **Imágenes que se ven de verdad** | Cada imagen de un mensaje —incrustada en el cuerpo, adjunta como archivo o recibida en la bandeja— aparece como una miniatura que se puede mirar, no como un nombre de archivo que hay que adivinar. Un clic abre el visor a pantalla completa: rueda para acercar, arrastrar para desplazar, doble clic para alternar entre tamaño ajustado y real, giro de un cuarto en ambos sentidos, espejo horizontal o vertical, flechas para recorrer el resto de imágenes del mensaje, y las dimensiones en píxeles, el tamaño y el formato a la vista antes de guardarla o copiarla al portapapeles. `Esc` cierra la imagen y nada más. |
-| 📆 **Un calendario laboral que enseña lo que hace** | Festivos, fines de semana que defines tú y días de recuperación — con una cuadrícula mensual donde un clic cambia el día, puntos de partida de un clic para seis países, y en cada fecha cuántos recordatorios caen ahí, relleno cuando ha sido el calendario quien los movió. |
+| 📆 **La cuadrícula del mes es la programación** | Cada casilla de día enumera lo que sale de verdad ese día: hora, destinatario, asunto. Un clic abre ese recordatorio, arrastrarlo a otro día lo mueve, y un doble clic en un día vacío empieza uno nuevo para esa fecha. Un arrastre dice lo que va a hacer antes de hacerlo: un envío único se mueve, una regla repetida *cambia*, porque no hay lista de excepciones por ocurrencia donde escribir «este martes no, envía el jueves», y un arrastre que reescribiera en silencio una regla semanal sería peor que uno que se niega. Las casillas se tiñen según la carga del día en una escala fija —1, 2, 3, 5, 8 envíos—, así que el mismo martes tiene el mismo tono el mes que viene. Una escala normalizada al día más cargado de la pantalla repintaría el mes entero cada vez que añadieras un recordatorio, y eso es decoración, no información. |
+| ⚠️ **Envíos que chocan, y un botón para eso** | Los recordatorios que caen en el mismo minuto se marcan en el día en que caen. Un clic los reparte dentro de ±5 minutos y luego nombra los que ha dejado donde estaban y por qué: una expresión cron es dueña de su propio minuto, y un empujón que cruzara la medianoche es un cambio de *día*, que no es lo que se le permite significar a unos minutos. Cambia la hora del día de la regla, así que la siguen todos los envíos futuros; lo dice en la confirmación, y `Ctrl+Z` devuelve el lote entero de una vez. |
+| 🎌 **Los días laborables los defines tú** | Festivos oficiales, fines de semana a tu gusto y días de recuperación, en una cuadrícula mensual donde un clic cambia el día. Puntos de partida de un clic para seis países, las tablas oficiales chinas transcritas —incluidos los días de recuperación 调休— e importación y exportación `.ics`. Cada recordatorio decide por su cuenta si sigue el calendario, y la cuadrícula marca qué envíos ha *movido* el calendario, que es lo único que responde a «¿ha servido de algo configurar todo esto?». La consulta «comprobar en línea» de las fechas oficiales de un año no había funcionado en ninguna compilación: la propia política de seguridad de contenido de la aplicación rechazaba la petición hecha desde la interfaz, y el fallo se parecía exactamente a un problema de red. Ahora sale por el proceso de confianza, con la política tan estricta como estaba. |
+| 🌐 **El día laboral del destinatario** | Un contacto puede llevar una zona horaria y un horario laboral, y un recordatorio dirigido a él cae dentro de *su* día y no del tuyo: «cada lunes a las 09:00» escrito en Shanghái llega si no a las 03:00 en Los Ángeles, que es la única hora de la semana en la que nadie lee el correo. Se aplica después del calendario laboral y después de las horas de silencio, y manda sobre ambos, así que un mensaje soltado en la mañana del destinatario puede caer perfectamente dentro de tu propia noche; eso es la función funcionando, no fallando. Solo se consulta la línea `To:`: a quien se mantiene al corriente no se le está localizando, y una copia no tiene por qué retener el correo del destinatario de verdad. **Nunca se retiene ni se descarta nada**: un conjunto de ventanas que no se pueden satisfacer a la vez, o una sencillamente mal configurada, se informa y el mensaje sale a la hora que fijaste. El editor enuncia la consecuencia en una frase —a qué hora saldría de verdad un recordatorio puesto a una hora dada, y qué hora es esa donde está esa persona—, porque todos los valores de ese formulario son verosímiles y ninguno se puede comprobar releyéndolo. |
+| 🗒️ **Un resumen de tu propia agenda** | Opcional: un correo al día a ti mismo con lo que sale hoy, lo que vence en los próximos siete días y lo que choca entre sí. No es una tarea en segundo plano escondida en alguna parte: es un recordatorio corriente dentro de tu programación, visible en la misma pantalla, que se pausa y se borra como cualquier otro, que es la única versión de esta función que esta aplicación está dispuesta a tener. Cuando una cifra es un mínimo y no un total, lo dice, y el cuerpo lleva el instante en que se calculó, porque bien puede ser que la máquina lo enviara horas después. |
+| 🎉 **Felicitaciones de fiesta, planificadas en vez de enviadas** | Elige un país y un año y Aevistle calcula qué festivos oficiales caen dónde y te enseña la lista. No existe nada hasta que pulsas el botón, y lo que crea entonces son tareas programadas corrientes y visibles. Los días consecutivos que comparten nombre son una sola ocasión: la Fiesta Nacional del 1 al 7 de octubre es una felicitación, no siete mensajes idénticos en una semana. Para un año chino que el Consejo de Estado aún no ha anunciado recurre a las fechas fijas y dice qué fuente ha usado, en vez de extrapolar el calendario lunar del año pasado y equivocarse a propósito. |
+| ⌨️ **Teclado, y un panel que dice la verdad** | Cada pestaña tiene un número, cada atajo está en la lista, y la lista se genera a partir de las propias pestañas, así que ya no puede quedarse desfasada como acababa de pasarle. |
+| 📤 **Llévate tus recordatorios** | Exporta tus programaciones a un archivo e impórtalas en otra instalación. En ese archivo no entra nunca ninguna cuenta, ni ningún servidor, ni ninguna contraseña: se puede guardar en una copia de seguridad sin problema. |
+| 📅 **Exportar las horas a las que enviará de verdad** | La exportación `.ics` de tus recordatorios puede escribir la regla de recurrencia, o los instantes que esta aplicación ya ha decidido, con los desplazamientos por festivos y las horas de silencio ya aplicados. Las dos cosas discrepan a propósito: «cada día laborable a las 09:00» es una regla cierta y una programación falsa en cuanto el calendario ha movido el envío del 1 de octubre al día 8, y quien se suscribiera leyendo la regla estaría viendo un plan que Aevistle ha decidido no seguir. **El límite, dicho en voz alta:** Outlook, Thunderbird y Apple Calendar pueden suscribirse al archivo guardado. Google Calendar no: solo lee direcciones web públicas, y esta aplicación no tiene servidor donde ponerlas. Una lista ya calculada además se queda anticuada en cuanto se pasa de las horas ya calculadas, y por eso es un modo y no lo predeterminado. |
+| ✒️ **Formato sin editor de texto enriquecido** | Negrita, cursiva, código, enlaces, listas y citas, insertados como Markdown en el mismo cuadro de texto plano. Al salir se convierte en HTML apto para el correo, así que el destinatario recibe formato y no asteriscos. |
+| 🔤 **Variables de combinación, también las del calendario** | `{{name}}`, `{{email}}` y tus propios campos de contacto, rellenados por destinatario y con Cc y Cco eliminados de las copias: una combinación son cuarenta cartas privadas, no un hilo con cuarenta personas dentro. Junto a esas, `{{nextWorkday}}`, `{{prevWorkday}}`, `{{holiday}}`, `{{nextHoliday}}`, `{{nextDayOff}}`, `{{daysToNextHoliday}}`, `{{workdaysLeftThisWeek}}` y `{{workdaysLeftThisMonth}}` leen el mismo calendario laboral que decide *cuándo* sale el mensaje, y se resuelven en el momento del envío, de modo que un recordatorio que el calendario empujó al lunes no siga diciendo «nos vemos mañana». Deliberadamente no existe `{{isWorkday}}`: tendría que aparecer como una palabra, en un idioma que esta parte de la aplicación no conoce. Una variable que no puede rellenar se queda en pie en vez de vaciarse en silencio. |
+| 🔍 **Buscar donde quieres** | Acota la búsqueda de la bandeja de entrada al remitente, al asunto o al texto de vista previa, porque buscar a una persona saca todos los boletines que mencionan su nombre. |
+| 👆 **Deslizar en el móvil** | Desliza un mensaje para quitarlo, o para cambiar si está leído o no. A propósito no es el borrado en el servidor: ese no se puede deshacer y no tiene nada que hacer detrás de un gesto. |
 | 📊 **Se ve que se envió** | Cada fila muestra el último envío, si salió bien y cuántas veces se ha ejecutado. Los recordatorios de una sola vez pasan a la pestaña Completados en cuanto terminan, en lugar de seguir en la lista fingiendo que esperan. |
 | 🗑️ **Un borrado que significa algo** | Dos acciones separadas, porque son dos peticiones distintas: quitarlo de Aevistle (reversible desde una papelera que lo guarda siete días) o eliminarlo del buzón en el servidor (irreversible, y lo dice). |
 | ✍️ **Modo concentración** | `F9` oculta todo salvo el mensaje y le da la ventana entera. `Esc` devuelve el resto. En la etiqueta hay un contador de caracteres y de bytes: un carácter chino son tres bytes, y el byte es lo que cuenta el límite de tu proveedor. |
@@ -80,9 +95,9 @@ enlaces de acceso, y deja todo lo demás tal cual por defecto.
 | 🔌 **Conexiones que salen bien** | ¿Puerto y cifrado descoordinados? Aevistle prueba la otra combinación que acepta tu proveedor en vez de fallar con «Unexpected socket close», y luego ofrece guardar lo que funcionó. Cada intento tiene un límite de tiempo: el botón de prueba siempre responde. |
 | 🩺 **Dice qué ha pasado** | Una prueba correcta informa del punto de conexión utilizado y el tiempo de ida y vuelta; una fallida nombra la causa y qué cambiar. La pantalla de actividad lleva una tasa de éxito y un tiempo mediano. |
 | 🌙 **Horas de silencio** | Los recordatorios nocturnos esperan a la mañana. El envío manual nunca se retiene: estás delante. |
-| ⬆️ **Actualizaciones dentro de la app** | Consulta las Releases de GitHub, descarga el instalador, lo verifica contra el SHA-256 publicado y se lo entrega al sistema. En Android abre el APK para el instalador del sistema. Se puede desactivar; no envía nada salvo la petición. |
+| ⬆️ **Actualizaciones dentro de la app** | Consulta las Releases de GitHub, descarga el instalador, lo verifica contra el SHA-256 publicado y se lo entrega al sistema. En Android abre el APK para el instalador del sistema. Se puede desactivar; no envía nada salvo la petición. En Android esta comprobación no había funcionado en ninguna versión publicada: la misma política de seguridad de contenido que impide que el cuerpo de un mensaje abra un socket rechazaba también la petición de actualización, y fallaba con un error indistinguible de estar sin conexión. Ahora la petición sale por el proceso de confianza, con una lista blanca fijada al host *y* a la ruta, en vez de haberse relajado la política. |
 | 🌍 **Seis idiomas** | English, 简体中文, Français, Español, Русский, العربية — con diseño completo de derecha a izquierda para el árabe. |
-| 🎨 **Agradable a la vista** | Claro y oscuro, siguiendo al sistema o fijado, seis colores de acento, dos densidades, y una elección tipográfica por escritura: Songti (宋体) para el chino y Times New Roman para el texto latino y la puntuación. |
+| 🎨 **Seis estilos visuales, no seis tonos** | Aurora, Graphite, Paper, Midnight, Nordic y Alto contraste, elegidos entre mosaicos de vista previa en **Ajustes → Apariencia**. Un estilo no es un cambio de color: cada uno reajusta también el radio de las esquinas, la altura de línea y cuánta sombra se le permite existir, que es lo que hace que Graphite se lea como otro programa y no como el mismo en gris. Todos los estilos traen una forma clara de verdad y una oscura de verdad, así que «seguir al sistema» sigue funcionando elijas el que elijas. **Alto contraste** es aquel en el que el diseño es un número: cada pareja de textos supera 7:1, WCAG AAA, incluidas las marcas de tiempo terciarias y los colores semánticos sobre sus propios fondos teñidos, que es justo donde los esquemas AAA suelen callarse. Sus bordes se ven a propósito, a 3,9:1 en claro y 6,3:1 en oscuro, por encima del 3:1 que se le pide al contorno de un control. Por encima de los estilos: claro y oscuro siguiendo al sistema o fijados, siete colores de acento —reajustados por cada estilo en vez de retirados, para que la elección sobreviva al cambio a Alto contraste—, dos densidades y una elección tipográfica por escritura: Songti (宋体) para el chino y Times New Roman para el texto latino y la puntuación. |
 
 ## Descarga
 
@@ -156,8 +171,17 @@ Una lista corta y fija de cosas sale de tu dispositivo, y nada más:
 4. **Una comprobación de actualizaciones**, si la dejas activada: una petición
    `GET` sin autenticar a `api.github.com` que pregunta cuál es la última
    versión. No lleva datos de la cuenta, ni contenido de mensajes, ni datos de
-   uso. Desactívala en **Ajustes → Actualizaciones** y la aplicación no hace
-   ninguna petición por su cuenta.
+   uso. Desactívala en **Ajustes → Actualizaciones** y la aplicación nunca hace
+   esta por su cuenta.
+5. **Una tabla de festivos oficiales, solo cuando pulsas «comprobar en línea»**
+   — una petición `GET` sin autenticar con las fechas de un año. Tanto esta
+   como la comprobación de actualizaciones están en una lista blanca fijada al
+   host *y* a la ruta exacta, y las dos salen desde el proceso de confianza, no
+   desde la parte de la aplicación que representa el correo, que no tiene
+   ningún alcance de red hacia fuera.
+
+Con las actualizaciones desactivadas, cada petición que queda en esa lista es
+una para la que has pulsado un botón.
 
 Todo vive en tu dispositivo:
 
@@ -203,7 +227,7 @@ Puedes comprobarlo tú mismo:
 npm run audit:self
 ```
 
-20 comprobaciones, salida en lenguaje llano, código de salida 1 si algo requiere
+21 comprobaciones, salida en lenguaje llano, código de salida 1 si algo requiere
 atención.
 
 ## Compilar desde el código
@@ -257,11 +281,11 @@ Más detalle en **[ARCHITECTURE.md](ARCHITECTURE.md)**.
 
 No son promesas: lo más probable que venga a continuación.
 
-- [ ] OAuth 2.0 para Gmail y Microsoft 365
-- [ ] Editor enriquecido con imágenes incrustadas
-- [ ] Importar y exportar programaciones
-- [ ] Versiones para macOS y Linux (el código ya las contempla)
-- [ ] Variables de plantilla por destinatario (`{{name}}`)
+- [ ] OAuth 2.0 para Gmail y Microsoft 365, para dejar de necesitar contraseñas
+      de aplicación
+- [ ] Un editor de texto enriquecido. Las imágenes en línea ya funcionan; el
+      cuadro en sí sigue siendo texto plano con Markdown
+- [ ] Versiones de escritorio para macOS y Linux (el código ya las contempla)
 - [ ] iOS
 
 ¿Falta algo? [Abre una incidencia](https://github.com/Aevorine/Aevistle/issues):

@@ -87,6 +87,7 @@ import { fetchMessageBody, purgeMessages, setServerSeenFlag, syncInbox, testInbo
 import { stopAllInboxWatchers, watchInboxes } from './imapIdle'
 import { deleteAccountInboxCache, deleteMessageCache, pruneInboxCache } from './inboxStore'
 import { clearImageCache, downloadRemoteImage } from './remoteImage'
+import { fetchFeed } from './feedFetch'
 
 // Bundled to CommonJS by scripts/build-electron.mjs, so __dirname is real.
 const DIRNAME = __dirname
@@ -1219,6 +1220,7 @@ function registerIpc(): void {
   )
 
   ipcMain.handle(IPC.fetchRemoteImage, (_e, url: string) => downloadRemoteImage(url))
+  ipcMain.handle(IPC.fetchFeed, (_e, url: string) => fetchFeed(url))
   ipcMain.handle(IPC.clearImageCache, () => clearImageCache())
 
   ipcMain.handle(IPC.notify, (_e, title: string, body: string) => {

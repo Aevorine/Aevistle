@@ -297,6 +297,10 @@
   --accent: var(--accent-azure-l);
   --accent-text: #ffffff;
   --scrim: rgba(16, 19, 26, 0.32);
+  /* The puck inside a switch. It was a literal `#fff` in app.css, which is the
+     one colour in the interface that never changed with anything — right in
+     light, and a hole punched in the page under `paper`. */
+  --knob: #ffffff;
 }
 
 /* ==========================================================================
@@ -345,6 +349,9 @@
   --accent: var(--accent-azure-d);
   --accent-text: #14161b;
   --scrim: rgba(0, 0, 0, 0.6);
+  /* Still a light puck in the dark theme: the track it sits on is either
+     `--border-strong` or the accent, and both are darker than this. */
+  --knob: #e2e6ee;
 }
 
 /* Follow the OS when the user has not chosen explicitly. */
@@ -372,6 +379,11 @@
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
     --shadow-md: 0 2px 6px rgba(0, 0, 0, 0.45), 0 8px 24px rgba(0, 0, 0, 0.35);
     --shadow-lg: 0 8px 20px rgba(0, 0, 0, 0.5), 0 24px 56px rgba(0, 0, 0, 0.45);
+    /* Was missing, so "match system" plus an OS in dark kept the *light*
+       theme's 28% glow on every primary button — the one token in this block
+       that had been forgotten, and invisible unless the two were compared
+       side by side. */
+    --shadow-accent: 0 4px 18px color-mix(in srgb, var(--accent) 32%, transparent);
 
     --success: #34d399;
     --success-bg: rgba(52, 211, 153, 0.1);
@@ -384,11 +396,1084 @@
 
     --accent-text: #14161b;
     --scrim: rgba(0, 0, 0, 0.6);
+    --knob: #e2e6ee;
+  }
+}
+
+/* ==========================================================================
+   Visual styles
+
+   Six of them, on `data-style`, sitting one layer above the light/dark pair
+   above: theme decides whether the page is bright or dim, style decides what
+   kind of surface it is made of. Every style therefore ships both.
+
+   A style is not a hue rotation. Each one also retunes the parts of the design
+   that are not colour at all — the radius ladder, line height, how much shadow
+   is allowed to exist — because that is what makes `graphite` read as a
+   different piece of software rather than the same one in grey. The shape and
+   rhythm tokens live in the theme-independent rule at the head of each style;
+   corners have no business changing when the sun goes down.
+
+   Layering, and why it works out:
+     `:root[data-style="x"]`                      (0,2,0)  shape, rhythm
+     `:root[data-style="x"][data-theme="light"]`  (0,3,0)  light colours
+     `:root[data-style="x"][data-theme="dark"]`   (0,3,0)  dark colours
+   Each of the three colour rules restates all thirty theme-scoped tokens. That
+   is deliberate repetition: a style that inherited half its dark palette from
+   the base theme would be a style only where it disagreed, and the disagreements
+   are exactly the places a reader cannot see from one block.
+
+   `--accent` appears in every block and is overridden by the `[data-accent]`
+   rules that follow, which is the intended order — the accent is the user's
+   choice and outranks the style's suggestion. See the note down there about the
+   seven `[data-theme="light"][data-accent]` rules that keep it that way.
+   ========================================================================== */
+
+/* --- aurora ---------------------------------------------------------------
+   The house style, refined rather than replaced: the same layered depth and
+   soft elevation as before, with the neutrals walked a few degrees toward
+   indigo so the greys read as deliberate rather than as absence of colour.
+   Ink, shadow geometry and the radius ladder are untouched, so an existing
+   install that lands here sees the interface it went to sleep with.
+   ------------------------------------------------------------------------- */
+
+:root[data-style="aurora"],
+:root[data-style="aurora"][data-theme="light"] {
+  color-scheme: light;
+
+  --bg: #eceef3;
+  --surface-1: #fbfbfd;
+  --surface-2: #f3f4f9;
+  --surface-3: #e9ebf2;
+  --surface-inset: #f2f3f8;
+  --surface-hover: rgba(20, 23, 45, 0.04);
+  --surface-active: rgba(20, 23, 45, 0.07);
+
+  --text-1: #262c38;   /* 13.6:1 on --surface-1 */
+  --text-2: #545c6b;   /*  6.5:1 */
+  --text-3: #656c7a;   /*  5.1:1 */
+  --text-inverse: #ffffff;
+
+  --border: #e4e7ef;
+  --border-strong: #d1d6e3;
+  --border-subtle: #eef0f6;
+
+  --shadow-sm: 0 1px 2px rgba(20, 23, 45, 0.05);
+  --shadow-md: 0 2px 4px rgba(20, 23, 45, 0.05), 0 6px 16px rgba(20, 23, 45, 0.07);
+  --shadow-lg: 0 4px 8px rgba(20, 23, 45, 0.06), 0 16px 40px rgba(20, 23, 45, 0.11);
+  --shadow-accent: 0 4px 14px color-mix(in srgb, var(--accent) 28%, transparent);
+
+  --success: #047857;
+  --success-bg: #ecfdf5;
+  --warning: #b45309;
+  --warning-bg: #fffbeb;
+  --danger: #be123c;
+  --danger-bg: #fff1f2;
+  --info: #0369a1;
+  --info-bg: #f0f9ff;
+
+  --accent: var(--accent-azure-l);
+  --accent-text: #ffffff;
+  --scrim: rgba(16, 19, 32, 0.32);
+  --knob: #ffffff;
+}
+
+:root[data-style="aurora"][data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: #14161d;
+  --surface-1: #1b1e26;
+  --surface-2: #20232c;
+  --surface-3: #272b36;
+  --surface-inset: #17191f;
+  --surface-hover: rgba(255, 255, 255, 0.05);
+  --surface-active: rgba(255, 255, 255, 0.085);
+
+  --text-1: #d5dae3;   /* 11.9:1 on --surface-1 */
+  --text-2: #a3acbb;   /*  7.3:1 */
+  --text-3: #8b95a6;   /*  5.5:1 */
+  --text-inverse: #14161d;
+
+  --border: #2e3441;
+  --border-strong: #3d4553;
+  --border-subtle: #252a34;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 2px 6px rgba(0, 0, 0, 0.45), 0 8px 24px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 8px 20px rgba(0, 0, 0, 0.5), 0 24px 56px rgba(0, 0, 0, 0.45);
+  --shadow-accent: 0 4px 18px color-mix(in srgb, var(--accent) 32%, transparent);
+
+  --success: #34d399;
+  --success-bg: rgba(52, 211, 153, 0.1);
+  --warning: #fbbf24;
+  --warning-bg: rgba(251, 191, 36, 0.1);
+  --danger: #fb7185;
+  --danger-bg: rgba(251, 113, 133, 0.1);
+  --info: #38bdf8;
+  --info-bg: rgba(56, 189, 248, 0.1);
+
+  --accent: var(--accent-azure-d);
+  --accent-text: #14161d;
+  --scrim: rgba(0, 0, 0, 0.6);
+  --knob: #e2e6ee;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root[data-style="aurora"]:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    --bg: #14161d;
+    --surface-1: #1b1e26;
+    --surface-2: #20232c;
+    --surface-3: #272b36;
+    --surface-inset: #17191f;
+    --surface-hover: rgba(255, 255, 255, 0.05);
+    --surface-active: rgba(255, 255, 255, 0.085);
+
+    --text-1: #d5dae3;
+    --text-2: #a3acbb;
+    --text-3: #8b95a6;
+    --text-inverse: #14161d;
+
+    --border: #2e3441;
+    --border-strong: #3d4553;
+    --border-subtle: #252a34;
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-md: 0 2px 6px rgba(0, 0, 0, 0.45), 0 8px 24px rgba(0, 0, 0, 0.35);
+    --shadow-lg: 0 8px 20px rgba(0, 0, 0, 0.5), 0 24px 56px rgba(0, 0, 0, 0.45);
+    --shadow-accent: 0 4px 18px color-mix(in srgb, var(--accent) 32%, transparent);
+
+    --success: #34d399;
+    --success-bg: rgba(52, 211, 153, 0.1);
+    --warning: #fbbf24;
+    --warning-bg: rgba(251, 191, 36, 0.1);
+    --danger: #fb7185;
+    --danger-bg: rgba(251, 113, 133, 0.1);
+    --info: #38bdf8;
+    --info-bg: rgba(56, 189, 248, 0.1);
+
+    --accent: var(--accent-azure-d);
+    --accent-text: #14161d;
+    --scrim: rgba(0, 0, 0, 0.6);
+    --knob: #e2e6ee;
+  }
+}
+
+/* --- graphite -------------------------------------------------------------
+   Neutral to the last decimal: every surface, border and ink here is on the
+   grey axis, so the accent is the only chromatic thing on screen and reads as
+   information rather than decoration.
+
+   Depth is carried by a hairline border instead of a shadow — the shadows are
+   still defined, at roughly a third of the house strength, because a modal
+   floating with no separation at all is not restraint, it is a bug. Corners
+   come down a step across the whole ladder; the difference between an 11px and
+   a 7px card corner is most of what separates "friendly" from "exact".
+   ------------------------------------------------------------------------- */
+
+:root[data-style="graphite"] {
+  --r-xs: 3px;
+  --r-sm: 5px;
+  --r-md: 7px;
+  --r-lg: 9px;
+  --r-xl: 12px;
+  /* All-caps Latin labels get a touch more air; it is the one typographic
+     mannerism this style allows itself. */
+  --tracking-wide: 0.08em;
+}
+
+:root[data-style="graphite"],
+:root[data-style="graphite"][data-theme="light"] {
+  color-scheme: light;
+
+  --bg: #f4f4f5;
+  --surface-1: #ffffff;
+  --surface-2: #f7f7f8;
+  --surface-3: #ececee;
+  --surface-inset: #fafafa;
+  --surface-hover: rgba(0, 0, 0, 0.04);
+  --surface-active: rgba(0, 0, 0, 0.07);
+
+  --text-1: #1f1f23;   /* 16.4:1 on --surface-1 */
+  --text-2: #56565d;   /*  7.3:1 */
+  --text-3: #6c6c75;   /*  5.2:1 */
+  --text-inverse: #ffffff;
+
+  --border: #e4e4e7;
+  --border-strong: #d3d3d7;
+  --border-subtle: #efeff1;
+
+  --shadow-sm: 0 1px 1px rgba(0, 0, 0, 0.03);
+  --shadow-md: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 10px rgba(0, 0, 0, 0.04);
+  --shadow-lg: 0 2px 4px rgba(0, 0, 0, 0.05), 0 12px 28px rgba(0, 0, 0, 0.07);
+  --shadow-accent: 0 1px 2px color-mix(in srgb, var(--accent) 22%, transparent);
+
+  --success: #15704f;
+  --success-bg: #eff5f2;
+  --warning: #8a5a12;
+  --warning-bg: #f7f3ec;
+  --danger: #b02231;
+  --danger-bg: #faf0f1;
+  --info: #1f5f9c;
+  --info-bg: #eff3f7;
+
+  --accent: var(--accent-azure-l);
+  --accent-text: #ffffff;
+  --scrim: rgba(0, 0, 0, 0.35);
+  --knob: #ffffff;
+}
+
+:root[data-style="graphite"][data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: #0f0f10;
+  --surface-1: #171719;
+  --surface-2: #1c1c1f;
+  --surface-3: #232327;
+  --surface-inset: #131314;
+  --surface-hover: rgba(255, 255, 255, 0.055);
+  --surface-active: rgba(255, 255, 255, 0.09);
+
+  --text-1: #ededef;   /* 15.3:1 on --surface-1 */
+  --text-2: #a3a3aa;   /*  7.1:1 */
+  --text-3: #88888f;   /*  5.1:1 */
+  --text-inverse: #0f0f10;
+
+  --border: #2a2a2d;
+  --border-strong: #3b3b40;
+  --border-subtle: #212124;
+
+  --shadow-sm: 0 1px 1px rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 1px 2px rgba(0, 0, 0, 0.5), 0 4px 12px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 4px 10px rgba(0, 0, 0, 0.55), 0 16px 36px rgba(0, 0, 0, 0.5);
+  --shadow-accent: 0 1px 3px color-mix(in srgb, var(--accent) 26%, transparent);
+
+  --success: #5fd0a6;
+  --success-bg: rgba(95, 208, 166, 0.1);
+  --warning: #e6b866;
+  --warning-bg: rgba(230, 184, 102, 0.1);
+  --danger: #f08a95;
+  --danger-bg: rgba(240, 138, 149, 0.1);
+  --info: #7fc0ea;
+  --info-bg: rgba(127, 192, 234, 0.1);
+
+  --accent: var(--accent-azure-d);
+  --accent-text: #0f0f10;
+  --scrim: rgba(0, 0, 0, 0.65);
+  --knob: #e8e8ea;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root[data-style="graphite"]:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    --bg: #0f0f10;
+    --surface-1: #171719;
+    --surface-2: #1c1c1f;
+    --surface-3: #232327;
+    --surface-inset: #131314;
+    --surface-hover: rgba(255, 255, 255, 0.055);
+    --surface-active: rgba(255, 255, 255, 0.09);
+
+    --text-1: #ededef;
+    --text-2: #a3a3aa;
+    --text-3: #88888f;
+    --text-inverse: #0f0f10;
+
+    --border: #2a2a2d;
+    --border-strong: #3b3b40;
+    --border-subtle: #212124;
+
+    --shadow-sm: 0 1px 1px rgba(0, 0, 0, 0.5);
+    --shadow-md: 0 1px 2px rgba(0, 0, 0, 0.5), 0 4px 12px rgba(0, 0, 0, 0.4);
+    --shadow-lg: 0 4px 10px rgba(0, 0, 0, 0.55), 0 16px 36px rgba(0, 0, 0, 0.5);
+    --shadow-accent: 0 1px 3px color-mix(in srgb, var(--accent) 26%, transparent);
+
+    --success: #5fd0a6;
+    --success-bg: rgba(95, 208, 166, 0.1);
+    --warning: #e6b866;
+    --warning-bg: rgba(230, 184, 102, 0.1);
+    --danger: #f08a95;
+    --danger-bg: rgba(240, 138, 149, 0.1);
+    --info: #7fc0ea;
+    --info-bg: rgba(127, 192, 234, 0.1);
+
+    --accent: var(--accent-azure-d);
+    --accent-text: #0f0f10;
+    --scrim: rgba(0, 0, 0, 0.65);
+    --knob: #e8e8ea;
+  }
+}
+
+/* --- paper ----------------------------------------------------------------
+   Written for the reading, not the screenshot. The ground is warm off-white
+   rather than white, the ink is brown-black rather than blue-black, and the
+   whole palette sits at a saturation low enough that nothing on the page
+   competes with the words on it.
+
+   This is the style the 宋体/Times pairing was drawn for, so it is the one that
+   spends most on line height: 1.75 rather than 1.65, which is about a line
+   every eight — the difference between skimming a message and reading it.
+   Its dark variant is not a grey night but a lamp-lit one, the same warm hue
+   rotation taken to the other end of the scale.
+   ------------------------------------------------------------------------- */
+
+:root[data-style="paper"] {
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 9px;
+  --r-lg: 12px;
+  --r-xl: 16px;
+  --leading-normal: 1.75;
+  --leading-relaxed: 1.9;
+}
+
+:root[data-style="paper"],
+:root[data-style="paper"][data-theme="light"] {
+  color-scheme: light;
+
+  --bg: #efece4;
+  --surface-1: #faf8f3;
+  --surface-2: #f5f2ea;
+  --surface-3: #eae6dc;
+  --surface-inset: #f2efe7;
+  --surface-hover: rgba(74, 58, 38, 0.05);
+  --surface-active: rgba(74, 58, 38, 0.085);
+
+  --text-1: #2b2721;   /* 14.0:1 on --surface-1 */
+  --text-2: #5b5449;   /*  7.0:1 */
+  --text-3: #6f665a;   /*  5.3:1 */
+  --text-inverse: #ffffff;
+
+  --border: #e3ded2;
+  --border-strong: #cec7b8;
+  --border-subtle: #ece8de;
+
+  --shadow-sm: 0 1px 2px rgba(74, 58, 38, 0.06);
+  --shadow-md: 0 2px 5px rgba(74, 58, 38, 0.07), 0 8px 20px rgba(74, 58, 38, 0.07);
+  --shadow-lg: 0 4px 10px rgba(74, 58, 38, 0.08), 0 18px 44px rgba(74, 58, 38, 0.12);
+  --shadow-accent: 0 3px 12px color-mix(in srgb, var(--accent) 24%, transparent);
+
+  --success: #3f6b41;
+  --success-bg: #eef2e9;
+  --warning: #8a5a1a;
+  --warning-bg: #f7efe0;
+  --danger: #a33a34;
+  --danger-bg: #f7ece8;
+  --info: #3a5f8a;
+  --info-bg: #eaeff5;
+
+  --accent: var(--accent-azure-l);
+  --accent-text: #ffffff;
+  --scrim: rgba(46, 36, 24, 0.34);
+  --knob: #fdfbf6;
+}
+
+:root[data-style="paper"][data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: #1a1713;
+  --surface-1: #221e19;
+  --surface-2: #27231d;
+  --surface-3: #302b24;
+  --surface-inset: #1d1a15;
+  --surface-hover: rgba(255, 246, 230, 0.055);
+  --surface-active: rgba(255, 246, 230, 0.09);
+
+  --text-1: #e6dfd3;   /* 12.5:1 on --surface-1 */
+  --text-2: #b0a695;   /*  6.9:1 */
+  --text-3: #968c7c;   /*  5.0:1 */
+  --text-inverse: #1a1713;
+
+  --border: #362f28;
+  --border-strong: #453d33;
+  --border-subtle: #2a251f;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.45);
+  --shadow-md: 0 2px 6px rgba(0, 0, 0, 0.5), 0 8px 22px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 8px 20px rgba(0, 0, 0, 0.55), 0 22px 52px rgba(0, 0, 0, 0.45);
+  --shadow-accent: 0 3px 16px color-mix(in srgb, var(--accent) 28%, transparent);
+
+  --success: #9dc48c;
+  --success-bg: rgba(157, 196, 140, 0.1);
+  --warning: #e0b674;
+  --warning-bg: rgba(224, 182, 116, 0.1);
+  --danger: #e59084;
+  --danger-bg: rgba(229, 144, 132, 0.1);
+  --info: #9dbcd9;
+  --info-bg: rgba(157, 188, 217, 0.1);
+
+  /* The one style that moves the default accent: azure at full strength is a
+     cold hole in a warm page. A user who picks an accent still gets it — the
+     `[data-accent]` rules below outrank this. */
+  --accent: #7cb8e8;
+  --accent-text: #1a1713;
+  --scrim: rgba(12, 9, 6, 0.62);
+  --knob: #e8e1d5;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root[data-style="paper"]:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    --bg: #1a1713;
+    --surface-1: #221e19;
+    --surface-2: #27231d;
+    --surface-3: #302b24;
+    --surface-inset: #1d1a15;
+    --surface-hover: rgba(255, 246, 230, 0.055);
+    --surface-active: rgba(255, 246, 230, 0.09);
+
+    --text-1: #e6dfd3;
+    --text-2: #b0a695;
+    --text-3: #968c7c;
+    --text-inverse: #1a1713;
+
+    --border: #362f28;
+    --border-strong: #453d33;
+    --border-subtle: #2a251f;
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.45);
+    --shadow-md: 0 2px 6px rgba(0, 0, 0, 0.5), 0 8px 22px rgba(0, 0, 0, 0.4);
+    --shadow-lg: 0 8px 20px rgba(0, 0, 0, 0.55), 0 22px 52px rgba(0, 0, 0, 0.45);
+    --shadow-accent: 0 3px 16px color-mix(in srgb, var(--accent) 28%, transparent);
+
+    --success: #9dc48c;
+    --success-bg: rgba(157, 196, 140, 0.1);
+    --warning: #e0b674;
+    --warning-bg: rgba(224, 182, 116, 0.1);
+    --danger: #e59084;
+    --danger-bg: rgba(229, 144, 132, 0.1);
+    --info: #9dbcd9;
+    --info-bg: rgba(157, 188, 217, 0.1);
+
+    --accent: #7cb8e8;
+    --accent-text: #1a1713;
+    --scrim: rgba(12, 9, 6, 0.62);
+    --knob: #e8e1d5;
+  }
+}
+
+/* --- midnight -------------------------------------------------------------
+   Dark-committed, and honest about it. The page is true black so an OLED panel
+   can switch those pixels off entirely; the surfaces climb out of it in cool
+   blue steps, and the borders are the only thing holding a card's shape, which
+   is why they glow faintly rather than sit flat.
+
+   Its light variant is *not* an inverted midnight, because there is no such
+   thing — a style whose whole idea is "the page emits nothing" has no bright
+   twin. What it has instead is a high-key cool grey: the same blue-steel
+   family, run at the top of the scale rather than the bottom, so switching to
+   light on this style is a coherent room rather than a broken promise.
+   ------------------------------------------------------------------------- */
+
+:root[data-style="midnight"] {
+  --r-xs: 5px;
+  --r-sm: 9px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-xl: 22px;
+}
+
+:root[data-style="midnight"],
+:root[data-style="midnight"][data-theme="light"] {
+  color-scheme: light;
+
+  --bg: #e7eaf1;
+  --surface-1: #f7f9fc;
+  --surface-2: #eff2f7;
+  --surface-3: #e2e7f0;
+  --surface-inset: #f0f3f8;
+  --surface-hover: rgba(18, 26, 48, 0.045);
+  --surface-active: rgba(18, 26, 48, 0.075);
+
+  --text-1: #1f2530;   /* 14.6:1 on --surface-1 */
+  --text-2: #4f5869;   /*  6.8:1 */
+  --text-3: #5d6577;   /*  5.1:1 */
+  --text-inverse: #ffffff;
+
+  --border: #dce1ec;
+  --border-strong: #c4cbdb;
+  --border-subtle: #e9edf5;
+
+  --shadow-sm: 0 1px 2px rgba(18, 26, 48, 0.06);
+  --shadow-md: 0 2px 5px rgba(18, 26, 48, 0.06), 0 8px 20px rgba(18, 26, 48, 0.08);
+  --shadow-lg: 0 4px 10px rgba(18, 26, 48, 0.07), 0 20px 48px rgba(18, 26, 48, 0.13);
+  --shadow-accent: 0 4px 16px color-mix(in srgb, var(--accent) 30%, transparent);
+
+  --success: #05745a;
+  --success-bg: #ebf8f4;
+  --warning: #9a5608;
+  --warning-bg: #fbf4e8;
+  --danger: #bb1b3f;
+  --danger-bg: #fceff2;
+  --info: #04628f;
+  --info-bg: #ecf5fb;
+
+  --accent: var(--accent-azure-l);
+  --accent-text: #ffffff;
+  --scrim: rgba(10, 14, 28, 0.36);
+  --knob: #ffffff;
+}
+
+:root[data-style="midnight"][data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: #000000;
+  --surface-1: #0a0d16;
+  --surface-2: #10141f;
+  --surface-3: #171c2a;
+  --surface-inset: #06080f;
+  --surface-hover: rgba(140, 180, 255, 0.07);
+  --surface-active: rgba(140, 180, 255, 0.12);
+
+  --text-1: #dfe6f5;   /* 15.5:1 on --surface-1 */
+  --text-2: #a9b3c9;   /*  9.2:1 */
+  --text-3: #8d97ad;   /*  6.6:1 */
+  --text-inverse: #000000;
+
+  --border: #1d2434;
+  --border-strong: #2d3549;
+  --border-subtle: #141a27;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.7);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.75), 0 10px 28px rgba(0, 0, 0, 0.6);
+  --shadow-lg: 0 10px 24px rgba(0, 0, 0, 0.8), 0 28px 64px rgba(0, 0, 0, 0.7);
+  /* A ring plus a bloom rather than a drop shadow: on a black page there is
+     nothing below a button for a shadow to fall on. */
+  --shadow-accent:
+    0 0 0 1px color-mix(in srgb, var(--accent) 26%, transparent),
+    0 6px 26px color-mix(in srgb, var(--accent) 40%, transparent);
+
+  --success: #3ddba4;
+  --success-bg: rgba(61, 219, 164, 0.1);
+  --warning: #f5c451;
+  --warning-bg: rgba(245, 196, 81, 0.1);
+  --danger: #ff7d92;
+  --danger-bg: rgba(255, 125, 146, 0.1);
+  --info: #54c6ff;
+  --info-bg: rgba(84, 198, 255, 0.1);
+
+  --accent: var(--accent-azure-d);
+  --accent-text: #000000;
+  --scrim: rgba(0, 0, 0, 0.72);
+  --knob: #e6ecf8;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root[data-style="midnight"]:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    --bg: #000000;
+    --surface-1: #0a0d16;
+    --surface-2: #10141f;
+    --surface-3: #171c2a;
+    --surface-inset: #06080f;
+    --surface-hover: rgba(140, 180, 255, 0.07);
+    --surface-active: rgba(140, 180, 255, 0.12);
+
+    --text-1: #dfe6f5;
+    --text-2: #a9b3c9;
+    --text-3: #8d97ad;
+    --text-inverse: #000000;
+
+    --border: #1d2434;
+    --border-strong: #2d3549;
+    --border-subtle: #141a27;
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.7);
+    --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.75), 0 10px 28px rgba(0, 0, 0, 0.6);
+    --shadow-lg: 0 10px 24px rgba(0, 0, 0, 0.8), 0 28px 64px rgba(0, 0, 0, 0.7);
+    --shadow-accent:
+      0 0 0 1px color-mix(in srgb, var(--accent) 26%, transparent),
+      0 6px 26px color-mix(in srgb, var(--accent) 40%, transparent);
+
+    --success: #3ddba4;
+    --success-bg: rgba(61, 219, 164, 0.1);
+    --warning: #f5c451;
+    --warning-bg: rgba(245, 196, 81, 0.1);
+    --danger: #ff7d92;
+    --danger-bg: rgba(255, 125, 146, 0.1);
+    --info: #54c6ff;
+    --info-bg: rgba(84, 198, 255, 0.1);
+
+    --accent: var(--accent-azure-d);
+    --accent-text: #000000;
+    --scrim: rgba(0, 0, 0, 0.72);
+    --knob: #e6ecf8;
+  }
+}
+
+/* --- nordic ---------------------------------------------------------------
+   Desaturated blue-grey, and the softest thing here. Corners open up across
+   the whole ladder — 16px on a card against the house 11px — and the shadows
+   go wide and faint rather than tight and dark, so surfaces look set down on
+   the page rather than cut out of it.
+
+   The semantic colours come off the same muted axis instead of the usual
+   alarm palette: a warning in this style is a change of temperature, not a
+   siren. It is the style to pick when the app is open all day in the corner
+   of a screen.
+   ------------------------------------------------------------------------- */
+
+:root[data-style="nordic"] {
+  --r-xs: 8px;
+  --r-sm: 12px;
+  --r-md: 16px;
+  --r-lg: 20px;
+  --r-xl: 26px;
+  --leading-normal: 1.7;
+}
+
+:root[data-style="nordic"],
+:root[data-style="nordic"][data-theme="light"] {
+  color-scheme: light;
+
+  --bg: #e6ebf0;
+  --surface-1: #f8fafc;
+  --surface-2: #f0f4f8;
+  --surface-3: #e3e9ef;
+  --surface-inset: #f1f5f8;
+  --surface-hover: rgba(46, 60, 80, 0.045);
+  --surface-active: rgba(46, 60, 80, 0.075);
+
+  --text-1: #2c3440;   /* 12.0:1 on --surface-1 */
+  --text-2: #515d70;   /*  6.6:1 */
+  --text-3: #5f6a7b;   /*  5.3:1 */
+  --text-inverse: #ffffff;
+
+  --border: #dde4ec;
+  --border-strong: #c7d1dd;
+  --border-subtle: #e9eef4;
+
+  --shadow-sm: 0 1px 3px rgba(46, 60, 80, 0.06);
+  --shadow-md: 0 3px 8px rgba(46, 60, 80, 0.07), 0 10px 26px rgba(46, 60, 80, 0.08);
+  --shadow-lg: 0 6px 16px rgba(46, 60, 80, 0.08), 0 24px 60px rgba(46, 60, 80, 0.12);
+  --shadow-accent: 0 6px 20px color-mix(in srgb, var(--accent) 26%, transparent);
+
+  --success: #41725a;
+  --success-bg: #edf3ef;
+  --warning: #8a6414;
+  --warning-bg: #f7f2e6;
+  --danger: #a1454e;
+  --danger-bg: #f7eeef;
+  --info: #3f6a94;
+  --info-bg: #edf2f7;
+
+  --accent: var(--accent-azure-l);
+  --accent-text: #ffffff;
+  --scrim: rgba(30, 40, 54, 0.34);
+  --knob: #ffffff;
+}
+
+:root[data-style="nordic"][data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: #191d24;
+  --surface-1: #21262f;
+  --surface-2: #262c36;
+  --surface-3: #2e3540;
+  --surface-inset: #1c2027;
+  --surface-hover: rgba(216, 222, 233, 0.055);
+  --surface-active: rgba(216, 222, 233, 0.09);
+
+  --text-1: #d8dee9;   /* 11.2:1 on --surface-1 */
+  --text-2: #a7b1c2;   /*  7.0:1 */
+  --text-3: #8e99ab;   /*  5.3:1 */
+  --text-inverse: #191d24;
+
+  --border: #333b47;
+  --border-strong: #434d5c;
+  --border-subtle: #2a313b;
+
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 3px 10px rgba(0, 0, 0, 0.4), 0 10px 28px rgba(0, 0, 0, 0.32);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.45), 0 28px 64px rgba(0, 0, 0, 0.4);
+  --shadow-accent: 0 6px 24px color-mix(in srgb, var(--accent) 30%, transparent);
+
+  --success: #a3be8c;
+  --success-bg: rgba(163, 190, 140, 0.1);
+  --warning: #ebcb8b;
+  --warning-bg: rgba(235, 203, 139, 0.1);
+  --danger: #e88b95;
+  --danger-bg: rgba(232, 139, 149, 0.1);
+  --info: #88c0d0;
+  --info-bg: rgba(136, 192, 208, 0.1);
+
+  /* Same reasoning as `paper`: the house azure is a degree harder than
+     anything else in this palette. Overridden by an explicit accent choice. */
+  --accent: #79b8e8;
+  --accent-text: #191d24;
+  --scrim: rgba(10, 13, 18, 0.62);
+  --knob: #dde3ec;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root[data-style="nordic"]:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    --bg: #191d24;
+    --surface-1: #21262f;
+    --surface-2: #262c36;
+    --surface-3: #2e3540;
+    --surface-inset: #1c2027;
+    --surface-hover: rgba(216, 222, 233, 0.055);
+    --surface-active: rgba(216, 222, 233, 0.09);
+
+    --text-1: #d8dee9;
+    --text-2: #a7b1c2;
+    --text-3: #8e99ab;
+    --text-inverse: #191d24;
+
+    --border: #333b47;
+    --border-strong: #434d5c;
+    --border-subtle: #2a313b;
+
+    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.35);
+    --shadow-md: 0 3px 10px rgba(0, 0, 0, 0.4), 0 10px 28px rgba(0, 0, 0, 0.32);
+    --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.45), 0 28px 64px rgba(0, 0, 0, 0.4);
+    --shadow-accent: 0 6px 24px color-mix(in srgb, var(--accent) 30%, transparent);
+
+    --success: #a3be8c;
+    --success-bg: rgba(163, 190, 140, 0.1);
+    --warning: #ebcb8b;
+    --warning-bg: rgba(235, 203, 139, 0.1);
+    --danger: #e88b95;
+    --danger-bg: rgba(232, 139, 149, 0.1);
+    --info: #88c0d0;
+    --info-bg: rgba(136, 192, 208, 0.1);
+
+    --accent: #79b8e8;
+    --accent-text: #191d24;
+    --scrim: rgba(10, 13, 18, 0.62);
+    --knob: #dde3ec;
+  }
+}
+
+/* --- contrast -------------------------------------------------------------
+   The accessibility style, and the only one where a number is the design.
+   Every text pair here clears 7:1 — not just body text, but the tertiary
+   timestamps and the semantic colours on their own tinted backgrounds, which
+   is where AAA schemes usually quietly stop.
+
+   Both variants are kept, and both are real: unlike `midnight`, "high contrast"
+   has a genuine bright form and a genuine dark form, and which one a person
+   needs is not something this file can guess. Light is black on white, dark is
+   white on black, and neither pretends the other does not exist.
+
+   Borders are visible on purpose — 3.9:1 in light and 6.3:1 in dark against
+   the surface they sit on, past the 3:1 that WCAG asks of a control boundary.
+   Corners tighten because a soft edge is a blurred edge.
+   ------------------------------------------------------------------------- */
+
+:root[data-style="contrast"] {
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 8px;
+  --r-lg: 10px;
+  --r-xl: 14px;
+
+  /* The seven accents, restated darker (light) and brighter (dark).
+     The `[data-accent]` rules resolve `var(--accent-azure-l)` against whatever
+     `:root` says it is *now*, so redefining the palette here retunes all seven
+     choices at once instead of taking the choice away — the alternative was
+     pinning `--accent` and leaving seven swatches that appeared to do nothing.
+     Each pair clears 7:1 against the `--accent-text` printed on it. */
+  --accent-azure-l: #0a4595;
+  --accent-azure-d: #7dc0ff;
+  --accent-indigo-l: #33308f;
+  --accent-indigo-d: #a9b4ff;
+  --accent-teal-l: #0a544c;
+  --accent-teal-d: #5eead4;
+  --accent-violet-l: #511d9e;
+  --accent-violet-d: #c9b8ff;
+  --accent-amber-l: #6b3d00;
+  --accent-amber-d: #fcd34d;
+  --accent-rose-l: #98002f;
+  --accent-rose-d: #ffabb6;
+  --accent-emerald-l: #04513c;
+  --accent-emerald-d: #6ee7b7;
+}
+
+:root[data-style="contrast"],
+:root[data-style="contrast"][data-theme="light"] {
+  color-scheme: light;
+
+  --bg: #ffffff;
+  --surface-1: #ffffff;
+  --surface-2: #f2f2f2;
+  --surface-3: #e4e4e4;
+  --surface-inset: #f7f7f7;
+  --surface-hover: rgba(0, 0, 0, 0.08);
+  --surface-active: rgba(0, 0, 0, 0.14);
+
+  --text-1: #000000;   /* 21.0:1 */
+  --text-2: #26262a;   /* 15.1:1 */
+  --text-3: #3a3a3f;   /* 11.3:1 */
+  --text-inverse: #ffffff;
+
+  --border: #6e6e6e;
+  --border-strong: #141414;
+  --border-subtle: #9a9a9a;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 2px 4px rgba(0, 0, 0, 0.3), 0 8px 20px rgba(0, 0, 0, 0.2);
+  --shadow-lg: 0 4px 10px rgba(0, 0, 0, 0.35), 0 20px 48px rgba(0, 0, 0, 0.28);
+  --shadow-accent: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent);
+
+  --success: #00543a;
+  --success-bg: #e8f4ee;
+  --warning: #6b3d00;
+  --warning-bg: #f8f0e2;
+  --danger: #98001f;
+  --danger-bg: #fbecee;
+  --info: #003f73;
+  --info-bg: #e9f1f8;
+
+  --accent: var(--accent-azure-l);
+  --accent-text: #ffffff;
+  --scrim: rgba(0, 0, 0, 0.5);
+  --knob: #ffffff;
+}
+
+:root[data-style="contrast"][data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: #000000;
+  --surface-1: #0d0d0d;
+  --surface-2: #1a1a1a;
+  --surface-3: #262626;
+  --surface-inset: #080808;
+  --surface-hover: rgba(255, 255, 255, 0.12);
+  --surface-active: rgba(255, 255, 255, 0.2);
+
+  --text-1: #ffffff;   /* 19.4:1 on --surface-1 */
+  --text-2: #dcdcdc;   /* 14.2:1 */
+  --text-3: #bdbdbd;   /* 10.3:1 */
+  --text-inverse: #000000;
+
+  --border: #8a8a8a;
+  --border-strong: #f0f0f0;
+  --border-subtle: #5c5c5c;
+
+  /* A shadow on a black page is nothing, so the two larger steps carry a light
+     ring instead: it is what tells a modal from the void behind it. */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.9);
+  --shadow-md: 0 0 0 1px #5c5c5c, 0 8px 24px rgba(0, 0, 0, 0.9);
+  --shadow-lg: 0 0 0 1px #8a8a8a, 0 24px 56px rgba(0, 0, 0, 0.95);
+  --shadow-accent: 0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent);
+
+  --success: #6ee7b7;
+  --success-bg: rgba(110, 231, 183, 0.12);
+  --warning: #fcd34d;
+  --warning-bg: rgba(252, 211, 77, 0.12);
+  --danger: #ffa2ad;
+  --danger-bg: rgba(255, 162, 173, 0.12);
+  --info: #8fd0ff;
+  --info-bg: rgba(143, 208, 255, 0.12);
+
+  --accent: var(--accent-azure-d);
+  --accent-text: #000000;
+  --scrim: rgba(0, 0, 0, 0.8);
+  --knob: #ffffff;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root[data-style="contrast"]:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    --bg: #000000;
+    --surface-1: #0d0d0d;
+    --surface-2: #1a1a1a;
+    --surface-3: #262626;
+    --surface-inset: #080808;
+    --surface-hover: rgba(255, 255, 255, 0.12);
+    --surface-active: rgba(255, 255, 255, 0.2);
+
+    --text-1: #ffffff;
+    --text-2: #dcdcdc;
+    --text-3: #bdbdbd;
+    --text-inverse: #000000;
+
+    --border: #8a8a8a;
+    --border-strong: #f0f0f0;
+    --border-subtle: #5c5c5c;
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.9);
+    --shadow-md: 0 0 0 1px #5c5c5c, 0 8px 24px rgba(0, 0, 0, 0.9);
+    --shadow-lg: 0 0 0 1px #8a8a8a, 0 24px 56px rgba(0, 0, 0, 0.95);
+    --shadow-accent: 0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent);
+
+    --success: #6ee7b7;
+    --success-bg: rgba(110, 231, 183, 0.12);
+    --warning: #fcd34d;
+    --warning-bg: rgba(252, 211, 77, 0.12);
+    --danger: #ffa2ad;
+    --danger-bg: rgba(255, 162, 173, 0.12);
+    --info: #8fd0ff;
+    --info-bg: rgba(143, 208, 255, 0.12);
+
+    --accent: var(--accent-azure-d);
+    --accent-text: #000000;
+    --scrim: rgba(0, 0, 0, 0.8);
+    --knob: #ffffff;
+  }
+}
+
+/* ==========================================================================
+   Style previews
+
+   The six tiles in Settings each have to paint a style they are not currently
+   in, which no amount of `var(--bg)` can do — those resolve to the *active*
+   style everywhere on the page, tile included. So each tile carries its own
+   five colours, and they are here rather than in app.css because they are the
+   same values as the blocks above and belong beside them.
+
+   Shape and shadow are set once, in the base rule: a style's corners do not
+   change with the theme, so neither do its miniature's.
+   ========================================================================== */
+
+.stylecard[data-style-preview="aurora"] {
+  --preview-bg: #eceef3;
+  --preview-surface: #fbfbfd;
+  --preview-border: #d1d6e3;
+  --preview-ink: #262c38;
+  --preview-accent: #0b6bd8;
+  --preview-r: 6px;
+  --preview-shadow: 0 2px 6px rgba(20, 23, 45, 0.14);
+}
+.stylecard[data-style-preview="graphite"] {
+  --preview-bg: #f4f4f5;
+  --preview-surface: #ffffff;
+  --preview-border: #d3d3d7;
+  --preview-ink: #1f1f23;
+  --preview-accent: #0b6bd8;
+  --preview-r: 3px;
+  --preview-shadow: 0 1px 1px rgba(0, 0, 0, 0.06);
+}
+.stylecard[data-style-preview="paper"] {
+  --preview-bg: #efece4;
+  --preview-surface: #faf8f3;
+  --preview-border: #cec7b8;
+  --preview-ink: #2b2721;
+  --preview-accent: #0b6bd8;
+  --preview-r: 5px;
+  --preview-shadow: 0 2px 5px rgba(74, 58, 38, 0.14);
+}
+.stylecard[data-style-preview="midnight"] {
+  --preview-bg: #000000;
+  --preview-surface: #0a0d16;
+  --preview-border: #2d3549;
+  --preview-ink: #dfe6f5;
+  --preview-accent: #56a9ff;
+  --preview-r: 7px;
+  --preview-shadow: 0 0 10px rgba(86, 169, 255, 0.22);
+}
+.stylecard[data-style-preview="nordic"] {
+  --preview-bg: #e6ebf0;
+  --preview-surface: #f8fafc;
+  --preview-border: #c7d1dd;
+  --preview-ink: #2c3440;
+  --preview-accent: #0b6bd8;
+  --preview-r: 9px;
+  --preview-shadow: 0 3px 10px rgba(46, 60, 80, 0.16);
+}
+.stylecard[data-style-preview="contrast"] {
+  --preview-bg: #ffffff;
+  --preview-surface: #ffffff;
+  --preview-border: #141414;
+  --preview-ink: #000000;
+  --preview-accent: #0a4595;
+  --preview-r: 4px;
+  --preview-shadow: none;
+}
+
+/* `midnight` is absent from both dark groups below: it is already showing its
+   committed form, and its light variant is the substitute, not the subject. */
+
+:root[data-theme="dark"] .stylecard[data-style-preview="aurora"] {
+  --preview-bg: #14161d;
+  --preview-surface: #1b1e26;
+  --preview-border: #3d4553;
+  --preview-ink: #d5dae3;
+  --preview-accent: #56a9ff;
+}
+:root[data-theme="dark"] .stylecard[data-style-preview="graphite"] {
+  --preview-bg: #0f0f10;
+  --preview-surface: #171719;
+  --preview-border: #3b3b40;
+  --preview-ink: #ededef;
+  --preview-accent: #56a9ff;
+}
+:root[data-theme="dark"] .stylecard[data-style-preview="paper"] {
+  --preview-bg: #1a1713;
+  --preview-surface: #221e19;
+  --preview-border: #453d33;
+  --preview-ink: #e6dfd3;
+  --preview-accent: #7cb8e8;
+}
+:root[data-theme="dark"] .stylecard[data-style-preview="nordic"] {
+  --preview-bg: #191d24;
+  --preview-surface: #21262f;
+  --preview-border: #434d5c;
+  --preview-ink: #d8dee9;
+  --preview-accent: #79b8e8;
+}
+:root[data-theme="dark"] .stylecard[data-style-preview="contrast"] {
+  --preview-bg: #000000;
+  --preview-surface: #0d0d0d;
+  --preview-border: #f0f0f0;
+  --preview-ink: #ffffff;
+  --preview-accent: #7dc0ff;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .stylecard[data-style-preview="aurora"] {
+    --preview-bg: #14161d;
+    --preview-surface: #1b1e26;
+    --preview-border: #3d4553;
+    --preview-ink: #d5dae3;
+    --preview-accent: #56a9ff;
+  }
+  :root:not([data-theme="light"]) .stylecard[data-style-preview="graphite"] {
+    --preview-bg: #0f0f10;
+    --preview-surface: #171719;
+    --preview-border: #3b3b40;
+    --preview-ink: #ededef;
+    --preview-accent: #56a9ff;
+  }
+  :root:not([data-theme="light"]) .stylecard[data-style-preview="paper"] {
+    --preview-bg: #1a1713;
+    --preview-surface: #221e19;
+    --preview-border: #453d33;
+    --preview-ink: #e6dfd3;
+    --preview-accent: #7cb8e8;
+  }
+  :root:not([data-theme="light"]) .stylecard[data-style-preview="nordic"] {
+    --preview-bg: #191d24;
+    --preview-surface: #21262f;
+    --preview-border: #434d5c;
+    --preview-ink: #d8dee9;
+    --preview-accent: #79b8e8;
+  }
+  :root:not([data-theme="light"]) .stylecard[data-style-preview="contrast"] {
+    --preview-bg: #000000;
+    --preview-surface: #0d0d0d;
+    --preview-border: #f0f0f0;
+    --preview-ink: #ffffff;
+    --preview-accent: #7dc0ff;
   }
 }
 
 /* ==========================================================================
    Accent selection — light values by default, dark values when dark is active
+
+   Last on purpose. A style block and an accent block can reach the same
+   specificity — `:root[data-style=x][data-theme=dark]` and
+   `:root[data-theme=dark][data-accent=azure]` are both (0,3,0) — and when they
+   tie, source order decides. The accent is the user's explicit choice, so it
+   goes last and wins.
    ========================================================================== */
 
 :root[data-accent="azure"]   { --accent: var(--accent-azure-l); }
@@ -398,6 +1483,20 @@
 :root[data-accent="amber"]   { --accent: var(--accent-amber-l); }
 :root[data-accent="rose"]    { --accent: var(--accent-rose-l); }
 :root[data-accent="emerald"] { --accent: var(--accent-emerald-l); }
+
+/* The same seven again, with `light` spelled out.
+   Not redundant: a style's light block is `:root[data-style=x][data-theme=light]`
+   at (0,3,0), which outranks the (0,2,0) rules above. Without these, choosing
+   "light" explicitly would hand the accent back to the style and the seven
+   swatches would stop working — but only in that one combination, which is
+   exactly the kind of bug that ships. */
+:root[data-theme="light"][data-accent="azure"]   { --accent: var(--accent-azure-l); }
+:root[data-theme="light"][data-accent="indigo"]  { --accent: var(--accent-indigo-l); }
+:root[data-theme="light"][data-accent="teal"]    { --accent: var(--accent-teal-l); }
+:root[data-theme="light"][data-accent="violet"]  { --accent: var(--accent-violet-l); }
+:root[data-theme="light"][data-accent="amber"]   { --accent: var(--accent-amber-l); }
+:root[data-theme="light"][data-accent="rose"]    { --accent: var(--accent-rose-l); }
+:root[data-theme="light"][data-accent="emerald"] { --accent: var(--accent-emerald-l); }
 
 :root[data-theme="dark"][data-accent="azure"]   { --accent: var(--accent-azure-d); }
 :root[data-theme="dark"][data-accent="indigo"]  { --accent: var(--accent-indigo-d); }
@@ -415,6 +1514,55 @@
   :root:not([data-theme="light"])[data-accent="amber"]   { --accent: var(--accent-amber-d); }
   :root:not([data-theme="light"])[data-accent="rose"]    { --accent: var(--accent-rose-d); }
   :root:not([data-theme="light"])[data-accent="emerald"] { --accent: var(--accent-emerald-d); }
+}
+
+/* --- the accent that is actually showing ------------------------------------
+
+   Same seven, resolved to whichever half of the pair the current theme is
+   using. Nothing in the app's own styling needs this — `--accent` is that
+   already — but the seven swatches in Settings have to paint the six accents
+   the user has *not* chosen, which `--accent` cannot tell them.
+
+   They read these instead of carrying a copy of the palette in TypeScript,
+   which is what they used to do. Two things fall out of that: `contrast`
+   retunes the palette for AAA and the swatches follow it without knowing, and
+   "match system" under an OS in dark mode now shows the dark halves — the copy
+   in the view had no way to see the media query and showed the light ones.
+   ---------------------------------------------------------------------------- */
+
+:root {
+  --accent-azure-now: var(--accent-azure-l);
+  --accent-indigo-now: var(--accent-indigo-l);
+  --accent-teal-now: var(--accent-teal-l);
+  --accent-violet-now: var(--accent-violet-l);
+  --accent-amber-now: var(--accent-amber-l);
+  --accent-rose-now: var(--accent-rose-l);
+  --accent-emerald-now: var(--accent-emerald-l);
+}
+
+:root[data-theme="dark"] {
+  --accent-azure-now: var(--accent-azure-d);
+  --accent-indigo-now: var(--accent-indigo-d);
+  --accent-teal-now: var(--accent-teal-d);
+  --accent-violet-now: var(--accent-violet-d);
+  --accent-amber-now: var(--accent-amber-d);
+  --accent-rose-now: var(--accent-rose-d);
+  --accent-emerald-now: var(--accent-emerald-d);
+}
+
+@media (prefers-color-scheme: dark) {
+  /* `:not([data-theme="light"])` and not a bare `:root`: someone who has
+     explicitly chosen light on a machine in dark mode is looking at the light
+     accents, and the swatches have to agree with the window. */
+  :root:not([data-theme="light"]) {
+    --accent-azure-now: var(--accent-azure-d);
+    --accent-indigo-now: var(--accent-indigo-d);
+    --accent-teal-now: var(--accent-teal-d);
+    --accent-violet-now: var(--accent-violet-d);
+    --accent-amber-now: var(--accent-amber-d);
+    --accent-rose-now: var(--accent-rose-d);
+    --accent-emerald-now: var(--accent-emerald-d);
+  }
 }
 
 /* ==========================================================================

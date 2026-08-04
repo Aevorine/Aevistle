@@ -20,6 +20,7 @@ import type {
 } from './bridge'
 import { failedResult } from './bridge'
 import { fetchLatest } from './update'
+import { feedFetchVia, type FeedResponse } from './feeds'
 import type {
   AppState,
   Attachment,
@@ -154,6 +155,7 @@ interface AevistleNativePlugin extends AndroidPermissionApi {
     items: Array<{ folderPath: string; uid: number }>
   }): Promise<void>
   fetchRemoteImage(opts: { url: string }): Promise<{ value: string }>
+  fetchFeed(opts: { url: string }): Promise<FeedResponse>
   downloadInboxAttachment(opts: {
     config: InboxAccountState
     folderPath: string
@@ -325,6 +327,7 @@ export function createAndroidBridge(): PlatformBridge & AndroidPermissionApi {
     deleteInboxMessages: (accountId, items) => Native.deleteInboxMessages({ accountId, items }),
     purgeInboxMessages: (config, items) => Native.purgeInboxMessages({ config, items }),
     fetchRemoteImage: (url) => Native.fetchRemoteImage({ url }).then((r) => r.value),
+    fetchFeed: (url) => Native.fetchFeed({ url }),
     // No native push exists yet — WorkManager's periodic sync updates its own
     // cache silently and the UI catches up on the next manual or app-open
     // sync, the same way `onJobEvent` is declared here but never actually
@@ -352,14 +355,29 @@ export function createAndroidBridge(): PlatformBridge & AndroidPermissionApi {
     },
 
     /**
-     * The WebView can reach the GitHub API directly, so the check needs no
-     * native code. Installing does: an APK has to go through the system
-     * package installer, which means handing the URL to the browser rather
-     * than downloading it here.
+     * The check goes through the plugin, because the WebView cannot make it.
+     *
+     * It was written as a direct `fetch` on the assumption that the WebView
+     * could reach api.github.com. It cannot: the bundle is served from
+     * `https://localhost` and `index.html` ships `connect-src 'self'`, so the
+     * request was refused by the document's own policy and this feature has
+     * never worked in a shipped Android build. The desktop copy of the same
+     * shared function appeared fine only because it runs in the main process,
+     * where no CSP applies.
+     *
+     * Installing still goes out to the browser: an APK has to reach the system
+     * package installer, which means handing over the URL rather than
+     * downloading it here.
      */
     async checkForUpdate() {
       const info = await Native.appInfo().catch(() => null)
-      return fetchLatest(info?.version ?? __APP_VERSION__, 'android')
+      return fetchLatest(
+        info?.version ?? __APP_VERSION__,
+        'android',
+        undefined,
+        undefined,
+        feedFetchVia((url) => Native.fetchFeed({ url })),
+      )
     },
 
     notify: (title, body, opts) => Native.notify({ title, body, code: opts?.code }),

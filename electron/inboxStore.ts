@@ -29,6 +29,15 @@ export interface CachedBody {
   sanitizedHtml?: string
   /** URLs stripped out during sanitization, kept so a later "load images" can restore them. */
   remoteImages: string[]
+  /**
+   * `text/calendar` parts, verbatim.
+   *
+   * A real meeting invitation carries its date in a `DTSTART` the sending
+   * calendar wrote on purpose. Reading that is not a heuristic; reading the
+   * prose beside it is. Cached with the body so the reader answers from disk
+   * on the second open, like everything else here.
+   */
+  icsParts?: string[]
 }
 
 export interface MailparserAttachment {
@@ -118,7 +127,13 @@ export async function readMessageBody(
   accountId: string,
   folderPath: string,
   uid: number,
-): Promise<{ text?: string; sanitizedHtml?: string; attachments: Attachment[]; remoteImages: string[] } | null> {
+): Promise<{
+  text?: string
+  sanitizedHtml?: string
+  attachments: Attachment[]
+  remoteImages: string[]
+  icsParts?: string[]
+} | null> {
   let cached: CachedBody
   try {
     const raw = await fs.readFile(bodyFile(accountId, folderPath, uid), 'utf8')
@@ -132,6 +147,7 @@ export async function readMessageBody(
     sanitizedHtml: cached.sanitizedHtml,
     attachments,
     remoteImages: cached.remoteImages,
+    icsParts: cached.icsParts,
   }
 }
 

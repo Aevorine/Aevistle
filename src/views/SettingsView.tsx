@@ -35,7 +35,7 @@ import { SectionNav } from '../components/SectionNav'
 import { groupAccounts, knownGroups } from '../core/accounts'
 import { useApp } from '../state/AppState'
 import { LOCALES, useI18n, type TranslationKey } from '../i18n'
-import { effectiveImagePolicy } from '../core/types'
+import { DEFAULT_RETRY, defaultRecurrence, effectiveImagePolicy, emptyDraft } from '../core/types'
 import type {
   AccentId,
   Density,
@@ -43,20 +43,49 @@ import type {
   LocalePreference,
   MailAccount,
   ThemeMode,
+  VisualStyle,
 } from '../core/types'
+import { buildDigest, DIGEST_JOB_ID } from '../core/digest'
+import { renderDigestBody, renderDigestSubject } from '../core/digestText'
+import {
+  GREETING_COUNTRIES,
+  greetingJobId,
+  planGreetings,
+  type GreetingOccasion,
+} from '../core/greetings'
+import { HOLIDAY_PRESETS } from '../core/holidayPresets'
 import type { AppInfo, DataFolder, DataFolderChange } from '../core/bridge'
 import { lastUpdateCheck, onUpdateCheck, runUpdateCheck } from '../core/update'
 import type { DownloadProgress, UpdateInfo } from '../core/update'
 
-const ACCENTS: Array<{ id: AccentId; light: string; dark: string }> = [
-  { id: 'azure', light: '#0b6bd8', dark: '#56a9ff' },
-  { id: 'indigo', light: '#4f46e5', dark: '#818cf8' },
-  { id: 'teal', light: '#0d9488', dark: '#2dd4bf' },
-  { id: 'violet', light: '#7c3aed', dark: '#a78bfa' },
-  { id: 'amber', light: '#b45309', dark: '#fbbf24' },
-  { id: 'rose', light: '#e11d48', dark: '#fb7185' },
-  { id: 'emerald', light: '#059669', dark: '#34d399' },
+/**
+ * The six visual styles, in the order they are offered.
+ *
+ * `aurora` first because it is the default and the one an existing install is
+ * already wearing; `contrast` last because it is the answer to a need rather
+ * than a taste. The colours each tile paints itself in are not here — they are
+ * `--preview-*` in theme.css, beside the style's own tokens, so the tile and
+ * the style it advertises cannot drift apart.
+ */
+const STYLES: Array<{ id: VisualStyle; labelKey: TranslationKey }> = [
+  { id: 'aurora', labelKey: 'settings.style.aurora' },
+  { id: 'graphite', labelKey: 'settings.style.graphite' },
+  { id: 'paper', labelKey: 'settings.style.paper' },
+  { id: 'midnight', labelKey: 'settings.style.midnight' },
+  { id: 'nordic', labelKey: 'settings.style.nordic' },
+  { id: 'contrast', labelKey: 'settings.style.contrast' },
 ]
+
+/**
+ * Just the seven names. The colours used to be spelled out here as fourteen
+ * hex literals copied from theme.css, and a copy of a palette is a palette that
+ * can be wrong: it showed the light halves whenever the theme was "match
+ * system" on a machine in dark mode, because a constant cannot see a media
+ * query. Each swatch now paints itself from `--accent-<id>-now`, which is the
+ * one the app is actually using — including under the `contrast` style, which
+ * retunes all seven for AAA.
+ */
+const ACCENTS: AccentId[] = ['azure', 'indigo', 'teal', 'violet', 'amber', 'rose', 'emerald']
 
 const REPO_URL = 'https://github.com/Aevorine/Aevistle'
 
@@ -72,9 +101,10 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
     resetEverything,
     permissions,
     fixPermission,
+    scheduleDraft,
   } = useApp()
 
-  const { t } = useI18n()
+  const { t, formatDateTime } = useI18n()
 
   /**
    * The jump bar's entries.
@@ -94,6 +124,8 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
       { id: 'set-update', label: t('update.title') },
       { id: 'set-appearance', label: t('settings.appearance') },
       { id: 'set-sending', label: t('settings.sending') },
+      { id: 'set-digest', label: t('settings.digest') },
+      { id: 'set-greetings', label: t('settings.greetings') },
       { id: 'set-notifications', label: t('settings.notifications') },
       { id: 'set-privacy', label: t('settings.privacy') },
       { id: 'set-about', label: t('settings.about') },
@@ -124,6 +156,116 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
 
   const s = state.settings
   const patch = (p: Partial<typeof s>) => dispatch({ type: 'patchSettings', patch: p })
+
+  // --- the daily digest ----------------------------------------------------
+
+  const [digestPreview, setDigestPreview] = useState<string | null>(null)
+
+  /**
+   * The preview goes through the very functions that build the mail.
+   *
+   * A preview assembled separately is a preview of a different message, and
+   * this one exists precisely so the user can see what will land in their inbox
+   * before agreeing to receive it every morning.
+   */
+  const previewDigest = () => {
+    const digest = buildDigest(state.jobs, {
+      quiet: { enabled: s.quietHoursEnabled, start: s.quietStart, end: s.quietEnd },
+      calendar: s.workCalendar,
+      excludeJobIds: [DIGEST_JOB_ID],
+    })
+    const names = new Map(state.jobs.map((j) => [j.id, j.name]))
+    const ctx = { t, formatDateTime, jobName: (id: string) => names.get(id) ?? id }
+    setDigestPreview(`${renderDigestSubject(digest, ctx)}\n\n${renderDigestBody(digest, ctx)}`)
+  }
+
+  // --- holiday greetings ---------------------------------------------------
+
+  const [greetYear, setGreetYear] = useState(() => new Date().getFullYear())
+  /**
+   * `null` until the user asks. Not computed on render, and deliberately so:
+   * a plan that appears by itself is one press away from mail nobody asked to
+   * write, and the whole point of this card is that the press comes first.
+   */
+  const [greetPlan, setGreetPlan] = useState<GreetingOccasion[] | null>(null)
+
+  const greetAccountId = s.greetingAccountId || s.defaultAccountId || state.accounts[0]?.id
+
+  const showGreetPlan = () => {
+    setGreetPlan(
+      planGreetings(
+        state.contacts.map((c) => ({
+          address: c.address,
+          name: c.name,
+          country: c.fields?.country,
+        })),
+        greetYear,
+        {
+          calendar: s.workCalendar,
+          timeOfDay: s.greetingTime,
+          defaultCountry: s.greetingCountry,
+        },
+      ),
+    )
+  }
+
+  /**
+   * Turn the reviewed plan into ordinary reminders.
+   *
+   * Behind a confirmation, and it creates *schedule entries* rather than
+   * sending anything: this application's identity is that it never silently
+   * sends and never silently fails to send, and a feature that manufactured
+   * outgoing mail on dates it worked out for itself would break the first half
+   * of that as thoroughly as a silent drop breaks the second.
+   */
+  const createGreetings = async () => {
+    if (!greetPlan || greetPlan.length === 0 || !greetAccountId) return
+    const ok = await confirm({
+      title: t('settings.greetConfirmTitle'),
+      body: t('settings.greetConfirm', { n: greetPlan.length }),
+      confirmLabel: t('settings.greetCreate', { n: greetPlan.length }),
+      cancelLabel: t('common.cancel'),
+    })
+    if (!ok) return
+
+    const subject = s.greetingSubject.trim() || t('greet.defaultSubject')
+    const body = s.greetingBody.trim() || t('greet.defaultBody')
+    const now = Date.now()
+
+    for (const occasion of greetPlan) {
+      await scheduleDraft({
+        // Deterministic, so pressing this twice replaces rather than duplicates.
+        id: greetingJobId(occasion),
+        name: t('settings.greetJobName', { holiday: occasion.name }),
+        enabled: true,
+        draft: {
+          ...emptyDraft(greetAccountId),
+          to: occasion.recipients.map((r) => r.address),
+          subject,
+          body,
+          bodyFormat: 'plain',
+          // So `{{holiday}}` and `{{name}}` resolve per recipient at send time
+          // rather than being frozen into the text now.
+          mergeEnabled: true,
+        },
+        recurrence: {
+          ...defaultRecurrence(now),
+          kind: 'once',
+          startAt: occasion.at,
+          timeOfDay: s.greetingTime,
+        },
+        occurrences: [],
+        runCount: 0,
+        retry: DEFAULT_RETRY,
+        status: 'armed',
+        createdAt: now,
+        updatedAt: now,
+      })
+    }
+
+    toast.push({ tone: 'success', title: t('settings.greetCreated', { n: greetPlan.length }) })
+    setGreetPlan(null)
+  }
 
   const removeAccount = async (account: MailAccount) => {
     const ok = await confirm({
@@ -240,7 +382,17 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
                       ) : null}
                     </div>
                     <div className="log__detail">
-                      {a.fromAddress} · {a.host}:{a.port} · {a.security.toUpperCase()}
+                      {/*
+                        `?.` because a `state.json` that predates this field, or
+                        that a person edited by hand, otherwise throws here —
+                        and a throw during render takes the *whole Settings
+                        screen* with it. Measured: 0 elements, no message, no
+                        way back, which is the same silent-blank failure the
+                        boot path was hardened against. The account row is worth
+                        showing with one field missing; it is not worth losing
+                        every other setting over.
+                      */}
+                      {a.fromAddress} · {a.host}:{a.port} · {a.security?.toUpperCase() ?? '—'}
                       {a.hasSecret ? '' : ` · ${t('account.password')}: ${t('common.none')}`}
                     </div>
                   </div>
@@ -320,18 +472,48 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
               />
             </Field>
 
+            {/* Above the accent, and deliberately: the style decides what the
+                seven accent chips will be sitting on. */}
+            <Field label={t('settings.visualStyle')} hint={t('settings.styleHint')}>
+              <div className="stylecards">
+                {STYLES.map((style) => (
+                  <button
+                    key={style.id}
+                    type="button"
+                    className="stylecard"
+                    data-style-preview={style.id}
+                    aria-pressed={(s.visualStyle ?? 'aurora') === style.id}
+                    onClick={() => patch({ visualStyle: style.id })}
+                  >
+                    {/* A page, a card on it, an accent and two lines of text —
+                        the smallest arrangement that still shows the two things
+                        that separate these styles: how far the card sits off the
+                        ground, and how sharp its corners are. */}
+                    <span className="stylecard__preview" aria-hidden="true">
+                      <span className="stylecard__pane">
+                        <span className="stylecard__accent" />
+                        <span className="stylecard__line" />
+                        <span className="stylecard__line stylecard__line--short" />
+                      </span>
+                    </span>
+                    <span className="stylecard__name">{t(style.labelKey)}</span>
+                  </button>
+                ))}
+              </div>
+            </Field>
+
             <Field label={t('settings.accent')}>
               <div className="accent-swatches">
-                {ACCENTS.map((a) => (
+                {ACCENTS.map((id) => (
                   <button
-                    key={a.id}
+                    key={id}
                     type="button"
                     className="swatch"
-                    aria-pressed={s.accent === a.id}
-                    aria-label={a.id}
-                    title={a.id}
-                    style={{ background: s.themeMode === 'dark' ? a.dark : a.light, color: a.light }}
-                    onClick={() => patch({ accent: a.id })}
+                    aria-pressed={s.accent === id}
+                    aria-label={id}
+                    title={id}
+                    style={{ background: `var(--accent-${id}-now)`, color: `var(--accent-${id}-now)` }}
+                    onClick={() => patch({ accent: id })}
                   />
                 ))}
               </div>
@@ -474,6 +656,214 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
                 </Field>
               </div>
             ) : null}
+          </div>
+        </Card>
+
+        {/* --- daily digest -------------------------------------------------
+            The switch is the whole control surface. What it writes is one
+            ordinary reminder in the schedule, budgeted by the same recurrence
+            engine as everything else — there is no digest timer anywhere in
+            this application, and adding one would give it two answers to the
+            question that engine exists to own. */}
+        <div id="set-digest" className="settings-section" />
+        <Card>
+          <div className="card__body">
+            <div className="section-label">{t('settings.digest')}</div>
+            {state.accounts.length === 0 ? (
+              <Banner tone="warning">{t('settings.digestNoAccount')}</Banner>
+            ) : null}
+            <Switch
+              checked={s.digestEnabled}
+              onChange={(v) => patch({ digestEnabled: v })}
+              title={t('settings.digestOn')}
+              description={t('settings.digestHint')}
+            />
+            {s.digestEnabled ? (
+              <>
+                <Field label={t('settings.digestTime')}>
+                  <input
+                    className="input"
+                    type="time"
+                    value={s.digestTime}
+                    onChange={(e) => patch({ digestTime: e.target.value })}
+                  />
+                </Field>
+                <Field label={t('settings.digestAccount')}>
+                  <select
+                    className="input"
+                    value={s.digestAccountId ?? ''}
+                    onChange={(e) => patch({ digestAccountId: e.target.value || undefined })}
+                  >
+                    <option value="">{t('settings.accountAuto')}</option>
+                    {state.accounts.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.label || a.fromAddress}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label={t('settings.digestTo')} hint={t('settings.digestToHint')}>
+                  <input
+                    className="input"
+                    type="email"
+                    value={s.digestTo ?? ''}
+                    onChange={(e) => patch({ digestTo: e.target.value })}
+                  />
+                </Field>
+                <div className="btn-row">
+                  <Button variant="ghost" icon={<IconMail size={16} />} onClick={previewDigest}>
+                    {t('settings.digestPreview')}
+                  </Button>
+                </div>
+                {digestPreview !== null ? (
+                  <div>
+                    <div className="section-label">{t('settings.digestPreviewTitle')}</div>
+                    <pre className="mono digest-preview">{digestPreview}</pre>
+                  </div>
+                ) : null}
+              </>
+            ) : null}
+          </div>
+        </Card>
+
+        {/* --- holiday greetings --------------------------------------------
+            A planner, not an automation. Nothing here runs on its own: the
+            plan appears when asked for, the reminders appear when confirmed,
+            and every one of them is visible and cancellable on the Schedule
+            screen. Mail that creates itself out of sight is the mirror image
+            of mail that silently fails to go, and this app exists to have
+            neither. */}
+        <div id="set-greetings" className="settings-section" />
+        <Card>
+          <div className="card__body">
+            <div className="section-label">{t('settings.greetings')}</div>
+            <div className="field__hint">{t('settings.greetHint')}</div>
+            {state.accounts.length === 0 ? (
+              <Banner tone="warning">{t('settings.greetNoAccount')}</Banner>
+            ) : null}
+            {state.contacts.length === 0 ? (
+              <Banner tone="info">{t('settings.greetNoContacts')}</Banner>
+            ) : null}
+
+            <Field label={t('settings.greetCountry')} hint={t('settings.greetCountryHint')}>
+              <select
+                className="input"
+                value={s.greetingCountry}
+                onChange={(e) => {
+                  patch({ greetingCountry: e.target.value })
+                  setGreetPlan(null)
+                }}
+              >
+                {GREETING_COUNTRIES.map((id) => (
+                  <option key={id} value={id}>
+                    {t(
+                      (HOLIDAY_PRESETS.find((p) => p.id === id)?.labelKey ??
+                        'workcal.preset.CN') as TranslationKey,
+                    )}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label={t('settings.greetYear')}>
+              <input
+                className="input"
+                type="number"
+                min={2000}
+                max={2099}
+                value={greetYear}
+                onChange={(e) => {
+                  setGreetYear(Number(e.target.value))
+                  setGreetPlan(null)
+                }}
+              />
+            </Field>
+            <Field label={t('settings.greetTime')}>
+              <input
+                className="input"
+                type="time"
+                value={s.greetingTime}
+                onChange={(e) => {
+                  patch({ greetingTime: e.target.value })
+                  setGreetPlan(null)
+                }}
+              />
+            </Field>
+            <Field label={t('settings.greetAccount')}>
+              <select
+                className="input"
+                value={s.greetingAccountId ?? ''}
+                onChange={(e) => patch({ greetingAccountId: e.target.value || undefined })}
+              >
+                <option value="">{t('settings.accountAuto')}</option>
+                {state.accounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.label || a.fromAddress}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label={t('settings.greetSubject')}>
+              <input
+                className="input"
+                value={s.greetingSubject}
+                placeholder={t('greet.defaultSubject')}
+                onChange={(e) => patch({ greetingSubject: e.target.value })}
+              />
+            </Field>
+            <Field label={t('settings.greetBody')} hint={t('settings.greetVars')}>
+              <textarea
+                className="textarea"
+                rows={4}
+                value={s.greetingBody}
+                placeholder={t('greet.defaultBody')}
+                onChange={(e) => patch({ greetingBody: e.target.value })}
+              />
+            </Field>
+
+            <div className="field__hint">{t('settings.greetMoving')}</div>
+
+            <div className="btn-row">
+              <Button variant="ghost" icon={<IconRefresh size={16} />} onClick={showGreetPlan}>
+                {t('settings.greetPlan')}
+              </Button>
+              {greetPlan && greetPlan.length > 0 ? (
+                <Button variant="primary" onClick={() => void createGreetings()}>
+                  {t('settings.greetCreate', { n: greetPlan.length })}
+                </Button>
+              ) : null}
+            </div>
+
+            {greetPlan === null ? null : greetPlan.length === 0 ? (
+              <EmptyState icon={<IconMail size={20} />} title={t('settings.greetNone', { year: greetYear })} />
+            ) : (
+              <ul className="greetplan">
+                {greetPlan.map((occasion) => (
+                  <li key={occasion.key} className="greetplan__row">
+                    <span>
+                      {t('settings.greetRow', {
+                        date: occasion.date,
+                        holiday: occasion.name,
+                        country: occasion.country,
+                        n: occasion.recipients.length,
+                      })}
+                    </span>
+                    <span className="btn-row">
+                      <StatusChip
+                        tone="neutral"
+                        label={t(
+                          occasion.source === 'statutory'
+                            ? 'settings.greetSourceStatutory'
+                            : 'settings.greetSourcePreset',
+                        )}
+                      />
+                      {state.jobs.some((j) => j.id === greetingJobId(occasion)) ? (
+                        <StatusChip tone="warning" label={t('settings.greetExists')} />
+                      ) : null}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
         </Card>
 

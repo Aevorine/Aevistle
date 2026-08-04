@@ -17,6 +17,13 @@
  */
 
 import type { Contact, MessageDraft } from './types'
+import {
+  addIsoDays,
+  isWorkingDayIso,
+  toIsoDate,
+  type IsoDate,
+  type WorkCalendar,
+} from './workCalendar'
 
 /** `{{ name }}` — braces doubled, whitespace tolerated, word characters only. */
 const TOKEN = /\{\{\s*([A-Za-z0-9_.-]+)\s*\}\}/g
@@ -36,6 +43,109 @@ export function builtinVars(now = Date.now(), locale = 'en'): MergeVars {
     month: two(d.getMonth() + 1),
     day: two(d.getDate()),
     weekday: new Intl.DateTimeFormat(locale, { weekday: 'long' }).format(d),
+  }
+}
+
+/**
+ * How far ahead the calendar variables will look before giving up.
+ *
+ * A year and a bit. A calendar with every day marked as a holiday would
+ * otherwise send `nextWorkday` scanning forever, and the honest answer to
+ * "when is the next working day" on such a calendar is "there isn't one" —
+ * which is an empty string, not a hang.
+ */
+const CALENDAR_HORIZON_DAYS = 400
+
+/**
+ * Variables that answer "what is today, on my working calendar?".
+ *
+ * The point of these is a message whose text depends on the calendar that
+ * already decides when it is sent. Without them the calendar can move a
+ * reminder onto Monday but the reminder still says "see you tomorrow", and the
+ * two halves of the same feature disagree in front of the recipient.
+ *
+ * Every value is a fact with an obvious rendering — a date, a name, a count.
+ * There is deliberately no `{{isWorkday}}`: it would have to render as a word,
+ * that word would have to be translated, and a merge variable is inserted into
+ * a message whose language this module does not know. Counts and dates carry
+ * across all six locales unchanged.
+ *
+ * An empty string is a real answer here, not a failure. `{{holiday}}` on an
+ * ordinary Tuesday is empty because there is no holiday, and "祝你{{holiday}}
+ * 快乐" collapsing to "祝你快乐" is better than it rendering the token. That is
+ * the one place this module departs from "unknown variables are left standing"
+ * — and it is not a departure, because the variable is known; its value is
+ * just empty.
+ *
+ * @param names Holiday names by date, where they are known. The generic
+ *   `WorkCalendar` stores dates without names, so `{{holiday}}` is only ever
+ *   non-empty for a calendar built from a named source — the Chinese statutory
+ *   tables, or an imported ICS with summaries.
+ */
+export function calendarVars(
+  now: number,
+  cal: WorkCalendar,
+  names: Map<IsoDate, string> = new Map(),
+): MergeVars {
+  const today = toIsoDate(now)
+
+  const scan = (from: IsoDate, step: 1 | -1, want: (iso: IsoDate) => boolean): IsoDate => {
+    for (let i = 1; i <= CALENDAR_HORIZON_DAYS; i++) {
+      const probe = addIsoDays(from, i * step)
+      if (want(probe)) return probe
+    }
+    return ''
+  }
+
+  const working = (iso: IsoDate) => isWorkingDayIso(iso, cal)
+  const offDay = (iso: IsoDate) => !isWorkingDayIso(iso, cal)
+
+  const nextWorkday = scan(today, 1, working)
+  const prevWorkday = scan(today, -1, working)
+  const nextHolidayDate = scan(today, 1, (iso) => cal.holidays.includes(iso))
+  // The next day off is not the next *holiday*: a weekend is a day off nobody
+  // announces. Both are offered because "see you after the weekend" and "see
+  // you after Spring Festival" are different sentences.
+  const nextDayOff = scan(today, 1, offDay)
+
+  const countUntil = (endExclusive: IsoDate): string => {
+    if (!endExclusive) return ''
+    let n = 0
+    for (let i = 0; i < CALENDAR_HORIZON_DAYS; i++) {
+      const probe = addIsoDays(today, i)
+      if (probe >= endExclusive) break
+      if (working(probe)) n++
+    }
+    return String(n)
+  }
+
+  const daysBetween = (from: IsoDate, to: IsoDate): string => {
+    if (!to) return ''
+    for (let i = 0; i <= CALENDAR_HORIZON_DAYS; i++) {
+      if (addIsoDays(from, i) === to) return String(i)
+    }
+    return ''
+  }
+
+  // The end of the ISO week (Monday-based), so "workdays left this week"
+  // means what a working week means rather than what a Sunday-first grid does.
+  const d = new Date(now)
+  const dow = (d.getDay() + 6) % 7 // 0 = Monday
+  const weekEnd = addIsoDays(today, 7 - dow)
+  const monthEnd = toIsoDate(new Date(d.getFullYear(), d.getMonth() + 1, 1).getTime())
+
+  return {
+    today,
+    holiday: names.get(today) ?? '',
+    nextWorkday,
+    prevWorkday,
+    nextDayOff,
+    nextHoliday: nextHolidayDate ? (names.get(nextHolidayDate) ?? '') : '',
+    nextHolidayDate,
+    daysToNextHoliday: daysBetween(today, nextHolidayDate),
+    daysToNextDayOff: daysBetween(today, nextDayOff),
+    workdaysLeftThisWeek: countUntil(weekEnd),
+    workdaysLeftThisMonth: countUntil(monthEnd),
   }
 }
 
@@ -105,9 +215,25 @@ export interface MergeMessage {
 export function buildMergeMessages(
   draft: MessageDraft,
   contacts: Contact[],
-  opts: { enabled: boolean; now?: number; locale?: string } = { enabled: true },
+  opts: {
+    enabled: boolean
+    now?: number
+    locale?: string
+    /** Supplies the `{{nextWorkday}}` family. Omitted, those variables simply do not exist. */
+    calendar?: WorkCalendar
+    /** Holiday names by date, for `{{holiday}}` / `{{nextHoliday}}`. */
+    holidayNames?: Map<IsoDate, string>
+  } = { enabled: true },
 ): MergeMessage[] {
-  const base = builtinVars(opts.now ?? Date.now(), opts.locale ?? 'en')
+  const at = opts.now ?? Date.now()
+  const base = {
+    ...builtinVars(at, opts.locale ?? 'en'),
+    // Only when a calendar was supplied. Registering these names with empty
+    // values on a caller that has no calendar would turn `{{nextWorkday}}`
+    // from a visible typo into a silent blank — the exact failure the
+    // leave-unknown-tokens-standing rule exists to prevent.
+    ...(opts.calendar ? calendarVars(at, opts.calendar, opts.holidayNames) : {}),
+  }
 
   if (!opts.enabled) {
     const vars = { ...base }

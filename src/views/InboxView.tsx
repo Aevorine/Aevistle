@@ -13,6 +13,29 @@
  * at the top of it. They now have a screen of their own (`CodesView`) fed by
  * an app-wide watcher, because a code that arrives has to be found — and
  * announced — whether or not anyone happens to be looking at the mailbox.
+ *
+ * ---------------------------------------------------------------------------
+ * B4 · 收件箱 → 日历
+ *
+ * A mail that says "the review is on 12 March at 14:30" is a reminder waiting
+ * to be typed out by hand, and the app already knows how to send reminders.
+ * `core/dateExtract` reads the moment; this screen offers it, in the reader,
+ * next to the sentence it came from.
+ *
+ * Three rules, each of them the reason a line of code below looks the way it
+ * does:
+ *
+ *  - **Nothing is created without a press.** Extraction runs when a message is
+ *    opened, which is already a deliberate act; a *job* is only ever built
+ *    inside `scheduleFromDate`, which is only ever reached from an `onClick`.
+ *    Arrival does nothing at all. This app never quietly creates outgoing mail.
+ *  - **The evidence travels with the answer.** Every offer shows the verbatim
+ *    slice of the message it was read from, exactly as `CodesView` does for a
+ *    verification code, so a wrong date is visibly wrong rather than mysterious.
+ *  - **`low` is never the default.** A low-confidence reading (see the date-order
+ *    rule in `core/dateExtract`, where bare `en` cannot decide `03/04`) gets no
+ *    primary button and asks a second question before it schedules. A wrong
+ *    date silently scheduled is worse than no offer at all.
  */
 
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
@@ -31,7 +54,9 @@ import {
   type SegmentedOption,
 } from '../components/ui'
 import {
+  IconCalendar,
   IconCheck,
+  IconClock,
   IconDownload,
   IconExternal,
   IconFlag,
@@ -55,19 +80,25 @@ import {
   seedAttachmentImage,
   useAttachmentImages,
 } from '../components/ImageLightbox'
-import { useI18n } from '../i18n'
+import { useI18n, type TranslationKey } from '../i18n'
 import { BROKEN_IMAGE, resolveRemoteImages } from '../core/remoteImagePlaceholder'
 import { resolveWithCache } from '../core/imageCache'
 import { getCachedBody, putCachedBody } from '../core/bodyMemo'
+import { CHAIN_STAGES, buildChain, leadLabelKey } from '../core/chain'
+import { extractDates, type DateHit } from '../core/dateExtract'
 import type { InboxMessageBody } from '../core/bridge'
 import {
+  DEFAULT_RETRY,
   REMOVED_RETENTION_MS,
+  defaultRecurrence,
   effectiveImagePolicy,
+  emptyDraft,
   senderDomain,
   shouldAutoLoadImages,
   type Attachment,
   type InboxMessage,
   type InboxTag,
+  type ScheduledJob,
 } from '../core/types'
 
 type AccountFilter = 'all' | string
@@ -79,6 +110,82 @@ const BIN_DAYS = Math.round(REMOVED_RETENTION_MS / 86_400_000)
 
 /** Types worth trying to show in place rather than handing straight to the OS. */
 const PREVIEWABLE = /\.(png|jpe?g|gif|webp|bmp|avif|pdf|txt|csv|log|md)$/i
+
+/**
+ * Which lead time a single press should use, most wanted first.
+ *
+ * The day before is the one people mean: it is late enough to still be about
+ * this event and early enough to do something about it. The rest are the
+ * fallbacks for an event that is closer than that — a meeting in ninety
+ * minutes cannot have a "day before" stage, and offering one that silently
+ * collapses onto the event itself is how a reminder arrives too late to help.
+ */
+const LEAD_PREFERENCE = [86_400_000, 2 * 3_600_000, 0, 3 * 86_400_000, 7 * 86_400_000]
+
+/** Longest evidence snippet worth putting in a reminder mail, in characters. */
+const EVIDENCE_LIMIT = 240
+
+/**
+ * The plain text a message actually reads as.
+ *
+ * `dateExtract` documents that its `body` is plain text — HTML converted
+ * upstream — and the desktop fetch does supply `text` for nearly every mail.
+ * The fallback exists for the ones it does not: a purely HTML newsletter whose
+ * `text/plain` alternative the sender omitted. Tags are replaced by a space or
+ * a newline rather than deleted, because `<td>12</td><td>March</td>` collapsed
+ * without a separator becomes `12March`, which reads as nothing at all.
+ */
+function bodyAsText(text: string, html: string): string {
+  if (text.trim()) return text
+  if (!html) return ''
+  return html
+    .replace(/<(script|style)[\s\S]*?<\/\1>/gi, ' ')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|tr|li|h[1-6]|table)>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#3[59];/g, "'")
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+}
+
+/**
+ * The raw `text/calendar` parts, when the platform hands any over.
+ *
+ * Read defensively rather than off a declared field: the transport that
+ * carries them is a neighbouring piece of work, and `dateExtract` treats them
+ * as optional — with them a real invitation is read from its `DTSTART`,
+ * without them the prose path answers. Neither needs this file to change.
+ */
+function icsPartsOf(body: InboxMessageBody): string[] | undefined {
+  const parts = (body as { icsParts?: unknown }).icsParts
+  if (!Array.isArray(parts)) return undefined
+  const strings = parts.filter((p): p is string => typeof p === 'string' && p.length > 0)
+  return strings.length > 0 ? strings : undefined
+}
+
+/**
+ * The platform's own language tag, not the app's `LocaleId`.
+ *
+ * `detectLocale()` collapses every English tag to `en`, and the region subtag
+ * it throws away is the only thing that decides whether `03/04/2026` is
+ * 3 April or 4 March — see the date-order rule in `core/dateExtract`.
+ */
+function platformLocale(): string | undefined {
+  return typeof navigator === 'undefined' ? undefined : navigator.language
+}
+
+const pad2 = (n: number) => String(n).padStart(2, '0')
+
+/** 'HH:mm' for an instant, in local time. */
+function hhmm(at: number): string {
+  const d = new Date(at)
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`
+}
 
 export function InboxView({ onGoToAccounts }: { onGoToAccounts?: () => void }) {
   const {
@@ -94,6 +201,7 @@ export function InboxView({ onGoToAccounts }: { onGoToAccounts?: () => void }) {
     purgeInboxMessages,
     restoreInboxMessages,
     clearRemovedMessages,
+    scheduleDraft,
   } = useApp()
   const { t, formatAgo, formatDateTime, dir } = useI18n()
   const toast = useToast()
@@ -125,6 +233,18 @@ export function InboxView({ onGoToAccounts }: { onGoToAccounts?: () => void }) {
   const [immersive, setImmersive] = useState(true)
   const [findOpen, setFindOpen] = useState(false)
   const [findText, setFindText] = useState('')
+  /**
+   * Highlighting is deferred, the input is not — the same trade the message
+   * filter above makes, for a much heavier consumer.
+   *
+   * `MessageBodyFrame` re-highlights by un-marking every existing `mark` (with
+   * a `parent.normalize()` each) and then walking the whole iframe document
+   * with a `TreeWalker`, splitting every matching text node. On a long
+   * newsletter that is thousands of cross-document DOM operations, and it ran
+   * once per character typed — so the character itself could not paint until
+   * the previous search had finished repainting the body.
+   */
+  const deferredFind = useDeferredValue(findText)
   const [preview, setPreview] = useState<{ attachment: Attachment; dataUrl: string; mime: string } | null>(null)
   /**
    * The picture on show, by path rather than by index.
@@ -822,6 +942,181 @@ export function InboxView({ onGoToAccounts }: { onGoToAccounts?: () => void }) {
    * pictures they may never scroll to. The others still open on click through
    * the ordinary path; they simply join the previous/next run once fetched.
    */
+  // --- B4 · the meeting / deadline this message is about --------------------
+
+  /*
+   * The four inputs, pulled out as plain values on purpose.
+   *
+   * `openBody` is *replaced* whenever an attachment finishes downloading
+   * (`withBytes` splices the ready file back in), and `openMessage` is
+   * replaced by every read/unread toggle. Keying the extraction on either
+   * object would re-run six languages' worth of matchers because somebody
+   * tapped a PDF. Strings and numbers compare by value, so the memo below
+   * only re-runs when the message genuinely changes.
+   */
+  const openMessageId = openMessage?.id
+  const openSubject = openMessage?.subject ?? ''
+  const openReceivedAt = openMessage?.date ?? 0
+  const openText = openBody?.text ?? ''
+  const openHtml = openBody?.sanitizedHtml ?? ''
+  /*
+   * The calendar parts, carried by *value* rather than by identity.
+   *
+   * `icsPartsOf` filters, so it hands back a fresh array every time it is
+   * called — and a fresh array in a dependency list is a memo that never hits,
+   * which would put the whole extraction back on every render by a route
+   * nothing in the code reads as a loop. Serialising and parsing back is the
+   * cheapest honest way to compare a small array of strings by content: the
+   * serialise re-runs only when the body object is replaced (an attachment
+   * finishing its download), and the parse only when the calendar data has
+   * genuinely changed — so the extraction below sees one stable value.
+   */
+  const openIcsKey = useMemo(
+    () => JSON.stringify(openBody ? (icsPartsOf(openBody) ?? []) : []),
+    [openBody],
+  )
+  const openIcsParts = useMemo(() => {
+    const parts = JSON.parse(openIcsKey) as string[]
+    return parts.length > 0 ? parts : undefined
+  }, [openIcsKey])
+
+  /**
+   * Every moment this message appears to be about.
+   *
+   * **Memoised on the message, and on nothing that moves while reading it.**
+   * Extraction is not free — six languages, twenty-odd strike-out patterns and
+   * several matcher passes over the whole body — and this component re-renders
+   * on every keystroke in the find box, every attachment fetch and every image
+   * that arrives. `findText` and `deferredFind` are deliberately absent from
+   * the dependency list: the find-in-message path was already the bottleneck
+   * once (see `deferredFind` above), and putting a full re-extraction on it
+   * would be the same mistake with a heavier consumer.
+   *
+   * It runs when a message is *opened*, which is a deliberate act, and it
+   * produces nothing but a list of offers. No mail is created here.
+   */
+  const dateHits = useMemo<DateHit[]>(() => {
+    if (!openMessageId || openReceivedAt === 0) return []
+    const body = bodyAsText(openText, openHtml)
+    if (!body && !openSubject) return []
+    return extractDates({
+      subject: openSubject,
+      body,
+      // The anchor is when the mail was *sent*, never the clock. "Tomorrow at
+      // 3" in a message read on Thursday means the day after it arrived.
+      receivedAt: openReceivedAt,
+      icsParts: openIcsParts,
+      locale: platformLocale(),
+    })
+  }, [openMessageId, openSubject, openReceivedAt, openText, openHtml, openIcsParts])
+
+  /**
+   * Reminders already made from this message, keyed by moment *and* lead time.
+   *
+   * Includes the message id, so moving to the next mail starts clean without
+   * anything having to remember to reset it. A second press on the same offer
+   * is still allowed — two reminders for one meeting is a thing people
+   * genuinely want — the mark only says the first one landed.
+   */
+  const [scheduledOffers, setScheduledOffers] = useState<Set<string>>(new Set())
+  const offerKey = (hit: DateHit, leadMs: number) =>
+    `${openMessageId ?? ''}${hit.at}${leadMs}`
+
+  /** "12 Mar 2026, 14:30", or just the day when the mail only gave a day. */
+  const whenLabel = useCallback(
+    (hit: DateHit) =>
+      hit.allDay ? formatDateTime(hit.at, { timeStyle: undefined }) : formatDateTime(hit.at),
+    [formatDateTime],
+  )
+
+  /**
+   * One press, one scheduled reminder email.
+   *
+   * Everything here is the machinery the compose screen already uses:
+   * `buildChain` models "remind me N before an event" and drops a stage whose
+   * fire time has already gone, and `scheduleDraft` is the same call the
+   * schedule button makes. Nothing new reaches the scheduler.
+   *
+   * A `low` confidence hit asks first. It is the one case where the app is
+   * openly unsure which date it read — bare `en` cannot tell `03/04` apart —
+   * and a wrong date scheduled without a word is exactly the silent failure
+   * this app exists to avoid.
+   */
+  const scheduleFromDate = async (hit: DateHit, leadMs: number) => {
+    const message = openMessage
+    if (!message) return
+    const account = accountsById.get(message.accountId)
+    const to = account?.fromAddress?.trim()
+    if (!to) {
+      toast.push({ tone: 'error', title: t('inboxcal.noAddress') })
+      return
+    }
+
+    if (hit.confidence === 'low') {
+      const ok = await confirm({
+        title: t('inboxcal.confirmLowTitle', { when: whenLabel(hit) }),
+        body: t('inboxcal.confirmLowBody', { evidence: hit.evidence.snippet }),
+        confirmLabel: t('inboxcal.scheduleAnyway'),
+        cancelLabel: t('common.cancel'),
+      })
+      if (!ok) return
+    }
+
+    const now = Date.now()
+    const title = (hit.title ?? '').trim() || message.subject || t('inbox.noSubject')
+    const evidence = hit.evidence.snippet.slice(0, EVIDENCE_LIMIT)
+    const bodyText =
+      t('inboxcal.mailBody', {
+        title,
+        when: whenLabel(hit),
+        from: message.from,
+        subject: message.subject || t('inbox.noSubject'),
+        evidence,
+      }) + (hit.location ? `\n${t('inboxcal.mailWhere', { where: hit.location })}\n` : '')
+
+    const base: Omit<ScheduledJob, 'id' | 'chainId'> = {
+      name: t('inboxcal.jobName', { title }),
+      enabled: true,
+      draft: {
+        ...emptyDraft(message.accountId),
+        // To yourself, at the address the message was received on: this is a
+        // reminder, not a reply, and it must never go back to the sender.
+        to: [to],
+        subject: t('inboxcal.mailSubject', { title }),
+        body: bodyText,
+      },
+      recurrence: {
+        ...defaultRecurrence(now),
+        kind: 'once',
+        startAt: hit.at,
+        // Unused by `once`, but a stale value here is the shape that bit the
+        // compose screen's time box: kept honest rather than left over.
+        timeOfDay: hhmm(hit.at - leadMs),
+      },
+      occurrences: [],
+      runCount: 0,
+      retry: DEFAULT_RETRY,
+      status: 'armed',
+      createdAt: now,
+      updatedAt: now,
+    }
+
+    const [job] = buildChain(base, [leadMs], now)
+    if (!job || job.recurrence.startAt <= now) {
+      toast.push({ tone: 'error', title: t('chain.alreadyPast') })
+      return
+    }
+    await scheduleDraft(job)
+    setScheduledOffers((prev) => new Set(prev).add(offerKey(hit, leadMs)))
+    // The time it will actually fire, not the one that was asked for: a lead
+    // `buildChain` had to drop would otherwise be reported as if it had stuck.
+    toast.push({
+      tone: 'success',
+      title: t('inboxcal.scheduled', { when: formatDateTime(job.recurrence.startAt) }),
+      detail: title,
+    })
+  }
+
   const inboxImageSources = useMemo(
     () =>
       (openBody?.attachments ?? [])
@@ -1274,9 +1569,37 @@ export function InboxView({ onGoToAccounts }: { onGoToAccounts?: () => void }) {
                   </Banner>
                 ) : null}
 
+                {/*
+                  B4 — the moment this message is about, offered in the reader.
+
+                  Above the body rather than in a dialog: an offer that
+                  interrupts the message is an offer made before the reader has
+                  seen what it refers to, and this one has to be checkable
+                  against the text right below it. Nothing here has done
+                  anything yet — pressing a lead time is what creates a
+                  reminder, and that press is the only path to one.
+                */}
+                {dateHits.length > 0 ? (
+                  <div className="reader__dates">
+                    <div className="section-label">
+                      <IconCalendar size={15} />
+                      {t('inboxcal.title', { n: dateHits.length })}
+                    </div>
+                    {dateHits.map((hit, index) => (
+                      <DateOffer
+                        key={`${hit.at} ${hit.kind} ${index}`}
+                        hit={hit}
+                        when={whenLabel(hit)}
+                        isScheduled={(leadMs) => scheduledOffers.has(offerKey(hit, leadMs))}
+                        onSchedule={(leadMs) => void scheduleFromDate(hit, leadMs)}
+                      />
+                    ))}
+                  </div>
+                ) : null}
+
                 <MessageBodyFrame
                   html={resolvedHtml ?? openBody.sanitizedHtml ?? textAsHtml(openBody.text ?? t('inbox.noBody'))}
-                  find={findOpen ? findText : ''}
+                  find={findOpen ? deferredFind : ''}
                   onLinkClick={openLinkSafely}
                 />
 
@@ -1407,6 +1730,128 @@ export function InboxView({ onGoToAccounts }: { onGoToAccounts?: () => void }) {
       ) : null}
 
       {confirmElement}
+    </div>
+  )
+}
+
+/**
+ * One extracted moment, and the offer to be reminded about it.
+ *
+ * Modelled on `CodesView`'s card, deliberately: that screen learned that an
+ * answer nobody can check is an answer nobody can correct. So the layout is
+ * the same shape — the answer large and first, the chips that qualify it
+ * beside it, and the verbatim source text underneath. The snippet is a
+ * stranger's prose of arbitrary length and may contain a URL or a run of CJK
+ * with no spaces in it, which is why the stylesheet clamps it and breaks it
+ * `anywhere`.
+ *
+ * Confidence is expressed three ways, because one is not enough: the card's
+ * border changes, a chip says so in words, and — the part that matters — a
+ * `low` reading gets no primary button at all. Its lead times are all plain,
+ * equally weighted controls, and `scheduleFromDate` asks a second question
+ * before any of them creates anything. Nothing about a low hit is the path of
+ * least resistance.
+ */
+function DateOffer({
+  hit,
+  when,
+  isScheduled,
+  onSchedule,
+}: {
+  hit: DateHit
+  when: string
+  isScheduled: (leadMs: number) => boolean
+  onSchedule: (leadMs: number) => void
+}) {
+  const { t } = useI18n()
+  const low = hit.confidence === 'low'
+
+  const now = Date.now()
+  /* A stage whose fire time has already gone is not offered. `buildChain`
+     would drop it and fall back to the event itself, which is a reminder that
+     arrives too late to be one. */
+  const leads = CHAIN_STAGES.filter((stage) => hit.at - stage.leadMs > now)
+  /* The single press. Absent for a `low` hit on purpose — see above. */
+  const preferred = low
+    ? undefined
+    : LEAD_PREFERENCE.find((ms) => leads.some((stage) => stage.leadMs === ms))
+  const others = leads.filter((stage) => stage.leadMs !== preferred)
+
+  const leadLabel = (leadMs: number) => t(leadLabelKey(leadMs) as TranslationKey)
+
+  return (
+    <div className="datecard" data-confidence={hit.confidence} data-kind={hit.kind}>
+      <div className="datecard__head">
+        <span className="datecard__mark">
+          <IconCalendar size={18} />
+        </span>
+        <div className="datecard__main">
+          <div className="datecard__when">{when}</div>
+          <div className="datecard__meta">
+            <span className="chip chip--strong">{t(`inboxcal.kind.${hit.kind}` as TranslationKey)}</span>
+            {hit.allDay ? <span className="chip chip--quiet">{t('inboxcal.allDay')}</span> : null}
+            {low ? (
+              <span className="chip chip--warning">{t('inboxcal.unsure')}</span>
+            ) : hit.confidence === 'medium' ? (
+              <span className="chip chip--quiet">{t('inboxcal.likely')}</span>
+            ) : null}
+            {hit.location ? (
+              <span className="chip chip--quiet">{t('inboxcal.at', { where: hit.location })}</span>
+            ) : null}
+          </div>
+          {hit.title ? <div className="datecard__title">{hit.title}</div> : null}
+        </div>
+      </div>
+
+      {/* Here is my answer, and here is why. */}
+      <div className="datecard__evidence">
+        <span className="datecard__evidenceLabel">
+          {hit.evidence.keyword
+            ? t('inboxcal.evidenceFrom', { keyword: hit.evidence.keyword })
+            : t('inboxcal.evidence')}
+        </span>
+        <span className="datecard__snippet">{hit.evidence.snippet}</span>
+      </div>
+
+      {low ? <div className="datecard__warn">{t('inboxcal.lowHint')}</div> : null}
+
+      <div className="datecard__actions">
+        {leads.length === 0 ? (
+          <span className="datecard__note">{t('chain.alreadyPast')}</span>
+        ) : (
+          <>
+            {preferred !== undefined ? (
+              <Button
+                variant="primary"
+                icon={isScheduled(preferred) ? <IconCheck size={15} /> : <IconClock size={15} />}
+                onClick={() => onSchedule(preferred)}
+              >
+                {t('inboxcal.remind', { lead: leadLabel(preferred) })}
+              </Button>
+            ) : null}
+            {others.length > 0 ? (
+              <div className="datecard__leads">
+                <span className="datecard__leadsLabel">
+                  {preferred === undefined ? t('inboxcal.remindWhen') : t('inboxcal.orLead')}
+                </span>
+                {others.map((stage) => (
+                  <button
+                    key={stage.leadMs}
+                    type="button"
+                    className="chip chip--toggle datecard__lead"
+                    data-done={isScheduled(stage.leadMs) || undefined}
+                    title={t('inboxcal.remind', { lead: leadLabel(stage.leadMs) })}
+                    onClick={() => onSchedule(stage.leadMs)}
+                  >
+                    {isScheduled(stage.leadMs) ? <IconCheck size={13} /> : null}
+                    {leadLabel(stage.leadMs)}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </>
+        )}
+      </div>
     </div>
   )
 }

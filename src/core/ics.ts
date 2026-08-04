@@ -902,7 +902,34 @@ function addDate(iso: IsoDate, days: number): IsoDate {
  */
 export function jobsToEvents(
   jobs: ScheduledJob[],
-  opts: { expandLimit?: number; now?: number } = {},
+  opts: {
+    expandLimit?: number
+    now?: number
+    /**
+     * Export the times this app will *actually send at*, not the rule.
+     *
+     * An `RRULE` is the honest export of a rule and a dishonest export of a
+     * schedule, and this application is one where those differ on purpose.
+     * "Every weekday at 09:00" becomes `RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR`
+     * — and then the working calendar moves the 1 October send to the 8th,
+     * quiet hours hold the 02:00 one until morning, and the subscriber's
+     * calendar still shows the original. They would be looking at a schedule
+     * this app has already decided not to follow.
+     *
+     * `job.occurrences` is the list *after* `applyWorkCalendarDetailed` and
+     * quiet hours have had it (see `rebuildJob` in `state/AppState.tsx`), so
+     * resolving means expanding that list instead of describing the rule. The
+     * cost is a file that goes stale — a concrete list only reaches as far as
+     * the occurrences do — which is why this is a mode and not the default.
+     *
+     * `calendar` is only reached for a job whose stored occurrence list is
+     * empty (a paused reminder, or one restored from an export). Without it
+     * that fallback would recompute from the bare rule and quietly put the
+     * unadjusted times back into a file whose whole purpose is that they are
+     * adjusted.
+     */
+    resolved?: { calendar?: WorkCalendar }
+  } = {},
 ): { events: IcsEvent[]; expanded: string[] } {
   const limit = opts.expandLimit ?? 100
   const now = opts.now ?? Date.now()
@@ -910,7 +937,7 @@ export function jobsToEvents(
   const expanded: string[] = []
 
   for (const job of jobs) {
-    const rule = recurrenceToRRule(job.recurrence)
+    const rule = opts.resolved ? null : recurrenceToRRule(job.recurrence)
     const description = [
       job.draft.subject,
       job.draft.to.length > 0 ? `To: ${job.draft.to.join(', ')}` : '',
@@ -936,7 +963,12 @@ export function jobsToEvents(
     const times =
       job.occurrences.length > 0
         ? job.occurrences.slice(0, limit)
-        : computeOccurrences(job.recurrence, { after: now, count: limit, runsSoFar: job.runCount })
+        : computeOccurrences(job.recurrence, {
+            after: now,
+            count: limit,
+            runsSoFar: job.runCount,
+            calendar: opts.resolved?.calendar,
+          })
     if (job.recurrence.kind !== 'once' && times.length >= limit) expanded.push(job.name)
     for (const [i, at] of times.entries()) {
       events.push({

@@ -17,6 +17,7 @@ import { evaluateConditions, type ConditionContext, type SendCondition } from '.
 import { buildMergeMessages, hasVars, type MergeMessage } from './mergeVars'
 import { attachmentLimitBytes, providerById } from './providers'
 import { isQuiet, type QuietHours } from './schedule'
+import type { IsoDate, WorkCalendar } from './workCalendar'
 import type { Attachment, Contact, MailAccount, MessageDraft } from './types'
 import { encodedSize, isRiskyAttachment, hasDeceptiveName, totalAttachmentBytes } from './validate'
 
@@ -83,6 +84,13 @@ export interface PreflightOptions {
   conditionContext?: Partial<ConditionContext>
   now?: number
   locale?: string
+  /**
+   * Supplies the calendar merge variables, so the preview shows the same text
+   * the recipient will get. Omitting it leaves `{{nextWorkday}}` standing as a
+   * token in the preview — which is the correct warning, not a bug.
+   */
+  calendar?: WorkCalendar
+  holidayNames?: Map<IsoDate, string>
 }
 
 function domainOf(address: string): string {
@@ -99,8 +107,12 @@ export function buildPreflight(
 
   const messages = buildMergeMessages(draft, opts.contacts, {
     enabled: opts.merge,
-    now,
+    // The preview is of the message as it will be *sent*, so the calendar
+    // variables have to resolve against the send time, not against now.
+    now: opts.scheduledFor ?? now,
     locale: opts.locale,
+    calendar: opts.calendar,
+    holidayNames: opts.holidayNames,
   })
 
   const allRecipients = [...new Set([...draft.to, ...draft.cc, ...draft.bcc])]

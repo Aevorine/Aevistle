@@ -20,9 +20,11 @@ import {
   type ReactNode,
 } from 'react'
 import {
+  DEFAULT_RETRY,
   DEFAULT_SETTINGS,
   SCHEMA_VERSION,
   defaultInboxAccountState,
+  defaultRecurrence,
   emptyDraft,
   newId,
   type AppState,
@@ -67,6 +69,14 @@ import {
   type CalendarWarning,
 } from '../core/workCalendar'
 import { buildMergeMessages } from '../core/mergeVars'
+import { applyDeliveryWindows, type DeliveryWindow } from '../core/deliveryWindow'
+// Not a component — a pure module that happens to live beside the one screen
+// that needed it first. Imported here so the scheduler and the compose preview
+// answer "whose window counts?" with the same code, not the same intention.
+import { windowsForRecipients, windowsOf } from '../components/deliveryPreview'
+import { buildDigest, DIGEST_JOB_ID } from '../core/digest'
+import { renderDigestBody, renderDigestSubject } from '../core/digestText'
+import { greetingYears, holidayNameMap } from '../core/greetings'
 import { captureSnapshot, type SnapshotReason } from '../core/snapshots'
 import {
   mergeHits,
@@ -115,6 +125,20 @@ function shapeOccurrences(
   job: Pick<ScheduledJob, 'recurrence'>,
   settings: Settings,
   now = Date.now(),
+  /**
+   * The recipients' delivery windows, when any of them has one.
+   *
+   * Applied last, and it wins. The order is the whole point: the working
+   * calendar and quiet hours are both about the *sender* — which days they
+   * work, when they are asleep — and a delivery window is about the
+   * *recipient's* day. Re-applying quiet hours afterwards would push the send
+   * straight back out of the window every time, which would reduce this
+   * feature to a no-op while looking like it worked. The consequence is
+   * accepted deliberately: a send released into the recipient's morning may
+   * sit inside the sender's night, and it should, because nobody is being
+   * woken by it.
+   */
+  windows: DeliveryWindow[] = [],
 ): { occurrences: number[]; warning?: CalendarWarning } {
   const calendar = settings.workCalendar ?? DEFAULT_WORK_CALENDAR
   const { occurrences: shaped, adjustment } = applyWorkCalendarDetailed(
@@ -122,10 +146,37 @@ function shapeOccurrences(
     job.recurrence.workdayPolicy ?? 'off',
     calendar,
   )
+  const quieted = applyQuietHours(shaped, quietFrom(settings))
   return {
-    occurrences: applyQuietHours(shaped, quietFrom(settings)),
+    occurrences:
+      windows.length === 0
+        ? quieted
+        // `applyDeliveryWindows` never drops an occurrence: an unsatisfiable
+        // set of windows returns the original instant and reports why, because
+        // a late message is a nuisance and a missing one is the failure this
+        // application exists to prevent.
+        : quieted.map((at) => applyDeliveryWindows(at, windows).at),
     warning: calendarWarning(adjustment, now),
   }
+}
+
+/**
+ * The windows belonging to a message's recipients, in `to` order.
+ *
+ * Cc and Bcc are deliberately not consulted: a window says when someone should
+ * be *reached*, and letting a carbon copy hold up the actual recipient's mail
+ * would be the tail wagging the dog.
+ *
+ * Deliberately **not** a second implementation of that rule. This started as a
+ * private copy here with a twin in `deliveryPreview.ts` — the compose screen
+ * needs the same answer to say "this will actually go out at 16:00 for Alice",
+ * and it cannot reach into the reducer for it. Two copies of one rule is the
+ * shape this codebase has been caught by before: the moment they disagree, the
+ * compose screen promises a send time the scheduler does not use, and nothing
+ * on either side looks wrong. One function, called from both.
+ */
+function windowsForDraft(to: string[], contacts: Contact[]): DeliveryWindow[] {
+  return windowsOf(windowsForRecipients(to, contacts))
 }
 
 /**
@@ -136,7 +187,13 @@ function shapeOccurrences(
  * them, so a user who removed a holiday could never get the reminder back on
  * the day they had first asked for.
  */
-function rebuildJob(job: ScheduledJob, settings: Settings, now = Date.now()): ScheduledJob {
+function rebuildJob(
+  job: ScheduledJob,
+  settings: Settings,
+  now = Date.now(),
+  /** Absent means "no contact list to consult", not "no windows" — see `windowsForDraft`. */
+  contacts: Contact[] = [],
+): ScheduledJob {
   const recurrence = migrateSkipWeekends(job.recurrence)
   const { occurrences, warning } = shapeOccurrences(
     computeOccurrences(recurrence, {
@@ -148,8 +205,109 @@ function rebuildJob(job: ScheduledJob, settings: Settings, now = Date.now()): Sc
     { recurrence },
     settings,
     now,
+    windowsForDraft(job.draft.to, contacts),
   )
   return { ...job, recurrence, occurrences, calendarWarning: warning }
+}
+
+// ---------------------------------------------------------------------------
+// The daily digest
+// ---------------------------------------------------------------------------
+
+/**
+ * The digest's mail, composed from the schedule as it stands right now.
+ *
+ * This is the whole mechanism, and it is deliberately not a mechanism. There is
+ * no digest timer, no digest sender and no digest branch in either native
+ * scheduler: the digest is an ordinary daily `ScheduledJob`, budgeted by the
+ * same recurrence engine, shaped by the same quiet hours and working calendar,
+ * and handed over in the same `bridge.syncJobs` call as everything else. The
+ * only thing that is special about it is that its *body* is generated on the
+ * way out instead of being typed once and stored — the same place, and for the
+ * same reason, that `forTransport` renders Markdown on the way out: the process
+ * that finally sends this has no idea how to compute a schedule summary and
+ * never will.
+ *
+ * The consequence is honest and is stated in the mail itself: the body is as
+ * fresh as the last time the schedule was armed, and `digest.generatedAt`
+ * records exactly when that was.
+ */
+function withDigestBody(job: ScheduledJob, live: AppState, i18n: I18n): ScheduledJob {
+  const digest = buildDigest(live.jobs, {
+    quiet: quietFrom(live.settings),
+    calendar: live.settings.workCalendar ?? DEFAULT_WORK_CALENDAR,
+    // Otherwise the digest opens every morning by reporting itself.
+    excludeJobIds: [DIGEST_JOB_ID],
+  })
+  const names = new Map(live.jobs.map((j) => [j.id, j.name]))
+  const ctx = {
+    t: i18n.t,
+    formatDateTime: i18n.formatDateTime,
+    jobName: (id: string) => names.get(id) ?? id,
+  }
+  return {
+    ...job,
+    draft: {
+      ...job.draft,
+      subject: renderDigestSubject(digest, ctx),
+      body: renderDigestBody(digest, ctx),
+      bodyFormat: 'plain',
+    },
+  }
+}
+
+/** The digest job as the settings currently describe it, occurrences and all. */
+function digestJobFor(
+  existing: ScheduledJob | undefined,
+  opts: { accountId: string; to: string; time: string; name: string },
+  settings: Settings,
+  now = Date.now(),
+): ScheduledJob {
+  return rebuildJob(
+    {
+      id: DIGEST_JOB_ID,
+      name: opts.name,
+      enabled: true,
+      draft: {
+        ...emptyDraft(opts.accountId),
+        to: [opts.to],
+        subject: opts.name,
+        bodyFormat: 'plain',
+      },
+      recurrence: {
+        ...defaultRecurrence(now),
+        kind: 'daily',
+        startAt: now,
+        timeOfDay: opts.time,
+      },
+      occurrences: [],
+      runCount: existing?.runCount ?? 0,
+      retry: DEFAULT_RETRY,
+      status: 'armed',
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    },
+    settings,
+    now,
+  )
+}
+
+/**
+ * Would writing this change anything the user can see?
+ *
+ * The effect that maintains the digest runs whenever an account is edited, and
+ * an unconditional dispatch there would bump `updatedAt` — which is half the
+ * signature that decides whether to tear down and rebuild every alarm on the
+ * device.
+ */
+function sameDigestJob(a: ScheduledJob, b: ScheduledJob): boolean {
+  return (
+    a.enabled === b.enabled &&
+    a.name === b.name &&
+    a.recurrence.timeOfDay === b.recurrence.timeOfDay &&
+    a.draft.accountId === b.draft.accountId &&
+    a.draft.to.join(',') === b.draft.to.join(',')
+  )
 }
 
 /** Two occurrence lists that would arm the same alarms. */
@@ -333,7 +491,7 @@ export function reducer(state: AppState, action: Action): AppState {
           if (touchesCalendar && !touchesQuiet && (job.recurrence.workdayPolicy ?? 'off') === 'off') {
             return job
           }
-          const next = rebuildJob(job, settings, now)
+          const next = rebuildJob(job, settings, now, state.contacts)
           if (
             sameList(next.occurrences, job.occurrences) &&
             next.recurrence === job.recurrence &&
@@ -1006,7 +1164,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
             runsSoFar: job.runCount,
             calendar,
           })
-          const shaped = shapeOccurrences(upcoming, { recurrence }, merged.settings)
+          const shaped = shapeOccurrences(
+            upcoming,
+            { recurrence },
+            merged.settings,
+            Date.now(),
+            windowsForDraft(job.draft.to, merged.contacts),
+          )
           return {
             ...job,
             recurrence,
@@ -1204,6 +1368,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
            */
           state.jobs
             .filter((j) => j.enabled)
+            // The digest's body is composed here, at the same moment and for
+            // the same reason the Markdown is rendered: this is the last point
+            // that still has the schedule, the calendar and a language.
+            .map((j) => (j.id === DIGEST_JOB_ID ? withDigestBody(j, liveRef.current, i18n) : j))
             .map((j) => ({ ...j, draft: forTransport(j.draft) })),
           state.accounts,
         )
@@ -1225,20 +1393,82 @@ export function AppProvider({ children }: { children: ReactNode }) {
     // Signatures, not the arrays themselves — otherwise every keystroke in a
     // draft would re-arm every alarm on the device.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bridge, ready, jobSignature, accountSignature])
+  }, [bridge, ready, jobSignature, accountSignature, i18n])
 
-  // --- theme, accent, density, direction ---------------------------------
+  /**
+   * Keep the digest reminder in step with its switch.
+   *
+   * This is bookkeeping, not scheduling — it writes one job and stops. What
+   * makes the digest arrive is the same machinery that makes every other
+   * reminder arrive, which is the point: adding a second timer here would give
+   * the app two answers to "when does something happen", and the one thing the
+   * shared recurrence engine exists to guarantee is that there is only one.
+   *
+   * Depends on the settings and on the account list, never on `state.jobs` —
+   * a dependency on the jobs it writes is a loop. `sameDigestJob` makes the
+   * repeat dispatches from an account edit into no-ops.
+   */
+  const { digestEnabled, digestTime, digestAccountId, digestTo } = state.settings
+  useEffect(() => {
+    if (!ready) return
+    const live = liveRef.current
+    const existing = live.jobs.find((j) => j.id === DIGEST_JOB_ID)
+
+    if (!digestEnabled) {
+      if (existing) dispatch({ type: 'removeJob', id: DIGEST_JOB_ID })
+      return
+    }
+
+    const accountId = digestAccountId || live.settings.defaultAccountId || live.accounts[0]?.id
+    const account = live.accounts.find((a) => a.id === accountId)
+    // No account means no digest, and the settings card says so out loud rather
+    // than leaving a switch that reads as on and does nothing.
+    if (!account) return
+    const to = (digestTo || account.fromAddress).trim()
+    if (!to) return
+
+    const wanted = digestJobFor(
+      existing,
+      { accountId: account.id, to, time: digestTime, name: i18n.t('digest.jobName') },
+      live.settings,
+    )
+    if (existing && sameDigestJob(existing, wanted)) return
+    dispatch({ type: 'upsertJob', job: wanted })
+    // `liveRef` supplies the jobs; listing them would make this effect rewrite
+    // the job it had just written.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, digestEnabled, digestTime, digestAccountId, digestTo, accountSignature, i18n])
+
+  // --- theme, style, accent, density, direction --------------------------
   useEffect(() => {
     const root = document.documentElement
-    const { themeMode, accent, density, listDensity } = state.settings
+    const { themeMode, visualStyle, accent, density, listDensity } = state.settings
     if (themeMode === 'system') root.removeAttribute('data-theme')
     else root.setAttribute('data-theme', themeMode)
+    root.setAttribute('data-style', visualStyle ?? 'aurora')
     root.setAttribute('data-accent', accent)
     root.setAttribute('data-density', density)
     root.setAttribute('data-list-density', listDensity ?? 'standard')
-    const meta = localeMeta(locale)
-    root.setAttribute('lang', meta.intlTag)
-    root.setAttribute('dir', meta.dir)
+    const localeInfo = localeMeta(locale)
+    root.setAttribute('lang', localeInfo.intlTag)
+    root.setAttribute('dir', localeInfo.dir)
+    // The window chrome follows the page. index.html ships two static
+    // `theme-color` tags as the pre-JS fallback, and they are copies of one
+    // theme's `--bg` — with six styles they are right in one case out of six,
+    // so the live value is read back off the element that was just relabelled
+    // and put in a tag ahead of them (the browser takes the first that matches).
+    const bg = getComputedStyle(root).getPropertyValue('--bg').trim()
+    if (bg) {
+      const head = document.head
+      let tag = head.querySelector<HTMLMetaElement>('meta[name="theme-color"][data-live]')
+      if (!tag) {
+        tag = document.createElement('meta')
+        tag.setAttribute('name', 'theme-color')
+        tag.setAttribute('data-live', '')
+        head.insertBefore(tag, head.querySelector('meta[name="theme-color"]'))
+      }
+      tag.setAttribute('content', bg)
+    }
   }, [state.settings, locale])
 
   // --- events from the platform scheduler --------------------------------
@@ -1408,7 +1638,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       const merge = draft.mergeEnabled === true && draft.to.length > 0
       const parts = merge
-        ? buildMergeMessages(draft, live.contacts, { enabled: true, locale })
+        ? buildMergeMessages(draft, live.contacts, {
+            enabled: true,
+            locale,
+            // So `{{nextWorkday}}` and friends answer from the same calendar
+            // that decided when this is being sent. Without it the calendar
+            // can move a reminder to Monday while its text still says
+            // "tomorrow".
+            calendar: live.settings.workCalendar ?? DEFAULT_WORK_CALENDAR,
+            // Was `statutoryNames()` alone, which named Chinese dates and
+            // nothing else — so `{{holiday}}` in a greeting to a French or
+            // Spanish contact rendered as an empty string and "Happy " went out
+            // the door. The Chinese tables still win every date they cover; the
+            // presets only fill the gaps. See `core/greetings.holidayNameMap`.
+            holidayNames: holidayNameMap({
+              years: greetingYears(),
+              prefer: live.settings.greetingCountry,
+            }),
+          })
         : [{ address: '', draft, missing: [] }]
 
       let result: SendResult
@@ -1517,6 +1764,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }),
         finalJob,
         state.settings,
+        Date.now(),
+        windowsForDraft(finalJob.draft.to, state.contacts),
       )
       finalJob = { ...finalJob, occurrences, calendarWarning: warning, updatedAt: Date.now() }
 
@@ -1547,7 +1796,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     async (id: string, enabled: boolean) => {
       const job = state.jobs.find((j) => j.id === id)
       if (!job) return
-      const rebuilt = enabled ? rebuildJob(job, state.settings) : null
+      const rebuilt = enabled ? rebuildJob(job, state.settings, Date.now(), state.contacts) : null
       dispatch({
         type: 'upsertJob',
         job: {
@@ -1633,7 +1882,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         } satisfies SendResult
       }
 
-      const result = await sendDraftNow(job.draft)
+      // "Send now" on the digest must compose it now, not resend whatever body
+      // was last handed to the scheduler.
+      const outgoing =
+        job.id === DIGEST_JOB_ID ? withDigestBody(job, liveRef.current, i18n) : job
+      const result = await sendDraftNow(outgoing.draft)
       dispatch({
         type: 'upsertJob',
         job: {
@@ -1647,7 +1900,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       })
       return result
     },
-    [state.jobs, sendDraftNow, conditionContext, addLog],
+    [state.jobs, sendDraftNow, conditionContext, addLog, i18n],
   )
 
   /**

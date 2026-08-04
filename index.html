@@ -5,9 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="color-scheme" content="light dark" />
     <meta name="theme-color" content="#14161b" media="(prefers-color-scheme: dark)" />
-    <!-- Both values are --bg from theme.css. They are duplicated here because
-         the browser needs them before any stylesheet has parsed; if that file
-         is retuned, these move with it. -->
+    <!-- Both values are the default style's --bg from theme.css. They are
+         duplicated here because the browser needs them before any stylesheet
+         has parsed; if that file is retuned, these move with it.
+
+         They are the fallback only. Once the app is up it reads the real --bg
+         for the chosen visual style and inserts a `data-live` theme-color tag
+         ahead of these two — six styles have six grounds, and a static pair
+         could only ever be right for one of them. See the appearance effect in
+         state/AppState.tsx. -->
     <meta name="theme-color" content="#eceef1" media="(prefers-color-scheme: light)" />
     <link rel="icon" type="image/png" href="/favicon.png" />
     <meta name="description" content="Aevistle — scheduled email reminders with attachments, for Windows and Android." />

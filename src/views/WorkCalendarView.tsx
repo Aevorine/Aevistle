@@ -40,6 +40,7 @@ import {
   type GridScope,
 } from '../components/MonthGrid'
 import { CalendarDayPanel, JobSheet, conflictLine, type DayEntry } from '../components/CalendarDayPanel'
+import type { DaySend } from '../components/MonthGrid'
 import {
   Button,
   Card,
@@ -50,6 +51,7 @@ import {
   PageHead,
   Segmented,
   StatusChip,
+  Switch,
   useConfirm,
   useToast,
 } from '../components/ui'
@@ -90,17 +92,24 @@ import {
   statutoryToCalendarDates,
   type StatutoryYear,
 } from '../core/cnHolidays'
+import { feedFetchVia } from '../core/feeds'
 import { findConflicts, type Conflict } from '../core/conflicts'
 import { buildIcs, calendarToEvents, eventsToCalendarDates, jobsToEvents, parseIcs } from '../core/ics'
-import { planReschedule } from '../core/reschedule'
+import { planReschedule, planRestagger } from '../core/reschedule'
+import { seedComposeDate } from '../core/composeSeed'
+import { LOAD_STEPS, loadLevel } from '../core/calendarLoad'
 import { saveGeneratedFile } from '../core/download'
+import type { Recurrence, ScheduledJob } from '../core/types'
 import {
+  addIsoDays,
   applyWorkCalendarDetailed,
   DEFAULT_WORK_CALENDAR,
   isWorkingDay,
   isWorkingDayIso,
   parseDateList,
   parseIsoDate,
+  spreadSameMinute,
+  STAGGER_WINDOW_MS,
   toIsoDate,
   type IsoDate,
   type WorkCalendar,
@@ -110,12 +119,25 @@ import {
 const WEEKDAY_ORDER = [1, 2, 3, 4, 5, 6, 0]
 /** How far ahead the impact preview looks, per reminder. */
 const PREVIEW_OCCURRENCES = 60
+/**
+ * Slack past the end of the visible range, in days.
+ *
+ * `MAX_SHIFT_DAYS` in `core/workCalendar.ts` is 31, so a `'before'` policy can
+ * pull an occurrence back by at most a month. Anything further out than that
+ * cannot land on a square the grid is drawing, which makes 31 the exact bound
+ * rather than a guess — the preview is unchanged, only the work is smaller.
+ */
+const PREVIEW_PAD_DAYS = 31
+const DAY_MS = 86_400_000
+
+/** How wide a de-stagger may spread a pile-up, as the sentences say it. */
+const STAGGER_WINDOW_MIN = Math.round(STAGGER_WINDOW_MS / 60_000)
 
 /** Remembers which country's names to use for the chips. See `holidayNameFor`. */
 const PRESET_MEMORY_KEY = 'aevistle.workcal.preset'
 
-export function WorkCalendarView() {
-  const { state, dispatch, pushUndo, toggleJob, scheduleDraft } = useApp()
+export function WorkCalendarView({ onCompose }: { onCompose?: () => void } = {}) {
+  const { state, dispatch, pushUndo, undo, toggleJob, scheduleDraft, bridge } = useApp()
   const { t, dir, formatDateTime } = useI18n()
   const toast = useToast()
   const { confirm, confirmElement } = useConfirm()
@@ -142,6 +164,30 @@ export function WorkCalendarView() {
   const [cached, setCached] = useState<StatutoryYear[]>(() => loadCachedYears())
   const [fetching, setFetching] = useState<number | null>(null)
   const icsInput = useRef<HTMLInputElement>(null)
+  /**
+   * The last day toggled, and when.
+   *
+   * A double-click arrives as click → click → dblclick. `MonthGrid` drops the
+   * second click, so exactly one toggle is committed before the create fires,
+   * and this is how the create knows there is one to take back. Matched on the
+   * date *and* on recency, so an unrelated toggle from a minute ago is never
+   * mistaken for the one this gesture caused.
+   */
+  const lastToggle = useRef<{ iso: IsoDate; at: number } | null>(null)
+
+  /**
+   * The locale's short time, built once.
+   *
+   * `formatDateTime` from `useI18n` constructs a fresh `Intl.DateTimeFormat` on
+   * every call, and this one is called up to three times per day square — 126
+   * constructions per render of a month, for a string that only needs one
+   * formatter. Same locale resolution as the weekday and month labels above.
+   */
+  const timeFormat = useMemo(
+    () => new Intl.DateTimeFormat(undefined, { timeStyle: 'short' } as Intl.DateTimeFormatOptions),
+    [],
+  )
+  const formatTime = useMemo(() => (at: number) => timeFormat.format(new Date(at)), [timeFormat])
 
   /**
    * Every write to the calendar goes through here, and every one of them is
@@ -167,6 +213,8 @@ export function WorkCalendarView() {
    * doing the opposite of what was meant.
    */
   const toggleDay = (iso: IsoDate) => {
+    // Remembered so a double-click can take it back. See `createOnDay`.
+    lastToggle.current = { iso, at: Date.now() }
     // `parseIsoDate`, never `new Date(iso)`: a bare date is UTC midnight per
     // spec, so west of UTC the weekend test below would read the previous day.
     const weekday = parseIsoDate(iso).getDay()
@@ -278,6 +326,49 @@ export function WorkCalendarView() {
   )
 
   /**
+   * The last instant the grid can possibly draw — twice, because one policy
+   * needs slack and three do not.
+   *
+   * This exists because the preview below used to ask for
+   * `PREVIEW_OCCURRENCES` occurrences with **no upper bound on time** — the
+   * same mistake `core/conflicts.ts` documents and fixed for the conflict scan,
+   * left in place here. `nextFireAfter` walks forward a day at a time up to
+   * `MAX_SEARCH_DAYS` (five years), allocating a `Date` per probe, so sixty
+   * occurrences of a *yearly* rule meant sixty years of day-by-day scanning —
+   * about 22 000 probes and 65 000 `Date` allocations, for one reminder, to
+   * draw a grid that shows six weeks.
+   *
+   * `grid` is where the drawn squares stop. `withSlack` adds `MAX_SHIFT_DAYS`,
+   * and is used only by `workdayPolicy: 'before'`, the one policy that moves a
+   * send *backwards* and can therefore pull an occurrence from beyond the grid
+   * onto a square inside it. `'after'`, `'skip'` and `'off'` never do, so
+   * asking them for another month of occurrences is pure waste.
+   *
+   * `count` stays as the second bound: a one-minute `interval` rule would
+   * otherwise produce a hundred thousand occurrences inside one month, and
+   * sixty of them is what the grid drew before and after this change.
+   */
+  const previewUntil = useMemo(() => {
+    const firstDay = weekStartDay(calendar.weekend)
+    let endExclusive: Date
+    if (scope === 'month') {
+      // The same arithmetic `MonthGrid` uses to build its cells: a leading pad
+      // to the week start, then whole weeks. The grid never draws past this.
+      const lead = (new Date(cursor.year, cursor.month, 1).getDay() - firstDay + 7) % 7
+      const days = new Date(cursor.year, cursor.month + 1, 0).getDate()
+      const cells = Math.ceil((lead + days) / 7) * 7
+      endExclusive = new Date(cursor.year, cursor.month, 1 - lead + cells)
+    } else if (scope === 'week') {
+      const week = weekOf(focusedDate, firstDay)
+      endExclusive = parseIsoDate(addIsoDays(week[6] ?? focusedDate, 1))
+    } else {
+      endExclusive = parseIsoDate(addIsoDays(focusedDate, 1))
+    }
+    const grid = endExclusive.getTime() - 1
+    return { grid, withSlack: grid + PREVIEW_PAD_DAYS * DAY_MS }
+  }, [calendar.weekend, scope, cursor.year, cursor.month, focusedDate])
+
+  /**
    * Where the next couple of months of reminders land, and which of them the
    * calendar moved.
    *
@@ -291,41 +382,99 @@ export function WorkCalendarView() {
     const marks = new Map<IsoDate, DayMark>()
     const entriesByDate = new Map<IsoDate, DayEntry[]>()
 
+    /*
+     * The minutes a pile-up happens on, as a set.
+     *
+     * Built once from the scan — one pass over a list that is at most a dozen
+     * long — so asking "is *this* send one of the colliding ones" below is a
+     * single hash lookup rather than a scan of the conflict list per
+     * occurrence. Same reason the `movedTo` map exists further down.
+     */
+    const collidingMinutes = new Set<number>()
+    for (const conflict of conflictScan.conflicts) {
+      if (conflict.kind === 'sameMinute' && conflict.at !== undefined) {
+        collidingMinutes.add(Math.floor(conflict.at / 60_000))
+      }
+    }
+
     for (const job of state.jobs) {
       if (!job.enabled) continue
       const policy = job.recurrence.workdayPolicy ?? 'off'
       const raw = computeOccurrences(job.recurrence, {
         count: PREVIEW_OCCURRENCES,
+        until: policy === 'before' ? previewUntil.withSlack : previewUntil.grid,
         runsSoFar: job.runCount,
         calendar,
       })
       const { occurrences, adjustment } = applyWorkCalendarDetailed(raw, policy, calendar)
       const rawDates = new Set(raw.map(toIsoDate))
+      // Destination date → where it came from, built once. The lookup used to
+      // be a `find` over `adjustment.moved` *per occurrence*, each step of
+      // which allocated a `Date` inside `toIsoDate` — quadratic in the number
+      // of shifted sends, for a job whose whole occurrence list is 60 long.
+      const movedTo = new Map<IsoDate, number>()
+      for (const move of adjustment.moved) {
+        // First writer wins, so this answers exactly what `find` answered when
+        // two sends were moved onto the same day.
+        const to = toIsoDate(move.to)
+        if (!movedTo.has(to)) movedTo.set(to, move.from)
+      }
 
       for (const at of occurrences) {
         const iso = toIsoDate(at)
         const shifted = !rawDates.has(iso)
-        const move = shifted ? adjustment.moved.find((m) => toIsoDate(m.to) === iso) : undefined
+        const from = shifted ? movedTo.get(iso) : undefined
+
+        /*
+         * The line the square will print. Built here, where the occurrence
+         * already is, rather than looked up per cell at render time — the
+         * whole reason `DaySend` carries raw strings instead of a finished
+         * sentence is so that this stays out of the render path and out of
+         * this memo's dependency list. Cost: one object per occurrence, on a
+         * loop that was already allocating one.
+         */
+        const line: DaySend = {
+          jobId: job.id,
+          at,
+          to: job.draft.to[0] ?? '',
+          subject: job.draft.subject,
+          shifted,
+          conflict: collidingMinutes.has(Math.floor(at / 60_000)),
+        }
 
         const mark = marks.get(iso)
         if (mark) {
           mark.count += 1
           mark.shifted = mark.shifted || shifted
           if (!mark.jobIds!.includes(job.id)) mark.jobIds!.push(job.id)
+          mark.lines!.push(line)
         } else {
-          marks.set(iso, { count: 1, shifted, jobIds: [job.id] })
+          marks.set(iso, { count: 1, shifted, jobIds: [job.id], lines: [line] })
         }
 
         const entry: DayEntry = {
           job,
           at,
           shifted,
-          originalIso: move ? toIsoDate(move.from) : undefined,
+          originalIso: from !== undefined ? toIsoDate(from) : undefined,
         }
         const list = entriesByDate.get(iso)
         if (list) list.push(entry)
         else entriesByDate.set(iso, [entry])
       }
+    }
+
+    /*
+     * Order and colour, once per day rather than once per cell.
+     *
+     * The sort is over one day's sends — typically one or two, and the square
+     * only ever prints three — so this is linear in the number of sends drawn,
+     * with a log factor inside each day. Doing it in the render would mean
+     * re-sorting 42 arrays on every keystroke that reaches this screen.
+     */
+    for (const mark of marks.values()) {
+      mark.lines?.sort((a, b) => a.at - b.at)
+      mark.level = loadLevel(mark.count)
     }
 
     // Conflicts colour the square they happen on, so the grid answers "where is
@@ -334,11 +483,11 @@ export function WorkCalendarView() {
       const severity = list.some((c) => c.severity === 'error') ? 'error' : 'warning'
       const mark = marks.get(iso)
       if (mark) mark.conflict = severity
-      else marks.set(iso, { count: 0, shifted: false, jobIds: [], conflict: severity })
+      else marks.set(iso, { count: 0, shifted: false, jobIds: [], lines: [], conflict: severity })
     }
 
     return { marks, entriesByDate }
-  }, [state.jobs, calendar, conflictScan])
+  }, [state.jobs, calendar, conflictScan, previewUntil])
 
   // --- moving a reminder ----------------------------------------------------
 
@@ -385,6 +534,134 @@ export function WorkCalendarView() {
       detail: t(plan.outcome === 'series' ? 'cal.move.doneSeries' : 'cal.move.doneOne', {
         to: toIso,
       }),
+    })
+  }
+
+  // --- starting one from the calendar ---------------------------------------
+
+  /**
+   * Double-click an empty square: a new reminder, for that day.
+   *
+   * Two things have to happen before the navigation, and both of them are
+   * corrections rather than features:
+   *
+   *   - **Take back the stray toggle.** The first click of the double-click
+   *     already marked the day as a holiday, because a browser has no way to
+   *     tell a first click from the first half of a double-click. `MonthGrid`
+   *     drops the *second* click, so there is exactly one edit to reverse, and
+   *     the app's own undo reverses it exactly. Leaving it would mean every
+   *     "new reminder here" also declared the day a public holiday.
+   *   - **Refuse a day that has gone.** Mail cannot be scheduled into last
+   *     Tuesday. Silently moving the date forward to something valid is the
+   *     kind of quiet correction that gets discovered a month later.
+   */
+  const createOnDay = (iso: IsoDate) => {
+    const stray = lastToggle.current
+    if (stray && stray.iso === iso && Date.now() - stray.at < 1500) {
+      undo()
+      lastToggle.current = null
+    }
+
+    if (iso < todayIso) {
+      toast.push({ tone: 'info', title: t('cal.create.past', { date: iso }) })
+      return
+    }
+    if (!onCompose) return
+    if (!seedComposeDate(iso)) return
+    onCompose()
+    toast.push({ tone: 'info', title: t('cal.create.seeded', { date: iso }) })
+  }
+
+  // --- de-staggering a pile-up ----------------------------------------------
+
+  /**
+   * Several reminders on one minute, spread across a window — and written back.
+   *
+   * This is the only conflict on this screen with a fix, and it is the one the
+   * app could already *see* and never act on: `applyWorkCalendarDetailed`
+   * de-duplicates within one reminder and is called once per job, so four rules
+   * that each independently say 09:00 have never had anything spreading them.
+   * `spreadSameMinute` is that same nudge with a `seen` set that spans jobs.
+   *
+   * What is written back is each rule's time of day, because that is all there
+   * is to write: `Recurrence` has no per-occurrence exceptions, so moving one
+   * send off 09:00 is moving every future send of that reminder off 09:00. The
+   * confirmation says so in those words before anything is saved — the same
+   * reason `planReschedule` is a plan rather than a mutation — and the whole
+   * batch is one undo entry, so Ctrl+Z puts every one of them back together.
+   */
+  const deStagger = async (conflict: Conflict) => {
+    const at = conflict.at
+    if (conflict.kind !== 'sameMinute' || at === undefined) return
+
+    const byId = new Map(state.jobs.map((j) => [j.id, j]))
+    const involved = conflict.jobIds
+      .map((id) => byId.get(id))
+      .filter((j): j is ScheduledJob => Boolean(j))
+    if (involved.length < 2) return
+
+    const plan = spreadSameMinute(involved.map((job) => ({ jobId: job.id, at })))
+
+    const writes: Array<{ job: ScheduledJob; recurrence: Recurrence; line: string }> = []
+    const refused: string[] = []
+    for (const move of plan.moves) {
+      const job = byId.get(move.jobId)
+      if (!job) continue
+      const restagger = planRestagger(job, move.to - move.from)
+      const sentence = `${job.name} — ${t(restagger.reasonKey as TranslationKey, restagger.reasonValues)}`
+      // A cron rule keeps its minute inside an expression somebody wrote by
+      // hand; rewriting it is not this button's business. Named in the result
+      // rather than skipped quietly, so "why is that one still at 09:00" has
+      // an answer on screen.
+      if (!restagger.recurrence) refused.push(sentence)
+      else writes.push({ job, recurrence: restagger.recurrence, line: sentence })
+    }
+
+    if (writes.length === 0) {
+      toast.push({
+        tone: 'error',
+        title: t('cal.stagger.nothing'),
+        detail: refused.length > 0 ? t('cal.stagger.refused', { list: refused.join(', ') }) : undefined,
+      })
+      return
+    }
+
+    // Every reminder, and exactly how far each one moves — not "3 reminders
+    // will be adjusted". The whole reason this is a confirmation rather than a
+    // button that just does it is that it rewrites *rules*, and a sentence
+    // that hides which rules is not a confirmation.
+    const ok = await confirm({
+      title: t('cal.stagger.title'),
+      body: [
+        t('cal.stagger.body', {
+          n: writes.length,
+          min: STAGGER_WINDOW_MIN,
+          when: formatDateTime(at),
+        }),
+        ...writes.map((w) => w.line),
+      ].join(' · '),
+      confirmLabel: t('cal.stagger.confirm'),
+      cancelLabel: t('common.cancel'),
+    })
+    if (!ok) return
+
+    // One entry for the whole batch: undoing half a de-stagger would leave the
+    // pile-up half-solved and the reminders in a state nobody chose.
+    pushUndo(
+      t('cal.stagger.undo'),
+      writes.map((w) => ({ type: 'upsertJob', job: w.job }) as const),
+    )
+    for (const w of writes) {
+      await scheduleDraft({ ...w.job, recurrence: w.recurrence })
+    }
+
+    toast.push({
+      tone: 'success',
+      title: t('cal.stagger.done', { n: writes.length, min: STAGGER_WINDOW_MIN }),
+      detail:
+        refused.length > 0
+          ? t('cal.stagger.refused', { list: refused.join(', ') })
+          : t('cal.undo.hint'),
     })
   }
 
@@ -436,12 +713,28 @@ export function WorkCalendarView() {
     )
   }
 
+  /**
+   * Export the times this app will actually send at, rather than the rules.
+   *
+   * Default on, and on *this* screen that is the only defensible default. An
+   * `RRULE` is the honest export of a rule and a dishonest export of a
+   * schedule, and this whole screen exists because the two differ: it moves the
+   * 1 October send to the 8th, and a subscriber reading the rule would be
+   * looking at a date this app has already decided not to use.
+   *
+   * The trade-off, stated in the hint rather than hidden: a rule stays correct
+   * forever, a resolved list only reaches as far as the occurrences do.
+   */
+  const [resolvedIcs, setResolvedIcs] = useState(true)
+
   const exportScheduleIcs = () => {
     if (state.jobs.length === 0) {
       toast.push({ tone: 'info', title: t('schedule.empty') })
       return
     }
-    const { events, expanded } = jobsToEvents(state.jobs)
+    const { events, expanded } = jobsToEvents(state.jobs, {
+      resolved: resolvedIcs ? { calendar } : undefined,
+    })
     void downloadIcs(buildIcs(events, { name: t('schedule.title') }), `aevistle-reminders-${todayIso}.ics`)
     if (expanded.length > 0) {
       toast.push({
@@ -513,7 +806,21 @@ export function WorkCalendarView() {
 
   const refreshStatutory = async (year: number) => {
     setFetching(year)
-    const outcome = await fetchStatutoryYear(year)
+    /**
+     * Through the bridge, because this document is not allowed to open a
+     * socket. `index.html` ships `connect-src 'self'`; the direct `fetch` that
+     * used to be here was refused by the page's own policy long before it
+     * reached the network, and every year — 2025, 2026, 2027 alike — came back
+     * as `Failed to fetch`, which reads exactly like a network fault and is
+     * not one. See `core/feeds.ts`.
+     *
+     * The browser preview has no trusted side to route through, so there it
+     * still calls the global and still fails. That is honest: it is the one
+     * build where the feature genuinely cannot work.
+     */
+    const outcome = await fetchStatutoryYear(year, {
+      fetchImpl: bridge?.fetchFeed ? feedFetchVia(bridge.fetchFeed) : undefined,
+    })
     setFetching(null)
     if (outcome.error || !outcome.year) {
       toast.push({
@@ -667,6 +974,19 @@ export function WorkCalendarView() {
                     setScope('day')
                   }}
                   onMoveJob={(jobId, from, to) => void moveJob(jobId, from, to)}
+                  /* The square lists what it holds; the drag that was already
+                     here still moves it, and a click now opens it. */
+                  showSends
+                  formatTime={formatTime}
+                  noRecipientLabel={t('cal.day.noRecipient')}
+                  noSubjectLabel={t('cal.day.noSubject')}
+                  moreLabel={(n) => t('cal.more', { n })}
+                  onOpenSend={(jobId, iso) => {
+                    setFocusedDate(iso)
+                    setSheetJobId(jobId)
+                  }}
+                  onCreateDay={onCompose ? createOnDay : undefined}
+                  createHint={onCompose ? t('cal.create.hint') : undefined}
                   rtl={dir === 'rtl'}
                   label={t('cal.gridLabel')}
                   badgeLabel={(iso, mark) => t('cal.badge', { n: mark.count, date: iso })}
@@ -706,6 +1026,9 @@ export function WorkCalendarView() {
                   onToggleDay={toggleDay}
                   onMove={(jobId, from, to) => void moveJob(jobId, from, to)}
                   onOpenJob={setSheetJobId}
+                  onCreate={onCompose ? createOnDay : undefined}
+                  onDeStagger={(conflict) => void deStagger(conflict)}
+                  staggerWindowMinutes={STAGGER_WINDOW_MIN}
                 />
               ) : null}
 
@@ -738,6 +1061,23 @@ export function WorkCalendarView() {
                   <span><i className="swatch swatch--mark" /> {t('workcal.legendReminders')}</span>
                   <span><i className="swatch swatch--shifted" /> {t('workcal.legendShifted')}</span>
                   <span><i className="swatch swatch--conflict" /> {t('cal.legendConflict')}</span>
+                  {/*
+                    The heatmap's own key. A scale nobody can read is decoration:
+                    without this, five shades of the accent say only "some of
+                    these are darker", and the reader has no way to learn that
+                    the darkest one means eight sends or more.
+                  */}
+                  <span className="monthgrid__legendscale">
+                    {t('cal.legendLoad')}
+                    <i className="swatch swatch--load" data-load="1" />
+                    <i className="swatch swatch--load" data-load="2" />
+                    <i className="swatch swatch--load" data-load="3" />
+                    <i className="swatch swatch--load" data-load="4" />
+                    <i className="swatch swatch--load" data-load="5" />
+                    <span className="monthgrid__legendmax">
+                      {t('cal.legendLoadMax', { n: LOAD_STEPS[LOAD_STEPS.length - 1] })}
+                    </span>
+                  </span>
                 </div>
               ) : null}
             </div>
@@ -784,6 +1124,16 @@ export function WorkCalendarView() {
                       <span className="conflict__when">
                         {conflict.at !== undefined ? formatDateTime(conflict.at) : conflict.date}
                       </span>
+                      {/* The one kind with a fix, offered where the problem is
+                          named. The other four end in "this will not send" and
+                          "there is nowhere to move it to", which no button can
+                          answer — a disabled control beside each of them would
+                          only look like the app was withholding something. */}
+                      {conflict.kind === 'sameMinute' ? (
+                        <Button variant="secondary" onClick={() => void deStagger(conflict)}>
+                          {t('cal.stagger.action', { min: STAGGER_WINDOW_MIN })}
+                        </Button>
+                      ) : null}
                     </li>
                   ))}
                 </ul>
@@ -917,7 +1267,22 @@ export function WorkCalendarView() {
                   }}
                 />
               </div>
+              <Switch
+                checked={resolvedIcs}
+                onChange={setResolvedIcs}
+                title={t('cal.ics.resolved')}
+                description={t('cal.ics.resolvedHint')}
+              />
               <div className="field__hint">{t('cal.ics.importHint')}</div>
+              {/*
+                Said here rather than discovered later. "Subscribe" in the sense
+                Google Calendar means it needs a public URL to poll, and this
+                application deliberately has no server and no address to give
+                one. A file that Outlook, Thunderbird and Apple Calendar can
+                subscribe to is the honest maximum, and claiming more would be
+                the kind of quiet half-truth this app is built to avoid.
+              */}
+              <div className="field__hint">{t('cal.ics.subscribeLimit')}</div>
             </div>
           </Card>
 

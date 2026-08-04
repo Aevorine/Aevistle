@@ -183,13 +183,23 @@ export async function fetchLatest(
   timeoutMs = 10_000,
   /** See `pickAsset`. Only the shell knows how this copy was installed. */
   portable = false,
+  /**
+   * How to make the request.
+   *
+   * Defaults to the global, which is right in the desktop main process and
+   * wrong everywhere a renderer runs: `connect-src 'self'` refuses it, and the
+   * refusal arrives as a bare `TypeError: Failed to fetch`. Android passes a
+   * bridge-backed implementation — see `core/feeds.ts`. That this parameter
+   * did not exist is why the Android update check never worked.
+   */
+  fetchImpl: typeof fetch = fetch,
 ): Promise<UpdateInfo> {
   const now = Date.now()
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
 
   try {
-    const response = await fetch(RELEASES_API, {
+    const response = await fetchImpl(RELEASES_API, {
       headers: {
         Accept: 'application/vnd.github+json',
         'X-GitHub-Api-Version': '2022-11-28',

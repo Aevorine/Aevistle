@@ -8,6 +8,7 @@
  */
 
 import type { ControlEndpoint, ControlRequest, ControlResponse } from './control'
+import type { FeedResponse } from './feeds'
 import type {
   AppState,
   Attachment,
@@ -132,6 +133,21 @@ export interface InboxMessageBody {
    * never open a socket of its own no matter what policy is in force.
    */
   remoteImages?: string[]
+  /**
+   * `text/calendar` parts of the message, verbatim, when it had any.
+   *
+   * A meeting invitation states its time in a `DTSTART` the sending calendar
+   * wrote on purpose; `core/dateExtract.ts` reads that in preference to the
+   * prose next to it, which is a guess by comparison.
+   *
+   * **Desktop only today.** The Android inbox parses bodies natively and does
+   * not lift these out yet, so a phone falls back to the prose reader — which
+   * works, and says `medium`/`low` where the desktop would say `high`. Written
+   * down rather than left to be discovered: an optional field that is simply
+   * always absent on one platform is the shape a silently-degraded feature
+   * takes.
+   */
+  icsParts?: string[]
 }
 
 /** New mail arrived while the app was open — the inbox analogue of `JobEvent`. */
@@ -357,6 +373,13 @@ export interface PlatformBridge {
    * IP and confirm the message was opened).
    */
   fetchRemoteImage?(url: string): Promise<string>
+  /**
+   * Read one of the two public feeds named in `feeds.ts` through the trusted
+   * side, because the renderer's `connect-src 'self'` forbids it from doing so
+   * itself. Absent on the browser preview, which has no trusted side; the two
+   * callers fall back to a direct `fetch` there and say so when it is refused.
+   */
+  fetchFeed?(url: string): Promise<FeedResponse>
   /**
    * Drop the on-disk remote-image cache. Optional because only the desktop
    * build has one — Android fetches through the plugin without caching.

@@ -168,12 +168,38 @@ export function VirtualList<T>({
     const scroller = scrollerRef.current
     if (!scroller) return
     const run = () => recomputeRef.current()
+
+    /*
+     * Scrolling is coalesced to one recompute per frame.
+     *
+     * A trackpad or a smooth-scrolling wheel delivers scroll events faster than
+     * the compositor paints, and each one used to run the binary search and
+     * possibly `setRange` synchronously. The search itself is cheap; what is
+     * not cheap is the render and the measuring layout effect a range change
+     * pulls behind it, and doing that twice inside one frame is work nobody can
+     * see. `requestAnimationFrame` also lands the recompute at the moment the
+     * new range is about to be painted rather than partway through the frame.
+     */
+    let frame = 0
+    const onScroll = () => {
+      // Already scheduled: the later event would compute the same range from
+      // the same `scrollTop` read at the same moment.
+      if (frame) return
+      frame = requestAnimationFrame(() => {
+        frame = 0
+        recomputeRef.current()
+      })
+    }
+
     run()
-    scroller.addEventListener('scroll', run, { passive: true })
+    scroller.addEventListener('scroll', onScroll, { passive: true })
     const observer = new ResizeObserver(run)
     observer.observe(scroller)
     return () => {
-      scroller.removeEventListener('scroll', run)
+      // Unmounting with a frame in flight would run `recompute` against a
+      // detached scroller — harmless today, but only by accident.
+      if (frame) cancelAnimationFrame(frame)
+      scroller.removeEventListener('scroll', onScroll)
       observer.disconnect()
     }
   }, [windowed])

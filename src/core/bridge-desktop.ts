@@ -54,6 +54,7 @@ export function createDesktopBridge(): PlatformBridge {
     purgeInboxMessages: (config, items) =>
       api.purgeInboxMessages(config.accountId, config, items),
     fetchRemoteImage: (url) => api.fetchRemoteImage(url),
+    fetchFeed: (url) => api.fetchFeed(url),
     onInboxEvent: (handler) => api.onInboxEvent(handler),
 
     dataFolder: () => api.dataFolder(),

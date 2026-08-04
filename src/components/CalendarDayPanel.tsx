@@ -19,7 +19,7 @@
 
 import { useState } from 'react'
 import { Button, IconButton, Modal, StatusChip } from './ui'
-import { IconCalendar, IconClock, IconExternal, IconPause, IconPlay } from './icons'
+import { IconAlert, IconCalendar, IconClock, IconExternal, IconPause, IconPlay, IconPlus } from './icons'
 import { DRAG_TYPE, dragPayload } from './MonthGrid'
 import { useI18n, type TranslationKey } from '../i18n'
 import { summarizeRecurrence } from '../core/schedule'
@@ -47,6 +47,9 @@ export function CalendarDayPanel({
   onToggleDay,
   onMove,
   onOpenJob,
+  onCreate,
+  onDeStagger,
+  staggerWindowMinutes,
 }: {
   iso: string
   entries: DayEntry[]
@@ -57,6 +60,12 @@ export function CalendarDayPanel({
   /** Ask to move a reminder from this day to another. */
   onMove: (jobId: string, fromIso: string, toIso: string) => void
   onOpenJob: (jobId: string) => void
+  /** Start a new reminder for this day. */
+  onCreate?: (iso: string) => void
+  /** Spread a pile-up on one minute across a window. See `spreadSameMinute`. */
+  onDeStagger?: (conflict: Conflict) => void
+  /** How wide that window is, for the button's own sentence. */
+  staggerWindowMinutes?: number
 }) {
   const { t, formatDateTime } = useI18n()
   const [movingId, setMovingId] = useState<string | null>(null)
@@ -67,6 +76,17 @@ export function CalendarDayPanel({
     : conflicts.length > 0
       ? 'warning'
       : null
+
+  /*
+   * The pile-ups on this day, and the one action that can undo them.
+   *
+   * `sameMinute` is the only conflict kind with a fix that does not require a
+   * decision from the user about what they meant — the other four are "this
+   * will not send" and "there is nowhere to move it to", which no button can
+   * answer. Offering a fix beside the three that have none would be worse than
+   * offering none at all.
+   */
+  const pileUps = onDeStagger ? conflicts.filter((c) => c.kind === 'sameMinute') : []
 
   return (
     <div className="dayview">
@@ -89,10 +109,38 @@ export function CalendarDayPanel({
             />
           ) : null}
         </div>
-        <Button variant="secondary" onClick={() => onToggleDay(iso)}>
-          {working ? t('cal.day.markOff') : t('cal.day.markWorking')}
-        </Button>
+        <div className="btn-row dayview__actions">
+          {onCreate ? (
+            <Button variant="primary" icon={<IconPlus size={15} />} onClick={() => onCreate(iso)}>
+              {t('cal.day.create')}
+            </Button>
+          ) : null}
+          <Button variant="secondary" onClick={() => onToggleDay(iso)}>
+            {working ? t('cal.day.markOff') : t('cal.day.markWorking')}
+          </Button>
+        </div>
       </div>
+
+      {pileUps.length > 0 ? (
+        <div className="banner banner--warning dayview__pileup">
+          <IconAlert size={16} />
+          <div className="banner__body">
+            {pileUps.map((conflict, i) => (
+              <div key={i} className="dayview__pileuprow">
+                <span>
+                  {t('cal.conflict.sameMinute', {
+                    n: conflict.count,
+                    when: conflict.at !== undefined ? formatDateTime(conflict.at) : iso,
+                  })}
+                </span>
+                <Button variant="secondary" onClick={() => onDeStagger?.(conflict)}>
+                  {t('cal.stagger.action', { min: staggerWindowMinutes ?? 5 })}
+                </Button>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       {entries.length === 0 ? (
         <p className="dayview__empty">{t('cal.day.none')}</p>
@@ -122,6 +170,22 @@ export function CalendarDayPanel({
                   <button type="button" className="dayrow__name link" onClick={() => onOpenJob(entry.job.id)}>
                     {entry.job.name}
                   </button>
+                  {/*
+                    Who it goes to and what it says — the two things the square
+                    upstairs can only show a truncated version of, at full
+                    length, which is what this panel is for. `.mono`-style
+                    wrapping on the subject because a subject can be one
+                    unbroken token (a reference number, a URL) and ordinary
+                    wrapping only breaks at spaces.
+                  */}
+                  <span className="dayrow__who">
+                    {entry.job.draft.to.length > 0
+                      ? entry.job.draft.to.join(', ')
+                      : t('cal.day.noRecipient')}
+                  </span>
+                  <span className="dayrow__subject">
+                    {entry.job.draft.subject || t('cal.day.noSubject')}
+                  </span>
                   <span className="dayrow__meta">
                     {t(summary.key as 'recur.summary.once', summary.values)}
                     {entry.shifted && entry.originalIso ? (

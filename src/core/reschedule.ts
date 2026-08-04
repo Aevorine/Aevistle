@@ -170,6 +170,85 @@ export function planReschedule(job: ScheduledJob, from: IsoDate, to: IsoDate): R
   }
 }
 
+// ---------------------------------------------------------------------------
+// Moving the *time* rather than the day
+// ---------------------------------------------------------------------------
+
+/**
+ * What shifting this reminder's clock time by a few minutes would do.
+ *
+ * The other half of the same honesty problem `planReschedule` exists for. A
+ * de-stagger looks like it moves *one* colliding send off 09:00, and it cannot:
+ * there is still no exception list, so the only thing that can be written back
+ * is the rule's own time of day, and every future send follows it. That is
+ * usually what the user wants — "these three all say nine, make them not" — but
+ * it must be said out loud before it happens, not discovered next month.
+ *
+ * Refusals are the valuable part, as ever:
+ *
+ *   - **cron** has its minute inside a string this module does not own. Editing
+ *     it here would mean re-emitting an expression somebody hand-wrote.
+ *   - **a shift across midnight** would move the send to another *day*, which
+ *     is a different operation with different consequences (a working-day
+ *     policy, an end date, a weekday rule) and is not what a nudge of a few
+ *     minutes is allowed to mean.
+ */
+export interface RestaggerPlan {
+  /** Translation key describing the change, or explaining the refusal. */
+  reasonKey: string
+  reasonValues?: Record<string, string | number>
+  /** Minutes, signed — what the sentence quotes. */
+  byMinutes: number
+  /** The rule to save. Absent when this cannot be done. */
+  recurrence?: Recurrence
+}
+
+/** `HH:mm` → minutes since local midnight, or null if it is not that shape. */
+function minutesOfDay(timeOfDay: string): number | null {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(timeOfDay.trim())
+  if (!m) return null
+  const hours = Number(m[1])
+  const minutes = Number(m[2])
+  if (hours > 23 || minutes > 59) return null
+  return hours * 60 + minutes
+}
+
+export function planRestagger(job: ScheduledJob, byMs: number): RestaggerPlan {
+  const rec = job.recurrence
+  const byMinutes = Math.round(byMs / 60_000)
+
+  if (byMinutes === 0) {
+    return { reasonKey: 'cal.stagger.noChange', byMinutes }
+  }
+  if (rec.kind === 'cron') {
+    return { reasonKey: 'cal.stagger.cron', byMinutes }
+  }
+
+  const startAt = rec.startAt + byMinutes * 60_000
+
+  // `once` and `interval` are driven by `startAt`; the calendar kinds are
+  // driven by `timeOfDay`. Both are moved, always, so the two can never
+  // disagree about what time this reminder goes out — a rule whose `startAt`
+  // says 09:00 and whose `timeOfDay` says 09:03 fires at one of them and
+  // displays the other.
+  const base = minutesOfDay(rec.timeOfDay)
+  if (base === null) {
+    return { reasonKey: 'cal.stagger.badTime', byMinutes }
+  }
+  const shifted = base + byMinutes
+  if (shifted < 0 || shifted > 23 * 60 + 59) {
+    return { reasonKey: 'cal.stagger.crossesMidnight', byMinutes }
+  }
+  const timeOfDay = `${pad2(Math.floor(shifted / 60))}:${pad2(shifted % 60)}`
+
+  return {
+    reasonKey: byMinutes > 0 ? 'cal.stagger.later' : 'cal.stagger.earlier',
+    reasonValues: { n: Math.abs(byMinutes), time: timeOfDay },
+    byMinutes,
+    recurrence: { ...rec, startAt, timeOfDay },
+  }
+}
+
 /**
  * The one-line answer to "can just this send be moved?".
  *

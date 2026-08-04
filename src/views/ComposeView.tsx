@@ -27,11 +27,24 @@ import {
   isViewableImage,
   useAttachmentImages,
 } from '../components/ImageLightbox'
+import {
+  previewFor,
+  wallTimeIn,
+  windowsForRecipients,
+  worthShowing,
+} from '../components/deliveryPreview'
 import { CHAIN_STAGES, buildChain, leadLabelKey } from '../core/chain'
 import { summarizeRecurrence } from '../core/schedule'
 import { upcoming } from '../core/upcoming'
 import { HealthBoard } from '../components/HealthBoard'
-import { RecurrenceEditor, fromLocalInput, toLocalInput } from '../components/RecurrenceEditor'
+import {
+  RecurrenceEditor,
+  fromLocalInput,
+  hhmm,
+  nextWholeHour,
+  quickTimes,
+  toLocalInput,
+} from '../components/RecurrenceEditor'
 import { ConditionEditor } from '../components/ConditionEditor'
 import { DraftHistory } from '../components/DraftHistory'
 import { OutboxStrip } from '../components/OutboxStrip'
@@ -97,6 +110,26 @@ function errorTitleKey(result: SendResult): TranslationKey {
 
 const BODY_HEIGHT_KEY = 'aevistle.compose.bodyHeight'
 
+/**
+ * A new reminder starts at the next whole hour, and the box says so.
+ *
+ * `defaultRecurrence()` seeds five minutes out, and the compose bar used to
+ * blank the field rather than show that — a `datetime-local` with no value,
+ * rendered by Chromium as `年/月/日 --:--`, sitting under a label reading
+ * "send time" and beside a sentence reading "no send time chosen yet". Three
+ * separate pieces of the screen saying the same nothing, while the state
+ * behind them held a perfectly good time all along.
+ *
+ * Blanking it was defensible on its own terms: showing `14:37` next to "not
+ * chosen yet" would have been the box contradicting the sentence. The mistake
+ * was treating that as a reason to hide the value instead of a reason to seed
+ * a value worth showing.
+ */
+function seedRecurrence(now = Date.now()): Recurrence {
+  const at = nextWholeHour(now)
+  return { ...defaultRecurrence(now), startAt: at, timeOfDay: hhmm(at) }
+}
+
 export function ComposeView({
   onGoToAccounts,
   onNavigate,
@@ -106,7 +139,7 @@ export function ComposeView({
   onNavigate?: (where: 'schedule' | 'settings' | 'compose' | 'logs') => void
 }) {
   const { state, dispatch, sendDraftNow, scheduleDraft, snapshotDraft, bridge } = useApp()
-  const { t, formatBytes } = useI18n()
+  const { t, formatBytes, formatDateTime } = useI18n()
   const toast = useToast()
   const { confirm, confirmElement } = useConfirm()
 
@@ -121,18 +154,23 @@ export function ComposeView({
   const [outcome, setOutcome] = useState<SendResult | null>(null)
   const [scheduleOpen, setScheduleOpen] = useState(false)
   /**
-   * Whether the send time on screen is one the user chose.
+   * Whether the schedule on screen is one the user has touched.
    *
-   * `recurrence` always holds a valid value (five minutes from now), so it
-   * cannot answer this by itself — and a screen that says "sends at 14:32"
-   * about a time nobody picked is worse than one that says nothing. Cleared
-   * with the draft, so the next reminder does not inherit the last one's time.
+   * No longer decides whether the send time is *shown* — it is seeded to the
+   * next whole hour and shown from the first render, because a blank box under
+   * a "send time" label was read as a missing feature rather than as a
+   * question. What it still decides is the 30-day forecast and the retry
+   * summary, neither of which is worth putting on screen about a rule nobody
+   * has looked at. Cleared with the draft, so the next reminder does not
+   * inherit the last one's time.
    */
   const [scheduleSet, setScheduleSet] = useState(false)
   const [jobName, setJobName] = useState('')
   /** Lead times ticked in the chain picker. `[0]` is "just the event itself". */
   const [leadTimes, setLeadTimes] = useState<number[]>([0])
-  const [recurrence, setRecurrence] = useState<Recurrence>(() => defaultRecurrence())
+  const [recurrence, setRecurrence] = useState<Recurrence>(() => seedRecurrence())
+  /** The quick-pick popover. Anchored, so opening it costs the message box no height. */
+  const [quickOpen, setQuickOpen] = useState(false)
   const [retry, setRetry] = useState<RetryPolicy>(DEFAULT_RETRY)
   const [burst, setBurst] = useState<BurstPolicy>(DEFAULT_BURST)
 
@@ -140,6 +178,7 @@ export function ComposeView({
   const subjectId = useFieldId('subject')
   const bodyId = useFieldId('body')
   const moreId = useFieldId('more')
+  const whenId = useFieldId('when')
 
   /**
    * The body box remembers how tall it was dragged.
@@ -608,7 +647,7 @@ export function ComposeView({
     // it unconditionally — which is what this did when the dialog was the only
     // place a time could be chosen — would now silently throw away the value
     // showing in the bar they just clicked.
-    if (!scheduleSet) setRecurrence(defaultRecurrence())
+    if (!scheduleSet) setRecurrence(seedRecurrence())
     setRetry(DEFAULT_RETRY)
     setBurst(DEFAULT_BURST)
     // Every dialog starts as a single reminder. Remembering the last chain
@@ -623,12 +662,103 @@ export function ComposeView({
   /** Reset the send time along with the draft it belonged to. */
   const clearSchedule = () => {
     setScheduleSet(false)
-    setRecurrence(defaultRecurrence())
+    setRecurrence(seedRecurrence())
     setLeadTimes([0])
     setConditions([])
   }
 
   const scheduleSummary = useMemo(() => summarizeRecurrence(recurrence), [recurrence])
+
+  /**
+   * B3 · 送达窗口 — the time in the box is not always the time it goes out.
+   *
+   * If someone in `To:` carries a delivery window, the scheduler will move this
+   * send into their working day (`shapeOccurrences` → `applyDeliveryWindows`).
+   * Without something here, the compose screen would state a send time the
+   * application has already decided not to use — the same silent contradiction
+   * the whole `whenbar` was added to end.
+   *
+   * `recurrence.startAt` is the instant asked about because it is the instant
+   * this bar edits: the four `timeOfDay` rules keep it in step on every change
+   * (see the field below), so it is always the clock time on screen.
+   *
+   * `windowsForRecipients` is `To:` only, deliberately mirroring
+   * `windowsForDraft` in `AppState`. Two different answers here and there would
+   * mean a promise the scheduler does not keep.
+   */
+  const delivery = useMemo(() => {
+    const entries = windowsForRecipients(draft.to, state.contacts)
+    if (entries.length === 0) return null
+    const preview = previewFor(recurrence.startAt, entries)
+    return worthShowing(preview) ? preview : null
+  }, [draft.to, state.contacts, recurrence.startAt])
+
+  /**
+   * The whole per-recipient story, as a tooltip rather than as markup.
+   *
+   * Every pixel below the message box is taken off the message box — six
+   * complaints, with measurements (PROJECT-BRIEF §6). So the marker itself is
+   * one short phrase folded into the sentence that is already in
+   * `.whenbar__text`, and the detail lives in `title`, which costs the layout
+   * nothing at all.
+   */
+  const deliveryDetail = useMemo(() => {
+    if (!delivery) return undefined
+    const lines = delivery.entries.map((entry, index) => {
+      const landing = delivery.result.perRecipient[index]
+      const outcome =
+        landing === undefined
+          ? ''
+          : landing.outcome === 'ignored'
+            ? t('deliver.rowIgnored')
+            : landing.outcome === 'impossible'
+              ? t('deliver.rowImpossible')
+              : landing.at === delivery.at
+                ? t('deliver.rowInside')
+                : t('deliver.rowMoved', { when: formatDateTime(landing.at) })
+      return t('deliver.composeRow', {
+        name: entry.name,
+        zone: landing?.timeZone ?? entry.window.timeZone,
+        theirTime: landing ? (wallTimeIn(delivery.at, landing.timeZone) ?? '—') : '—',
+        outcome,
+      })
+    })
+    if (delivery.splitRequired) lines.push(t('deliver.composeSplit'))
+    lines.push(t('deliver.composeHint'))
+    return [t('deliver.composeTitle'), ...lines].join('\n')
+  }, [delivery, t, formatDateTime])
+
+  /**
+   * Rules whose fire time is `timeOfDay`, not `startAt`.
+   *
+   * `nextFireAfter` reads `timeOfDay` for all four of these and treats
+   * `startAt` only as a floor — so the bar has to edit the field that decides,
+   * or it edits nothing while looking like it edited something.
+   */
+  const firesAtTimeOfDay =
+    recurrence.kind === 'daily' ||
+    recurrence.kind === 'weekly' ||
+    recurrence.kind === 'monthly' ||
+    recurrence.kind === 'yearly'
+
+  /** Anchored popovers close on Escape and on a click that lands elsewhere. */
+  useEffect(() => {
+    if (!quickOpen) return
+    const close = (e: Event) => {
+      if (e instanceof KeyboardEvent && e.key !== 'Escape') return
+      if (e.type === 'pointerdown') {
+        const target = e.target as HTMLElement | null
+        if (target?.closest('.whenbar__quick')) return
+      }
+      setQuickOpen(false)
+    }
+    document.addEventListener('keydown', close)
+    document.addEventListener('pointerdown', close)
+    return () => {
+      document.removeEventListener('keydown', close)
+      document.removeEventListener('pointerdown', close)
+    }
+  }, [quickOpen])
 
   const scheduleHasErrors = hasErrors([...validateRecurrence(recurrence), ...validateBurst(burst)])
 
@@ -1055,42 +1185,153 @@ export function ComposeView({
                   interaction for the common case (a one-off reminder). Repeats,
                   retries, chains and conditions stay in the dialog, one click
                   away, because those are the rare ones.
+
+                  The control shown depends on which rule is live, because a
+                  `datetime-local` is only the right control for two of the
+                  seven. `daily`/`weekly`/`monthly`/`yearly` fire at
+                  `timeOfDay` and treat `startAt` as a floor (see
+                  `nextFireAfter` in schedule.ts), so a date-and-time box there
+                  edited a field that does not decide anything: you could
+                  change "every weekday at 09:00" to read 14:30 in this bar and
+                  the reminder would still go out at 09:00, with nothing on
+                  screen admitting it. Those rules get a `time` box bound to
+                  the field that actually fires. `cron` gets no editor at all —
+                  the expression is the rule, and it belongs in the dialog.
                 */}
-                <Field label={t('compose.sendsAt')}>
+                <Field label={t('compose.sendsAt')} htmlFor={whenId}>
                   <div className="whenbar">
-                    <input
-                      className="input whenbar__time"
-                      type="datetime-local"
-                      /* Empty until a time is actually chosen. `recurrence`
-                         always holds one (five minutes out), and showing that
-                         beside the words "no send time chosen yet" would be the
-                         box contradicting the sentence next to it. */
-                      value={scheduleSet ? toLocalInput(recurrence.startAt) : ''}
-                      onChange={(e) => {
-                        setRecurrence((r) => ({
-                          ...r,
-                          startAt: fromLocalInput(e.target.value, r.startAt),
-                        }))
-                        setScheduleSet(true)
-                      }}
-                    />
+                    {recurrence.kind === 'cron' ? (
+                      <output
+                        id={whenId}
+                        className="input whenbar__time whenbar__cron mono"
+                        title={recurrence.cron || undefined}
+                      >
+                        {recurrence.cron || '—'}
+                      </output>
+                    ) : firesAtTimeOfDay ? (
+                      <input
+                        id={whenId}
+                        className="input whenbar__time"
+                        type="time"
+                        value={recurrence.timeOfDay}
+                        onChange={(e) => {
+                          const value = e.target.value
+                          if (!value) return
+                          setRecurrence((r) => ({
+                            ...r,
+                            timeOfDay: value,
+                            // Keep the anchor on the same clock time. `startAt`
+                            // is a floor for these rules, and leaving it on the
+                            // old minute makes the dialog and this bar disagree
+                            // about a value they share.
+                            startAt: fromLocalInput(
+                              `${toLocalInput(r.startAt).slice(0, 10)}T${value}`,
+                              r.startAt,
+                            ),
+                          }))
+                          setScheduleSet(true)
+                        }}
+                      />
+                    ) : (
+                      <input
+                        id={whenId}
+                        className="input whenbar__time"
+                        type="datetime-local"
+                        /* Seeded, not blank. See `seedRecurrence`. */
+                        value={toLocalInput(recurrence.startAt)}
+                        onChange={(e) => {
+                          setRecurrence((r) => {
+                            const at = fromLocalInput(e.target.value, r.startAt)
+                            return { ...r, startAt: at, timeOfDay: hhmm(at) }
+                          })
+                          setScheduleSet(true)
+                        }}
+                      />
+                    )}
+
+                    {/*
+                      The four times people actually pick, without charging the
+                      message box a row for them.
+
+                      A visible chip row here would be ~40px, and every pixel
+                      spent below the body is taken straight off the body — the
+                      one complaint this screen has collected more than any
+                      other. So they hang in a popover anchored to the field:
+                      open costs nothing above the fold, closed costs nothing
+                      at all.
+                    */}
+                    {recurrence.kind === 'cron' ? null : (
+                      <div className="whenbar__quick">
+                        <button
+                          type="button"
+                          className="btn btn--ghost btn--icon whenbar__quickbtn"
+                          aria-label={t('schedule.quickTimes')}
+                          title={t('schedule.quickTimes')}
+                          aria-expanded={quickOpen}
+                          onClick={() => setQuickOpen((v) => !v)}
+                        >
+                          <IconClock size={16} />
+                        </button>
+                        {quickOpen ? (
+                          <div
+                            className="popover whenbar__picks"
+                            role="group"
+                            aria-label={t('schedule.quickTimes')}
+                          >
+                            {quickTimes(Date.now()).map((o) => (
+                              <button
+                                key={o.key}
+                                type="button"
+                                className="chip chip--toggle"
+                                aria-pressed={Math.abs(recurrence.startAt - o.at) < 60_000}
+                                onClick={() => {
+                                  setRecurrence((r) => ({
+                                    ...r,
+                                    startAt: o.at,
+                                    timeOfDay: hhmm(o.at),
+                                  }))
+                                  setScheduleSet(true)
+                                  setQuickOpen(false)
+                                }}
+                              >
+                                {t(o.key as TranslationKey)}
+                              </button>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                    )}
+
                     <div className="whenbar__text">
-                      {scheduleSet ? (
-                        <>
-                          <span className="whenbar__rule">
-                            {t(scheduleSummary.key as TranslationKey, scheduleSummary.values)}
-                          </span>
-                          {plannedStages.length > 1 ? (
-                            <span className="whenbar__count">
-                              {t('chain.willCreate', { n: plannedStages.length })}
-                            </span>
-                          ) : null}
-                        </>
-                      ) : (
-                        <span className="whenbar__rule whenbar__rule--unset">
-                          {t('schedule.notSetYet')}
+                      <span className="whenbar__rule">
+                        {t(scheduleSummary.key as TranslationKey, scheduleSummary.values)}
+                      </span>
+                      {plannedStages.length > 1 ? (
+                        <span className="whenbar__count">
+                          {t('chain.willCreate', { n: plannedStages.length })}
                         </span>
-                      )}
+                      ) : null}
+                      {/*
+                        B3 · 送达窗口 — folded into this sentence, not given a
+                        row. `.whenbar__text` already wraps and already carries a
+                        second conditional span beside it (`.whenbar__count`);
+                        this is a third inline sibling on the same line, so the
+                        bar's height stays what its 46px controls make it and
+                        the message box loses nothing. The per-recipient detail
+                        is in `title` for the same reason.
+                      */}
+                      {delivery ? (
+                        <span className="whenbar__window" title={deliveryDetail}>
+                          {delivery.impossible
+                            ? t('deliver.composeImpossible')
+                            : delivery.moved
+                              ? t('deliver.composeMoved', {
+                                  when: formatDateTime(delivery.at),
+                                  name: delivery.boundTo?.name ?? delivery.entries[0].name,
+                                })
+                              : t('deliver.composeSplitShort')}
+                        </span>
+                      ) : null}
                     </div>
                     <Button variant="ghost" onClick={openSchedule}>
                       {t('schedule.moreRules')}

@@ -237,7 +237,41 @@ export function calendarWarning(
 }
 
 /**
- * Reserve an instant, nudging later if it is already taken — but not forever.
+ * How the nudge is allowed to move: one direction or both, how far, in what step.
+ *
+ * `allowEarlier` is the whole reason this is a parameter rather than a
+ * constant. Inside one job the nudge may only push *later*: the occurrences
+ * arrive in order and an earlier slot is a time the rule already went past.
+ * Across jobs — see `spreadSameMinute` — the collision is between rules that
+ * each independently chose 09:00, none of them has priority over the others,
+ * and pushing four of them strictly later means the last one is twenty minutes
+ * out. Spreading around the chosen minute keeps everybody closer to the time
+ * they actually asked for.
+ */
+export interface NudgeOptions {
+  /** Smallest move. One minute — `Recurrence.timeOfDay` has no finer unit. */
+  stepMs: number
+  /** How far from `base` a nudge may end up, in either direction. */
+  maxSpreadMs: number
+  /** May a slot before `base` be used? */
+  allowEarlier: boolean
+}
+
+/**
+ * Candidate offsets from the base instant, nearest first.
+ *
+ * `+1, +2, +3…` one-directionally; `+1, −1, +2, −2…` when both are allowed, so
+ * the answer is always the closest free slot to the time the user chose.
+ */
+function* nudgeOffsets({ stepMs, maxSpreadMs, allowEarlier }: NudgeOptions): Generator<number> {
+  for (let k = 1; k * stepMs <= maxSpreadMs; k++) {
+    yield k * stepMs
+    if (allowEarlier) yield -k * stepMs
+  }
+}
+
+/**
+ * Reserve an instant, nudging off it if it is already taken — but not forever.
  *
  * Collapsing is intentional: three reminders that all fall inside the same
  * public holiday and all shift to the following Monday would otherwise arrive
@@ -250,20 +284,47 @@ export function calendarWarning(
  * At the cap the occurrence keeps its instant rather than being dropped. A
  * duplicate timestamp is a visible annoyance; a missing send is the failure
  * this application exists to prevent.
+ *
+ * The day boundary is never crossed in either direction. A send nudged past
+ * midnight is on a day the calendar was not asked about, which is how a
+ * "working days only" policy quietly delivers on a Saturday.
  */
-function place(base: number, seen: Set<number>, adj: CalendarAdjustment): number {
+export function placeWithin(
+  base: number,
+  seen: Set<number>,
+  adj: CalendarAdjustment,
+  options: NudgeOptions,
+): number {
   const day = toIsoDate(base)
   let t = base
-  while (seen.has(t)) {
-    const next = t + NUDGE_MS
-    if (next - base > MAX_COLLAPSE_SPREAD_MS) break
-    if (toIsoDate(next) !== day) break
-    t = next
+  if (seen.has(t)) {
+    for (const offset of nudgeOffsets(options)) {
+      const candidate = base + offset
+      if (toIsoDate(candidate) !== day) {
+        // Walking one way, the day boundary is the end of the road. Walking
+        // both ways, it only rules out this side — the other one may still
+        // have room, and giving up there would leave a collision unresolved
+        // for every send scheduled near midnight.
+        if (!options.allowEarlier) break
+        continue
+      }
+      t = candidate
+      if (!seen.has(t)) break
+    }
   }
   if (t !== base) adj.spread.push({ at: base, byMs: t - base })
   if (seen.has(t)) adj.crowded.push(t)
   else seen.add(t)
   return t
+}
+
+/** The within-one-job nudge: later only, one minute at a time, up to an hour. */
+function place(base: number, seen: Set<number>, adj: CalendarAdjustment): number {
+  return placeWithin(base, seen, adj, {
+    stepMs: NUDGE_MS,
+    maxSpreadMs: MAX_COLLAPSE_SPREAD_MS,
+    allowEarlier: false,
+  })
 }
 
 /**
@@ -315,6 +376,94 @@ export function applyWorkCalendar(
   cal: WorkCalendar,
 ): number[] {
   return applyWorkCalendarDetailed(occurrences, policy, cal).occurrences
+}
+
+// ---------------------------------------------------------------------------
+// De-staggering: the collision the nudge above cannot see
+// ---------------------------------------------------------------------------
+
+/**
+ * The default window a de-stagger may spread a pile-up over, either side of the
+ * minute everybody picked.
+ *
+ * Five minutes, not an hour. `MAX_COLLAPSE_SPREAD_MS` is generous because it is
+ * cleaning up after the *calendar* — a public holiday can shift a whole week of
+ * sends onto one morning and something has to give. A de-stagger is a
+ * deliberate action on a handful of reminders that genuinely all say 09:00, and
+ * a reminder that arrives at 09:47 because two others also wanted nine is not
+ * the reminder anybody set.
+ */
+export const STAGGER_WINDOW_MS = 5 * NUDGE_MS
+export const STAGGER_STEP_MS = NUDGE_MS
+
+/** One send in a pile-up, named by the reminder it belongs to. */
+export interface StaggerSend {
+  jobId: string
+  at: number
+}
+
+export interface StaggerMove {
+  jobId: string
+  from: number
+  to: number
+}
+
+export interface StaggerPlan {
+  /** Sends that were given a different instant, in the order they were placed. */
+  moves: StaggerMove[]
+  /** Sends there was no free slot for. They keep the shared instant. */
+  crowded: StaggerSend[]
+  windowMs: number
+  stepMs: number
+}
+
+/**
+ * Spread a pile-up **across jobs**, which nothing in this file did before.
+ *
+ * `applyWorkCalendarDetailed` de-duplicates the occurrences of *one* reminder
+ * and cannot do more: it is called once per job, with a `seen` set that lives
+ * and dies inside that call. So four different reminders that each say 09:00,
+ * or four that a holiday each shifted onto the same Monday morning, arrive as
+ * four messages in the same instant — the `sameMinute` conflict
+ * `core/conflicts.ts` reports and nothing has ever been able to fix.
+ *
+ * This is the same nudge, given a `seen` set that spans jobs and permission to
+ * move both ways. It plans only; the caller writes the result back, because
+ * changing when a *rule* fires is an edit to somebody's reminder and belongs
+ * behind a confirmation and an undo.
+ *
+ * The first send in each minute keeps its instant. Somebody has to, and the
+ * alternative — moving all of them — means a de-stagger nobody asked for
+ * changes every reminder involved.
+ */
+export function spreadSameMinute(
+  sends: StaggerSend[],
+  opts: { windowMs?: number; stepMs?: number; taken?: Iterable<number> } = {},
+): StaggerPlan {
+  const windowMs = opts.windowMs ?? STAGGER_WINDOW_MS
+  const stepMs = opts.stepMs ?? STAGGER_STEP_MS
+  const seen = new Set<number>(opts.taken ?? [])
+  const adjustment = emptyAdjustment()
+  const moves: StaggerMove[] = []
+  const crowded: StaggerSend[] = []
+
+  // Earliest first, then by job id. Deterministic on purpose: running a
+  // de-stagger twice must produce the same answer, and "whichever order the
+  // job list happened to be in" is not that.
+  const ordered = [...sends].sort((a, b) => a.at - b.at || (a.jobId < b.jobId ? -1 : a.jobId > b.jobId ? 1 : 0))
+
+  for (const send of ordered) {
+    const before = adjustment.crowded.length
+    const to = placeWithin(send.at, seen, adjustment, {
+      stepMs,
+      maxSpreadMs: windowMs,
+      allowEarlier: true,
+    })
+    if (adjustment.crowded.length > before) crowded.push({ jobId: send.jobId, at: to })
+    if (to !== send.at) moves.push({ jobId: send.jobId, from: send.at, to })
+  }
+
+  return { moves, crowded, windowMs, stepMs }
 }
 
 // ---------------------------------------------------------------------------
