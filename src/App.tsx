@@ -19,7 +19,7 @@ import {
   IconUsers,
 } from './components/icons'
 import { CommandPalette, type PaletteTarget } from './components/CommandPalette'
-import { useCodeWatcher } from './state/useCodeWatcher'
+import { CodeCheckProvider } from './state/CodeCheck'
 import { claimStartupUpdateCheck, runUpdateCheck } from './core/update'
 import brandMark from './assets/brand.png'
 import { Skeleton } from './components/Skeleton'
@@ -102,15 +102,6 @@ function Shell() {
   const [view, setView] = useState<ViewId>('compose')
   const [openAccountOnMount, setOpenAccountOnMount] = useState(false)
 
-  /**
-   * Extraction runs here, not on the screen that shows the results.
-   *
-   * A code that lands while you are writing a message has to be waiting on the
-   * Codes screen when you switch to it, and its notification has to fire
-   * whether or not that screen was ever opened. Neither is possible from
-   * inside the view.
-   */
-  useCodeWatcher()
   const [collapsed, setCollapsed] = useState(
     () => localStorage.getItem(COLLAPSE_KEY) === '1',
   )
@@ -499,7 +490,11 @@ export default function App() {
     <AppProvider>
       <I18nBridge>
         <ToastProvider>
-          <Shell />
+          {/* Above the shell, so extraction and the "check now" state outlive
+              every screen switch — see the header comment in `CodeCheck`. */}
+          <CodeCheckProvider>
+            <Shell />
+          </CodeCheckProvider>
         </ToastProvider>
       </I18nBridge>
     </AppProvider>

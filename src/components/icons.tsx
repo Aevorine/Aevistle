@@ -375,3 +375,22 @@ export const IconChevronRight = (p: IconProps) => (
     <path d="M9 5l7 7-7 7" />
   </Svg>
 )
+
+/** A QR code, drawn as its three finder squares plus a scatter of modules. */
+export const IconQr = (p: IconProps) => (
+  <Svg {...p}>
+    <rect x="3" y="3" width="7" height="7" rx="1" />
+    <rect x="14" y="3" width="7" height="7" rx="1" />
+    <rect x="3" y="14" width="7" height="7" rx="1" />
+    <path d="M14 14h3v3h-3zM19 14h2M14 19h3m2 0h2m-2-2v0" />
+  </Svg>
+)
+
+/** Used for the "why this one" disclosure — a question inside a circle. */
+export const IconHelp = (p: IconProps) => (
+  <Svg {...p}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M9.6 9.2a2.5 2.5 0 1 1 3.3 2.4c-.6.2-.9.8-.9 1.4v.4" />
+    <path d="M12 17h.01" />
+  </Svg>
+)

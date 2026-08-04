@@ -3557,32 +3557,43 @@ textarea {
  * aimed at. The nested buttons stop propagation, so "open link" still means
  * open link.
  */
+/* The card is now a column: the press target on top, the "why this one" panel
+   underneath it. The press target keeps every interaction style it had — what
+   moved is only which element carries them, so the panel can be opened without
+   the whole card reading as pressable while it is open. */
 .codecard {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  text-align: start;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  transition:
+    border-color var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease);
+}
+.codecard__body {
   display: flex;
   align-items: center;
   gap: var(--sp-4);
   width: 100%;
   padding: var(--sp-4) var(--sp-5);
-  text-align: start;
-  background: var(--surface-1);
-  border: 1px solid var(--border);
   border-radius: var(--r-lg);
   cursor: pointer;
-  transition:
-    border-color var(--dur-fast) var(--ease),
-    background var(--dur-fast) var(--ease),
-    transform var(--dur-fast) var(--ease);
+  transition: transform var(--dur-fast) var(--ease);
 }
 .codecard:hover {
   border-color: var(--accent);
   background: var(--surface-2);
 }
-.codecard:active {
+.codecard__body:active {
   transform: scale(0.995);
 }
-.codecard:focus-visible {
+.codecard__body:focus-visible {
   outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  outline-offset: -2px;
+  border-radius: var(--r-lg);
 }
 .codecard[data-copied] {
   border-color: var(--success);
@@ -3732,13 +3743,208 @@ textarea {
 }
 
 @media (max-width: 900px) {
-  .codecard {
+  .codecard__body {
     flex-wrap: wrap;
   }
   .codecard__actions {
     width: 100%;
     justify-content: flex-end;
   }
+}
+
+/* --- check-now status, link purpose, and the "why this one" panel --------- */
+
+/**
+ * The result of the last press, in one line.
+ *
+ * Deliberately not a toast. A toast is gone in four seconds, and "no new mail"
+ * is the answer you want to still be able to read while you go and ask the
+ * service to send the code again.
+ */
+.checkbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-4);
+  margin-bottom: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  font-size: var(--text-sm);
+}
+.checkbar[data-tone="success"] {
+  border-color: var(--success);
+  background: var(--success-bg);
+}
+.checkbar[data-tone="error"] {
+  border-color: var(--danger);
+  background: var(--danger-bg);
+}
+.checkbar__icon {
+  flex: none;
+  display: flex;
+  color: var(--text-2);
+}
+.checkbar__text {
+  flex: 1;
+  min-width: 0;
+}
+.checkbar__hint {
+  color: var(--text-2);
+}
+/* The server's own words, kept monospace so they read as quoted output rather
+   than as something this app wrote. */
+.checkbar__raw {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-3);
+  word-break: break-word;
+}
+.checkbar__when,
+.checkbar__wait {
+  flex: none;
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+.checkbar__when {
+  color: var(--text-3);
+}
+/* The countdown is the one thing on this line that is still changing, so it
+   takes the accent while the rest stays quiet. */
+.checkbar__wait {
+  color: var(--accent);
+  font-variant-numeric: var(--numeric);
+}
+
+/* What the link does, above where it goes. */
+.codecard__purpose {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.codecard__host {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Tinted from the live accent rather than a second stored colour, so it tracks
+   whichever of the five accents is selected without five more variables. */
+.chip--strong {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  font-weight: 600;
+}
+.chip--timer {
+  background: var(--surface-3);
+  color: var(--text-2);
+  font-variant-numeric: var(--numeric);
+}
+
+/* An expired code is dimmed and struck, never removed: knowing the code you
+   are looking at has run out is the point, and a card that vanished would just
+   look like the mail never arrived. */
+.codecard[data-expired] .codecard__value {
+  color: var(--text-3);
+  text-decoration: line-through;
+  text-decoration-thickness: 2px;
+}
+/* Found by the press you just made, as opposed to already sitting there. */
+.codecard[data-new] {
+  border-color: var(--success);
+}
+
+.codewhy {
+  padding: var(--sp-3) var(--sp-5) var(--sp-4);
+  border-top: 1px dashed var(--border);
+  font-size: var(--text-sm);
+  color: var(--text-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+.codewhy__label {
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-3);
+  margin-bottom: var(--sp-1);
+}
+.codewhy__list {
+  margin: 0;
+  padding-inline-start: 1.2em;
+}
+.codewhy__alts {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+.codewhy__alts li {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.codewhy__alts code {
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--numeric);
+  padding: 2px 6px;
+  border-radius: var(--r-sm);
+  background: var(--surface-3);
+  /* Struck-out candidates read as evidence, not as offers. */
+  color: var(--text-3);
+}
+.codewhy__alts li[data-eligible] code {
+  color: var(--text-1);
+}
+.codewhy__altReason {
+  color: var(--text-3);
+  font-size: var(--text-xs);
+}
+.codewhy__foot {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+.codewhy__note {
+  color: var(--text-3);
+  font-size: var(--text-xs);
+}
+
+.qrbox {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-3);
+}
+/* Fixed white plate in both themes: a camera reading an inverted code is a
+   coin flip, and this is the one surface in the app not being read by a human. */
+.qrbox__code {
+  width: min(64vw, 320px);
+  height: auto;
+  border-radius: var(--r-md);
+  background: #fff;
+}
+.qrbox__hint {
+  margin: 0;
+  color: var(--text-2);
+  text-align: center;
+}
+.qrbox__url {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-3);
+  word-break: break-all;
+  text-align: center;
 }
 
 /* --- message reader ------------------------------------------------------ */

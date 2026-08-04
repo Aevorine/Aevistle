@@ -6,6 +6,8 @@
  * (sockets, keystore, file dialogs, alarms) goes through `PlatformBridge`.
  */
 
+import type { CodeRule, ReasonCode } from './codeExtract'
+import type { LinkPurpose, LinkRisk } from './linkPurpose'
 import type { SendCondition } from './conditions'
 import type { OutboxItem } from './outbox'
 import type { DraftSnapshot } from './snapshots'
@@ -573,6 +575,22 @@ export interface Settings {
    */
   notifyOnCode?: boolean
   /**
+   * Put a freshly found code straight on the clipboard.
+   *
+   * Only ever fires while "waiting for a code" is switched on, and only for the
+   * first high-confidence code of that wait. Silently replacing the clipboard
+   * is a real cost — whatever was there is gone — so it is confined to the
+   * window where the user has explicitly said the next code is what they want.
+   */
+  autoCopyCode?: boolean
+  /**
+   * Corrections the user has made to code extraction, per sender domain.
+   *
+   * Stored rather than inferred each time, because the whole value of a
+   * correction is that it survives the mail it was made in being deleted.
+   */
+  codeRules?: CodeRule[]
+  /**
    * Row height across the list screens. `standard` is the default; `compact`
    * fits about a third more rows, `roomy` is for reading at a distance.
    *
@@ -622,6 +640,8 @@ export const DEFAULT_SETTINGS: Settings = {
   inboxSyncMinutes: 5,
   inboxPush: true,
   notifyOnCode: true,
+  autoCopyCode: true,
+  codeRules: [],
   listDensity: 'standard',
   imagePolicyChosen: false,
 }
@@ -850,6 +870,56 @@ export interface CodeHit {
    * looking unhandled forever.
    */
   readAt?: number
+
+  // --- explainability and purpose (added after the "98052" misread) ---------
+  /*
+   * Everything below is optional, so a `state.json` written by an older build
+   * loads unchanged and simply shows the plainer card it always showed. The
+   * cards are not re-extracted on upgrade: the mail they came from is routinely
+   * deleted the moment the code is used, and a screen that blanked out its
+   * history to gain an explanation nobody asked for would be a bad trade.
+   */
+  /** Why this value was picked, and what lost — see `core/codeExtract`. */
+  reasons?: ExtractReason[]
+  /** Runners-up and struck-out numbers, so a wrong pick is one press from right. */
+  alternatives?: CodeAlternative[]
+  /** Links only: what the link is for, where it lands, what to be careful of. */
+  link?: LinkFacts
+  /** When the mail said the code or link stops working (epoch ms). */
+  expiresAt?: number
+  /** The mail said it can only be used once. */
+  oneTime?: boolean
+}
+
+/**
+ * Mirrors `codeExtract.ExtractReason`; declared here so state stays self-describing.
+ *
+ * `code` is the union rather than `string`, and that is load-bearing: the panel
+ * renders each one through `t(\`codes.reason.${code}\`)`, so a reason with no
+ * translation is a compile error instead of a raw key on screen in one of six
+ * languages nobody on this project reads.
+ */
+export interface ExtractReason {
+  code: ReasonCode
+  detail?: string
+}
+
+export interface CodeAlternative {
+  value: string
+  reasons: ExtractReason[]
+  /** False for numbers struck out before scoring — shown as excluded, not as options. */
+  eligible: boolean
+}
+
+/** The part of a link analysis worth keeping after the mail body is gone. */
+export interface LinkFacts {
+  purpose: LinkPurpose
+  purposeConfidence: 'high' | 'medium' | 'low'
+  host: string
+  domain: string
+  risks: LinkRisk[]
+  /** The text written on the link in the mail, when there was any. */
+  anchorText?: string
 }
 
 /**

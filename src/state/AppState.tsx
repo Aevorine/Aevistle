@@ -738,6 +738,19 @@ export function reducer(state: AppState, action: Action): AppState {
 // Context
 // ---------------------------------------------------------------------------
 
+/**
+ * What one inbox refresh actually did, handed back to whoever asked for it.
+ *
+ * `lastSyncError` on the account is the durable record; this is the answer to
+ * "what happened just now", which is a different question and the only one a
+ * button press can honestly report on.
+ */
+export interface SyncOutcome {
+  ok: boolean
+  error?: string
+  inbox?: InboxAccountState
+}
+
 export interface AppApi {
   state: AppState
   ready: boolean
@@ -797,6 +810,7 @@ export interface AppApi {
 
   /** Save IMAP config (and optionally a new password), then sync if enabled. */
   saveInboxAccount: (config: InboxAccountState, secret?: string) => Promise<void>
+
   /**
    * Connect and refresh one account's inbox. Records the error in state rather
    * than throwing, so a bad password shows up as a banner, not a crash.
@@ -805,7 +819,10 @@ export interface AppApi {
    * cannot rely on reading it back out of state — see the comment on the
    * implementation.
    */
-  syncInboxAccount: (accountId: string, override?: InboxAccountState) => Promise<void>
+  syncInboxAccount: (
+    accountId: string,
+    override?: InboxAccountState,
+  ) => Promise<SyncOutcome | undefined>
   /** Probe the IMAP endpoint without saving anything. */
   testInboxAccount: (config: InboxAccountState, secret?: string) => Promise<SendResult>
   /** Fetches and caches a body on demand — Phase 1's sync only prefetches the most recent few messages. */
@@ -1789,12 +1806,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
       try {
         const result = await bridge.syncInbox(config)
         dispatch({ type: 'upsertInboxAccount', inbox: result, origin: 'sync' })
+        /*
+         * Handed back as well as dispatched. A caller that pressed a button and
+         * is waiting to say what happened cannot read the answer out of `state`
+         * — `dispatch` has not landed yet — and the alternative, polling the
+         * account for a `lastSyncError` that may be left over from the previous
+         * attempt, is how "check now" ends up reporting a stale failure as if it
+         * had just occurred.
+         */
+        return { ok: !result.lastSyncError, error: result.lastSyncError, inbox: result }
       } catch (e) {
+        const error = e instanceof Error ? e.message : String(e)
         dispatch({
           type: 'upsertInboxAccount',
-          inbox: { ...config, lastSyncError: e instanceof Error ? e.message : String(e) },
+          inbox: { ...config, lastSyncError: error },
           origin: 'sync',
         })
+        return { ok: false, error }
       }
     },
     [bridge, state.inboxAccounts],
