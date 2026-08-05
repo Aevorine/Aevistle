@@ -2587,6 +2587,130 @@ textarea {
   .banner--info:not(.banner--keep) {
     display: none;
   }
+
+  /* --- dialogs are screens here, not cards ---------------------------------
+   *
+   * On a desktop a dialog is a card floating over the page: scrim down each
+   * side, rounded corners, a shadow lifting it off what it covers. That
+   * vocabulary needs room either side to read as anything, and on a 390px
+   * phone there is none — so `padding: var(--sp-5)` on the scrim plus
+   * `max-height: 94vh` produced a panel with a ~20px gutter all round, corners
+   * curving away from screen edges they were almost touching, and the tab bar
+   * showing underneath through the blur. It read as a card that had failed to
+   * position itself rather than as a screen, which is the report this fixes.
+   *
+   * A phone has one honest answer: the dialog *is* the screen. Edge to edge,
+   * square corners, no shadow, covering the tab bar completely — and closed
+   * with the button in its header, which is now the only way out and therefore
+   * has to be (and is) always visible.
+   *
+   * Sized by stretching inside the scrim rather than with `100vh`/`100dvh`.
+   * The scrim is already `position: fixed; inset: 0`, so stretching to it is
+   * exact on every engine; `100vh` is famously wrong on mobile browsers with
+   * retracting chrome, and `dvh` — which fixes that — only landed in Chromium
+   * 108, the same class of assumption that left the toggle knobs motionless on
+   * older Android System WebView builds.
+   */
+  /*
+   * The gutter moves from the scrim onto the card, deliberately.
+   *
+   * The obvious spelling is `.modal-scrim:has(> .modal--wide) { padding: 0 }`,
+   * and it is the wrong tool for the load-bearing half of this fix: `:has()`
+   * is Chromium 105, so on the older Android System WebView builds that this
+   * release already had to accommodate once — the toggle knobs that never
+   * moved — the selector would not match and dialogs would stay exactly as
+   * broken as they are now, on exactly the devices least able to spare the
+   * space. A rule that silently does nothing on old engines is worse than no
+   * rule, because it tests fine everywhere the author looks.
+   *
+   * So the scrim gives up its padding unconditionally, and the small dialogs
+   * that still want to float take an equivalent margin of their own. Plain
+   * `margin` and plain class selectors: nothing here needs an engine newer
+   * than the app's own floor.
+   */
+  .modal-scrim {
+    padding: 0;
+  }
+  /* Confirmations and short prompts stay cards. "Delete this reminder?" is two
+     buttons and a sentence; giving it the whole display would make a routine
+     yes/no look like a change of screen.
+
+     Sized rather than margined: the base rule is `width: min(560px, 100%)`, so
+     a margin on top of it asks for 100% + 40px inside a 390px scrim, the box
+     overflows and the browser pins it to the left edge — which is the same
+     "card in the wrong place" this whole block is fixing, reintroduced one
+     rule further down. The scrim already centres, so taking the gutter out of
+     the width is all that is needed. */
+  .modal {
+    width: calc(100% - 2 * var(--sp-5));
+    max-height: calc(100% - 2 * var(--sp-5));
+  }
+
+  .modal--wide,
+  .modal--fullscreen {
+    margin: 0;
+    width: 100%;
+    max-width: none;
+    height: 100%;
+    max-height: none;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  /*
+   * A full-height panel rises; it does not zoom.
+   *
+   * `modal-in` scales from 0.985, which on a card reads as "this came forward"
+   * and on something the size of the screen reads as the whole display
+   * flinching. The slide alone is the same gesture every mobile sheet uses.
+   */
+  .modal--wide,
+  .modal--fullscreen {
+    animation: sheet-in var(--dur-slow) var(--ease-out);
+  }
+
+  /*
+   * The system's own furniture, kept clear.
+   *
+   * Edge to edge means the header now sits under the status bar and the footer
+   * under the gesture bar. `.view` and `.page-head` already pay this tax for
+   * the same reason; a dialog that covers the whole screen has to pay it too,
+   * or the close button ends up beneath the clock.
+   */
+  .modal--wide .modal__header,
+  .modal--fullscreen .modal__header {
+    padding-top: calc(var(--sp-4) + env(safe-area-inset-top, 0px));
+  }
+  .modal--wide .modal__body,
+  .modal--fullscreen .modal__body {
+    padding-bottom: calc(var(--sp-5) + env(safe-area-inset-bottom, 0px));
+  }
+  /* A footer, when there is one, is the bottom-most thing and takes the inset
+     instead. The body's own bottom padding above is harmless underneath it —
+     it just becomes ordinary spacing between the last field and the buttons,
+     which is what it looks like anyway. */
+  .modal--wide > .modal__footer,
+  .modal--fullscreen > .modal__footer {
+    padding-bottom: calc(var(--sp-4) + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+/*
+ * Rise from the bottom edge. Paired with the full-screen dialog rules above.
+ *
+ * Declared outside the media query because keyframes are global anyway, and
+ * burying it inside one makes it look conditional when only its *use* is.
+ */
+@keyframes sheet-in {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* ==========================================================================
@@ -5178,6 +5302,28 @@ textarea {
   border-radius: 0;
   box-shadow: none;
   background: none;
+}
+
+/*
+ * The section names itself once, in the dialog's header.
+ *
+ * Every row in the settings list passes the *same* translation key to
+ * `SettingsSection` that the card inside already renders as its own heading —
+ * `settings.appearance` is both the row you tapped and the first line of what
+ * opened — so the word appears twice, two rows apart, on a screen that exists
+ * to hold less.
+ *
+ * Only the heading text goes. `.card__header` is emphatically not hidden: it
+ * also carries that section's action button ("Add account" lives there), and
+ * hiding a container because of the text in it is precisely how the Home
+ * dialogs lost "New contact" and "Export CSV" a commit ago. `.section-label`
+ * is a bare text node with no such passenger, so it can go outright — but only
+ * the first one, because a card with several labelled groups is using the rest
+ * to separate them from each other, not to name the section.
+ */
+.modal__body--settings .card__title,
+.modal__body--settings > .card > .card__body > .section-label:first-child {
+  display: none;
 }
 
 /**
