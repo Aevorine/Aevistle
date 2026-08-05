@@ -195,19 +195,69 @@ function rebuildJob(
   contacts: Contact[] = [],
 ): ScheduledJob {
   const recurrence = migrateSkipWeekends(job.recurrence)
+  const raw = computeOccurrences(recurrence, {
+    runsSoFar: job.runCount,
+    count: 24,
+    after: now,
+    calendar: settings.workCalendar ?? DEFAULT_WORK_CALENDAR,
+  })
   const { occurrences, warning } = shapeOccurrences(
-    computeOccurrences(recurrence, {
-      runsSoFar: job.runCount,
-      count: 24,
-      after: now,
-      calendar: settings.workCalendar ?? DEFAULT_WORK_CALENDAR,
-    }),
+    raw,
     { recurrence },
     settings,
     now,
     windowsForDraft(job.draft.to, contacts),
   )
-  return { ...job, recurrence, occurrences, calendarWarning: warning }
+  return {
+    ...job,
+    recurrence,
+    occurrences,
+    calendarWarning: warning,
+    rawOccurrences: raw,
+    rawOccurrencesRunCount: job.runCount,
+  }
+}
+
+/**
+ * `rebuildJob`'s cheap half — re-shape a job from its cached raw occurrence
+ * list instead of re-running the day-by-day search that built it.
+ *
+ * The search inside `computeOccurrences` is what makes a full rebuild cost
+ * anything: for a sparse rule (monthly, yearly, a tight cron) it can walk
+ * hundreds of candidate days per occurrence. None of that depends on the
+ * working calendar or quiet hours — only `shapeOccurrences`, which is a
+ * single pass over at most 24 numbers, does. So when the raw list is still
+ * good, only the cheap half needs to run again.
+ *
+ * "Still good" is two checks, and either one failing means something changed
+ * the job out from under the cache without telling it, so this falls back to
+ * a full `rebuildJob` — always correct, just not always fast:
+ *
+ *   - `rawOccurrencesRunCount` must match the live `runCount`. A run can end
+ *     an `afterCount` rule — or simply advance which occurrence is "next" —
+ *     on a day nothing about the calendar changed, and a cache computed
+ *     before that run does not know it happened.
+ *   - The cached list's first entry must still be in the future. It is
+ *     ascending, so if the first entry has not yet passed, none of them has —
+ *     and if it has, the cache is exactly as stale as a job whose reminder
+ *     already went out while nobody re-armed it.
+ */
+function reshapeJob(job: ScheduledJob, settings: Settings, now: number, contacts: Contact[]): ScheduledJob {
+  const raw = job.rawOccurrences
+  const cacheValid =
+    raw !== undefined &&
+    job.rawOccurrencesRunCount === job.runCount &&
+    (raw.length === 0 || raw[0] > now)
+  if (!cacheValid) return rebuildJob(job, settings, now, contacts)
+
+  const { occurrences, warning } = shapeOccurrences(
+    raw,
+    { recurrence: job.recurrence },
+    settings,
+    now,
+    windowsForDraft(job.draft.to, contacts),
+  )
+  return { ...job, occurrences, calendarWarning: warning }
 }
 
 // ---------------------------------------------------------------------------
@@ -491,14 +541,25 @@ export function reducer(state: AppState, action: Action): AppState {
           if (touchesCalendar && !touchesQuiet && (job.recurrence.workdayPolicy ?? 'off') === 'off') {
             return job
           }
-          const next = rebuildJob(job, settings, now, state.contacts)
+          const next = reshapeJob(job, settings, now, state.contacts)
           if (
             sameList(next.occurrences, job.occurrences) &&
             next.recurrence === job.recurrence &&
             next.calendarWarning === undefined &&
             job.calendarWarning === undefined
           ) {
-            return job
+            // The visible answer did not change, so this must not bump
+            // `updatedAt` or touch anything the scheduler-sync signature
+            // watches. But `reshapeJob` may have just healed a cache that was
+            // stale on the way in (a run moved `runCount` past what it was
+            // computed against, yet the recomputed answer landed on the same
+            // occurrences anyway) — keeping the healed cache is what lets the
+            // *next* edit take the fast path instead of silently falling back
+            // to a full rebuild every time, forever.
+            return job.rawOccurrences === next.rawOccurrences &&
+              job.rawOccurrencesRunCount === next.rawOccurrencesRunCount
+              ? job
+              : { ...job, rawOccurrences: next.rawOccurrences, rawOccurrencesRunCount: next.rawOccurrencesRunCount }
           }
           // `updatedAt` is what the scheduler-sync signature watches. Without
           // bumping it, a change that moved only the *later* occurrences would
@@ -1156,10 +1217,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // Also where the legacy `skipWeekends` flag is retired. It runs on
         // every boot and is idempotent by construction (it clears the flag it
         // reads), so the migration needs no version marker and cannot half-run.
+        //
+        // `rawOccurrences` is dropped rather than carried over for the same
+        // reason the occurrence list itself is re-derived: a timezone change
+        // can leave a cached raw timestamp numerically in the future while
+        // meaning the wrong wall-clock time, and `reshapeJob`'s cache check
+        // has no way to tell that apart from a cache that is still good. One
+        // full rebuild the first time a calendar or quiet-hours edit lands in
+        // a new session re-establishes it; every edit after that is cheap
+        // again. See `reshapeJob`.
         const calendar = merged.settings.workCalendar ?? DEFAULT_WORK_CALENDAR
         merged.jobs = merged.jobs.map((job) => {
           const recurrence = migrateSkipWeekends(job.recurrence)
-          if (!job.enabled) return recurrence === job.recurrence ? job : { ...job, recurrence }
+          if (!job.enabled) {
+            if (recurrence === job.recurrence && job.rawOccurrences === undefined) return job
+            return { ...job, recurrence, rawOccurrences: undefined, rawOccurrencesRunCount: undefined }
+          }
           const { upcoming } = rearm(recurrence, job.occurrences ?? [], {
             runsSoFar: job.runCount,
             calendar,
@@ -1176,6 +1249,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
             recurrence,
             occurrences: shaped.occurrences,
             calendarWarning: shaped.warning,
+            rawOccurrences: undefined,
+            rawOccurrencesRunCount: undefined,
           }
         })
 
@@ -1756,18 +1831,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // flag for jobs that had it, and a job saved with both it and a policy
       // used to be shifted twice.
       finalJob = { ...finalJob, recurrence: migrateSkipWeekends(finalJob.recurrence) }
+      const rawOccurrences = computeOccurrences(finalJob.recurrence, {
+        runsSoFar: finalJob.runCount,
+        count: 24,
+        calendar: state.settings.workCalendar ?? DEFAULT_WORK_CALENDAR,
+      })
       const { occurrences, warning } = shapeOccurrences(
-        computeOccurrences(finalJob.recurrence, {
-          runsSoFar: finalJob.runCount,
-          count: 24,
-          calendar: state.settings.workCalendar ?? DEFAULT_WORK_CALENDAR,
-        }),
+        rawOccurrences,
         finalJob,
         state.settings,
         Date.now(),
         windowsForDraft(finalJob.draft.to, state.contacts),
       )
-      finalJob = { ...finalJob, occurrences, calendarWarning: warning, updatedAt: Date.now() }
+      finalJob = {
+        ...finalJob,
+        occurrences,
+        calendarWarning: warning,
+        updatedAt: Date.now(),
+        // Keeps `patchSettings`'s fast path warm — see `reshapeJob`. Set here
+        // rather than left stale, because this is also where `recurrence` can
+        // change, and a cache computed against the *previous* rule must never
+        // survive that.
+        rawOccurrences,
+        rawOccurrencesRunCount: finalJob.runCount,
+      }
 
       dispatch({ type: 'upsertJob', job: finalJob })
       if (warning && warning.dropped.length > 0) {
@@ -1805,7 +1892,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
           enabled,
           status: enabled ? 'armed' : 'paused',
           // A paused job's warning describes a list that no longer exists.
-          ...(enabled ? {} : { occurrences: [], calendarWarning: undefined }),
+          ...(enabled
+            ? {}
+            : { occurrences: [], calendarWarning: undefined, rawOccurrences: undefined, rawOccurrencesRunCount: undefined }),
           updatedAt: Date.now(),
         },
       })

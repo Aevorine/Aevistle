@@ -397,6 +397,114 @@ if (present('B1: the reducer is reachable', app.reducer)) {
 }
 
 // ===========================================================================
+// B6 — the raw-occurrence cache a second calendar edit reuses
+// ===========================================================================
+//
+// `reshapeJob` skips `computeOccurrences`'s day-by-day search on a cache hit,
+// which means the two things that can make a cached list wrong — time
+// consuming its first entry, and a run moving `runCount` past what it was
+// computed against — have to be caught here, not discovered by a reminder
+// that quietly stops firing.
+
+if (present('B6: the reducer is reachable', app.reducer)) {
+  // A yearly rule anchored months from `startAt` forces `nextFireAfter` to
+  // walk most of a year per occurrence — the cost `reshapeJob` exists to
+  // avoid paying twice.
+  // `month` is 0-based, like `Date.getMonth()` — 3 is April. (See the scar
+  // tissue in `nextFireAfter`'s doc comment about this exact field.)
+  const yearly = (id) =>
+    job(id, {
+      recurrence: { ...baseRec, kind: 'yearly', month: 3, dayOfMonth: 15, startAt: NOW, workdayPolicy: 'after' },
+    })
+  const fleet = []
+  for (let i = 0; i < 150; i++) fleet.push(yearly(`year${i}`))
+  const coldState = stateWith(fleet)
+
+  // `startAt` is NOW (2026-09-01), so the first April 15th the rule can match
+  // is 2027, not 2026 — the search has already gone past this year's. 2027-04-15
+  // is a Thursday: marking it off pushes the occurrence to the next working
+  // day, and the second edit pushes it one day further — both fixture dates a
+  // job would actually have to move for.
+  const t0 = Date.now()
+  const warmed = app.reducer(coldState, {
+    type: 'patchSettings',
+    patch: { workCalendar: { weekend: [0, 6], holidays: ['2027-04-15'], workdays: [] } },
+  })
+  const tCold = Date.now() - t0
+
+  ok('B6: a cold edit populates the raw cache', warmed.jobs[0].rawOccurrences !== undefined)
+  eq('B6: tagged with the runCount it was computed against', warmed.jobs[0].rawOccurrencesRunCount, 0)
+
+  const holidays2 = ['2027-04-15', '2027-04-16']
+  const t1 = Date.now()
+  const rewarmed = app.reducer(warmed, {
+    type: 'patchSettings',
+    patch: { workCalendar: { weekend: [0, 6], holidays: holidays2, workdays: [] } },
+  })
+  const tWarm = Date.now() - t1
+
+  // Correctness first: a cache-hit re-shape has to be indistinguishable from
+  // a full rebuild, not just fast. Same proof B1 already relies on — nothing
+  // lands on a day just marked off.
+  ok(
+    'B6: a cache-hit re-shape still honours the new calendar',
+    rewarmed.jobs.every((j) => j.occurrences.every((t) => !holidays2.includes(iso(t)))),
+  )
+  ok(
+    'B6: and actually changed something (the calendar edit was not a no-op)',
+    JSON.stringify(rewarmed.jobs[0].occurrences) !== JSON.stringify(warmed.jobs[0].occurrences),
+  )
+
+  // Then speed: the whole point. A generous absolute ceiling rather than a
+  // tight ratio, so this stays true on a slow CI runner — 150 yearly jobs
+  // reshaping from cache is a few thousand cheap array operations, nothing
+  // that should ever approach the search the cold pass just did.
+  ok(`B6: a cache-hit edit stays fast regardless of load (${tWarm} ms)`, tWarm < 500)
+  if (tCold > 20) {
+    ok(
+      `B6: and is meaningfully faster than the cold edit that built the cache (cold ${tCold} ms, warm ${tWarm} ms)`,
+      tWarm < tCold,
+    )
+  }
+
+  // The cache must never outlive the run count it was computed against.
+  const capped = job('capped', {
+    recurrence: { ...baseRec, startAt: NOW, workdayPolicy: 'after', endMode: 'afterCount', maxRuns: 3 },
+    runCount: 2,
+  })
+  const seeded = app.reducer(stateWith([capped]), {
+    type: 'patchSettings',
+    patch: { workCalendar: { weekend: [0, 6], holidays: [], workdays: [] } },
+  })
+  const cache = seeded.jobs[0]
+  ok('B6: one run left of three means exactly one cached occurrence', cache.rawOccurrences?.length === 1)
+  eq('B6: cached against runCount 2', cache.rawOccurrencesRunCount, 2)
+
+  const ran = app.reducer(seeded, {
+    type: 'jobRan',
+    jobId: 'capped',
+    run: { runCount: 3, lastRunAt: Date.now(), lastResult: 'ok', status: 'done', occurrences: [] },
+  })
+  ok(
+    'B6 (fixture): the run itself does not touch the cache',
+    ran.jobs[0].rawOccurrences?.length === 1 && ran.jobs[0].rawOccurrencesRunCount === 2,
+  )
+
+  // A calendar edit landing right after the exhausting run must not resurrect
+  // the one occurrence the stale cache still remembers — the rule is done.
+  const after2 = app.reducer(ran, {
+    type: 'patchSettings',
+    patch: { workCalendar: { weekend: [0, 6], holidays: ['2026-09-02'], workdays: [] } },
+  })
+  eq(
+    'B6: a run that exhausts the rule stays exhausted after the next calendar edit',
+    after2.jobs[0].occurrences,
+    [],
+  )
+  eq('B6: the cache is re-established against the current runCount', after2.jobs[0].rawOccurrencesRunCount, 3)
+}
+
+// ===========================================================================
 // B5 — the calendar travels with the jobs
 // ===========================================================================
 

@@ -326,6 +326,23 @@ export interface ScheduledJob {
   calendarWarning?: CalendarWarning
   createdAt: number
   updatedAt: number
+  /**
+   * `occurrences` before the working calendar and quiet hours shifted them —
+   * what `computeOccurrences` produced, unshifted. And the `runCount` it was
+   * computed against, since a run can end an `afterCount` rule on a day the
+   * calendar never touched, which this cache would not otherwise know.
+   *
+   * Exists purely so that re-arming a job after a calendar or quiet-hours edit
+   * can re-shape this list instead of re-running the day-by-day search that
+   * built it — a search that depends only on the *recurrence*, never on the
+   * calendar. Read as "no cache" when absent, which is true of every job the
+   * moment it comes out of hydrate: see the comment where that is cleared for
+   * why a value computed in a previous session is not trusted here, even if
+   * it looks numerically still in the future.
+   */
+  rawOccurrences?: number[]
+  /** The `runCount` `rawOccurrences` was computed against. See above. */
+  rawOccurrencesRunCount?: number
 }
 
 // ---------------------------------------------------------------------------
