@@ -19,7 +19,7 @@ import type {
   PlatformBridge,
 } from './bridge'
 import { failedResult } from './bridge'
-import { fetchLatest } from './update'
+import { fetchLatest, type DownloadProgress } from './update'
 import { feedFetchVia, type FeedResponse } from './feeds'
 import type {
   AppState,
@@ -200,9 +200,22 @@ interface AevistleNativePlugin extends AndroidPermissionApi {
   saveAttachmentAs(opts: { path: string; suggestedName: string }): Promise<{ value?: string }>
   saveAttachmentsTo(opts: { paths: string[] }): Promise<{ folder?: string; saved?: number }>
 
+  /** See `UpdateInstaller.java`. Resolves with the finished `DownloadProgress`; progress arrives on the `updateProgress` listener meanwhile. */
+  downloadUpdate(opts: {
+    url: string
+    name: string
+    sizeBytes: number
+  }): Promise<DownloadProgress>
+  /** Rejects with the message `unknown-sources` when the per-app install toggle is off — the native side has already opened that settings screen. */
+  installUpdate(opts: { path: string }): Promise<void>
+
   addListener(
     eventName: 'jobEvent',
     handler: (event: JobEvent) => void,
+  ): Promise<{ remove: () => Promise<void> }>
+  addListener(
+    eventName: 'updateProgress',
+    handler: (progress: DownloadProgress) => void,
   ): Promise<{ remove: () => Promise<void> }>
 }
 
@@ -421,9 +434,9 @@ export function createAndroidBridge(): PlatformBridge & AndroidPermissionApi {
      * shared function appeared fine only because it runs in the main process,
      * where no CSP applies.
      *
-     * Installing still goes out to the browser: an APK has to reach the system
-     * package installer, which means handing over the URL rather than
-     * downloading it here.
+     * The download and the install now happen here too — see `downloadUpdate`
+     * below. They used to be desktop-only, which left this method able to
+     * announce a new version and unable to do anything about it.
      */
     async checkForUpdate() {
       const info = await Native.appInfo().catch(() => null)
@@ -434,6 +447,43 @@ export function createAndroidBridge(): PlatformBridge & AndroidPermissionApi {
         undefined,
         feedFetchVia((url) => Native.fetchFeed({ url })),
       )
+    },
+
+    /**
+     * Fetch the APK into app-private storage, verified against the release's
+     * published checksum. `UpdateInstaller.java` holds the reasoning; the
+     * shape of what comes back is `DownloadProgress`, identical to the
+     * desktop's, so `SettingsView` needs no platform branch to draw it.
+     */
+    downloadUpdate: (asset) =>
+      Native.downloadUpdate({ url: asset.url, name: asset.name, sizeBytes: asset.sizeBytes }),
+
+    /**
+     * Hand the finished APK to the system package installer.
+     *
+     * The one rejection worth translating is `unknown-sources`: Android 8+
+     * gates this behind a per-app settings toggle that has no request dialog,
+     * so the native side opens that settings screen before rejecting, and this
+     * turns the marker into something the user-facing catch can explain. Every
+     * other failure already arrives as a sentence.
+     */
+    async installUpdate(filePath) {
+      try {
+        await Native.installUpdate({ path: filePath })
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        if (message.includes('unknown-sources')) {
+          throw new Error('ANDROID_UNKNOWN_SOURCES')
+        }
+        throw error
+      }
+    },
+
+    onUpdateProgress(handler) {
+      const pending = Native.addListener('updateProgress', handler)
+      return () => {
+        void pending.then((h) => h.remove())
+      }
     },
 
     notify: (title, body, opts) => Native.notify({ title, body, code: opts?.code }),

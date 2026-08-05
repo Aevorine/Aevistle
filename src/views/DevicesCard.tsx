@@ -116,6 +116,30 @@ export function DevicesCard() {
   const [otherPlatform, setOtherPlatform] = useState<PairedDevicePlatform>('android')
   const labelId = useFieldId('devlabel')
 
+  /**
+   * Which of this machine's addresses the QR code will publish.
+   *
+   * Empty string means "whichever `pairingServer.ts` ranks first", which is
+   * the right answer on the overwhelming majority of machines and the only
+   * one a phone-and-a-laptop household ever needs.
+   *
+   * The picker exists for the machines where ranking by interface name cannot
+   * win. A desktop with a VPN client, a hypervisor and a container runtime
+   * installed reports a fistful of private addresses that are indistinguishable
+   * from the Wi-Fi card's by shape alone — `172.18.0.1` looks exactly as much
+   * like a LAN as `192.168.1.7` does. Guess wrong and the *phone* is the only
+   * thing that finds out, four seconds later, as
+   * `failed to connect to /172.18.0.1 … after 4000ms`.
+   *
+   * So the guess is shown, and it is editable. It is not a setting and is not
+   * persisted: the answer changes when the laptop moves between networks, and
+   * a remembered address would be wrong exactly when someone is least likely
+   * to look at it.
+   */
+  const [hostAddress, setHostAddress] = useState('')
+  const [addresses, setAddresses] = useState<string[]>([])
+  const addressId = useFieldId('devaddr')
+
   const canHost = Boolean(bridge?.startPairingHost)
   const canJoin = Boolean(bridge?.pairingJoinRequest)
   const thisPlatform: PairedDevicePlatform = bridge?.platform === 'android' ? 'android' : 'windows'
@@ -198,11 +222,36 @@ export function DevicesCard() {
       const payload = await bridge.startPairingHost(
         'ongoing',
         open.kind === 'new' ? open.pairId : open.device.id,
+        hostAddress || undefined,
       )
       setHostPayload(payload)
     } catch (e) {
       setHostStatus('error')
       setHostError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  /**
+   * Asked for when the panel opens, not held in a ref or fetched once at
+   * mount: between one pairing attempt and the next the laptop may have moved
+   * onto a different network, or a VPN may have come up and added an address
+   * that was not there before. This is cheap (one `os.networkInterfaces()`
+   * call) and always current.
+   */
+  const loadAddresses = async () => {
+    if (!bridge?.lanAddresses) return
+    try {
+      const found = await bridge.lanAddresses()
+      setAddresses(found)
+      // Deliberately left on "" (= let the host rank) rather than pinned to
+      // `found[0]`. They resolve to the same address today, but pinning would
+      // freeze this attempt's choice against a network that changes underneath
+      // it between opening the panel and pressing the button.
+      if (hostAddress && !found.includes(hostAddress)) setHostAddress('')
+    } catch {
+      // A build without the handler, or a call that failed: the picker simply
+      // does not appear and pairing behaves exactly as it did before it existed.
+      setAddresses([])
     }
   }
 
@@ -212,6 +261,7 @@ export function DevicesCard() {
     setHostPayload(null)
     setHostError(undefined)
     setHostStatus('listening')
+    void loadAddresses()
   }
 
   const closeHost = () => {
@@ -460,10 +510,47 @@ export function DevicesCard() {
                 {hostStatus === 'connected' ? (
                   <Banner tone="info">{t('devices.hostConnectedHint')}</Banner>
                 ) : null}
+
+                {/* Which address the code actually published, in plain text
+                    beside the QR block.
+
+                    The QR encodes it, but a QR code is not readable by the
+                    person holding it, so when the other device times out the
+                    only party who can tell that the wrong interface was chosen
+                    is the one who cannot see the choice. Printing it makes the
+                    two halves of the diagnosis available in the same place:
+                    this line says `172.18.0.1`, the phone's error says
+                    `172.18.0.1`, and the fix is one button away instead of
+                    being a mystery. */}
+                {hostPayload && hostStatus !== 'connected' ? (
+                  // `--keep`: exempt from the narrow-screen hint cull. This is
+                  // the only place the published address is legible to a human,
+                  // and it is the half of the diagnosis the *other* device's
+                  // timeout cannot supply.
+                  <div className="field__hint field__hint--keep">
+                    {t('devices.hostAddressShown', { address: hostPayload.host })}
+                  </div>
+                ) : null}
+
                 <div className="btn-row">
                   <Button variant={hostStatus === 'connected' ? 'primary' : 'ghost'} onClick={closeHost}>
                     {hostStatus === 'connected' ? t('common.done') : t('common.cancel')}
                   </Button>
+                  {addresses.length > 1 && hostStatus !== 'connected' ? (
+                    <Button
+                      variant="ghost"
+                      onClick={() => {
+                        // Drops the listener before going back, so the old
+                        // address stops accepting the moment a different one
+                        // is being considered.
+                        void bridge?.stopPairingHost?.()
+                        setHostStarted(false)
+                        setHostPayload(null)
+                      }}
+                    >
+                      {t('devices.hostAddressChange')}
+                    </Button>
+                  ) : null}
                 </div>
               </>
             ) : (
@@ -480,6 +567,36 @@ export function DevicesCard() {
                   />
                 </Field>
                 {shareForm(platformName(otherPlatform))}
+
+                {/* Only when there is a decision to make. One address is not a
+                    choice, and a select with a single option in it is a
+                    question the user cannot answer wrong but still has to
+                    read. Zero addresses means no network at all, which
+                    `startHost` reports properly a moment later. */}
+                {addresses.length > 1 ? (
+                  <Field
+                    label={t('devices.hostAddress')}
+                    hint={t('devices.hostAddressHint')}
+                    htmlFor={addressId}
+                  >
+                    <select
+                      id={addressId}
+                      className="input"
+                      value={hostAddress}
+                      onChange={(e) => setHostAddress(e.target.value)}
+                    >
+                      <option value="">
+                        {t('devices.hostAddressAuto', { address: addresses[0] })}
+                      </option>
+                      {addresses.map((address) => (
+                        <option key={address} value={address}>
+                          {address}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                ) : null}
+
                 <div className="btn-row">
                   <Button
                     variant="primary"

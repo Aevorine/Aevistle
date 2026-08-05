@@ -115,6 +115,23 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <!--
+        Hand a downloaded update to the system package installer.
+
+        This app is distributed as an APK from its own GitHub releases, not
+        through a store, so there is no store client to do updates for it. The
+        alternative is telling the user to open a browser, find the release
+        page, download an APK into a shared folder and tap it — which is the
+        same install with the verification removed and the file left somewhere
+        any other app can read.
+
+        What this permission does *not* grant is silent installation. From
+        Android 8 it is additionally a per-app toggle in system settings, and
+        even holding both the user still confirms every install on the
+        system's own screen. See `UpdateInstaller.canInstall`.
+    -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
+    <!--
         Scan a pairing QR code (`PairingScanner.tsx`) — the camera preview and
         frame decoding happen entirely in the WebView via `getUserMedia`, the
         same plain Web API a browser page would use. Nothing here goes through

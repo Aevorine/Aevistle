@@ -239,8 +239,25 @@ export interface DesktopApi {
   // for the listener. Desktop can play either role; `pairingJoinRequest` is
   // the one both roles share, since a desktop JOINER is just as CSP-blocked
   // from a direct `fetch()` as the Android WebView is.
-  /** HOST: open a ~2-minute LAN listener and return the QR payload. `pairId` is required for `mode: 'ongoing'` — see `pairingServer.ts`. */
-  startPairingHost(mode: PairMode, pairId?: string): Promise<PairingPayload>
+  /**
+   * HOST: open a ~2-minute LAN listener and return the QR payload. `pairId` is
+   * required for `mode: 'ongoing'` — see `pairingServer.ts`.
+   *
+   * `host` overrides which of this machine's addresses is bound and published.
+   * Omitted, the ranked best from `lanAddresses()` is used; passing one of the
+   * others is how the user corrects a machine whose interfaces defeat the
+   * ranking. Anything not currently on this machine is refused.
+   */
+  startPairingHost(mode: PairMode, pairId?: string, host?: string): Promise<PairingPayload>
+  /**
+   * Every address this machine could be paired at, best first.
+   *
+   * Exists because the ranking in `pairingServer.ts` is a heuristic over
+   * interface names, and a heuristic that is wrong silently costs the user a
+   * four-second timeout on the other device with no clue in it. Showing the
+   * list turns "it does not work" into "it is offering the wrong one".
+   */
+  lanAddresses(): Promise<string[]>
   /** HOST: stop early — the countdown ran out, or the user left the screen. */
   stopPairingHost(): Promise<void>
   onPairingEvent(handler: (event: PairingEvent) => void): () => void
@@ -317,6 +334,7 @@ export const IPC = {
   controlRequest: 'aevistle:control-request',
   controlResponse: 'aevistle:control-response',
   startPairingHost: 'aevistle:start-pairing-host',
+  lanAddresses: 'aevistle:lan-addresses',
   stopPairingHost: 'aevistle:stop-pairing-host',
   pairingEvent: 'aevistle:pairing-event',
   pairingJoinRequest: 'aevistle:pairing-join-request',

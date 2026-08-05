@@ -23,4 +23,17 @@
     <!-- The same two, for a data folder moved to shared or SD-card storage. -->
     <external-files-path name="ext_inbox_attachments" path="inbox-attachments/" />
     <external-files-path name="ext_attachments" path="attachments/" />
+
+    <!--
+        Downloaded APKs, for the system package installer alone.
+
+        Its own root rather than a corner of an existing one, so the grant this
+        creates covers exactly the directory `UpdateInstaller` writes to and
+        nothing above it. Note it is `files-path`, not `external-files-path`:
+        the update is never written to shared storage even when the *data*
+        folder has been moved there, because an APK sitting somewhere another
+        app can rewrite between the checksum passing and the installer reading
+        it would make the verification decorative.
+    -->
+    <files-path name="updates" path="updates/" />
 </paths>

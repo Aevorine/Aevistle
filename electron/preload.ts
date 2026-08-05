@@ -140,7 +140,9 @@ const api: DesktopApi = {
     return () => ipcRenderer.removeListener(IPC.controlRequest, listener)
   },
 
-  startPairingHost: (mode, pairId) => ipcRenderer.invoke(IPC.startPairingHost, mode, pairId),
+  startPairingHost: (mode, pairId, host) =>
+    ipcRenderer.invoke(IPC.startPairingHost, mode, pairId, host),
+  lanAddresses: () => ipcRenderer.invoke(IPC.lanAddresses),
   stopPairingHost: () => ipcRenderer.invoke(IPC.stopPairingHost),
   pairingJoinRequest: (url, body) => ipcRenderer.invoke(IPC.pairingJoinRequest, url, body),
   onPairingEvent: (handler) => {

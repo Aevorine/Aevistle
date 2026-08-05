@@ -73,10 +73,16 @@ export class PairingServer {
    * with a device already known, or a freshly minted id for a first-time
    * pairing — see `core/pairing.ts`.
    */
-  async start(mode: PairMode, pairId?: string): Promise<PairingPayload> {
+  async start(mode: PairMode, pairId?: string, hostOverride?: string): Promise<PairingPayload> {
     await this.stop()
 
-    const host = pickLanIPv4()
+    const available = listLanIPv4()
+    // An override is honoured only if this machine actually holds that address.
+    // Anything else would hand the renderer a `server.listen(0, <arbitrary>)`,
+    // and the interesting failure is not a bad literal — it is a hostname that
+    // resolves somewhere, which is a bind attempt aimed by whatever answered
+    // DNS. The list is the allowlist, and it is one this process built itself.
+    const host = hostOverride && available.includes(hostOverride) ? hostOverride : available[0]
     if (!host) {
       throw new Error('No network is available to pair over — connect to Wi-Fi or a LAN first.')
     }
@@ -225,19 +231,125 @@ function readJson(req: IncomingMessage, maxBody: number): Promise<Record<string,
 }
 
 /**
- * Every non-internal IPv4 interface, first one wins. A machine tethered to a
- * phone hotspot or plugged into one LAN typically has exactly one such
- * interface up, and the chosen address is shown to the user (as the `host` in
- * the payload) so a multi-homed machine that guessed wrong is visible, not
- * silently unreachable.
+ * Interface names that are almost never the way a phone reaches this machine.
+ *
+ * Virtual adapters — VPN and proxy tunnels, hypervisor host-only networks,
+ * container bridges — hold ordinary-looking private addresses on interfaces
+ * that route nowhere near the Wi-Fi the other device is on. `os
+ * .networkInterfaces()` reports every one of them as `internal: false`,
+ * because to the kernel they are as real as the Wi-Fi card.
+ *
+ * Matched case-insensitively against the interface name, as a substring, and
+ * kept deliberately broad: the cost of demoting a real interface is that it
+ * sorts below another real interface, while the cost of *not* demoting a
+ * virtual one is a pairing that cannot work and says nothing about why.
  */
-/** Exported for `syncServer.ts`, which needs the exact same "which interface is this device reachable on" answer for its own, longer-lived listener. */
-export function pickLanIPv4(): string | null {
+const VIRTUAL_INTERFACE_HINTS = [
+  'tun',
+  'tap',
+  'wsl',
+  'vethernet',
+  'docker',
+  'vmware',
+  'vmnet',
+  'virtualbox',
+  'vbox',
+  'hyper-v',
+  'loopback',
+  'bluetooth',
+  'teredo',
+  'isatap',
+  'zerotier',
+  'tailscale',
+  'wireguard',
+  'openvpn',
+  // The Chinese Windows names for the same things — this app ships in six
+  // languages and the interface list comes from the OS, not from us.
+  '蓝牙',
+  '虚拟',
+]
+
+/** Lower sorts first. See `rankAddress`. */
+function subnetRank(address: string): number {
+  // 192.168/16 is what home and small-office routers hand out, and it is the
+  // one range container runtimes and hypervisors stay out of by convention.
+  if (address.startsWith('192.168.')) return 0
+  // 10/8 is the other genuinely common LAN range — larger sites, and most
+  // phone hotspots.
+  if (address.startsWith('10.')) return 1
+  const [a, b] = address.split('.', 2).map((n) => Number.parseInt(n, 10))
+  // 172.16/12 is a real private range *and* Docker's default pool
+  // (172.17–172.31). Real, so not excluded; overwhelmingly virtual in
+  // practice, so it loses to anything above.
+  if (a === 172 && b >= 16 && b <= 31) return 2
+  return 3
+}
+
+/**
+ * Every candidate address this machine might be reachable at, best first.
+ *
+ * This used to be "the first non-internal IPv4 wins", on the reasoning that a
+ * machine on one LAN has exactly one such interface up. That reasoning does
+ * not survive contact with a real desktop. A machine reporting *eighteen*
+ * IPv4 addresses is not unusual: one Wi-Fi, one VPN tunnel, two hypervisor
+ * host-only networks, and fourteen `169.254.x.x` stubs from adapters that
+ * never got a DHCP lease. The first one the OS happened to list won, and the
+ * QR code published it.
+ *
+ * The failure that produced was silent on the desktop and unreadable on the
+ * phone: `failed to connect to /172.18.0.1 (port 10897) from
+ * /192.168.1.42 (port 34478) after 4000ms` — a proxy tunnel's address, from
+ * a phone one subnet away, with nothing anywhere saying which interface had
+ * been chosen or that there had been a choice at all.
+ *
+ * So: exclude what cannot work, rank what is left, and return all of it.
+ *
+ *   - `169.254.0.0/16` is dropped outright. It is what Windows assigns when
+ *     DHCP fails, it is per-link and unroutable, and a machine with a working
+ *     network never needs to be reached at one.
+ *   - Interfaces whose names look virtual sort last rather than being dropped,
+ *     because someone genuinely pairing across a VPN should still be offered
+ *     the address — just not handed it ahead of their Wi-Fi.
+ *   - Among equals, the subnet decides, then the address itself, so the answer
+ *     is stable across calls. An order that shifted between the QR code and
+ *     the sync listener would pair on one address and then sync on another.
+ *
+ * The caller publishes `[0]` and shows the rest, so a wrong guess is now
+ * something the user can see and correct instead of a timeout.
+ */
+export function listLanIPv4(): string[] {
   const interfaces = os.networkInterfaces()
+  const candidates: Array<{ address: string; virtual: boolean }> = []
+
   for (const name of Object.keys(interfaces)) {
+    const lower = name.toLowerCase()
+    const virtual = VIRTUAL_INTERFACE_HINTS.some((hint) => lower.includes(hint))
     for (const info of interfaces[name] ?? []) {
-      if (info.family === 'IPv4' && !info.internal) return info.address
+      if (info.family !== 'IPv4' || info.internal) continue
+      // Link-local: DHCP failed on this adapter. Not a route to anywhere.
+      if (info.address.startsWith('169.254.')) continue
+      candidates.push({ address: info.address, virtual })
     }
   }
-  return null
+
+  return candidates
+    .sort(
+      (a, b) =>
+        Number(a.virtual) - Number(b.virtual) ||
+        subnetRank(a.address) - subnetRank(b.address) ||
+        a.address.localeCompare(b.address),
+    )
+    .map((c) => c.address)
+}
+
+/**
+ * The single best address, or null when this machine is not on a network.
+ *
+ * Exported for `syncServer.ts`, which needs the exact same "which interface is
+ * this device reachable on" answer for its own, longer-lived listener — and
+ * needs it to agree with what pairing published, which is why both read one
+ * ordering rather than each picking for themselves.
+ */
+export function pickLanIPv4(): string | null {
+  return listLanIPv4()[0] ?? null
 }

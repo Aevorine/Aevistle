@@ -4,7 +4,8 @@ import { AppProvider, useApp } from './state/AppState'
 import { I18nContext, useI18n } from './i18n'
 import { Banner, IconButton, ToastProvider, useToast } from './components/ui'
 import { ShortcutsDialog, matchShortcut } from './components/Shortcuts'
-import { NAV, type ViewId } from './core/nav'
+import { HOME_SECTIONS, MOBILE_NAV, NAV, type ViewId } from './core/nav'
+import { useNarrow } from './components/useNarrow'
 import { DataFolderSetup } from './components/DataFolderSetup'
 import {
   IconActivity,
@@ -12,6 +13,7 @@ import {
   IconClock,
   IconCloudNode,
   IconFileText,
+  IconHome,
   IconInbox,
   IconKey,
   IconKeyNode,
@@ -47,6 +49,7 @@ const loadTemplates = () => import('./views/TemplatesView')
 const loadLogs = () => import('./views/LogsView')
 const loadWorkCalendar = () => import('./views/WorkCalendarView')
 const loadSettings = () => import('./views/SettingsView')
+const loadHome = () => import('./views/HomeView')
 
 const CodesView = lazy(() => loadCodes().then((m) => ({ default: m.CodesView })))
 const ScheduleView = lazy(() => loadSchedule().then((m) => ({ default: m.ScheduleView })))
@@ -58,6 +61,7 @@ const WorkCalendarView = lazy(() =>
   loadWorkCalendar().then((m) => ({ default: m.WorkCalendarView })),
 )
 const SettingsView = lazy(() => loadSettings().then((m) => ({ default: m.SettingsView })))
+const HomeView = lazy(() => loadHome().then((m) => ({ default: m.HomeView })))
 
 /**
  * Warm the other screens once the app is idle.
@@ -73,7 +77,7 @@ const SettingsView = lazy(() => loadSettings().then((m) => ({ default: m.Setting
  */
 function prefetchScreens(): void {
   const warm = () => {
-    for (const load of [loadCodes, loadSettings, loadSchedule, loadLogs, loadContacts, loadTemplates, loadInbox]) {
+    for (const load of [loadCodes, loadHome, loadSettings, loadSchedule, loadLogs, loadContacts, loadTemplates, loadInbox]) {
       void load().catch(() => {})
     }
   }
@@ -93,6 +97,7 @@ const NAV_ICONS = {
   calendar: IconCalendar,
   activity: IconActivity,
   settings: IconSettings,
+  home: IconHome,
 } as const
 
 /** The only two `NAV_ICONS` entries `runecircuit` redraws — a full icon-set
@@ -111,6 +116,28 @@ function Shell() {
   const toast = useToast()
   const [view, setView] = useState<ViewId>('compose')
   const [openAccountOnMount, setOpenAccountOnMount] = useState(false)
+
+  /**
+   * Nine tabs on a desktop, five on a phone — see `core/nav.ts`.
+   *
+   * The *screens* are identical either way. Only which of them the bar can
+   * reach directly changes, and Home is the door to the rest.
+   */
+  const narrow = useNarrow()
+  const navItems = narrow ? MOBILE_NAV : NAV
+
+  /**
+   * Which tab to light up.
+   *
+   * Usually `view` itself. The exception is a phone showing one of the five
+   * screens that live behind Home: `Ctrl+4` and the command palette can both
+   * still land there directly (deliberately — a keyboard on a tablet should
+   * not lose four shortcuts to a layout decision), and the bar has no tab of
+   * their own to highlight. Without this, pressing Ctrl+4 on a narrow window
+   * left every tab unlit, which reads as "nothing is selected" rather than as
+   * "you are somewhere under Home".
+   */
+  const currentTab: ViewId = narrow && HOME_SECTIONS.includes(view) ? 'home' : view
 
   const [collapsed, setCollapsed] = useState(
     () => localStorage.getItem(COLLAPSE_KEY) === '1',
@@ -347,8 +374,12 @@ function Shell() {
               <div className="brand__tagline">{t('app.tagline')}</div>
             </div>
           </div>
+          {/* The same list the loaded shell will draw, so the bar does not
+              change length the instant the app becomes ready — on a phone that
+              would be five tabs replaced by five different tabs, which reads
+              as a flicker rather than as loading finishing. */}
           <nav className="nav" aria-label="Primary">
-            {NAV.map((item) => {
+            {navItems.map((item) => {
               const Icon = NAV_ICONS[item.icon]
               return (
                 <span key={item.id} className="nav__item" aria-disabled="true">
@@ -382,7 +413,7 @@ function Shell() {
         </div>
 
         <nav className="nav" aria-label="Primary">
-          {NAV.map((item) => {
+          {navItems.map((item) => {
             const Icon =
               state.settings.visualStyle === 'runecircuit' && (item.icon === 'mail' || item.icon === 'key')
                 ? RUNE_NAV_ICONS[item.icon]
@@ -396,7 +427,7 @@ function Shell() {
                    label would break the moment the app is read in one of the
                    other five languages. */
                 data-view={item.id}
-                aria-current={view === item.id ? 'page' : undefined}
+                aria-current={currentTab === item.id ? 'page' : undefined}
                 title={t(item.labelKey)}
                 onClick={() => {
                   setOpenAccountOnMount(false)
@@ -500,6 +531,24 @@ function Shell() {
           <Suspense fallback={<Skeleton shape="form" />}>
             <SettingsView openAccountOnMount={openAccountOnMount} />
           </Suspense>
+        ) : null}
+
+        {/* The phone hub. Guarded on `narrow` as well as on `view`, because a
+            window dragged wide while Home is open would otherwise leave the
+            user on a screen with no tab on the sidebar — Home is not one of
+            the nine. Falling back to Compose is the same landing the app
+            starts on. */}
+        {view === 'home' ? (
+          narrow ? (
+            <Suspense fallback={<Skeleton shape="list" rows={5} />}>
+              <HomeView onCompose={() => setView('compose')} armedCount={armedCount} />
+            </Suspense>
+          ) : (
+            <ComposeView
+              onGoToAccounts={goToAccounts}
+              onNavigate={(where) => (where === 'settings' ? goToAccounts() : setView(where))}
+            />
+          )
         ) : null}
       </main>
 

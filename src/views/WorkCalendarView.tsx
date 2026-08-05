@@ -1196,23 +1196,27 @@ export function WorkCalendarView({ onCompose }: { onCompose?: () => void } = {})
         />
 
         {/*
-          Said before anything else, because it is the answer to "I configured
-          this and nothing happened". Zero is where every install starts.
+          Only the positive case is announced now.
+
+          There used to be a companion banner for `users.length === 0`
+          explaining that no reminder uses this calendar yet and which switch
+          turns it on. It was accurate and it was in the way: zero is where
+          every install starts, so the first thing anyone ever saw on this
+          screen was two lines telling them the screen they had just opened
+          was not doing anything — above the calendar, on every visit, until
+          they happened to satisfy it. On a phone it pushed the month grid
+          itself below the fold.
+
+          The same instruction lives where it can be acted on, in the
+          recurrence editor's own switch, which is the thing the removed text
+          was directing people to anyway.
         */}
-        {users.length === 0 ? (
-          <div className="banner banner--info">
-            <IconCalendar size={16} />
-            <div>
-              <strong>{t('workcal.unusedTitle')}</strong>
-              <div>{t('workcal.unusedBody')}</div>
-            </div>
-          </div>
-        ) : (
+        {users.length > 0 ? (
           <div className="banner banner--success">
             <IconCalendar size={16} />
             <div>{t('workcal.usedBy', { n: users.length })}</div>
           </div>
-        )}
+        ) : null}
 
         <div className="list-pane workcal__panes">
           <Card>

@@ -29,7 +29,8 @@ export function createDesktopBridge(): PlatformBridge {
     onControlRequest: (handler) => api.onControlRequest(handler),
     respondToControl: (response) => api.respondToControl(response),
 
-    startPairingHost: (mode, pairId) => api.startPairingHost(mode, pairId),
+    startPairingHost: (mode, pairId, host) => api.startPairingHost(mode, pairId, host),
+    lanAddresses: () => api.lanAddresses(),
     stopPairingHost: () => api.stopPairingHost(),
     onPairingEvent: (handler) => api.onPairingEvent(handler),
     pairingJoinRequest: (url, body) => api.pairingJoinRequest(url, body),

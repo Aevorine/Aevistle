@@ -230,8 +230,24 @@ export interface PlatformBridge {
   // `fetch()` on a LAN address directly by `connect-src 'self'` — so this is
   // present on every platform bridge except the browser preview, which has no
   // trusted layer to relay through.
-  /** HOST: start a ~2-minute LAN pairing session and return the QR payload. `pairId` is required for `mode: 'ongoing'` — see `pairingServer.ts`. */
-  startPairingHost?(mode: PairMode, pairId?: string): Promise<PairingPayload>
+  /**
+   * HOST: start a ~2-minute LAN pairing session and return the QR payload.
+   * `pairId` is required for `mode: 'ongoing'` — see `pairingServer.ts`.
+   *
+   * `host` picks which of this machine's addresses to publish; omitted, the
+   * best-ranked one is used. See `lanAddresses`.
+   */
+  startPairingHost?(mode: PairMode, pairId?: string, host?: string): Promise<PairingPayload>
+  /**
+   * HOST: every address this machine could be reached at, best first.
+   *
+   * A desktop with a VPN client, a hypervisor or a container runtime installed
+   * holds several private addresses that look identical to the one the Wi-Fi
+   * card has, and only one of them is on the phone's network. The ranking in
+   * `pairingServer.ts` guesses; this is what lets the user see the guess and
+   * override it instead of reading a socket timeout on the other device.
+   */
+  lanAddresses?(): Promise<string[]>
   /** HOST: stop early. */
   stopPairingHost?(): Promise<void>
   /** HOST: listening/connected/expired/stopped/error, as they happen. */

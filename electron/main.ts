@@ -64,7 +64,7 @@ import {
   type ControlEndpoint,
   type ControlResponse,
 } from '../src/core/control'
-import { PairingServer } from './pairingServer'
+import { listLanIPv4, PairingServer } from './pairingServer'
 import type { PairingPayload, PairMode } from '../src/core/pairing'
 import { SyncServer } from './syncServer'
 import type { SyncListenerStatus, SyncServerResponse } from '../src/core/syncLoop'
@@ -956,7 +956,19 @@ function registerIpc(): void {
     desktopPrefs = next
     // Only written when it actually changes: this touches the registry on
     // Windows, and the renderer pushes prefs on every settings edit.
-    if (loginChanged && process.platform !== 'linux') {
+    //
+    // `app.isPackaged` is not a nicety here. Run from a checkout, `process
+    // .execPath` is `node_modules/electron/dist/electron.exe` and the app
+    // directory is an argument Electron only gets because npm passed it — so
+    // the login item Windows records is `electron.exe --hidden` with no app
+    // path at all. At the next boot that launches Electron's built-in
+    // "path-to-app" placeholder window instead of Aevistle: a stray window
+    // every morning, from a dev run months earlier, that looks nothing like
+    // this app and offers no way to work out what put it there.
+    //
+    // A development build has no business writing to the user's Run key at
+    // all. `clearDevLoginItem` below cleans up after the versions that did.
+    if (loginChanged && process.platform !== 'linux' && app.isPackaged) {
       try {
         app.setLoginItemSettings({
           openAtLogin: next.launchAtLogin,
@@ -1409,8 +1421,13 @@ function registerIpc(): void {
 
   ipcMain.handle(
     IPC.startPairingHost,
-    (_e, mode: PairMode, pairId?: string): Promise<PairingPayload> => pairingServer.start(mode, pairId),
+    (_e, mode: PairMode, pairId?: string, host?: string): Promise<PairingPayload> =>
+      pairingServer.start(mode, pairId, host),
   )
+  // Read fresh on every call rather than cached at startup: laptops join and
+  // leave networks, and a VPN going up or down rewrites this list without the
+  // app being told. A stale list would offer an address that is gone.
+  ipcMain.handle(IPC.lanAddresses, () => listLanIPv4())
   ipcMain.handle(IPC.stopPairingHost, () => pairingServer.stop())
   ipcMain.handle(IPC.pairingJoinRequest, (_e, url: string, body: unknown) =>
     pairingJoinRequest(url, body),
@@ -1610,11 +1627,45 @@ function guessMime(filePath: string): string {
 // Lifecycle
 // ---------------------------------------------------------------------------
 
+/**
+ * Undo the login item a development run should never have written.
+ *
+ * Versions before this one called `setLoginItemSettings` regardless of how the
+ * app was started, so anyone who turned "launch at login" on while running
+ * from a checkout has a `Run` entry pointing at
+ * `node_modules/electron/dist/electron.exe --hidden` — no app path, so every
+ * boot opens Electron's own "path-to-app" placeholder window. Turning the
+ * switch back off in a *packaged* build would not clear it: that build writes
+ * a different key (`electron.app.Aevistle`, from its own product name), and the
+ * dev one, `electron.app.Electron`, would sit there forever with nothing in any
+ * user interface that referred to it.
+ *
+ * So the cleanup has to happen from the same kind of process that made the
+ * mess. Restricted to unpackaged runs for exactly that reason — a packaged
+ * build calling this would clear its *own*, entirely legitimate entry and
+ * silently turn the feature off.
+ */
+function clearDevLoginItem(): void {
+  if (app.isPackaged || process.platform === 'linux') return
+  try {
+    if (!app.getLoginItemSettings().openAtLogin) return
+    app.setLoginItemSettings({ openAtLogin: false, args: [] })
+    console.warn(
+      '[aevistle] removed a login item left behind by a development run — ' +
+        'launch-at-login only applies to an installed build.',
+    )
+  } catch (error) {
+    console.error('[aevistle] could not clear the development login item:', error)
+  }
+}
+
 void app.whenReady().then(() => {
   // Before anything reads or writes: the user may have pointed the data folder
   // somewhere else, and loading state from the default folder first would show
   // them an empty app.
   dataFolderFellBack = initDataRoot().fellBack
+
+  clearDevLoginItem()
 
   // Now that `app.getLocale()` answers, the tray can be built in the OS
   // language straight away instead of flashing English until the window loads.

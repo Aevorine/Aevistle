@@ -255,6 +255,17 @@ export const IconFolder = (p: IconProps) => (
   </Svg>
 )
 
+/* The phone-only Home tab. A roof and a door rather than the more common
+   roof-only outline: at 17px the plain house silhouette is hard to tell from
+   the folder above it, and these two sit four tabs apart on the same bar. */
+export const IconHome = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M3.5 10.5 12 3.5l8.5 7" />
+    <path d="M5.5 9.2V19a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1V9.2" />
+    <path d="M9.8 20v-5.2h4.4V20" />
+  </Svg>
+)
+
 export const IconDatabase = (p: IconProps) => (
   <Svg {...p}>
     <ellipse cx="12" cy="6" rx="7.5" ry="3" />

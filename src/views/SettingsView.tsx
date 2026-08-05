@@ -15,15 +15,25 @@ import {
   useToast,
 } from '../components/ui'
 import {
+  IconAlert,
+  IconCalendar,
+  IconDatabase,
   IconDownload,
   IconExternal,
+  IconFileText,
   IconFolder,
+  IconGlobe,
+  IconInfo,
+  IconKey,
+  IconLink,
   IconMail,
   IconMonitor,
   IconMoon,
   IconPlus,
   IconRefresh,
+  IconSend,
   IconShield,
+  IconStar,
   IconSun,
   IconTrash,
 } from '../components/icons'
@@ -35,6 +45,8 @@ import { ScheduleTransferCard } from './ScheduleTransferCard'
 import { ControlCard } from './ControlCard'
 import { CalendarSubscribeCard } from './CalendarSubscribeCard'
 import { SectionNav } from '../components/SectionNav'
+import { SettingsSection } from '../components/SettingsSection'
+import { useNarrow } from '../components/useNarrow'
 import { groupAccounts, knownGroups } from '../core/accounts'
 import { useApp } from '../state/AppState'
 import { LOCALES, useI18n, type TranslationKey } from '../i18n'
@@ -128,6 +140,17 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
   } = useApp()
 
   const { t, formatDateTime } = useI18n()
+
+  /**
+   * Phone layout is a different structure, not a restyle — see
+   * `components/SettingsSection.tsx`. Everything below renders identically in
+   * both; only the wrapper decides whether a section is a card on the page or
+   * a row that opens a dialog.
+   */
+  const narrow = useNarrow()
+
+  /** Passed to every section so the dialog's close button is translated once, here, rather than sixteen times. */
+  const closeLabel = t('common.close')
 
   /**
    * The jump bar's entries.
@@ -318,11 +341,16 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
 
   return (
     <div className="view view--settings">
-      {/* A grid, not a column. Fifteen cards stacked one per row is a ribbon
-          of settings down the middle of a 2560px monitor with nothing either
-          side of it; the anchor markers span the full width so the section
-          nav still lands on the right place. */}
-      <div className="view__inner view__inner--grid">
+      {/* A grid, not a column — on a desktop. Sixteen cards stacked one per row
+          is a ribbon of settings down the middle of a 2560px monitor with
+          nothing either side of it; the anchor markers span the full width so
+          the section nav still lands on the right place.
+
+          On a phone the same grid would be one column anyway, and what it
+          holds there is not cards but rows (see `SettingsSection`), which want
+          to sit flush against each other as a single list rather than floating
+          apart with card gaps between them. `--list` is that difference. */}
+      <div className={`view__inner ${narrow ? 'view__inner--list' : 'view__inner--grid'}`}>
         <PageHead title={t('settings.title')} subtitle={t('settings.subtitle')} />
 
         {/* Top of the screen, not tucked into the data card: an app that came
@@ -336,15 +364,26 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
           </Banner>
         ) : null}
 
-        {/* Nine cards and counting. The alternative to a jump bar is tabs, and
-            tabs hide settings behind a guess about which one they are under.
-            The list itself is built once per language change, above — written
+        {/* The jump bar, on wide windows only.
+
+            The alternative to it there is tabs, and tabs hide settings behind a
+            guess about which one they are under. On a phone it is neither: the
+            sections are already a list of rows, so a strip of thirteen labels
+            pinned above them is a second index of the same thing, scrolling
+            sideways, eating the top of a screen that has none to spare. The
+            list itself is built once per language change, above — written
             inline it was a new array on every render, and `SectionNav` keys an
             IntersectionObserver over eight elements on exactly that value. */}
-        <SectionNav sections={navSections} />
+        {narrow ? null : <SectionNav sections={navSections} />}
 
         {/* --- accounts ---------------------------------------------------- */}
-        <div id="set-accounts" className="settings-section" />
+        <SettingsSection
+          id="set-accounts"
+          label={t('account.title')}
+          icon={<IconMail size={17} />}
+          narrow={narrow}
+          closeLabel={closeLabel}
+        >
         <Card flush>
           <CardHeader
             title={t('account.title')}
@@ -446,34 +485,94 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
             ])
           )}
         </Card>
+        </SettingsSection>
 
         {/* --- data folder --------------------------------------------------
             Directly under Accounts on purpose. Where your data lives is a
             decision people want to make early and revisit rarely, and burying
             it under six panels of preferences is why it gets missed. */}
-        <div id="set-data" className="settings-section" />
-        <DataFolderCard />
+        <SettingsSection
+          id="set-data"
+          label={t('data.title')}
+          icon={<IconFolder size={17} />}
+          narrow={narrow}
+          closeLabel={closeLabel}
+        >
+          <DataFolderCard />
+        </SettingsSection>
 
-        {/* --- updates ----------------------------------------------------- */}
-        <div id="set-backup" className="settings-section" />
-        <BackupCard />
-        {/* Next to the backup card because they answer neighbouring questions,
-            and deliberately separate because they are not the same one: a
-            backup restores this install, this moves reminders to another. */}
-        <ScheduleTransferCard />
-        {/* The offline fallback for device pairing — same file shape as the
-            backup above, scoped and PIN-encrypted. See `core/pairingFile.ts`. */}
-        <PairingFileCard />
+        {/* --- backup, transfer, pairing file -------------------------------
+            Three neighbours, three sections. They used to share one anchor,
+            which was fine when the anchor's only job was to be scrolled to and
+            wrong the moment it became a row someone taps: "Backup" opening a
+            dialog that also contains reminder transfer and encrypted pairing
+            files is a row that lies about what is behind it. They answer
+            neighbouring questions and they are not the same question — a
+            backup restores *this* install, a transfer moves reminders to
+            another, and a pairing file is the offline fallback for LAN
+            pairing (see `core/pairingFile.ts`). */}
+        <SettingsSection
+          id="set-backup"
+          label={t('backup.title')}
+          icon={<IconDatabase size={17} />}
+          narrow={narrow}
+          closeLabel={closeLabel}
+        >
+          <BackupCard />
+        </SettingsSection>
+
+        <SettingsSection
+          id="set-transfer"
+          label={t('transfer.title')}
+          icon={<IconSend size={17} />}
+          narrow={narrow}
+          closeLabel={closeLabel}
+        >
+          <ScheduleTransferCard />
+        </SettingsSection>
+
+        <SettingsSection
+          id="set-pairingfile"
+          label={t('pairing.file.export')}
+          icon={<IconKey size={17} />}
+          narrow={narrow}
+          closeLabel={closeLabel}
+        >
+          <PairingFileCard />
+        </SettingsSection>
 
         {/* The live, LAN-paired counterpart to the file above — where a pairing
             is started from either end, and where the devices it produced are
             managed. See `core/pairedDevices.ts` and `core/syncLoop.ts`. */}
-        <div id="set-devices" className="settings-section" />
-        <DevicesCard />
+        <SettingsSection
+          id="set-devices"
+          label={t('devices.title')}
+          icon={<IconLink size={17} />}
+          narrow={narrow}
+          closeLabel={closeLabel}
+        >
+          <DevicesCard />
+        </SettingsSection>
 
-        <div id="set-control" className="settings-section" />
-        <ControlCard />
-        <CalendarSubscribeCard />
+        <SettingsSection
+          id="set-control"
+          label={t('control.title')}
+          icon={<IconGlobe size={17} />}
+          narrow={narrow}
+          closeLabel={closeLabel}
+        >
+          <ControlCard />
+        </SettingsSection>
+
+        <SettingsSection
+          id="set-calendarsub"
+          label={t('cal.subscribe.toggle')}
+          icon={<IconCalendar size={17} />}
+          narrow={narrow}
+          closeLabel={closeLabel}
+        >
+          <CalendarSubscribeCard />
+        </SettingsSection>
 
         {/* The work calendar used to be a card here, and its anchor outlived
             it. Removed rather than turned into a link to the calendar tab:
@@ -485,11 +584,24 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
             becomes unreachable: the calendar is the seventh sidebar tab and
             Ctrl+7. */}
 
-        <div id="set-update" className="settings-section" />
-        <UpdateCard />
+        <SettingsSection
+          id="set-update"
+          label={t('update.title')}
+          icon={<IconDownload size={17} />}
+          narrow={narrow}
+          closeLabel={closeLabel}
+        >
+          <UpdateCard />
+        </SettingsSection>
 
         {/* --- appearance -------------------------------------------------- */}
-        <div id="set-appearance" className="settings-section" />
+        <SettingsSection
+          id="set-appearance"
+          label={t('settings.appearance')}
+          icon={<IconSun size={17} />}
+          narrow={narrow}
+          closeLabel={closeLabel}
+        >
         <Card>
           <div className="card__body">
             <div className="section-label">{t('settings.appearance')}</div>
@@ -649,8 +761,16 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
           </div>
         </Card>
 
+        </SettingsSection>
+
         {/* --- sending ----------------------------------------------------- */}
-        <div id="set-sending" className="settings-section" />
+        <SettingsSection
+          id="set-sending"
+          label={t('settings.sending')}
+          icon={<IconSend size={17} />}
+          narrow={narrow}
+          closeLabel={closeLabel}
+        >
         <Card>
           <div className="card__body">
             <div className="section-label">{t('settings.sending')}</div>
@@ -747,7 +867,15 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
             engine as everything else — there is no digest timer anywhere in
             this application, and adding one would give it two answers to the
             question that engine exists to own. */}
-        <div id="set-digest" className="settings-section" />
+        </SettingsSection>
+
+        <SettingsSection
+          id="set-digest"
+          label={t('settings.digest')}
+          icon={<IconFileText size={17} />}
+          narrow={narrow}
+          closeLabel={closeLabel}
+        >
         <Card>
           <div className="card__body">
             <div className="section-label">{t('settings.digest')}</div>
@@ -815,7 +943,15 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
             screen. Mail that creates itself out of sight is the mirror image
             of mail that silently fails to go, and this app exists to have
             neither. */}
-        <div id="set-greetings" className="settings-section" />
+        </SettingsSection>
+
+        <SettingsSection
+          id="set-greetings"
+          label={t('settings.greetings')}
+          icon={<IconStar size={17} />}
+          narrow={narrow}
+          closeLabel={closeLabel}
+        >
         <Card>
           <div className="card__body">
             <div className="section-label">{t('settings.greetings')}</div>
@@ -950,7 +1086,15 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
         </Card>
 
         {/* --- notifications & system -------------------------------------- */}
-        <div id="set-notifications" className="settings-section" />
+        </SettingsSection>
+
+        <SettingsSection
+          id="set-notifications"
+          label={t('settings.notifications')}
+          icon={<IconAlert size={17} />}
+          narrow={narrow}
+          closeLabel={closeLabel}
+        >
         <Card>
           <div className="card__body">
             <div className="section-label">{t('settings.notifications')}</div>
@@ -1070,7 +1214,15 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
         </Card>
 
         {/* --- privacy ----------------------------------------------------- */}
-        <div id="set-privacy" className="settings-section" />
+        </SettingsSection>
+
+        <SettingsSection
+          id="set-privacy"
+          label={t('settings.privacy')}
+          icon={<IconShield size={17} />}
+          narrow={narrow}
+          closeLabel={closeLabel}
+        >
         <Card>
           <div className="card__body">
             <div className="section-label">{t('settings.privacy')}</div>
@@ -1217,7 +1369,15 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
         </Card>
 
         {/* --- about ------------------------------------------------------- */}
-        <div id="set-about" className="settings-section" />
+        </SettingsSection>
+
+        <SettingsSection
+          id="set-about"
+          label={t('settings.about')}
+          icon={<IconInfo size={17} />}
+          narrow={narrow}
+          closeLabel={closeLabel}
+        >
         <Card>
           <div className="card__body">
             <div className="section-label">{t('settings.about')}</div>
@@ -1256,6 +1416,7 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
             </div>
           </div>
         </Card>
+        </SettingsSection>
       </div>
 
       <AccountDialog
@@ -1405,7 +1566,36 @@ function UpdateCard() {
       })
       if (!ok) return
     }
-    void bridge.installUpdate(progress.path)
+    /*
+     * Awaited, not fire-and-forget.
+     *
+     * On the desktop this hands off to an installer and the app is about to be
+     * replaced, so a rejection had nowhere useful to go and `void` was
+     * harmless. Android added a failure that is both common and completely
+     * recoverable: "install unknown apps" is a per-app toggle with no request
+     * dialog, and without it the handoff fails. The native side opens that
+     * settings screen on the way out, but a button that silently does nothing
+     * while a settings page appears is a button the user will not connect to
+     * the page — so it has to say what it wants.
+     */
+    try {
+      await bridge.installUpdate(progress.path)
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e)
+      toast.push(
+        message === 'ANDROID_UNKNOWN_SOURCES'
+          ? {
+              // `info`, not `error`: nothing went wrong, there is a step left.
+              // The settings screen it names is already on top of this toast,
+              // so the wording has to still make sense when the user comes
+              // back from it a minute later.
+              tone: 'info',
+              title: t('update.installNeedsPermission'),
+              detail: t('update.installNeedsPermissionHint'),
+            }
+          : { tone: 'error', title: t('update.failed'), detail: message },
+      )
+    }
   }
 
   return (
@@ -1508,8 +1698,17 @@ function UpdateCard() {
               </Button>
             </div>
 
+            {/* Three outcomes, not two. Android can install in-app now, but it
+                does not do what the desktop does: the app is not closed and
+                replaced by an installer, Android puts its own confirmation
+                screen up. Telling a phone user "Aevistle closes so the
+                installer can replace it" describes something they will not
+                see, and the sentence that matters to them — that their
+                reminders survive — was in neither string. */}
             {canInstallHere ? (
-              <div className="update-meta">{t('update.installHint')}</div>
+              <div className="update-meta">
+                {t(bridge?.platform === 'android' ? 'update.installHintAndroid' : 'update.installHint')}
+              </div>
             ) : (
               <div className="update-meta">{t('update.androidHint')}</div>
             )}

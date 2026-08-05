@@ -1248,6 +1248,83 @@ public class AevistleNativePlugin extends Plugin {
     }
 
     // -----------------------------------------------------------------------
+    // In-app update
+    //
+    // The check itself has always worked here — `FeedFetcher` relays it past
+    // the WebView's `connect-src 'self'` — but there was nothing to *do* with
+    // the answer: `downloadUpdate` and `installUpdate` existed only on the
+    // desktop bridge, so `canInstallHere` in `SettingsView` was false and the
+    // phone offered a link to a web page. See `UpdateInstaller` for why doing
+    // it here beats sending someone to the browser.
+    // -----------------------------------------------------------------------
+
+    @PluginMethod
+    public void downloadUpdate(final PluginCall call) {
+        final String url = call.getString("url");
+        final String name = call.getString("name", "aevistle.apk");
+        final long size = call.getLong("sizeBytes", 0L);
+        if (url == null || url.isEmpty()) {
+            call.reject("url is required");
+            return;
+        }
+        io.execute(() -> {
+            try {
+                UpdateInstaller.Downloaded result = UpdateInstaller.download(
+                        getContext(), url, name, size,
+                        (received, total) -> {
+                            // Same channel and shape as the desktop's
+                            // `IPC.updateProgress`, so `SettingsView`'s
+                            // progress bar needs no platform branch.
+                            JSObject progress = new JSObject();
+                            progress.put("receivedBytes", received);
+                            progress.put("totalBytes", total);
+                            progress.put("done", false);
+                            notifyListeners("updateProgress", progress);
+                        });
+
+                JSObject done = new JSObject();
+                done.put("receivedBytes", result.receivedBytes);
+                done.put("totalBytes", result.totalBytes);
+                done.put("done", true);
+                done.put("path", result.path);
+                done.put("checksumVerified", result.checksumVerified);
+                notifyListeners("updateProgress", done);
+                call.resolve(done);
+            } catch (Exception e) {
+                call.reject(e.getMessage() == null ? e.toString() : e.getMessage(), e);
+            }
+        });
+    }
+
+    @PluginMethod
+    public void installUpdate(PluginCall call) {
+        String path = call.getString("path");
+        if (path == null || path.isEmpty()) {
+            call.reject("path is required");
+            return;
+        }
+        try {
+            UpdateInstaller.install(getContext(), path);
+            call.resolve();
+        } catch (IllegalStateException e) {
+            // The one failure with a route out of it. Android 8+ makes
+            // "install from this app" a settings toggle with no dialog to
+            // request, so the honest move is to open the exact screen that
+            // grants it rather than reject with a message the user cannot act
+            // on. The rejection code is what `bridge-android.ts` matches on.
+            try {
+                getContext().startActivity(UpdateInstaller.unknownSourcesIntent(getContext()));
+            } catch (Exception ignored) {
+                // An OEM build without that settings screen. Nothing further to
+                // try; the rejection below still explains what is missing.
+            }
+            call.reject("unknown-sources");
+        } catch (Exception e) {
+            call.reject(e.getMessage() == null ? e.toString() : e.getMessage(), e);
+        }
+    }
+
+    // -----------------------------------------------------------------------
     // Data folder
     // -----------------------------------------------------------------------
 

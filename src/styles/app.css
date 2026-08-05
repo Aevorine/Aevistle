@@ -243,7 +243,7 @@ textarea {
   position: absolute;
   inset-inline-start: 0;
   top: 50%;
-  translate: 0 -50%;
+  transform: translateY(-50%);
   width: 3px;
   height: 18px;
   border-radius: var(--r-full);
@@ -862,7 +862,25 @@ textarea {
      the warm page of `paper`. `--knob` is the lightest thing each palette has. */
   background: var(--knob);
   box-shadow: var(--shadow-sm);
-  transition: translate var(--dur) var(--ease);
+  /*
+   * `transform`, not the standalone `translate` property.
+   *
+   * The individual transform properties (`translate` / `rotate` / `scale`) are
+   * Transforms Level 2 and did not ship until Chromium 104. Android System
+   * WebView is updated through the Play Store and lags badly on OEM builds, so
+   * on a phone carrying an older WebView the declaration below was simply
+   * dropped — while `background` on the track, one rule up, applied fine.
+   *
+   * That produced the worst possible failure for a toggle: the track changed
+   * colour, so the control clearly reacted to the tap, but the knob never
+   * left its socket. Every switch in Settings looked broken *and* looked like
+   * it had half-worked, which reads as "the setting did not save".
+   *
+   * Level 1 `transform` is supported by every WebView that can run this app at
+   * all. Nothing here needs the composability Level 2 buys, so there is no
+   * trade — see the sibling conversions in the toast, modal and button rules.
+   */
+  transition: transform var(--dur) var(--ease);
 }
 .switch input {
   position: absolute;
@@ -874,10 +892,10 @@ textarea {
   background: var(--accent);
 }
 .switch input:checked + .switch__control::after {
-  translate: 16px 0;
+  transform: translateX(16px);
 }
 [dir="rtl"] .switch input:checked + .switch__control::after {
-  translate: -16px 0;
+  transform: translateX(-16px);
 }
 .switch input:focus-visible + .switch__control {
   outline: 2px solid var(--accent);
@@ -1359,10 +1377,10 @@ textarea {
     border-color var(--dur-fast) var(--ease),
     color var(--dur-fast) var(--ease),
     box-shadow var(--dur-fast) var(--ease),
-    translate var(--dur-fast) var(--ease);
+    transform var(--dur-fast) var(--ease);
 }
 .btn:active:not(:disabled) {
-  translate: 0 1px;
+  transform: translateY(1px);
 }
 .btn:disabled {
   opacity: 0.5;
@@ -1855,13 +1873,11 @@ textarea {
 @keyframes toast-in {
   from {
     opacity: 0;
-    translate: 0 12px;
-    scale: 0.98;
+    transform: translateY(12px) scale(0.98);
   }
   to {
     opacity: 1;
-    translate: 0 0;
-    scale: 1;
+    transform: translateY(0) scale(1);
   }
 }
 
@@ -1992,13 +2008,11 @@ textarea {
 @keyframes modal-in {
   from {
     opacity: 0;
-    translate: 0 10px;
-    scale: 0.985;
+    transform: translateY(10px) scale(0.985);
   }
   to {
     opacity: 1;
-    translate: 0 0;
-    scale: 1;
+    transform: translateY(0) scale(1);
   }
 }
 
@@ -2021,10 +2035,10 @@ textarea {
   background-clip: content-box;
   transition:
     border-color var(--dur-fast) var(--ease),
-    scale var(--dur-fast) var(--ease);
+    transform var(--dur-fast) var(--ease);
 }
 .swatch:hover {
-  scale: 1.08;
+  transform: scale(1.08);
 }
 .swatch[aria-pressed="true"] {
   border-color: currentColor;
@@ -2263,7 +2277,7 @@ textarea {
   position: absolute;
   inset-inline-start: 11px;
   top: 50%;
-  translate: 0 -50%;
+  transform: translateY(-50%);
   color: var(--text-3);
   pointer-events: none;
 }
@@ -2539,6 +2553,40 @@ textarea {
     bottom: calc(var(--sp-4) + 64px);
     max-width: none;
   }
+
+  /*
+   * Explanatory prose stands down on a phone.
+   *
+   * Every one of these strings earns its place on a 2560px desktop, where it
+   * sits in the empty column beside the control it describes and costs
+   * nothing. On a 360px phone there is no empty column: the description wraps
+   * to three lines *under* the switch, so a settings panel of eight switches
+   * becomes a page of thirty-two lines of which eight are the actual controls.
+   * The screen stops being a list of things you can change and becomes an
+   * article about them, and the control you came for is four scrolls down.
+   *
+   * What is hidden is exactly the text that explains a control the user can
+   * see and operate without it:
+   *
+   *   - `.switch__desc` — the sentence under a toggle's title.
+   *   - `.field__hint` — guidance below an input. `.field__labelhint` is left
+   *     alone: it shares the label's line and costs no vertical space, which
+   *     is the whole reason it exists (see `Field` in `ui.tsx`).
+   *   - `.banner--info` — the "here is how this screen works" notes. Only this
+   *     tone. `--warning`, `--danger` and `--success` all report something
+   *     that has happened or is wrong, and a phone is *more* likely to need
+   *     those than a desktop, not less.
+   *
+   * `--keep` is the deliberate exception, for the handful of hints that are
+   * diagnostic rather than explanatory — text that is the only place a fact
+   * appears, like which LAN address a pairing code published. Hiding one of
+   * those does not remove an explanation, it removes evidence.
+   */
+  .switch__desc:not(.switch__desc--keep),
+  .field__hint:not(.field__hint--keep),
+  .banner--info:not(.banner--keep) {
+    display: none;
+  }
 }
 
 /* ==========================================================================
@@ -2581,11 +2629,11 @@ textarea {
 @keyframes sendresult-in {
   from {
     opacity: 0;
-    translate: 0 8px;
+    transform: translateY(8px);
   }
   to {
     opacity: 1;
-    translate: 0 0;
+    transform: translateY(0);
   }
 }
 
@@ -4938,6 +4986,221 @@ textarea {
 .view__inner--grid > .banner,
 .view__inner--grid > .settingsnav {
   grid-column: 1 / -1;
+}
+
+/* --- settings as a list of rows (phone layout) ---------------------------- */
+
+/**
+ * The phone counterpart to the grid above — see `components/SettingsSection.tsx`
+ * for why the structure changes rather than the styling.
+ *
+ * A plain column, not a grid: every child is either the heading, a banner, or
+ * one full-width row, and there is never a second column to place anything in.
+ */
+.view__inner--list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+/* The anchors are still emitted here (measuring scripts find sections by them)
+   but nothing scrolls to them on a phone, so they must not open a gap in a
+   list whose rows are meant to touch. */
+.view__inner--list > .settings-section {
+  height: 0;
+}
+
+.view__inner--list > .page-head,
+.view__inner--list > .banner {
+  margin-bottom: var(--sp-3);
+}
+
+/**
+ * One row of the settings list.
+ *
+ * Sized to the platform touch target rather than to its text: 56px clears
+ * both Android's 48dp minimum and iOS's 44pt with room for a fingertip that
+ * is not aimed precisely, which is the normal case for a list you are
+ * scrolling past. The chevron is not decoration — it is the only thing
+ * distinguishing "this opens something" from "this is a heading", and the
+ * rows below it look exactly like headings without it.
+ */
+.settingsrow {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  min-height: 56px;
+  padding: var(--sp-3) var(--sp-1);
+  border: 0;
+  /* Hairline between rows, none under the last: a trailing rule under the
+     final row reads as "there is more below", on the one screen where being
+     wrong about that means scrolling for nothing. */
+  border-bottom: 1px solid var(--border);
+  background: none;
+  color: var(--text-1);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease);
+}
+.settingsrow:last-of-type {
+  border-bottom: 0;
+}
+.settingsrow:hover,
+.settingsrow:focus-visible {
+  background: var(--surface-2);
+}
+.settingsrow:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.settingsrow__icon {
+  display: flex;
+  flex: none;
+  color: var(--text-3);
+}
+.settingsrow__label {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--text-base);
+  font-weight: 600;
+  /* Long labels in Russian and Arabic wrap rather than pushing the chevron off
+     the row — `flex: none` on the chevron alone would let this squeeze it. */
+  overflow-wrap: anywhere;
+}
+.settingsrow__chevron {
+  flex: none;
+  color: var(--text-3);
+}
+/* The chevron points the way the language reads. */
+[dir="rtl"] .settingsrow__chevron {
+  transform: scaleX(-1);
+}
+
+/* --- the phone Home hub --------------------------------------------------- */
+
+/**
+ * Five tiles, one column.
+ *
+ * A two-column grid was the first instinct and is wrong for five items: the
+ * last one sits alone on its own row looking like a mistake, and halving the
+ * width halves the room for labels that are two words in English and rather
+ * more in Russian («Рабочий календарь») and Arabic. One column also means each
+ * tile is a full-width tap target, which on the screen whose entire job is
+ * "get me to one of five places" is worth more than density.
+ */
+.hometiles {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+}
+
+.hometile {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  min-height: 64px;
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface-1);
+  color: var(--text-1);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
+}
+.hometile:hover,
+.hometile:focus-visible {
+  background: var(--surface-2);
+  border-color: var(--border-strong);
+}
+.hometile:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.hometile:active {
+  transform: translateY(1px);
+}
+.hometile__icon {
+  display: flex;
+  flex: none;
+  color: var(--accent);
+}
+.hometile__label {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--text-lg);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+/* Same shape and role as `.nav__badge`, which is what used to carry this count
+   on the schedule tab before that tab moved behind Home. Losing the count
+   entirely would have made "how many reminders are armed" a thing you could
+   only learn by opening the screen. */
+.hometile__badge {
+  flex: none;
+  min-width: 22px;
+  padding: 2px 7px;
+  border-radius: var(--r-full);
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: var(--text-sm);
+  font-weight: 700;
+  text-align: center;
+}
+.hometile__chevron {
+  flex: none;
+  color: var(--text-3);
+}
+[dir="rtl"] .hometile__chevron {
+  transform: scaleX(-1);
+}
+
+/**
+ * A section opened from the list.
+ *
+ * The card inside has already drawn its own frame, and a dialog that draws a
+ * second one around it puts two borders and two paddings between the edge of
+ * the screen and the first control — which on a 360px phone is most of the
+ * width gone before anything useful starts.
+ */
+.modal__body--settings {
+  padding: 0;
+}
+.modal__body--settings > .card {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: none;
+}
+
+/**
+ * A whole screen opened inside a dialog — the five behind Home.
+ *
+ * Those components are top-level views: each renders `.view`, which brings its
+ * own horizontal padding, and a `PageHead` that is `position: sticky` against
+ * the scroll container. Both are right on a tab and wrong here, where the
+ * dialog is already the padding and already has a title bar. So the body gives
+ * up its own padding and the screen inside gives up its heading — one title,
+ * one inset, one scroller.
+ */
+.modal__body--screen {
+  padding: 0;
+}
+.modal__body--screen > .view {
+  padding-top: 0;
+}
+/* The dialog header states which screen this is; the screen's own heading
+   would repeat it two lines lower, and its `subtitle` explains a screen the
+   user has just chosen by name. */
+.modal__body--screen .page-head {
+  display: none;
 }
 
 /* --- compose: three bands, message in the middle -------------------------- */
@@ -8048,20 +8311,17 @@ textarea {
 @keyframes seal-stamp {
   0% {
     opacity: 0;
-    translate: 0 12px;
-    scale: 0.9;
+    transform: translateY(12px) scale(0.9);
     box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent-classical-marker, var(--accent)) 0%, transparent);
   }
   45% {
     opacity: 1;
-    translate: 0 0;
-    scale: 1.06;
+    transform: translateY(0) scale(1.06);
     box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent-classical-marker, var(--accent)) 45%, transparent);
   }
   100% {
     opacity: 1;
-    translate: 0 0;
-    scale: 1;
+    transform: translateY(0) scale(1);
     box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent-classical-marker, var(--accent)) 0%, transparent);
   }
 }

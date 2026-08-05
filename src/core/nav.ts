@@ -28,6 +28,14 @@ export type ViewId =
   | 'workcal'
   | 'logs'
   | 'settings'
+  /**
+   * The phone-only hub. Deliberately absent from `NAV`: it is not a ninth
+   * screen competing with the others, it is a container for five of them that
+   * only exists where they will not fit across the bottom of the window. On a
+   * desktop there is no Home tab and nothing to reach one with, which is why it
+   * has no number here — see `MOBILE_NAV`.
+   */
+  | 'home'
 
 export interface NavItem {
   id: ViewId
@@ -43,6 +51,7 @@ export interface NavItem {
     | 'calendar'
     | 'activity'
     | 'settings'
+    | 'home'
 }
 
 export const NAV: NavItem[] = [
@@ -70,3 +79,48 @@ export const NAV: NavItem[] = [
  * rather than a tenth digit — which is worth knowing before adding one.
  */
 export const MAX_NAV_SHORTCUT = 9
+
+/**
+ * The five screens that move behind Home on a phone.
+ *
+ * Nine tabs do not fit across a 360px screen. They never did: the bottom bar
+ * had been a horizontal scroller since the calendar tab was added, which meant
+ * four of the nine were off-screen at any moment and the only clue was that the
+ * strip moved when you dragged it. A tab you have to *discover by scrolling a
+ * tab bar* is a tab most people never find.
+ *
+ * Which five: the ones you visit deliberately, when you have decided to do
+ * something, rather than the ones you check. Compose, verification codes, the
+ * inbox and Settings stay on the bar because they are the reflex actions —
+ * codes especially, which is the screen people open the app *for* on the days
+ * they open it in a hurry, and which is why it sits second in `NAV` too.
+ * Schedules, contacts, templates, the calendar and the log are all "I am going
+ * to go and organise something", and one extra tap to reach them costs nothing
+ * against four of them being invisible.
+ *
+ * Order matches `NAV` so the two never disagree about where things sit.
+ */
+export const HOME_SECTIONS: ViewId[] = [
+  'schedule',
+  'contacts',
+  'templates',
+  'workcal',
+  'logs',
+]
+
+/**
+ * The bottom bar on a phone: four reflexes and the door to everything else.
+ *
+ * Five items at ~64px each fit a 360px screen without scrolling, which is the
+ * entire point — see `HOME_SECTIONS`. Not derived from `NAV` by filtering,
+ * because Home is not in `NAV` and the order here is a separate decision:
+ * Home sits in the middle, under the thumb, because it is the one that leads
+ * somewhere rather than doing something.
+ */
+export const MOBILE_NAV: NavItem[] = [
+  { id: 'compose', labelKey: 'nav.compose', icon: 'mail' },
+  { id: 'codes', labelKey: 'nav.codes', icon: 'key' },
+  { id: 'home', labelKey: 'nav.home', icon: 'home' },
+  { id: 'inbox', labelKey: 'nav.inbox', icon: 'inbox' },
+  { id: 'settings', labelKey: 'nav.settings', icon: 'settings' },
+]
