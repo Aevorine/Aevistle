@@ -105,6 +105,37 @@ réellement, et les deux choses qui restent volontairement en arrière →
 Trente-six entrées comme celles-ci, chacune avec le raisonnement derrière →
 **[FEATURES.md](FEATURES.md)**
 
+## Nouveautés de la 0.1.17
+
+**N’importe quels deux appareils peuvent désormais s’appairer, dans les deux
+sens.** Les applications téléphone et tablette peuvent afficher un code QR
+d’appairage, et plus seulement le lire — téléphone à téléphone, tablette à
+tablette et tablette à téléphone fonctionnent sans qu’un ordinateur ait à
+présenter le code. Android répond aussi à la synchronisation continue, au lieu
+de seulement l’engager.
+
+- **Le code QR et la caméra apparaissaient hors de votre champ de vision.**
+  « Appairer un nouvel appareil » ajoutait un panneau *après* la liste des
+  appareils, ce qui sur un téléphone se trouve sous la ligne de flottaison — la
+  caméra s’allumait hors écran. Les trois panneaux d’appairage sont maintenant
+  des boîtes de dialogue plein écran, avec le bouton de fermeture qui leur
+  manquait.
+- **Les tablettes recevaient la disposition de bureau.** La bascule
+  téléphone/bureau était une requête à 760px et une tablette fait 800px en mode
+  portrait : les Réglages affichaient une grille de cartes au lieu de lignes à
+  ouvrir. La structure demande désormais « fenêtre étroite **ou** plateforme
+  tactile » ; la barre d’onglets reste guidée par la largeur, donc une tablette
+  conserve ses neuf onglets.
+- **« Publier le calendrier de travail » ouvrait un écran vide** sous Android.
+  Il explique maintenant pourquoi un téléphone ne peut pas maintenir cette
+  écoute, et propose un export `.ics` — ce qui répare aussi l’export d’une
+  sauvegarde, d’un fichier de transfert de rappels et d’un fichier d’appairage
+  chiffré depuis un téléphone, tous bloqués de la même façon.
+
+La poignée de main d’appairage n’est pas du code neuf : seule la socket est
+native, et `core/pairing.ts` détient toujours l’unique implémentation de
+l’échange de clés.
+
 ## Nouveautés de la 0.1.16
 
 Réparations de la mise en page mobile introduite par la 0.1.15 — aucune

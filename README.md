@@ -110,6 +110,29 @@ things that deliberately stay behind → **[docs/PRIVACY.md](docs/PRIVACY.md)**.
 Thirty-six of these, each with the reasoning behind it →
 **[docs/FEATURES.md](docs/FEATURES.md)**
 
+## New in 0.1.17
+
+**Any two devices can pair now, from either end.** The phone and tablet apps can
+show a pairing QR code, not just read one — so phone-to-phone, tablet-to-tablet
+and tablet-to-phone work without a computer in the room to hold the code.
+Android answers ongoing sync too, rather than only starting it.
+
+- **The QR code and the camera appeared where you were not looking.** Tapping
+  "Pair a new device" added a panel *after* the device list, which on a phone is
+  below the fold — the camera switched on off-screen. All three pairing panels
+  are dialogs now, full screen, each with the close button they never had.
+- **Tablets were getting the desktop layout.** The phone/desktop switch was a
+  760px query and a tablet is 800px in portrait, so Settings rendered a grid of
+  cards instead of rows that open. Structure now asks "narrow window *or* touch
+  platform"; the tab bar still goes by width, so a tablet keeps all nine tabs.
+- **"Publish the working calendar" opened an empty screen** on Android. It now
+  says why a phone cannot hold that listener open, and offers a `.ics` export
+  instead — which also fixes exporting a backup, a reminder transfer file and an
+  encrypted pairing file from a phone, all blocked the same way.
+
+The pairing handshake is not new code: the socket is the only native part, and
+`core/pairing.ts` still holds the one implementation of the key exchange.
+
 ## New in 0.1.16
 
 Repairs to the phone layout 0.1.15 introduced — no feature changed, and nothing

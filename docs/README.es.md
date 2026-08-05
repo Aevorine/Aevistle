@@ -103,6 +103,36 @@ que se quedan a propósito → **[PRIVACY.md](PRIVACY.md)**.
 Treinta y seis entradas como estas, cada una con el razonamiento detrás →
 **[FEATURES.md](FEATURES.md)**
 
+## Novedades de 0.1.17
+
+**Ahora dos dispositivos cualesquiera pueden emparejarse, desde cualquiera de
+los dos lados.** Las aplicaciones de teléfono y tableta pueden mostrar un código
+QR de emparejamiento, no solo leerlo: teléfono con teléfono, tableta con tableta
+y tableta con teléfono funcionan sin un ordenador que sostenga el código.
+Android también responde a la sincronización continua, en lugar de solo
+iniciarla.
+
+- **El código QR y la cámara aparecían donde no estabas mirando.** «Emparejar un
+  nuevo dispositivo» añadía un panel *después* de la lista de dispositivos, que
+  en un teléfono queda fuera de la pantalla: la cámara se encendía sin verse.
+  Los tres paneles de emparejamiento son ahora diálogos a pantalla completa, con
+  el botón de cerrar que nunca tuvieron.
+- **A las tabletas se les daba la disposición de escritorio.** El cambio entre
+  teléfono y escritorio era una consulta de 760px y una tableta mide 800px en
+  vertical, así que Ajustes mostraba una cuadrícula de tarjetas en vez de filas
+  que se abren. Ahora la estructura pregunta «ventana estrecha **o** plataforma
+  táctil»; la barra de pestañas sigue guiándose por el ancho, así que una
+  tableta conserva sus nueve pestañas.
+- **«Publicar el calendario laboral» abría una pantalla vacía** en Android.
+  Ahora explica por qué un teléfono no puede mantener esa escucha y ofrece una
+  exportación `.ics` — lo que además arregla exportar una copia de seguridad, un
+  archivo de transferencia de recordatorios y un archivo de emparejamiento
+  cifrado desde un teléfono, los tres bloqueados por lo mismo.
+
+El apretón de manos del emparejamiento no es código nuevo: solo el socket es
+nativo, y `core/pairing.ts` sigue teniendo la única implementación del
+intercambio de claves.
+
 ## Novedades de 0.1.16
 
 Reparaciones de la disposición para teléfono que introdujo 0.1.15 — ninguna
