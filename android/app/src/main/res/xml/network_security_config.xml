@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+
+    <!--
+        The default for everything: HTTPS only, and trusted against the system
+        CA store alone, so a user-installed CA cannot be used to read what this
+        app fetches.
+    -->
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+
+    <!--
+        Pairing and sync speak plain `http://` to the other device: no
+        certificate exists for an address the user's router handed out this
+        morning, and the payload is separately encrypted anyway
+        (`core/pairingCrypto.ts`).
+
+        This block is as close as Android gets to saying "the LAN, and nothing
+        else". A `domain` rule matches a hostname either exactly or by
+        dot-boundary suffix; there is no CIDR form and no prefix form. So
+        10/8, 172.16/12, 192.168/16 and 169.254/16 — where a peer's numeric
+        address actually lives — cannot be written here at all, at any length.
+        `.local` (RFC 6762) and `home.arpa` (RFC 8375) can be, and are
+        link-scoped by definition, which is why the carve-out is spelled in
+        namespaces rather than ranges.
+
+        A peer reached by its numeric address matches nothing here and falls
+        back to the deny above. That range check has to live in Java, on the
+        resolved address, the way `electron/main.ts`'s `isLanRelayUrl` does it
+        on desktop — it is the only place it can be exact.
+    -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">local</domain>
+        <domain includeSubdomains="true">home.arpa</domain>
+        <domain includeSubdomains="false">localhost</domain>
+        <domain includeSubdomains="false">ip6-localhost</domain>
+        <domain includeSubdomains="false">127.0.0.1</domain>
+    </domain-config>
+
+</network-security-config>

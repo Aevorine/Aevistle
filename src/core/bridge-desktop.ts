@@ -29,6 +29,17 @@ export function createDesktopBridge(): PlatformBridge {
     onControlRequest: (handler) => api.onControlRequest(handler),
     respondToControl: (response) => api.respondToControl(response),
 
+    startPairingHost: (mode, pairId) => api.startPairingHost(mode, pairId),
+    stopPairingHost: () => api.stopPairingHost(),
+    onPairingEvent: (handler) => api.onPairingEvent(handler),
+    pairingJoinRequest: (url, body) => api.pairingJoinRequest(url, body),
+
+    applySyncListener: (enabled) => api.applySyncListener(enabled),
+    syncRequest: (url, body) => api.syncRequest(url, body),
+    onSyncServerRequest: (handler) => api.onSyncServerRequest(handler),
+    respondToSyncServer: (response) => api.respondToSyncServer(response),
+    getSyncSecret: (keyRef) => api.getSyncSecret(keyRef),
+
     pickFiles: () => api.pickFiles(),
     snapshotAttachments: (attachments, jobId) => api.snapshotAttachments(attachments, jobId),
     revealPath: (path) => api.revealPath(path),
@@ -48,6 +59,7 @@ export function createDesktopBridge(): PlatformBridge {
     testInbox: (config, secret) => api.testInbox(config, secret),
     watchInbox: (configs) => api.watchInbox(configs),
     getMessageBody: (config, folderPath, uid) => api.getMessageBody(config, folderPath, uid),
+    sanitizeHtml: (html) => api.sanitizeHtml(html),
     setMessageFlags: (config, folderPath, uid, patch) =>
       api.setMessageFlags(config, folderPath, uid, patch),
     deleteInboxMessages: (accountId, items) => api.deleteInboxMessages(accountId, items),

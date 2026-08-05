@@ -404,7 +404,9 @@ source(
 source(
   'wiring: "run now" composes a fresh digest instead of resending a stored body',
   appState,
-  /withDigestBody\(job,[\s\S]{0,60}?\)\n?[\s\S]{0,120}?sendDraftNow\(outgoing\.draft\)/,
+  // The draft has to be the recomposed one; what follows it is the caller's
+  // business, so the first argument is pinned and the rest is not.
+  /withDigestBody\(job,[\s\S]{0,60}?\)\n?[\s\S]{0,120}?sendDraftNow\(outgoing\.draft[,)]/,
 )
 source(
   'wiring: the digest reminder is built through rebuildJob, like every other job',

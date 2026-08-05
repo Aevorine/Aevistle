@@ -15,7 +15,17 @@ import { useApp } from '../state/AppState'
 import { useI18n } from '../i18n'
 import { summarizeRecurrence } from '../core/schedule'
 import { isFinished } from '../core/jobRun'
-import type { ScheduledJob } from '../core/types'
+import { ATMOSPHERE_MOTION_MIN, type ScheduledJob } from '../core/types'
+
+/**
+ * Matches `--dur-slow` in theme.css — there is no clean way to read a CSS
+ * custom property's *time* value back into a `setTimeout`, so this is a
+ * second copy of the same number rather than a shared source. If the two ever
+ * drift, the row disappears from `state.jobs` slightly before or after its
+ * own exit animation finishes playing; nothing worse than that depends on
+ * them staying equal.
+ */
+const INK_BLOOM_MS = 260
 
 /** Soonest first; a reminder with nothing left to fire sorts to the bottom. */
 function byNextRun(a: ScheduledJob, b: ScheduledJob) {
@@ -30,6 +40,17 @@ export function ScheduleView({ onCompose }: { onCompose: () => void }) {
   const toast = useToast()
   const { confirm, confirmElement } = useConfirm()
   const [busy, setBusy] = useState<string | null>(null)
+  /**
+   * Rows mid-`ink-bloom` (app.css) — present in `state.jobs` for the length of
+   * their exit animation rather than gone the instant delete is clicked. Only
+   * ever non-empty under runecircuit with the motion threshold cleared; every
+   * other style's `remove` still deletes on the spot, same as before this
+   * existed.
+   */
+  const [removingIds, setRemovingIds] = useState<Set<string>>(new Set())
+  const ceremonialDelete =
+    state.settings.visualStyle === 'runecircuit' &&
+    (state.settings.themeIntensity ?? 60) >= ATMOSPHERE_MOTION_MIN
 
   /**
    * Finished reminders move out of the way instead of sitting at the top of
@@ -69,6 +90,49 @@ export function ScheduleView({ onCompose }: { onCompose: () => void }) {
   const jobs = showDone ? done : active
 
   /**
+   * The actual removal from `state.jobs`, ceremonial-delete-aware.
+   *
+   * Under every style but runecircuit (or runecircuit below the motion
+   * threshold) this is `deleteJob` called immediately, unchanged from before
+   * `ink-bloom` existed. Under runecircuit it instead marks the rows
+   * `data-removing` — which is what triggers app.css's `ink-bloom` animation —
+   * and defers the real `deleteJob` by `INK_BLOOM_MS`, so the row the user
+   * watches disappear is the one still in the list, animating, rather than one
+   * that vanished instantly while a CSS class chased it.
+   *
+   * The `setRemovingIds` updater is where the double-fire guard actually
+   * lives: it computes `toAnimate` — the ids not already mid-animation — from
+   * `prev`, not from the `removingIds` closed over at call time, so two
+   * `remove()` calls queued in the same tick (a chain's lone sibling can reach
+   * this from both the "cancel all" and "cancel one" branches below) still see
+   * each other's claim rather than both scheduling their own timeout for the
+   * same id.
+   */
+  const deleteWithAnimation = (ids: string[]) => {
+    if (!ceremonialDelete) {
+      for (const jobId of ids) void deleteJob(jobId)
+      return
+    }
+    let toAnimate: string[] = []
+    setRemovingIds((prev) => {
+      toAnimate = ids.filter((jobId) => !prev.has(jobId))
+      if (toAnimate.length === 0) return prev
+      const next = new Set(prev)
+      toAnimate.forEach((jobId) => next.add(jobId))
+      return next
+    })
+    if (toAnimate.length === 0) return
+    window.setTimeout(() => {
+      for (const jobId of toAnimate) void deleteJob(jobId)
+      setRemovingIds((prev) => {
+        const next = new Set(prev)
+        toAnimate.forEach((jobId) => next.delete(jobId))
+        return next
+      })
+    }, INK_BLOOM_MS)
+  }
+
+  /**
    * Delete a reminder — and, if it is one stage of a chain, offer to take the
    * rest with it. Deleting "3 days before" on its own and leaving "the day
    * before" behind is occasionally what someone wants and usually not; asking
@@ -92,9 +156,7 @@ export function ScheduleView({ onCompose }: { onCompose: () => void }) {
       // dialog's dismiss (Esc / backdrop) is handled by the promise resolving
       // false, which is why "only this one" is the false branch rather than a
       // third option nobody would find.
-      for (const sibling of all ? siblings : [job!]) {
-        await deleteJob(sibling.id)
-      }
+      deleteWithAnimation((all ? siblings : [job!]).map((j) => j.id))
       toast.push({ tone: 'info', title: t('toast.deleted') })
       return
     }
@@ -106,7 +168,7 @@ export function ScheduleView({ onCompose }: { onCompose: () => void }) {
       danger: true,
     })
     if (!ok) return
-    await deleteJob(id)
+    deleteWithAnimation([id])
     toast.push({ tone: 'info', title: t('toast.deleted') })
   }
 
@@ -213,6 +275,7 @@ export function ScheduleView({ onCompose }: { onCompose: () => void }) {
                   className="job"
                   data-disabled={!job.enabled}
                   data-failed={job.lastResult === 'failed'}
+                  data-removing={removingIds.has(job.id) || undefined}
                 >
                   <span className="job__pulse" />
                   <div className="job__body">
@@ -353,7 +416,11 @@ export function ScheduleView({ onCompose }: { onCompose: () => void }) {
                     >
                       {job.enabled ? <IconPause size={16} /> : <IconPlay size={16} />}
                     </IconButton>
-                    <IconButton label={t('common.delete')} onClick={() => remove(job.id)}>
+                    <IconButton
+                      label={t('common.delete')}
+                      onClick={() => remove(job.id)}
+                      disabled={removingIds.has(job.id)}
+                    >
                       <IconTrash size={16} />
                     </IconButton>
                   </div>

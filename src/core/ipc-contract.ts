@@ -35,6 +35,8 @@ import type {
 import type { DownloadProgress, UpdateAsset, UpdateInfo } from './update'
 import type { ControlEndpoint, ControlRequest, ControlResponse } from './control'
 import type { FeedResponse } from './feeds'
+import type { PairingEvent, PairingPayload, PairMode } from './pairing'
+import type { SyncListenerStatus, SyncServerRequest, SyncServerResponse } from './syncLoop'
 
 /**
  * Tray menu items that are a request to the *window*, not to the app.
@@ -167,6 +169,12 @@ export interface DesktopApi {
     folderPath: string,
     uid: number,
   ): Promise<InboxMessageBody>
+  /**
+   * Run arbitrary HTML through the same allowlist a received message's body
+   * goes through, so a scheduled draft previewed on the calendar screen never
+   * needs a render path of its own. See `electron/sanitizeHtml.ts`.
+   */
+  sanitizeHtml(html: string): Promise<string>
   setMessageFlags(
     config: InboxAccountState,
     folderPath: string,
@@ -212,13 +220,48 @@ export interface DesktopApi {
   // --- control interface (Claude Code and other callers) -----------------
   /**
    * Start or stop the loopback server to match the settings just saved, and
-   * report where it ended up. Returns null when the interface is off.
+   * report where it ended up. Returns null when *both* `enabled` and
+   * `calendarSubscribeEnabled` are off — the server has no reason to be up.
    */
-  applyControl(settings: { enabled: boolean; allowSending: boolean }): Promise<ControlEndpoint | null>
+  applyControl(settings: {
+    enabled: boolean
+    allowSending: boolean
+    /** Serves `GET /calendar.ics` on the same server. See `core/types.ts`. */
+    calendarSubscribeEnabled: boolean
+  }): Promise<ControlEndpoint | null>
   /** Requests arriving from HTTP, the drop folder or the CLI. */
   onControlRequest(handler: (request: ControlRequest) => void): () => void
   /** The answer to one of those, keyed by `request.id`. */
   respondToControl(response: ControlResponse): Promise<void>
+
+  // --- LAN pairing (device-to-device, end-to-end encrypted) --------------
+  // See `src/core/pairing.ts` for the handshake and `electron/pairingServer.ts`
+  // for the listener. Desktop can play either role; `pairingJoinRequest` is
+  // the one both roles share, since a desktop JOINER is just as CSP-blocked
+  // from a direct `fetch()` as the Android WebView is.
+  /** HOST: open a ~2-minute LAN listener and return the QR payload. `pairId` is required for `mode: 'ongoing'` — see `pairingServer.ts`. */
+  startPairingHost(mode: PairMode, pairId?: string): Promise<PairingPayload>
+  /** HOST: stop early — the countdown ran out, or the user left the screen. */
+  stopPairingHost(): Promise<void>
+  onPairingEvent(handler: (event: PairingEvent) => void): () => void
+  /** JOINER: relay one POST to `http://<lan-ip>:<port>/pair`. Any other host or path is refused — see `main.ts`. */
+  pairingJoinRequest(url: string, body: unknown): Promise<unknown>
+
+  // --- ongoing sync (LAN-only, no relay) -----------------------------------
+  // See `src/core/syncLoop.ts`. The listener (`electron/syncServer.ts`) is
+  // desktop-only, same reasoning as pairing's HOST role — only Electron main
+  // can hold a LAN socket open. It never decrypts anything itself: every
+  // request is handed to the renderer, which holds the only copy of the
+  // long-lived keys.
+  /** Open or close the LAN sync listener, and say what happened. See `syncServer.ts` on why this is not automatic. */
+  applySyncListener(enabled: boolean): Promise<SyncListenerStatus>
+  /** The initiating side of a sync cycle: relay one POST to `http://<lan-ip>:<port>/sync`. */
+  syncRequest(url: string, body: unknown): Promise<unknown>
+  /** The accepting side (desktop only): a request arrived on the sync listener and wants an answer. */
+  onSyncServerRequest(handler: (request: SyncServerRequest) => void): () => void
+  respondToSyncServer(response: SyncServerResponse): Promise<void>
+  /** See `PlatformBridge.getSyncSecret`'s doc in `bridge.ts` for why this exists at all. */
+  getSyncSecret(keyRef: string): Promise<string | null>
 }
 
 /** IPC channel names, in one place so main and preload cannot disagree. */
@@ -250,6 +293,7 @@ export const IPC = {
   testInbox: 'aevistle:test-inbox',
   watchInbox: 'aevistle:watch-inbox',
   getMessageBody: 'aevistle:get-message-body',
+  sanitizeHtml: 'aevistle:sanitize-html',
   setMessageFlags: 'aevistle:set-message-flags',
   deleteInboxMessages: 'aevistle:delete-inbox-messages',
   purgeInboxMessages: 'aevistle:purge-inbox-messages',
@@ -272,4 +316,13 @@ export const IPC = {
   applyControl: 'aevistle:apply-control',
   controlRequest: 'aevistle:control-request',
   controlResponse: 'aevistle:control-response',
+  startPairingHost: 'aevistle:start-pairing-host',
+  stopPairingHost: 'aevistle:stop-pairing-host',
+  pairingEvent: 'aevistle:pairing-event',
+  pairingJoinRequest: 'aevistle:pairing-join-request',
+  applySyncListener: 'aevistle:apply-sync-listener',
+  syncRequest: 'aevistle:sync-request',
+  syncServerRequest: 'aevistle:sync-server-request',
+  syncServerResponse: 'aevistle:sync-server-response',
+  getSyncSecret: 'aevistle:get-sync-secret',
 } as const

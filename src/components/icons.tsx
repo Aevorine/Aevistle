@@ -177,6 +177,13 @@ export const IconMonitor = (p: IconProps) => (
   </Svg>
 )
 
+export const IconSmartphone = (p: IconProps) => (
+  <Svg {...p}>
+    <rect x="6.5" y="2.5" width="11" height="19" rx="2" />
+    <path d="M11 18h2" />
+  </Svg>
+)
+
 export const IconMail = (p: IconProps) => (
   <Svg {...p}>
     <rect x="2.5" y="5" width="19" height="14" rx="2.5" />
@@ -376,6 +383,13 @@ export const IconChevronRight = (p: IconProps) => (
   </Svg>
 )
 
+/** Row-disclosure affordance — rotated 180° by CSS when the row it opens is expanded. */
+export const IconChevronDown = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M5 9l7 7 7-7" />
+  </Svg>
+)
+
 /** A QR code, drawn as its three finder squares plus a scatter of modules. */
 export const IconQr = (p: IconProps) => (
   <Svg {...p}>
@@ -392,5 +406,34 @@ export const IconHelp = (p: IconProps) => (
     <circle cx="12" cy="12" r="9" />
     <path d="M9.6 9.2a2.5 2.5 0 1 1 3.3 2.4c-.6.2-.9.8-.9 1.4v.4" />
     <path d="M12 17h.01" />
+  </Svg>
+)
+
+/* --- runecircuit fusion icons -----------------------------------------------
+   The `runecircuit` style trades a small, named set of nav icons for these —
+   see `RUNE_NAV_ICONS` in `App.tsx`. Each fuses a traditional motif with a
+   circuit-diagram element rather than redrawing the same pictogram in a new
+   skin, which is why they live here instead of a themed variant of `IconMail`
+   and `IconKey`. */
+
+/** A four-lobed cloud-collar (云肩) rosette around a via-dot, with a short
+    trace dropping out of it — the mail icon this style stands in for. */
+export const IconCloudNode = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M12 4.2a2.6 2.6 0 0 1 2.4 3.6 2.6 2.6 0 0 1 1.8 4.4 2.6 2.6 0 0 1-1.8 4.4A2.6 2.6 0 0 1 12 19.8a2.6 2.6 0 0 1-2.4-3.6 2.6 2.6 0 0 1-1.8-4.4A2.6 2.6 0 0 1 9.6 7.8 2.6 2.6 0 0 1 12 4.2Z" />
+    <circle cx="12" cy="12" r="1.5" />
+    <path d="M12 13.5V17" />
+  </Svg>
+)
+
+/** A 回纹 key-fret spiral standing in for a key's bow, its shaft running
+    straight into two right-angle stubs instead of rounded teeth — the code
+    icon this style stands in for. */
+export const IconKeyNode = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M11 4H4v9h7V8H7" />
+    <path d="M11 4h7" />
+    <path d="M14 4v3" />
+    <path d="M18 4v5" />
   </Svg>
 )

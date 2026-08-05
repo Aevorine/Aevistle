@@ -17,15 +17,32 @@
  * half the users of this app cannot perform at all.
  */
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Button, IconButton, Modal, StatusChip } from './ui'
-import { IconAlert, IconCalendar, IconClock, IconExternal, IconPause, IconPlay, IconPlus } from './icons'
-import { DRAG_TYPE, dragPayload } from './MonthGrid'
+import {
+  IconAlert,
+  IconCalendar,
+  IconChevronDown,
+  IconClock,
+  IconExternal,
+  IconPause,
+  IconPlay,
+  IconPlus,
+} from './icons'
+import { DRAG_TYPE, dragPayload, type SendDeliveryStatus } from './MonthGrid'
+import { MessageBodyFrame } from './MessageBodyFrame'
 import { useI18n, type TranslationKey } from '../i18n'
-import { summarizeRecurrence } from '../core/schedule'
-import { toIsoDate, type CalendarWarning, type WorkdayPolicy } from '../core/workCalendar'
+import { computeOccurrences, summarizeRecurrence } from '../core/schedule'
+import { canMoveSingleOccurrence } from '../core/reschedule'
+import {
+  shiftToWorkingDay,
+  toIsoDate,
+  type CalendarWarning,
+  type WorkCalendar,
+  type WorkdayPolicy,
+} from '../core/workCalendar'
 import type { Conflict } from '../core/conflicts'
-import type { ScheduledJob } from '../core/types'
+import type { MessageDraft, ScheduledJob, Template } from '../core/types'
 
 /** One send, on one day. */
 export interface DayEntry {
@@ -36,6 +53,8 @@ export interface DayEntry {
   shifted: boolean
   /** The day the rule originally asked for, when it was moved. */
   originalIso?: string
+  /** What became of this send — see `SendDeliveryStatus`. Absent when there is nothing to correlate against. */
+  status?: SendDeliveryStatus
 }
 
 export function CalendarDayPanel({
@@ -43,6 +62,7 @@ export function CalendarDayPanel({
   entries,
   working,
   holidayName,
+  calendar,
   conflicts,
   onToggleDay,
   onMove,
@@ -50,11 +70,16 @@ export function CalendarDayPanel({
   onCreate,
   onDeStagger,
   staggerWindowMinutes,
+  sanitizeHtml,
+  onOpenLink,
+  compact = false,
 }: {
   iso: string
   entries: DayEntry[]
   working: boolean
   holidayName?: string
+  /** Needed to tell a genuine public holiday from a day that merely has no name for it — see the per-row shift suggestion below. */
+  calendar: WorkCalendar
   conflicts: Conflict[]
   onToggleDay: (iso: string) => void
   /** Ask to move a reminder from this day to another. */
@@ -66,10 +91,29 @@ export function CalendarDayPanel({
   onDeStagger?: (conflict: Conflict) => void
   /** How wide that window is, for the button's own sentence. */
   staggerWindowMinutes?: number
+  /**
+   * Run an HTML draft body through the same allowlist a received message
+   * goes through, before the row preview renders it. Absent on platforms
+   * with no trusted side to run it (see `PlatformBridge.sanitizeHtml`) — the
+   * preview falls back to plain text there rather than rendering anything
+   * unsanitized.
+   */
+  sanitizeHtml?: (html: string) => Promise<string>
+  /** A link inside an expanded HTML preview was clicked. */
+  onOpenLink: (url: string) => void
+  /**
+   * Embedded inline under the month/week grid rather than shown as its own
+   * zoom. Suppresses the working/holiday/conflict chip row — the grid the
+   * reader just clicked from already says which day this is.
+   */
+  compact?: boolean
 }) {
   const { t, formatDateTime } = useI18n()
   const [movingId, setMovingId] = useState<string | null>(null)
   const [movingTo, setMovingTo] = useState(iso)
+  /** Which row's body preview is open. One at a time, so the panel keeps a bounded height. */
+  const [expandedId, setExpandedId] = useState<string | null>(null)
+  const isHoliday = calendar.holidays.includes(iso)
 
   const worst = conflicts.some((c) => c.severity === 'error')
     ? 'error'
@@ -95,20 +139,22 @@ export function CalendarDayPanel({
           <IconCalendar size={16} />
           <span>{formatDateTime(new Date(`${iso}T12:00:00`).getTime(), { dateStyle: 'full', timeStyle: undefined })}</span>
         </div>
-        <div className="dayview__chips">
-          <StatusChip
-            tone={working ? 'success' : 'neutral'}
-            dot
-            label={working ? t('workcal.dayWorking') : t('workcal.dayOff')}
-          />
-          {holidayName ? <StatusChip tone="info" label={holidayName} /> : null}
-          {worst ? (
+        {compact ? null : (
+          <div className="dayview__chips">
             <StatusChip
-              tone={worst === 'error' ? 'danger' : 'warning'}
-              label={t('cal.conflict.count', { n: conflicts.length })}
+              tone={working ? 'success' : 'neutral'}
+              dot
+              label={working ? t('workcal.dayWorking') : t('workcal.dayOff')}
             />
-          ) : null}
-        </div>
+            {holidayName ? <StatusChip tone="info" label={holidayName} /> : null}
+            {worst ? (
+              <StatusChip
+                tone={worst === 'error' ? 'danger' : 'warning'}
+                label={t('cal.conflict.count', { n: conflicts.length })}
+              />
+            ) : null}
+          </div>
+        )}
         <div className="btn-row dayview__actions">
           {onCreate ? (
             <Button variant="primary" icon={<IconPlus size={15} />} onClick={() => onCreate(iso)}>
@@ -151,9 +197,22 @@ export function CalendarDayPanel({
             .sort((a, b) => a.at - b.at)
             .map((entry) => {
               const summary = summarizeRecurrence(entry.job.recurrence)
+              const key = `${entry.job.id}-${entry.at}`
+              const expanded = expandedId === key
+              /*
+               * Only offered for a job that has opted the calendar *out*
+               * (`'off'`) and still landed on a holiday — `applyWorkCalendarDetailed`
+               * already moved every other policy off this day, so a row that
+               * reaches here with 'before'/'after'/'skip' would be one the
+               * calendar already handled, and a second suggestion for it would
+               * be redundant with the very policy it is asking about.
+               */
+              const wantsShift = isHoliday && (entry.job.recurrence.workdayPolicy ?? 'off') === 'off'
+              const shiftBefore = wantsShift ? shiftToWorkingDay(entry.at, calendar, 'before') : null
+              const shiftAfter = wantsShift ? shiftToWorkingDay(entry.at, calendar, 'after') : null
               return (
               <li
-                key={`${entry.job.id}-${entry.at}`}
+                key={key}
                 className="dayrow"
                 data-shifted={entry.shifted}
                 draggable
@@ -162,51 +221,110 @@ export function CalendarDayPanel({
                   event.dataTransfer.effectAllowed = 'move'
                 }}
               >
-                <span className="dayrow__time">
-                  <IconClock size={14} />
-                  {formatDateTime(entry.at, { timeStyle: 'short', dateStyle: undefined })}
-                </span>
-                <span className="dayrow__body">
-                  <button type="button" className="dayrow__name link" onClick={() => onOpenJob(entry.job.id)}>
-                    {entry.job.name}
-                  </button>
-                  {/*
-                    Who it goes to and what it says — the two things the square
-                    upstairs can only show a truncated version of, at full
-                    length, which is what this panel is for. `.mono`-style
-                    wrapping on the subject because a subject can be one
-                    unbroken token (a reference number, a URL) and ordinary
-                    wrapping only breaks at spaces.
-                  */}
-                  <span className="dayrow__who">
-                    {entry.job.draft.to.length > 0
-                      ? entry.job.draft.to.join(', ')
-                      : t('cal.day.noRecipient')}
-                  </span>
-                  <span className="dayrow__subject">
-                    {entry.job.draft.subject || t('cal.day.noSubject')}
-                  </span>
-                  <span className="dayrow__meta">
-                    {t(summary.key as 'recur.summary.once', summary.values)}
-                    {entry.shifted && entry.originalIso ? (
-                      <> · {t('cal.day.movedFrom', { from: entry.originalIso })}</>
+                <div className="dayrow__main">
+                  <span className="dayrow__time">
+                    <IconClock size={14} />
+                    {entry.status ? (
+                      <span
+                        className="sendstatus"
+                        data-status={entry.status}
+                        aria-hidden="true"
+                        title={t('cal.status.badgeAria', { status: t(`cal.status.${entry.status}` as TranslationKey) })}
+                      />
                     ) : null}
+                    {formatDateTime(entry.at, { timeStyle: 'short', dateStyle: undefined })}
                   </span>
-                </span>
-                <span className="dayrow__actions">
-                  <Button
-                    variant="ghost"
-                    onClick={() => {
-                      setMovingId(entry.job.id)
-                      setMovingTo(iso)
-                    }}
-                  >
-                    {t('cal.day.move')}
-                  </Button>
-                  <IconButton label={t('cal.day.open')} onClick={() => onOpenJob(entry.job.id)}>
-                    <IconExternal size={15} />
-                  </IconButton>
-                </span>
+                  <span className="dayrow__body">
+                    <button type="button" className="dayrow__name link" onClick={() => onOpenJob(entry.job.id)}>
+                      {entry.job.name}
+                    </button>
+                    {/*
+                      Who it goes to and what it says — the two things the square
+                      upstairs can only show a truncated version of, at full
+                      length, which is what this panel is for. `.mono`-style
+                      wrapping on the subject because a subject can be one
+                      unbroken token (a reference number, a URL) and ordinary
+                      wrapping only breaks at spaces.
+                    */}
+                    <span className="dayrow__who">
+                      {entry.job.draft.to.length > 0
+                        ? entry.job.draft.to.join(', ')
+                        : t('cal.day.noRecipient')}
+                    </span>
+                    <span className="dayrow__subject">
+                      {entry.job.draft.subject || t('cal.day.noSubject')}
+                    </span>
+                    <span className="dayrow__meta">
+                      {t(summary.key as 'recur.summary.once', summary.values)}
+                      {entry.shifted && entry.originalIso ? (
+                        <> · {t('cal.day.movedFrom', { from: entry.originalIso })}</>
+                      ) : null}
+                      {entry.status ? <> · {t(`cal.status.${entry.status}` as TranslationKey)}</> : null}
+                    </span>
+                  </span>
+                  <span className="dayrow__actions">
+                    <Button
+                      variant="ghost"
+                      onClick={() => {
+                        setMovingId(entry.job.id)
+                        setMovingTo(iso)
+                      }}
+                    >
+                      {t('cal.day.move')}
+                    </Button>
+                    <IconButton label={t('cal.day.open')} onClick={() => onOpenJob(entry.job.id)}>
+                      <IconExternal size={15} />
+                    </IconButton>
+                    <IconButton
+                      label={expanded ? t('cal.day.previewHide') : t('cal.day.preview')}
+                      aria-expanded={expanded}
+                      onClick={() => setExpandedId(expanded ? null : key)}
+                    >
+                      <IconChevronDown size={15} className="dayrow__chevron" data-open={expanded} />
+                    </IconButton>
+                  </span>
+                </div>
+
+                {wantsShift ? (
+                  shiftBefore !== null || shiftAfter !== null ? (
+                    <div className="banner banner--warning dayrow__holidaysuggest">
+                      <IconAlert size={14} />
+                      <div className="banner__body">
+                        <div>{t('cal.holiday.suggestTitle', { holiday: holidayName ?? iso })}</div>
+                        <div className="btn-row">
+                          {shiftBefore !== null ? (
+                            <Button
+                              variant="secondary"
+                              onClick={() => onMove(entry.job.id, iso, toIsoDate(shiftBefore))}
+                            >
+                              {t('cal.holiday.shiftBefore', {
+                                date: formatDateTime(shiftBefore, { dateStyle: 'medium', timeStyle: undefined }),
+                              })}
+                            </Button>
+                          ) : null}
+                          {shiftAfter !== null ? (
+                            <Button
+                              variant="secondary"
+                              onClick={() => onMove(entry.job.id, iso, toIsoDate(shiftAfter))}
+                            >
+                              {t('cal.holiday.shiftAfter', {
+                                date: formatDateTime(shiftAfter, { dateStyle: 'medium', timeStyle: undefined }),
+                              })}
+                            </Button>
+                          ) : null}
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="field__hint">{t('cal.holiday.noneAvailable')}</div>
+                  )
+                ) : null}
+
+                {expanded ? (
+                  <div className="dayrow__preview">
+                    <BodyPreview draft={entry.job.draft} sanitizeHtml={sanitizeHtml} onOpenLink={onOpenLink} />
+                  </div>
+                ) : null}
               </li>
               )
             })}
@@ -247,6 +365,59 @@ export function CalendarDayPanel({
 }
 
 /**
+ * A draft's body, under its row — never a fresh render path for HTML.
+ *
+ * `plain` and `markdown` are printed as pre-wrapped text: React escapes
+ * everything it renders as children, so this can never become markup, only
+ * ever look like some. `html` is the one format that can carry a real
+ * injection surface — the exact one a received message's body carries — so
+ * it is handed to `sanitizeHtml` and only ever reaches the screen through
+ * `MessageBodyFrame`'s inert iframe, the same component the inbox reader
+ * uses. While that round trip is in flight, or on a platform where it is not
+ * available at all (see `PlatformBridge.sanitizeHtml`), the raw source is
+ * shown as text rather than risking a raw-HTML-injection shortcut.
+ */
+function BodyPreview({
+  draft,
+  sanitizeHtml,
+  onOpenLink,
+}: {
+  draft: MessageDraft
+  sanitizeHtml?: (html: string) => Promise<string>
+  onOpenLink: (url: string) => void
+}) {
+  const { t } = useI18n()
+  const [sanitized, setSanitized] = useState<string | null>(null)
+
+  useEffect(() => {
+    setSanitized(null)
+    if (draft.bodyFormat !== 'html' || !sanitizeHtml || !draft.body.trim()) return
+    let live = true
+    sanitizeHtml(draft.body)
+      .then((html) => {
+        if (live) setSanitized(html)
+      })
+      .catch(() => {
+        // Left as `null` — the fallback below renders the raw source as
+        // inert text rather than pretending the sanitize step succeeded.
+      })
+    return () => {
+      live = false
+    }
+  }, [draft.body, draft.bodyFormat, sanitizeHtml])
+
+  if (!draft.body.trim()) {
+    return <p className="dayrow__previewempty">{t('cal.day.previewEmpty')}</p>
+  }
+  if (draft.bodyFormat === 'html' && sanitized !== null) {
+    return (
+      <MessageBodyFrame html={sanitized} find="" onLinkClick={onOpenLink} frameClassName="dayrow__previewframe" />
+    )
+  }
+  return <pre className="dayrow__previewtext">{draft.body}</pre>
+}
+
+/**
  * A reminder, opened from the calendar.
  *
  * Small on purpose. It is not a second schedule editor — it answers the three
@@ -267,6 +438,7 @@ export function JobSheet({
   onClose,
   onTogglePaused,
   onPolicyChange,
+  onViewSeries,
 }: {
   job: ScheduledJob
   warning?: CalendarWarning
@@ -274,6 +446,8 @@ export function JobSheet({
   onClose: () => void
   onTogglePaused: () => void
   onPolicyChange: (policy: WorkdayPolicy) => void
+  /** Open `SeriesSheet`. Absent (or simply unused) for a one-off job — see `canMoveSingleOccurrence`. */
+  onViewSeries?: () => void
 }) {
   const { t, formatDateTime } = useI18n()
   const summary = summarizeRecurrence(job.recurrence)
@@ -367,6 +541,169 @@ export function JobSheet({
           >
             {job.enabled ? t('schedule.pause') : t('schedule.resume')}
           </Button>
+          {/*
+            Only for a rule this app can actually reason about as a series —
+            `canMoveSingleOccurrence` is true for a one-off job, which has no
+            series to view. Same guard `planReschedule` itself would apply.
+          */}
+          {onViewSeries && !canMoveSingleOccurrence(job) ? (
+            <Button variant="secondary" onClick={onViewSeries}>
+              {t('cal.series.open')}
+            </Button>
+          ) : null}
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+/** How many future occurrences `SeriesSheet` lists before "show more" is offered, and each step after. */
+const SERIES_VISIBLE_STEP = 8
+
+/**
+ * The recurring series behind one job, reached from `JobSheet` when
+ * `canMoveSingleOccurrence` says a drag cannot act on a single send.
+ *
+ * `Recurrence` has no per-occurrence exception list — see `core/reschedule.ts`'s
+ * file header — so every action here is honest about working on the *whole*
+ * series rather than implying a per-occurrence edit that does not exist:
+ * pausing pauses every future send, the day shift moves every future send by
+ * the same number of days (the same `planReschedule`/`recurrence.startAt`
+ * shift a drag on the grid already performs, applied through the caller's
+ * `moveJob` so it goes through the same confirmation), and the template swap
+ * replaces the message every future send will carry, never one occurrence's
+ * copy alone.
+ */
+export function SeriesSheet({
+  job,
+  calendar,
+  templates,
+  onClose,
+  onPause,
+  onShift,
+  onSwapTemplate,
+}: {
+  job: ScheduledJob
+  calendar: WorkCalendar
+  templates: Template[]
+  onClose: () => void
+  onPause: () => void
+  /** Shift every future occurrence by this many days — positive is later, negative earlier. */
+  onShift: (days: number) => void
+  onSwapTemplate: (templateId: string) => void
+}) {
+  const { t, formatDateTime } = useI18n()
+  const summary = summarizeRecurrence(job.recurrence)
+  const [visible, setVisible] = useState(SERIES_VISIBLE_STEP)
+  const [shiftInput, setShiftInput] = useState('')
+  const [templateId, setTemplateId] = useState('')
+
+  const occurrences = computeOccurrences(job.recurrence, {
+    after: Date.now(),
+    count: visible,
+    runsSoFar: job.runCount,
+    calendar,
+  })
+  // A `count` request that came back full may still have more behind it; one
+  // short of it never does. The one false positive this allows — asking for
+  // more and getting the same list back — costs a click, not a wrong answer.
+  const hasMore = occurrences.length === visible
+
+  const shiftDays = Number(shiftInput)
+  const canShift = shiftInput.trim() !== '' && Number.isFinite(shiftDays) && shiftDays !== 0
+
+  return (
+    <Modal
+      open
+      title={t('cal.series.title', { name: job.name })}
+      onClose={onClose}
+      closeLabel={t('common.close')}
+      wide
+    >
+      <div className="jobsheet">
+        <div className="jobsheet__row">
+          <StatusChip
+            tone={job.enabled ? 'accent' : 'neutral'}
+            dot={job.enabled}
+            label={job.enabled ? t('status.armed') : t('status.paused')}
+          />
+          <span>{t(summary.key as 'recur.summary.once', summary.values)}</span>
+        </div>
+
+        <div className="jobsheet__section">
+          <div className="section-label">{t('cal.job.next')}</div>
+          {occurrences.length === 0 ? (
+            <div className="field__hint">{t('schedule.noMoreRuns')}</div>
+          ) : (
+            <ol className="jobsheet__times">
+              {occurrences.map((at) => (
+                <li key={at}>{formatDateTime(at)}</li>
+              ))}
+            </ol>
+          )}
+          {hasMore ? (
+            <Button variant="ghost" onClick={() => setVisible((n) => n + SERIES_VISIBLE_STEP)}>
+              {t('cal.series.showMore')}
+            </Button>
+          ) : null}
+        </div>
+
+        <div className="jobsheet__section">
+          <div className="section-label">{t('cal.series.shiftBy')}</div>
+          <div className="btn-row">
+            <input
+              className="input series-shift__input"
+              type="number"
+              value={shiftInput}
+              onChange={(event) => setShiftInput(event.target.value)}
+              aria-label={t('cal.series.shiftBy')}
+            />
+            <Button variant="secondary" disabled={!canShift} onClick={() => onShift(shiftDays)}>
+              {t('cal.series.applyShift')}
+            </Button>
+          </div>
+          <div className="field__hint">{t('cal.series.shiftDays')}</div>
+        </div>
+
+        {templates.length > 0 ? (
+          <div className="jobsheet__section">
+            <div className="section-label">{t('cal.series.swapTemplate')}</div>
+            <div className="btn-row">
+              <select
+                className="input"
+                value={templateId}
+                onChange={(event) => setTemplateId(event.target.value)}
+                aria-label={t('cal.series.swapTemplate')}
+              >
+                <option value="">—</option>
+                {templates.map((tpl) => (
+                  <option key={tpl.id} value={tpl.id}>
+                    {tpl.name}
+                  </option>
+                ))}
+              </select>
+              <Button
+                variant="secondary"
+                disabled={!templateId}
+                onClick={() => {
+                  onSwapTemplate(templateId)
+                  setTemplateId('')
+                }}
+              >
+                {t('common.confirm')}
+              </Button>
+            </div>
+          </div>
+        ) : null}
+
+        <div className="btn-row">
+          {job.enabled ? (
+            <Button variant="secondary" icon={<IconPause size={15} />} onClick={onPause}>
+              {t('schedule.pause')}
+            </Button>
+          ) : (
+            <StatusChip tone="neutral" label={t('status.paused')} />
+          )}
         </div>
       </div>
     </Modal>

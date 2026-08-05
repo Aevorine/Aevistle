@@ -29,6 +29,7 @@ export function ControlCard() {
 
   const enabled = state.settings.controlEnabled === true
   const allowSending = state.settings.controlAllowSending === true
+  const calendarSubscribeEnabled = state.settings.calendarSubscribeEnabled === true
   const supported = typeof bridge?.applyControl === 'function'
 
   const refresh = useCallback(async () => {
@@ -36,9 +37,11 @@ export function ControlCard() {
     // Re-applying the settings we already have is also how the card asks
     // "where did you end up?" — the call is idempotent and returns the
     // endpoint file's contents.
-    const next = await bridge.applyControl({ enabled, allowSending }).catch(() => null)
+    const next = await bridge
+      .applyControl({ enabled, allowSending, calendarSubscribeEnabled })
+      .catch(() => null)
     setEndpoint(next)
-  }, [bridge, enabled, allowSending])
+  }, [bridge, enabled, allowSending, calendarSubscribeEnabled])
 
   useEffect(() => {
     void refresh()

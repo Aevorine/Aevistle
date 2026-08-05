@@ -37,6 +37,7 @@
 
 import { useEffect, useMemo, useRef } from 'react'
 import { addIsoDays, parseIsoDate, toIsoDate, type WorkCalendar } from '../core/workCalendar'
+import type { SolarTermId } from '../core/solarTerms'
 
 /**
  * One send, as a day square shows it: time · recipient · subject.
@@ -47,6 +48,9 @@ import { addIsoDays, parseIsoDate, toIsoDate, type WorkCalendar } from '../core/
  * every render — into the dependency list of the memo that this whole screen's
  * performance rests on. See `WorkCalendarView`.
  */
+/** What happened to a past send, as far as the app can honestly tell. See `WorkCalendarView`. */
+export type SendDeliveryStatus = 'delivered' | 'failed' | 'retrying'
+
 export interface DaySend {
   jobId: string
   /** When it fires, after the calendar and quiet hours have had their say. */
@@ -65,6 +69,18 @@ export interface DaySend {
    * here and leaves the reader to work out which of the three it is about.
    */
   conflict?: boolean
+  /**
+   * A single glyph for the avatar chip — a contact's initial, or the first
+   * letter of the recipient's local part. `undefined` when there is no
+   * recipient to draw one from.
+   */
+  initials?: string
+  /**
+   * What became of this send, correlated against the logs and the offline
+   * queue. `undefined` for a send in the future, and for one in the past that
+   * left no trace to correlate against — never guessed. See `WorkCalendarView`.
+   */
+  status?: SendDeliveryStatus
 }
 
 export interface DayMark {
@@ -92,12 +108,19 @@ export interface DayMark {
 }
 
 /**
- * How many sends a square lists before it stops and says "+N more".
+ * How many rows a square spends on sends before it stops and says "+N more".
  *
  * Three, because that is what fits above the fold of a cell at every width the
  * grid is drawn at without the month growing taller than the window. The rest
  * are not hidden — the badge still counts all of them, "+N more" opens the day,
  * and the day panel lists every one.
+ *
+ * "+N more" costs one of the three. It is a row like any other and the cell
+ * cannot shrink to fit a fourth — flex items in a column have `min-height:
+ * auto` — so a day that overflows lists two sends and the button rather than
+ * three sends and a button clipped out of sight. It was clipped out of sight,
+ * and `hidden > 0` is the only state it is ever drawn in, so the affordance
+ * had never once been visible while still holding a tab stop.
  */
 export const MAX_CELL_SENDS = 3
 
@@ -167,6 +190,29 @@ export interface MonthGridProps {
   onOpenDay?: (iso: string) => void
   /** A reminder badge was dragged from `fromIso` and dropped on `toIso`. */
   onMoveJob?: (jobId: string, fromIso: string, toIso: string) => void
+  /**
+   * The dragged reminder's pointer has crossed onto a new cell — preview only,
+   * fired at most once per cell entered rather than on every native `dragover`
+   * tick. `fromAt` is the instant of the specific occurrence being dragged (the
+   * badge falls back to the day's earliest one), and `x`/`y` are the pointer's
+   * `clientX`/`clientY` at that moment, for a tooltip to anchor itself to.
+   */
+  onDragHover?: (info: { jobId: string; fromIso: string; toIso: string; fromAt: number; x: number; y: number }) => void
+  /** The drag that `onDragHover` was reporting on has ended (drop or cancel). */
+  onDragHoverEnd?: () => void
+  /**
+   * Days queued for the calendar's gap-compose, so their square can say so.
+   * Populated by ctrl/cmd-click on an empty square — see `onGapToggle`.
+   */
+  gapDates?: Set<string>
+  /**
+   * An empty square was ctrl/cmd-clicked: add or remove it from the gap-compose
+   * batch. Never fires on a square that already has sends — `onCreateDay`'s own
+   * `canCreate` rule decides that, the same rule the double-click uses, so a
+   * square you cannot start a *single* reminder from cannot join a batch of
+   * them either.
+   */
+  onGapToggle?: (iso: string) => void
   /** Reading direction, so the horizontal arrows mean what they look like. */
   rtl?: boolean
   /** Accessible name for the grid. */
@@ -198,6 +244,23 @@ export interface MonthGridProps {
   onCreateDay?: (iso: string) => void
   /** Announced on an empty square that can be double-clicked. */
   createHint?: string
+  /**
+   * Paint the busyness tint (`data-load`). On by default; off leaves every
+   * square its ordinary colour while the badge keeps counting. See the switch
+   * in `WorkCalendarView`.
+   */
+  heatmapOn?: boolean
+  /** Hover text for one avatar chip, e.g. "Recipient: Alex". */
+  initialsAriaLabel?: (recipient: string) => string
+  /** The word for a send's delivery status, folded into its row's own label. */
+  sendStatusLabel?: (status: SendDeliveryStatus) => string
+  /**
+   * The 节气 governing the displayed month, computed by the caller
+   * (`core/solarTerms.ts`) — this component only carries it onto the grid's
+   * own element as `data-solar-term`. Consumed purely in CSS, and only under
+   * the runecircuit style; every other style ignores the attribute entirely.
+   */
+  solarTerm?: SolarTermId
 }
 
 export function MonthGrid({
@@ -216,6 +279,10 @@ export function MonthGrid({
   onSelect,
   onOpenDay,
   onMoveJob,
+  onDragHover,
+  onDragHoverEnd,
+  gapDates,
+  onGapToggle,
   rtl = false,
   label,
   badgeLabel,
@@ -227,6 +294,10 @@ export function MonthGrid({
   onOpenSend,
   onCreateDay,
   createHint,
+  heatmapOn = true,
+  initialsAriaLabel,
+  sendStatusLabel,
+  solarTerm,
 }: MonthGridProps) {
   /**
    * Weeks start on the first day that is *not* a weekend, so a Friday–Saturday
@@ -304,6 +375,32 @@ export function MonthGrid({
    *  but a parent re-render for an unrelated reason must not steal it. */
   const wantsFocus = useRef(false)
 
+  /**
+   * What is being dragged, remembered outside React state.
+   *
+   * `dataTransfer.getData` is unreadable during `dragover` in every standards-
+   * compliant browser (Chromium included) — only `dragstart` and `drop` may
+   * read it, for the same reason a web page cannot read what you drag in from
+   * your file manager before you drop it. So the payload is captured once, at
+   * `dragstart`, into a plain ref: one HTML5 drag gesture runs synchronously
+   * and never overlaps another, so there is nothing here for two drags to race
+   * over. `lastHoverIso` is the throttle — `dragover` fires on every pixel of
+   * pointer movement, and `onDragHover` only needs to know when a *new* cell
+   * was entered.
+   */
+  const draggingRef = useRef<{ jobId: string; fromIso: string; fromAt: number } | null>(null)
+  const lastHoverIso = useRef<string | null>(null)
+
+  const beginDrag = (jobId: string, fromIso: string, fromAt: number) => {
+    draggingRef.current = { jobId, fromIso, fromAt }
+    lastHoverIso.current = null
+  }
+  const endDrag = () => {
+    draggingRef.current = null
+    lastHoverIso.current = null
+    onDragHoverEnd?.()
+  }
+
   useEffect(() => {
     if (!wantsFocus.current || !focusedDate) return
     wantsFocus.current = false
@@ -369,6 +466,18 @@ export function MonthGrid({
      * leaves one stray toggle behind.
      */
     if (event.detail > 1) return
+    // Ctrl/Cmd-click on an *empty* square adds it to the gap-compose batch
+    // instead of toggling it. Same `canCreate` rule the double-click already
+    // enforces, recomputed here rather than threaded through as a second prop:
+    // a square with sends on it is somebody reaching for one of them with a
+    // held-down modifier key, not a request to queue the day.
+    if ((event.ctrlKey || event.metaKey) && onGapToggle) {
+      const canCreate = Boolean(onCreateDay) && !marks?.get(iso)?.count
+      if (canCreate) {
+        onGapToggle(iso)
+        return
+      }
+    }
     // Shift-click extends from wherever the selection was anchored — the
     // gesture every file list and spreadsheet already trained. Without it a
     // two-week shutdown is fourteen clicks.
@@ -381,7 +490,12 @@ export function MonthGrid({
   }
 
   return (
-    <div className="monthgrid" data-scope={scope} data-lines={showSends || undefined}>
+    <div
+      className="monthgrid"
+      data-scope={scope}
+      data-lines={showSends || undefined}
+      data-solar-term={solarTerm}
+    >
       <div className="monthgrid__head" aria-hidden="true">
         {Array.from({ length: 7 }, (_, i) => {
           const day = (firstDay + i) % 7
@@ -416,7 +530,8 @@ export function MonthGrid({
           // O(1) per cell: an already-sorted array is read, sliced to at most
           // three, and never scanned. The whole point of `lines` being prebuilt.
           const lines = showSends ? (mark?.lines ?? EMPTY_SENDS) : EMPTY_SENDS
-          const listed = lines.length > MAX_CELL_SENDS ? lines.slice(0, MAX_CELL_SENDS) : lines
+          const listed =
+            lines.length > MAX_CELL_SENDS ? lines.slice(0, MAX_CELL_SENDS - 1) : lines
           const hidden = lines.length - listed.length
           const canCreate = Boolean(onCreateDay) && !mark?.count
 
@@ -438,10 +553,24 @@ export function MonthGrid({
                 if (!event.dataTransfer.types.includes(DRAG_TYPE)) return
                 event.preventDefault()
                 event.dataTransfer.dropEffect = 'move'
+                // Once per cell entered, not once per pixel of pointer motion —
+                // see the comment on `draggingRef` above.
+                if (draggingRef.current && lastHoverIso.current !== cell.iso) {
+                  lastHoverIso.current = cell.iso
+                  onDragHover?.({
+                    jobId: draggingRef.current.jobId,
+                    fromIso: draggingRef.current.fromIso,
+                    toIso: cell.iso,
+                    fromAt: draggingRef.current.fromAt,
+                    x: event.clientX,
+                    y: event.clientY,
+                  })
+                }
               }}
               onDrop={(event) => {
                 if (!onMoveJob) return
                 const payload = readDragPayload(event.dataTransfer.getData(DRAG_TYPE))
+                endDrag()
                 if (!payload) return
                 const { jobId, fromIso } = payload
                 event.preventDefault()
@@ -464,12 +593,13 @@ export function MonthGrid({
                 data-makeup={makeup}
                 data-today={cell.iso === todayIso}
                 data-selected={selected}
+                data-gap={gapDates?.has(cell.iso) || undefined}
                 data-conflict={mark?.conflict ?? undefined}
                 /* The heatmap. A step, not a count: the square is tinted by how
                    busy the day is, and the badge on top still says exactly how
                    many. Absent — not zero — on a day with nothing on it, so the
                    stylesheet never has to paint "no load" as a colour. */
-                data-load={mark?.level ?? undefined}
+                data-load={heatmapOn ? (mark?.level ?? undefined) : undefined}
                 tabIndex={cell.iso === rovingDate ? 0 : -1}
                 aria-pressed={holiday || makeup}
                 title={
@@ -489,6 +619,7 @@ export function MonthGrid({
                   className="monthgrid__marks"
                   data-shifted={mark.shifted}
                   data-conflict={mark.conflict ?? undefined}
+                  data-chips={mark.count <= MAX_CELL_SENDS ? true : undefined}
                   /*
                     Part of the same roving tab stop as the day it sits on, so
                     arrowing to a day with reminders and pressing Tab reaches
@@ -497,6 +628,13 @@ export function MonthGrid({
                     only route to a reminder a mouse click on an 18px circle.
                   */
                   tabIndex={cell.iso === rovingDate ? 0 : -1}
+                  /*
+                    The chips below are decoration only — this label is still
+                    the single sentence a screen reader hears, exactly as it was
+                    before the chips existed. A per-chip `aria-label` would have
+                    read three fragments in place of the one sentence that
+                    actually says how many and which day.
+                  */
                   aria-label={badgeLabel(cell.iso, mark)}
                   title={badgeLabel(cell.iso, mark)}
                   draggable={Boolean(draggableJob && onMoveJob)}
@@ -504,16 +642,49 @@ export function MonthGrid({
                     if (!draggableJob) return
                     event.dataTransfer.setData(DRAG_TYPE, dragPayload(draggableJob, cell.iso))
                     event.dataTransfer.effectAllowed = 'move'
+                    // No single occurrence to point at from a badge — it stands
+                    // for every send this day, not one row of `lines`. The
+                    // earliest is close enough for a preview that never blocks.
+                    beginDrag(draggableJob, cell.iso, mark.lines?.[0]?.at ?? Date.now())
                   }}
+                  onDragEnd={endDrag}
                   onClick={(event) => {
                     event.stopPropagation()
                     onFocusDate?.(cell.iso)
                     onOpenDay?.(cell.iso)
                   }}
                 >
-                  {/* A count rather than one dot per reminder: three dots and
-                      seven dots are indistinguishable at this size. */}
-                  {mark.count}
+                  {/* Up to three overlapping initials read faster than a
+                      number — "who is this about" instead of "how many". Past
+                      three the chips would overlap into an unreadable stack,
+                      so the count comes back, exactly as it always has.
+                      `.monthgrid__markscount` rides along, hidden, as the
+                      narrow-width fallback: three 14px chips do not fit
+                      inside the 38px cell this app is built down to (see the
+                      "38px holds a date or a line of text" note below), so
+                      the ≤560px media query swaps which of the two is
+                      display:none rather than trying to shrink chips that
+                      have nowhere left to shrink to. */}
+                  {mark.count <= MAX_CELL_SENDS && mark.lines && mark.lines.length > 0 ? (
+                    <>
+                      <span className="monthgrid__marksavatars" aria-hidden="true">
+                        {mark.lines.map((send) => (
+                          <span
+                            key={`${send.jobId}-${send.at}`}
+                            className="monthgrid__markschip"
+                            title={initialsAriaLabel ? initialsAriaLabel(send.to || noRecipientLabel) : undefined}
+                          >
+                            {send.initials ?? '–'}
+                          </span>
+                        ))}
+                      </span>
+                      <span className="monthgrid__markscount" aria-hidden="true">
+                        {mark.count}
+                      </span>
+                    </>
+                  ) : (
+                    mark.count
+                  )}
                 </button>
               ) : null}
 
@@ -542,7 +713,8 @@ export function MonthGrid({
                     const who = send.to || noRecipientLabel
                     const subject = send.subject || noSubjectLabel
                     const time = formatTime ? formatTime(send.at) : ''
-                    const full = [time, who, subject].filter(Boolean).join(' · ')
+                    const statusWord = send.status && sendStatusLabel ? sendStatusLabel(send.status) : ''
+                    const full = [time, who, subject, statusWord].filter(Boolean).join(' · ')
                     return (
                       <button
                         key={`${send.jobId}-${send.at}`}
@@ -566,14 +738,23 @@ export function MonthGrid({
                           // a row always knows which one it is.
                           event.dataTransfer.setData(DRAG_TYPE, dragPayload(send.jobId, cell.iso))
                           event.dataTransfer.effectAllowed = 'move'
+                          beginDrag(send.jobId, cell.iso, send.at)
                         }}
+                        onDragEnd={endDrag}
                         onClick={(event) => {
                           event.stopPropagation()
                           onFocusDate?.(cell.iso)
                           onOpenSend?.(send.jobId, cell.iso)
                         }}
                       >
-                        <span className="monthgrid__sendtime">{time}</span>
+                        <span className="monthgrid__sendtime">
+                          {/* Decorative — the status word is already folded
+                              into this row's own `full` label above. */}
+                          {send.status ? (
+                            <span className="sendstatus" data-status={send.status} aria-hidden="true" />
+                          ) : null}
+                          {time}
+                        </span>
                         <span className="monthgrid__sendtext">
                           {who}
                           <span className="monthgrid__sendsubject"> · {subject}</span>

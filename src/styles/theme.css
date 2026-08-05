@@ -73,6 +73,53 @@
     U+F900-FAFF, U+FE30-FE4F, U+FF00-FFEF;
 }
 
+/* --- 'Aevistle Rune' -------------------------------------------------------
+   A second face, not a variant of the first: `runecircuit` wants its headings
+   to look etched rather than set, and Times/Songti was tuned for the opposite
+   job. Same split-by-codepoint trick as 'Aevistle Text' above, so a screen
+   title with a Latin product name in it still gets one glyph per script — but
+   the fonts underneath are different. 楷体/KaiTi is a running-hand script, the
+   way a seal-carver's brush actually moves, for the CJK half; a coding
+   monospace, the family `--font-mono` already draws from, for the Latin half,
+   so a heading and the tabular numerals beside it read as cut from the same
+   block.
+
+   Heading-only by design — see the `[data-style="runecircuit"]` rules in
+   app.css that apply it, and never let this reach `--font-sans`. 楷体 at 小四
+   (16px) body size is markedly less legible than 宋体: thinner joins, more
+   slant, drawn to be read large rather than read for an hour. */
+@font-face {
+  font-family: "Aevistle Rune";
+  font-style: normal;
+  font-weight: 100 900;
+  src:
+    local("Cascadia Code"), local("JetBrains Mono"), local("SF Mono"),
+    local("Consolas"), local("DejaVu Sans Mono");
+  unicode-range:
+    U+0000-024F, U+0250-02AF, U+0370-03FF, U+0400-04FF,
+    U+2000-206F, U+2070-209F, U+20A0-20CF, U+2100-214F, U+2190-21FF, U+2200-22FF;
+}
+
+@font-face {
+  font-family: "Aevistle Rune";
+  font-style: normal;
+  font-weight: 100 900;
+  src:
+    local("KaiTi"), local("STKaiti"), local("华文楷体"), local("Kaiti SC"),
+    local("Noto Serif CJK SC"), local("Noto Serif SC"), local("Source Han Serif SC"),
+    /* The same three Android spellings 'Aevistle Text' above lists, and for
+       the same reason: without them every `local()` here fails on Android, the
+       face never loads, and the heading pairing is a silent no-op on the whole
+       platform. No calligraphic CJK font ships there, so this lands on the
+       body Songti — legibly, and by choice rather than by falling off the end
+       of the list. */
+    local("Noto Serif CJK"), local("NotoSerifCJK"), local("Source Han Serif");
+  unicode-range:
+    U+2E80-2EFF, U+3000-303F, U+3040-30FF, U+3100-312F, U+3190-319F,
+    U+31C0-31EF, U+3200-32FF, U+3400-4DBF, U+4E00-9FFF,
+    U+F900-FAFF, U+FE30-FE4F, U+FF00-FFEF;
+}
+
 :root {
   /* ---- typography ----
 
@@ -185,6 +232,21 @@
   --dur-fast: 110ms;
   --dur: 180ms;
   --dur-slow: 260ms;
+  /* A different family, deliberately: the three above are for a click's own
+     reaction and stop being polish past ~220ms. `--dur-pulse` is for an
+     ambient loop with nobody's finger waiting on it — `DeviceLinkAnimation`'s
+     travelling pulse — where the same short duration reads as a flicker
+     rather than motion. */
+  --dur-pulse: 1600ms;
+
+  /* runecircuit's ceremonial-layer dial (card grain, hover glow, the
+     solar-term wash, seal-stamp/ink-bloom). Declared globally at its no-op
+     value — 1, full strength, changes nothing — because AppState.tsx sets the
+     real value with `root.style.setProperty`, which is an *inline* override
+     and always wins regardless of which style block last touched `:root`; see
+     `--solarterm-*` and `.card:not(.compose-card)` below for the consumers.
+     Every other style ignores this token entirely. */
+  --intensity: 1;
 
   /* ---- layout ----
      Widened alongside the type scale: 16px body copy needs roughly 15% more
@@ -403,7 +465,7 @@
 /* ==========================================================================
    Visual styles
 
-   Six of them, on `data-style`, sitting one layer above the light/dark pair
+   Seven of them, on `data-style`, sitting one layer above the light/dark pair
    above: theme decides whether the page is bright or dim, style decides what
    kind of surface it is made of. Every style therefore ships both.
 
@@ -1151,6 +1213,333 @@
   }
 }
 
+/* --- runecircuit ------------------------------------------------------------
+   A hanging scroll by day, a powered-down circuit board by night — the two
+   are meant to read as the same object seen at different hours, not as two
+   unrelated skins sharing a name. Radii are small and slightly uneven across
+   the ladder, the way an etched trace pad is round enough to solder to and
+   no rounder; line height leans on the paper side of the scale because the
+   day half is, before anything else, meant to be read.
+
+   Day is pale ink-wash: rice-paper neutrals with a cool, faintly jade
+   undertone rather than paper's warm brown, and ink-black text instead of
+   brown-black. Only the accent — a deep printable teal, the one saturated
+   mark on the page, the way a red seal chop is the one saturated mark on a
+   scroll — breaks from the wash. Night is cyber ink: the same ink pushed to
+   the bottom of the scale, cool near-black rather than paper's lamp-lit warm
+   black, restrained everywhere except the accent, which stops being a seal
+   chop and starts being a live trace — a glowing cyan with a matching glow
+   in `--shadow-accent`. This is also where the circuit motif itself lives:
+   `--circuit-trace`/`--circuit-node` for the board pattern under the working
+   calendar, `--texture-grain` for the noise on a card, and the raw
+   `--neon-*` swatches a card border blends toward on hover.
+   ------------------------------------------------------------------------- */
+
+:root[data-style="runecircuit"] {
+  --r-xs: 2px;
+  --r-sm: 5px;
+  --r-md: 8px;
+  --r-lg: 13px;
+  --r-xl: 20px;
+  --leading-normal: 1.72;
+  --leading-relaxed: 1.88;
+
+  /* The board pattern under the working calendar. Both ride on tokens that
+     already flip with theme and accent — `--border` and `--accent` — so
+     there is nothing here to re-declare per theme; only the mix percentage
+     is fixed. Hairline enough to read as a taped schematic, not a texture.
+
+     Both also scale by `--intensity`, the same way the grain's opacity and the
+     solar-term wash's alpha do. Without that factor the dial's bottom stop
+     turned off every other part of the style and left the board pattern — the
+     style's signature decoration — at full strength, so "off" was not off. */
+  --circuit-trace: color-mix(in srgb, var(--border) calc(70% * var(--intensity, 1)), transparent);
+  --circuit-node: color-mix(in srgb, var(--accent) calc(38% * var(--intensity, 1)), transparent);
+
+  /* feTurbulence noise, baked to ~5% alpha inside the SVG itself (the `rect`
+     below carries its own `opacity`) so one `background-image` layer brings
+     its own fade — an element-level `opacity` would also wash out the card's
+     border and the text sitting on top of it. Vector, so it re-rasterises
+     cleanly at 125%/150% Windows scaling instead of banding the way a bitmap
+     noise tile would. Well under 1KB. */
+  --texture-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='90' height='90'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.05'/%3E%3C/svg%3E");
+
+  /* The two-axis accent (A10): `accentBase` is the printed-ink half — a card
+     border at rest, the nav underline, the seal-stamp ring — and `accentCyber`
+     is the live-trace half `--accent`/`--accent-text` already resolve from.
+     Raw swatches only; `--accent-classical`/`--accent-classical-text` and
+     `--accent`/`--accent-text` resolve one of each pair against `data-accent-base`
+     /`data-accent-cyber`, below the seven-accent block these sit beside. Both
+     halves defined once, theme-invariant, same convention as `--accent-azure-l`
+     et al. in the universal token block near the top of this file. */
+  /* The classical half again, but for the places it is painted as a *mark* on
+     a surface rather than as a fill behind text: the active-page nav bar and
+     the seal-stamp ring. Three of the four bases are dark enough to work as
+     both; `moonwhite` in the light theme is 1.06:1 against `--surface-2` and
+     the 3px bar simply vanishes, well under WCAG 1.4.11's 3:1 for a UI
+     component. `--accent-classical-text` already solved the mirror of this
+     problem for text-on-fill; this is the fill-on-surface half. */
+  --accent-classical-marker: var(--accent-classical, var(--accent));
+
+  --classical-ink-l: #1c2b22;
+  --classical-ink-d: #cfe0d6;
+  --classical-crimson-l: #9c2b3a;
+  --classical-crimson-d: #ff8a93;
+  --classical-moonwhite-l: #eef1ea;
+  --classical-moonwhite-d: #f5f7f1;
+  --classical-gold-l: #6f5410;
+  --classical-gold-d: #e8c774;
+
+  /* The light cyan is a shade darker than the hue looks like it wants to be:
+     it is the shipped default `accentCyber`, so it is what `--accent-text`
+     (#ffffff) sits on for every primary button, and what `.link` is painted in
+     on `--surface-1`. At #0e8a93 those measured 4.14:1 and 3.85:1 — the only
+     pair in this file under AA. #0d7d85 is 4.90:1 and 4.55:1 at the same hue. */
+  --cyber-cyan-l: #0d7d85;
+  --cyber-cyan-d: #2de2e6;
+  --cyber-magenta-l: #a3236b;
+  --cyber-magenta-d: #ff5fd8;
+  --cyber-blue-l: #1d5fa8;
+  --cyber-blue-d: #63b3ff;
+}
+
+:root[data-style="runecircuit"],
+:root[data-style="runecircuit"][data-theme="light"] {
+  color-scheme: light;
+
+  --bg: #e9ebe6;
+  --surface-1: #f6f7f3;
+  --surface-2: #f0f2ec;
+  --surface-3: #e3e6de;
+  --surface-inset: #eef0ea;
+  --surface-hover: rgba(32, 38, 30, 0.045);
+  --surface-active: rgba(32, 38, 30, 0.08);
+
+  --text-1: #20261f;   /* 14.3:1 on --surface-1 */
+  --text-2: #4e564a;   /*  7.1:1 */
+  --text-3: #656d5f;   /*  5.0:1 */
+  --text-inverse: #ffffff;
+
+  --border: #dde0d7;
+  --border-strong: #c7cbbe;
+  --border-subtle: #e5e7df;
+
+  --shadow-sm: 0 1px 2px rgba(24, 30, 20, 0.06);
+  --shadow-md: 0 2px 5px rgba(24, 30, 20, 0.07), 0 8px 20px rgba(24, 30, 20, 0.07);
+  --shadow-lg: 0 4px 10px rgba(24, 30, 20, 0.08), 0 18px 44px rgba(24, 30, 20, 0.12);
+  --shadow-accent: 0 3px 14px color-mix(in srgb, var(--accent) 26%, transparent);
+
+  --success: #3d6e52;
+  --success-bg: #e9f1ea;
+  --warning: #8a6a1a;
+  --warning-bg: #f6f0dc;
+  --danger: #a13a3a;
+  --danger-bg: #f6ebe9;
+  --info: #2f6e78;
+  --info-bg: #e6f0f1;
+
+  /* Raw swatches, not blended with anything yet — a card border mixes toward
+     one of these with `color-mix()` at the point of use. Printable, not lit:
+     day is still a scroll, and these are the ink a scroll uses when it wants
+     to be noticed, not a light source. */
+  --neon-cyan: #0e8a93;
+  --neon-magenta: #a3236b;
+  --neon-gold: #9c7a24;
+
+  /* The 24 solar terms (A6, `core/solarTerms.ts`), each a colour wash under
+     the constant circuit-trace grid on the working calendar — see
+     `WorkCalendarView`'s `data-solar-term` and the consuming rule in app.css.
+     Hue alone carries the shift (winter blue, spring green, summer amber,
+     autumn ochre, in solar-term order); saturation and lightness are held
+     fixed across all 24 so no single term reads as louder than its neighbours.
+     Low alpha, and scaled by `--intensity` on top of that — this is a wash
+     under `--surface-inset`-backed day cells, not a colour anything is read
+     against; see chunk-06's A7 audit for why. */
+  --solarterm-xiaohan: hsl(245 30% 42% / calc(0.16 * var(--intensity, 1)));
+  --solarterm-dahan: hsl(255 30% 42% / calc(0.16 * var(--intensity, 1)));
+  --solarterm-lichun: hsl(95 30% 42% / calc(0.16 * var(--intensity, 1)));
+  --solarterm-yushui: hsl(105 30% 42% / calc(0.16 * var(--intensity, 1)));
+  --solarterm-jingzhe: hsl(115 30% 42% / calc(0.16 * var(--intensity, 1)));
+  --solarterm-chunfen: hsl(125 30% 42% / calc(0.16 * var(--intensity, 1)));
+  --solarterm-qingming: hsl(135 30% 42% / calc(0.16 * var(--intensity, 1)));
+  --solarterm-guyu: hsl(145 30% 42% / calc(0.16 * var(--intensity, 1)));
+  --solarterm-lixia: hsl(35 30% 42% / calc(0.16 * var(--intensity, 1)));
+  --solarterm-xiaoman: hsl(42 30% 42% / calc(0.16 * var(--intensity, 1)));
+  --solarterm-mangzhong: hsl(48 30% 42% / calc(0.16 * var(--intensity, 1)));
+  --solarterm-xiazhi: hsl(54 30% 42% / calc(0.16 * var(--intensity, 1)));
+  --solarterm-xiaoshu: hsl(60 30% 42% / calc(0.16 * var(--intensity, 1)));
+  --solarterm-dashu: hsl(66 30% 42% / calc(0.16 * var(--intensity, 1)));
+  --solarterm-liqiu: hsl(8 30% 42% / calc(0.16 * var(--intensity, 1)));
+  --solarterm-chushu: hsl(14 30% 42% / calc(0.16 * var(--intensity, 1)));
+  --solarterm-bailu: hsl(20 30% 42% / calc(0.16 * var(--intensity, 1)));
+  --solarterm-qiufen: hsl(26 30% 42% / calc(0.16 * var(--intensity, 1)));
+  --solarterm-hanlu: hsl(32 30% 42% / calc(0.16 * var(--intensity, 1)));
+  --solarterm-shuangjiang: hsl(38 30% 42% / calc(0.16 * var(--intensity, 1)));
+  --solarterm-lidong: hsl(205 30% 42% / calc(0.16 * var(--intensity, 1)));
+  --solarterm-xiaoxue: hsl(215 30% 42% / calc(0.16 * var(--intensity, 1)));
+  --solarterm-daxue: hsl(225 30% 42% / calc(0.16 * var(--intensity, 1)));
+  --solarterm-dongzhi: hsl(235 30% 42% / calc(0.16 * var(--intensity, 1)));
+
+  /* Deep printable teal rather than the house azure: azure is a sans-serif
+     colour, and the one saturated mark on an ink-wash page reads as a seal
+     chop, not a hyperlink. Overridden by an explicit accent choice, same as
+     `paper` and `nordic`. */
+  --accent: #0e7c86;
+  --accent-text: #ffffff;
+  --scrim: rgba(20, 26, 22, 0.34);
+  --knob: #fbfcf9;
+}
+
+:root[data-style="runecircuit"][data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: #0a0f0e;
+  --surface-1: #101716;
+  --surface-2: #141d1b;
+  --surface-3: #1a2422;
+  --surface-inset: #0d1312;
+  --surface-hover: rgba(200, 240, 235, 0.055);
+  --surface-active: rgba(200, 240, 235, 0.09);
+
+  --text-1: #d8e4e0;   /* 13.9:1 on --surface-1 */
+  --text-2: #a3b5b0;   /*  8.5:1 */
+  --text-3: #869a95;   /*  6.1:1 */
+  --text-inverse: #0a0f0e;
+
+  --border: #1f2b28;
+  --border-strong: #2c3b37;
+  --border-subtle: #182220;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 2px 6px rgba(0, 0, 0, 0.55), 0 8px 22px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 8px 20px rgba(0, 0, 0, 0.6), 0 22px 52px rgba(0, 0, 0, 0.5);
+  --shadow-accent: 0 3px 18px color-mix(in srgb, var(--accent) 34%, transparent);
+
+  --success: #7fd9b0;
+  --success-bg: rgba(127, 217, 176, 0.1);
+  --warning: #e8c774;
+  --warning-bg: rgba(232, 199, 116, 0.1);
+  --danger: #e5847a;
+  --danger-bg: rgba(229, 132, 122, 0.1);
+  --info: #6fd0d6;
+  --info-bg: rgba(111, 208, 214, 0.1);
+
+  /* Same three swatches, lit rather than printed — night is a live board, so
+     these read as neon signage instead of ink. `--neon-cyan` lands on the
+     same value as `--accent` below on purpose: in this style the accent
+     already *is* the trace colour, and a card border blending "toward the
+     accent" and a card border blending "toward `--neon-cyan`" should be the
+     same statement. */
+  --neon-cyan: #2de2e6;
+  --neon-magenta: #ff5fd8;
+  --neon-gold: #ffcf5c;
+
+  /* Same 24, lit rather than printed — see the light block's comment. */
+  --solarterm-xiaohan: hsl(245 68% 62% / calc(0.14 * var(--intensity, 1)));
+  --solarterm-dahan: hsl(255 68% 62% / calc(0.14 * var(--intensity, 1)));
+  --solarterm-lichun: hsl(95 68% 62% / calc(0.14 * var(--intensity, 1)));
+  --solarterm-yushui: hsl(105 68% 62% / calc(0.14 * var(--intensity, 1)));
+  --solarterm-jingzhe: hsl(115 68% 62% / calc(0.14 * var(--intensity, 1)));
+  --solarterm-chunfen: hsl(125 68% 62% / calc(0.14 * var(--intensity, 1)));
+  --solarterm-qingming: hsl(135 68% 62% / calc(0.14 * var(--intensity, 1)));
+  --solarterm-guyu: hsl(145 68% 62% / calc(0.14 * var(--intensity, 1)));
+  --solarterm-lixia: hsl(35 68% 62% / calc(0.14 * var(--intensity, 1)));
+  --solarterm-xiaoman: hsl(42 68% 62% / calc(0.14 * var(--intensity, 1)));
+  --solarterm-mangzhong: hsl(48 68% 62% / calc(0.14 * var(--intensity, 1)));
+  --solarterm-xiazhi: hsl(54 68% 62% / calc(0.14 * var(--intensity, 1)));
+  --solarterm-xiaoshu: hsl(60 68% 62% / calc(0.14 * var(--intensity, 1)));
+  --solarterm-dashu: hsl(66 68% 62% / calc(0.14 * var(--intensity, 1)));
+  --solarterm-liqiu: hsl(8 68% 62% / calc(0.14 * var(--intensity, 1)));
+  --solarterm-chushu: hsl(14 68% 62% / calc(0.14 * var(--intensity, 1)));
+  --solarterm-bailu: hsl(20 68% 62% / calc(0.14 * var(--intensity, 1)));
+  --solarterm-qiufen: hsl(26 68% 62% / calc(0.14 * var(--intensity, 1)));
+  --solarterm-hanlu: hsl(32 68% 62% / calc(0.14 * var(--intensity, 1)));
+  --solarterm-shuangjiang: hsl(38 68% 62% / calc(0.14 * var(--intensity, 1)));
+  --solarterm-lidong: hsl(205 68% 62% / calc(0.14 * var(--intensity, 1)));
+  --solarterm-xiaoxue: hsl(215 68% 62% / calc(0.14 * var(--intensity, 1)));
+  --solarterm-daxue: hsl(225 68% 62% / calc(0.14 * var(--intensity, 1)));
+  --solarterm-dongzhi: hsl(235 68% 62% / calc(0.14 * var(--intensity, 1)));
+
+  /* The one token the day half does not prepare you for: the seal chop
+     becomes a powered trace, printable teal replaced by a glowing cyan that
+     `--shadow-accent` above already bloomed to match. */
+  --accent: #2de2e6;
+  --accent-text: #06201f;
+  --scrim: rgba(4, 8, 7, 0.66);
+  --knob: #d8e4e0;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root[data-style="runecircuit"]:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    --bg: #0a0f0e;
+    --surface-1: #101716;
+    --surface-2: #141d1b;
+    --surface-3: #1a2422;
+    --surface-inset: #0d1312;
+    --surface-hover: rgba(200, 240, 235, 0.055);
+    --surface-active: rgba(200, 240, 235, 0.09);
+
+    --text-1: #d8e4e0;
+    --text-2: #a3b5b0;
+    --text-3: #869a95;
+    --text-inverse: #0a0f0e;
+
+    --border: #1f2b28;
+    --border-strong: #2c3b37;
+    --border-subtle: #182220;
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
+    --shadow-md: 0 2px 6px rgba(0, 0, 0, 0.55), 0 8px 22px rgba(0, 0, 0, 0.45);
+    --shadow-lg: 0 8px 20px rgba(0, 0, 0, 0.6), 0 22px 52px rgba(0, 0, 0, 0.5);
+    --shadow-accent: 0 3px 18px color-mix(in srgb, var(--accent) 34%, transparent);
+
+    --success: #7fd9b0;
+    --success-bg: rgba(127, 217, 176, 0.1);
+    --warning: #e8c774;
+    --warning-bg: rgba(232, 199, 116, 0.1);
+    --danger: #e5847a;
+    --danger-bg: rgba(229, 132, 122, 0.1);
+    --info: #6fd0d6;
+    --info-bg: rgba(111, 208, 214, 0.1);
+
+    --neon-cyan: #2de2e6;
+    --neon-magenta: #ff5fd8;
+    --neon-gold: #ffcf5c;
+
+    --solarterm-xiaohan: hsl(245 68% 62% / calc(0.14 * var(--intensity, 1)));
+    --solarterm-dahan: hsl(255 68% 62% / calc(0.14 * var(--intensity, 1)));
+    --solarterm-lichun: hsl(95 68% 62% / calc(0.14 * var(--intensity, 1)));
+    --solarterm-yushui: hsl(105 68% 62% / calc(0.14 * var(--intensity, 1)));
+    --solarterm-jingzhe: hsl(115 68% 62% / calc(0.14 * var(--intensity, 1)));
+    --solarterm-chunfen: hsl(125 68% 62% / calc(0.14 * var(--intensity, 1)));
+    --solarterm-qingming: hsl(135 68% 62% / calc(0.14 * var(--intensity, 1)));
+    --solarterm-guyu: hsl(145 68% 62% / calc(0.14 * var(--intensity, 1)));
+    --solarterm-lixia: hsl(35 68% 62% / calc(0.14 * var(--intensity, 1)));
+    --solarterm-xiaoman: hsl(42 68% 62% / calc(0.14 * var(--intensity, 1)));
+    --solarterm-mangzhong: hsl(48 68% 62% / calc(0.14 * var(--intensity, 1)));
+    --solarterm-xiazhi: hsl(54 68% 62% / calc(0.14 * var(--intensity, 1)));
+    --solarterm-xiaoshu: hsl(60 68% 62% / calc(0.14 * var(--intensity, 1)));
+    --solarterm-dashu: hsl(66 68% 62% / calc(0.14 * var(--intensity, 1)));
+    --solarterm-liqiu: hsl(8 68% 62% / calc(0.14 * var(--intensity, 1)));
+    --solarterm-chushu: hsl(14 68% 62% / calc(0.14 * var(--intensity, 1)));
+    --solarterm-bailu: hsl(20 68% 62% / calc(0.14 * var(--intensity, 1)));
+    --solarterm-qiufen: hsl(26 68% 62% / calc(0.14 * var(--intensity, 1)));
+    --solarterm-hanlu: hsl(32 68% 62% / calc(0.14 * var(--intensity, 1)));
+    --solarterm-shuangjiang: hsl(38 68% 62% / calc(0.14 * var(--intensity, 1)));
+    --solarterm-lidong: hsl(205 68% 62% / calc(0.14 * var(--intensity, 1)));
+    --solarterm-xiaoxue: hsl(215 68% 62% / calc(0.14 * var(--intensity, 1)));
+    --solarterm-daxue: hsl(225 68% 62% / calc(0.14 * var(--intensity, 1)));
+    --solarterm-dongzhi: hsl(235 68% 62% / calc(0.14 * var(--intensity, 1)));
+
+    --accent: #2de2e6;
+    --accent-text: #06201f;
+    --scrim: rgba(4, 8, 7, 0.66);
+    --knob: #d8e4e0;
+  }
+}
+
 /* --- contrast -------------------------------------------------------------
    The accessibility style, and the only one where a number is the design.
    Every text pair here clears 7:1 — not just body text, but the tertiary
@@ -1379,6 +1768,15 @@
   --preview-r: 9px;
   --preview-shadow: 0 3px 10px rgba(46, 60, 80, 0.16);
 }
+.stylecard[data-style-preview="runecircuit"] {
+  --preview-bg: #e9ebe6;
+  --preview-surface: #f6f7f3;
+  --preview-border: #c7cbbe;
+  --preview-ink: #20261f;
+  --preview-accent: #0e7c86;
+  --preview-r: 5px;
+  --preview-shadow: 0 2px 5px rgba(24, 30, 20, 0.14);
+}
 .stylecard[data-style-preview="contrast"] {
   --preview-bg: #ffffff;
   --preview-surface: #ffffff;
@@ -1420,6 +1818,13 @@
   --preview-ink: #d8dee9;
   --preview-accent: #79b8e8;
 }
+:root[data-theme="dark"] .stylecard[data-style-preview="runecircuit"] {
+  --preview-bg: #0a0f0e;
+  --preview-surface: #101716;
+  --preview-border: #2c3b37;
+  --preview-ink: #d8e4e0;
+  --preview-accent: #2de2e6;
+}
 :root[data-theme="dark"] .stylecard[data-style-preview="contrast"] {
   --preview-bg: #000000;
   --preview-surface: #0d0d0d;
@@ -1456,6 +1861,13 @@
     --preview-border: #434d5c;
     --preview-ink: #d8dee9;
     --preview-accent: #79b8e8;
+  }
+  :root:not([data-theme="light"]) .stylecard[data-style-preview="runecircuit"] {
+    --preview-bg: #0a0f0e;
+    --preview-surface: #101716;
+    --preview-border: #2c3b37;
+    --preview-ink: #d8e4e0;
+    --preview-accent: #2de2e6;
   }
   :root:not([data-theme="light"]) .stylecard[data-style-preview="contrast"] {
     --preview-bg: #000000;
@@ -1562,6 +1974,97 @@
     --accent-amber-now: var(--accent-amber-d);
     --accent-rose-now: var(--accent-rose-d);
     --accent-emerald-now: var(--accent-emerald-d);
+  }
+}
+
+/* --- runecircuit's own accent: two axes, not seven swatches -----------------
+
+   `[data-style="runecircuit"]` only — the other six styles never carry
+   `data-accent-base`/`data-accent-cyber`, so these selectors simply never
+   match there and the seven-swatch `--accent` resolution above keeps doing
+   exactly what it always did. Last in the file on purpose, same reasoning as
+   the block above it: a style rule and an accent rule can tie at (0,3,0)
+   (`:root[data-style=x][data-theme=y]` vs. `:root[data-style=x][data-accent-base=z]`),
+   and the user's explicit choice has to be the one that wins the tie.
+
+   `--accent`/`--accent-text` keep meaning exactly what they mean everywhere
+   else — the live-trace colour, resolved here from `accentCyber` instead of
+   the seven-way picker. `--accent-classical`/`--accent-classical-text` are new:
+   the printed-ink half, with its own text pairing per swatch rather than one
+   universal `--accent-text`-style constant, because moon-white as a *background*
+   needs dark text in light mode and light text in dark mode while the other
+   three bases want the opposite — a single shared text colour would clear
+   three of the four and silently fail the fourth. */
+
+:root[data-style="runecircuit"][data-accent-base="ink"]       { --accent-classical: var(--classical-ink-l);       --accent-classical-text: #ffffff; }
+:root[data-style="runecircuit"][data-accent-base="crimson"]   { --accent-classical: var(--classical-crimson-l);   --accent-classical-text: #ffffff; }
+/* The one row that needs a marker of its own: moon-white on a light page is a
+   fill you read text on, not a mark you can see against the page. The cyber
+   half stands in wherever the classical half is drawn as a bar or a ring. */
+:root[data-style="runecircuit"][data-accent-base="moonwhite"] { --accent-classical: var(--classical-moonwhite-l); --accent-classical-text: #20261f; --accent-classical-marker: var(--accent); }
+:root[data-style="runecircuit"][data-accent-base="gold"]      { --accent-classical: var(--classical-gold-l);      --accent-classical-text: #ffffff; }
+
+:root[data-style="runecircuit"][data-theme="dark"][data-accent-base="ink"]       { --accent-classical: var(--classical-ink-d);       --accent-classical-text: #0a0f0e; }
+:root[data-style="runecircuit"][data-theme="dark"][data-accent-base="crimson"]   { --accent-classical: var(--classical-crimson-d);   --accent-classical-text: #2a0507; }
+/* Restated because the light moonwhite row above it ties on nothing here — it
+   is (0,3,0) and this is (0,4,0), but the marker it sets is not otherwise
+   overridden, and moon-white on a dark page is the one case that needs no
+   stand-in (16.8:1 against the sidebar). */
+:root[data-style="runecircuit"][data-theme="dark"][data-accent-base="moonwhite"] { --accent-classical: var(--classical-moonwhite-d); --accent-classical-text: #1c231f; --accent-classical-marker: var(--classical-moonwhite-d); }
+:root[data-style="runecircuit"][data-theme="dark"][data-accent-base="gold"]      { --accent-classical: var(--classical-gold-d);       --accent-classical-text: #241b04; }
+
+@media (prefers-color-scheme: dark) {
+  :root[data-style="runecircuit"]:not([data-theme="light"])[data-accent-base="ink"]       { --accent-classical: var(--classical-ink-d);       --accent-classical-text: #0a0f0e; }
+  :root[data-style="runecircuit"]:not([data-theme="light"])[data-accent-base="crimson"]   { --accent-classical: var(--classical-crimson-d);   --accent-classical-text: #2a0507; }
+  :root[data-style="runecircuit"]:not([data-theme="light"])[data-accent-base="moonwhite"] { --accent-classical: var(--classical-moonwhite-d); --accent-classical-text: #1c231f; --accent-classical-marker: var(--classical-moonwhite-d); }
+  :root[data-style="runecircuit"]:not([data-theme="light"])[data-accent-base="gold"]      { --accent-classical: var(--classical-gold-d);       --accent-classical-text: #241b04; }
+}
+
+:root[data-style="runecircuit"][data-accent-cyber="cyan"]    { --accent: var(--cyber-cyan-l);    --accent-text: #ffffff; }
+:root[data-style="runecircuit"][data-accent-cyber="magenta"] { --accent: var(--cyber-magenta-l); --accent-text: #ffffff; }
+:root[data-style="runecircuit"][data-accent-cyber="blue"]    { --accent: var(--cyber-blue-l);    --accent-text: #ffffff; }
+
+:root[data-style="runecircuit"][data-theme="dark"][data-accent-cyber="cyan"]    { --accent: var(--cyber-cyan-d);    --accent-text: #06201f; }
+:root[data-style="runecircuit"][data-theme="dark"][data-accent-cyber="magenta"] { --accent: var(--cyber-magenta-d); --accent-text: #2a0518; }
+:root[data-style="runecircuit"][data-theme="dark"][data-accent-cyber="blue"]    { --accent: var(--cyber-blue-d);    --accent-text: #06131f; }
+
+@media (prefers-color-scheme: dark) {
+  :root[data-style="runecircuit"]:not([data-theme="light"])[data-accent-cyber="cyan"]    { --accent: var(--cyber-cyan-d);    --accent-text: #06201f; }
+  :root[data-style="runecircuit"]:not([data-theme="light"])[data-accent-cyber="magenta"] { --accent: var(--cyber-magenta-d); --accent-text: #2a0518; }
+  :root[data-style="runecircuit"]:not([data-theme="light"])[data-accent-cyber="blue"]    { --accent: var(--cyber-blue-d);    --accent-text: #06131f; }
+}
+
+/* Same "-now" trick as the seven swatches above, for the two new rows in
+   Settings: each swatch paints itself from the half the current theme is
+   actually showing, rather than a copy of the palette the view would have to
+   keep in sync by hand. */
+:root {
+  --classical-ink-now: var(--classical-ink-l);
+  --classical-crimson-now: var(--classical-crimson-l);
+  --classical-moonwhite-now: var(--classical-moonwhite-l);
+  --classical-gold-now: var(--classical-gold-l);
+  --cyber-cyan-now: var(--cyber-cyan-l);
+  --cyber-magenta-now: var(--cyber-magenta-l);
+  --cyber-blue-now: var(--cyber-blue-l);
+}
+:root[data-theme="dark"] {
+  --classical-ink-now: var(--classical-ink-d);
+  --classical-crimson-now: var(--classical-crimson-d);
+  --classical-moonwhite-now: var(--classical-moonwhite-d);
+  --classical-gold-now: var(--classical-gold-d);
+  --cyber-cyan-now: var(--cyber-cyan-d);
+  --cyber-magenta-now: var(--cyber-magenta-d);
+  --cyber-blue-now: var(--cyber-blue-d);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --classical-ink-now: var(--classical-ink-d);
+    --classical-crimson-now: var(--classical-crimson-d);
+    --classical-moonwhite-now: var(--classical-moonwhite-d);
+    --classical-gold-now: var(--classical-gold-d);
+    --cyber-cyan-now: var(--cyber-cyan-d);
+    --cyber-magenta-now: var(--cyber-magenta-d);
+    --cyber-blue-now: var(--cyber-blue-d);
   }
 }
 

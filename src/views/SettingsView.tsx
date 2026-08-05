@@ -29,14 +29,19 @@ import {
 } from '../components/icons'
 import { AccountDialog } from '../components/AccountDialog'
 import { BackupCard } from './BackupCard'
+import { PairingFileCard } from './PairingFileCard'
+import { DevicesCard } from './DevicesCard'
 import { ScheduleTransferCard } from './ScheduleTransferCard'
 import { ControlCard } from './ControlCard'
+import { CalendarSubscribeCard } from './CalendarSubscribeCard'
 import { SectionNav } from '../components/SectionNav'
 import { groupAccounts, knownGroups } from '../core/accounts'
 import { useApp } from '../state/AppState'
 import { LOCALES, useI18n, type TranslationKey } from '../i18n'
 import { DEFAULT_RETRY, defaultRecurrence, effectiveImagePolicy, emptyDraft } from '../core/types'
 import type {
+  AccentBase,
+  AccentCyber,
   AccentId,
   Density,
   InboxAccountState,
@@ -59,7 +64,7 @@ import { lastUpdateCheck, onUpdateCheck, runUpdateCheck } from '../core/update'
 import type { DownloadProgress, UpdateInfo } from '../core/update'
 
 /**
- * The six visual styles, in the order they are offered.
+ * The seven visual styles, in the order they are offered.
  *
  * `aurora` first because it is the default and the one an existing install is
  * already wearing; `contrast` last because it is the answer to a need rather
@@ -73,6 +78,7 @@ const STYLES: Array<{ id: VisualStyle; labelKey: TranslationKey }> = [
   { id: 'paper', labelKey: 'settings.style.paper' },
   { id: 'midnight', labelKey: 'settings.style.midnight' },
   { id: 'nordic', labelKey: 'settings.style.nordic' },
+  { id: 'runecircuit', labelKey: 'settings.style.runecircuit' },
   { id: 'contrast', labelKey: 'settings.style.contrast' },
 ]
 
@@ -86,6 +92,23 @@ const STYLES: Array<{ id: VisualStyle; labelKey: TranslationKey }> = [
  * retunes all seven for AAA.
  */
 const ACCENTS: AccentId[] = ['azure', 'indigo', 'teal', 'violet', 'amber', 'rose', 'emerald']
+
+/**
+ * runecircuit's own accent, on two axes instead of the seven above — see the
+ * block comment beside `--accent-classical` in theme.css. Swatches paint from
+ * `--classical-<id>-now`/`--cyber-<id>-now`, the same "-now" trick as `ACCENTS`.
+ */
+const ACCENT_BASES: Array<{ id: AccentBase; labelKey: TranslationKey }> = [
+  { id: 'ink', labelKey: 'settings.accentBase.ink' },
+  { id: 'crimson', labelKey: 'settings.accentBase.crimson' },
+  { id: 'moonwhite', labelKey: 'settings.accentBase.moonwhite' },
+  { id: 'gold', labelKey: 'settings.accentBase.gold' },
+]
+const ACCENT_CYBERS: Array<{ id: AccentCyber; labelKey: TranslationKey }> = [
+  { id: 'cyan', labelKey: 'settings.accentCyber.cyan' },
+  { id: 'magenta', labelKey: 'settings.accentCyber.magenta' },
+  { id: 'blue', labelKey: 'settings.accentCyber.blue' },
+]
 
 const REPO_URL = 'https://github.com/Aevorine/Aevistle'
 
@@ -120,6 +143,7 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
       { id: 'set-accounts', label: t('account.title') },
       { id: 'set-data', label: t('data.title') },
       { id: 'set-backup', label: t('backup.title') },
+      { id: 'set-devices', label: t('settings.devices') },
       { id: 'set-control', label: t('control.title') },
       { id: 'set-update', label: t('update.title') },
       { id: 'set-appearance', label: t('settings.appearance') },
@@ -437,9 +461,19 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
             and deliberately separate because they are not the same one: a
             backup restores this install, this moves reminders to another. */}
         <ScheduleTransferCard />
+        {/* The offline fallback for device pairing — same file shape as the
+            backup above, scoped and PIN-encrypted. See `core/pairingFile.ts`. */}
+        <PairingFileCard />
+
+        {/* The live, LAN-paired counterpart to the file above — where a pairing
+            is started from either end, and where the devices it produced are
+            managed. See `core/pairedDevices.ts` and `core/syncLoop.ts`. */}
+        <div id="set-devices" className="settings-section" />
+        <DevicesCard />
 
         <div id="set-control" className="settings-section" />
         <ControlCard />
+        <CalendarSubscribeCard />
 
         {/* The work calendar used to be a card here, and its anchor outlived
             it. Removed rather than turned into a link to the calendar tab:
@@ -502,22 +536,70 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
               </div>
             </Field>
 
-            <Field label={t('settings.accent')}>
-              <div className="accent-swatches">
-                {ACCENTS.map((id) => (
-                  <button
-                    key={id}
-                    type="button"
-                    className="swatch"
-                    aria-pressed={s.accent === id}
-                    aria-label={id}
-                    title={id}
-                    style={{ background: `var(--accent-${id}-now)`, color: `var(--accent-${id}-now)` }}
-                    onClick={() => patch({ accent: id })}
+            {(s.visualStyle ?? 'aurora') === 'runecircuit' ? (
+              <>
+                <Field label={t('settings.accentBase')}>
+                  <div className="accent-swatches">
+                    {ACCENT_BASES.map(({ id, labelKey }) => (
+                      <button
+                        key={id}
+                        type="button"
+                        className="swatch"
+                        aria-pressed={(s.accentBase ?? 'ink') === id}
+                        aria-label={t(labelKey)}
+                        title={t(labelKey)}
+                        style={{ background: `var(--classical-${id}-now)`, color: `var(--classical-${id}-now)` }}
+                        onClick={() => patch({ accentBase: id })}
+                      />
+                    ))}
+                  </div>
+                </Field>
+                <Field label={t('settings.accentCyber')}>
+                  <div className="accent-swatches">
+                    {ACCENT_CYBERS.map(({ id, labelKey }) => (
+                      <button
+                        key={id}
+                        type="button"
+                        className="swatch"
+                        aria-pressed={(s.accentCyber ?? 'cyan') === id}
+                        aria-label={t(labelKey)}
+                        title={t(labelKey)}
+                        style={{ background: `var(--cyber-${id}-now)`, color: `var(--cyber-${id}-now)` }}
+                        onClick={() => patch({ accentCyber: id })}
+                      />
+                    ))}
+                  </div>
+                </Field>
+                <Field label={t('settings.atmosphereIntensity')} hint={t('settings.atmosphereIntensityHint')}>
+                  <input
+                    className="range"
+                    type="range"
+                    min={0}
+                    max={100}
+                    step={5}
+                    value={s.themeIntensity ?? 60}
+                    onChange={(e) => patch({ themeIntensity: Number(e.target.value) })}
                   />
-                ))}
-              </div>
-            </Field>
+                </Field>
+              </>
+            ) : (
+              <Field label={t('settings.accent')}>
+                <div className="accent-swatches">
+                  {ACCENTS.map((id) => (
+                    <button
+                      key={id}
+                      type="button"
+                      className="swatch"
+                      aria-pressed={s.accent === id}
+                      aria-label={id}
+                      title={id}
+                      style={{ background: `var(--accent-${id}-now)`, color: `var(--accent-${id}-now)` }}
+                      onClick={() => patch({ accent: id })}
+                    />
+                  ))}
+                </div>
+              </Field>
+            )}
 
             <div className="field__row">
               <Field label={t('settings.density')}>

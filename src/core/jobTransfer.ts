@@ -258,12 +258,28 @@ export function materialise(
   newId: (prefix: string) => string,
   missingPaths: Set<string> = new Set(),
   now = Date.now(),
-): { jobs: ScheduledJob[]; droppedAttachments: number } {
+  /**
+   * Indexes into `parsed.jobs` that `syncScope.dedupeAgainstLocal` already
+   * matched, by exact content hash, against a job already on this machine.
+   * Sync-only, same reasoning as `backup.ts`'s `applyBackup`: the hash is
+   * computed with `crypto.subtle.digest`, which is async, so this function
+   * stays synchronous and only honours a decision made before it was called.
+   * The plain reminder-file import in `ScheduleTransferCard.tsx` never passes
+   * this, so its behaviour is unchanged.
+   */
+  duplicateIndexes: ReadonlySet<number> = new Set(),
+): { jobs: ScheduledJob[]; droppedAttachments: number; duplicatesSkipped: number } {
   let droppedAttachments = 0
-  const jobs = parsed.jobs.map((entry, i) => {
+  let duplicatesSkipped = 0
+  const jobs: ScheduledJob[] = []
+  parsed.jobs.forEach((entry, i) => {
+    if (duplicateIndexes.has(i)) {
+      duplicatesSkipped++
+      return
+    }
     const kept = (entry.attachmentPaths ?? []).filter((p) => !missingPaths.has(p))
     droppedAttachments += (entry.attachmentPaths ?? []).length - kept.length
-    return {
+    jobs.push({
       id: newId('job'),
       name: entry.name || `Imported ${i + 1}`,
       enabled: entry.enabled !== false,
@@ -295,7 +311,7 @@ export function materialise(
       status: 'armed' as const,
       createdAt: now,
       updatedAt: now,
-    } as ScheduledJob
+    } as ScheduledJob)
   })
-  return { jobs, droppedAttachments }
+  return { jobs, droppedAttachments, duplicatesSkipped }
 }

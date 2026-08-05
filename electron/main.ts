@@ -64,6 +64,10 @@ import {
   type ControlEndpoint,
   type ControlResponse,
 } from '../src/core/control'
+import { PairingServer } from './pairingServer'
+import type { PairingPayload, PairMode } from '../src/core/pairing'
+import { SyncServer } from './syncServer'
+import type { SyncListenerStatus, SyncServerResponse } from '../src/core/syncLoop'
 import {
   dataFolderSize,
   dataLocation,
@@ -87,7 +91,10 @@ import { fetchMessageBody, purgeMessages, setServerSeenFlag, syncInbox, testInbo
 import { stopAllInboxWatchers, watchInboxes } from './imapIdle'
 import { deleteAccountInboxCache, deleteMessageCache, pruneInboxCache } from './inboxStore'
 import { clearImageCache, downloadRemoteImage } from './remoteImage'
+import { sanitizeMessageHtml } from './sanitizeHtml'
 import { fetchFeed } from './feedFetch'
+import { buildIcs, calendarToEvents } from '../src/core/ics'
+import { DEFAULT_WORK_CALENDAR, type WorkCalendar } from '../src/core/workCalendar'
 
 // Bundled to CommonJS by scripts/build-electron.mjs, so __dirname is real.
 const DIRNAME = __dirname
@@ -138,8 +145,31 @@ const scheduler = new Scheduler()
 // it means something is actually wrong.
 // ---------------------------------------------------------------------------
 
-let controlSettings = { enabled: false, allowSending: false }
+let controlSettings = { enabled: false, allowSending: false, calendarSubscribeEnabled: false }
 const pendingControl = new Map<string, (response: ControlResponse) => void>()
+
+/**
+ * The working calendar as an `.ics` file, for `GET /calendar.ics`.
+ *
+ * Read straight off `state.json` via `loadState` rather than round-tripped
+ * through the renderer the way `/control` is: that round trip exists because
+ * `/control` can *change* state, and every write has to go through the one
+ * reducer that owns it. This route only ever reads, and `loadState` already
+ * reads exactly what the renderer last saved — the same 350ms-debounced file
+ * `saveState` writes to. No i18n reaches the main process, so the two labels
+ * below are plain English rather than `t('workcal.dayOff')` and
+ * `t('workcal.makeupDays')` — a small, stated gap next to a live subscribe
+ * feed beats blocking it on wiring a translation table into this process.
+ */
+async function buildCalendarIcsText(): Promise<string | null> {
+  const state = await loadState<{ settings?: { workCalendar?: WorkCalendar } }>().catch(() => null)
+  const calendar = state?.settings?.workCalendar ?? DEFAULT_WORK_CALENDAR
+  const events = calendarToEvents(calendar, {
+    holidayLabel: 'Day off',
+    workdayLabel: 'Make-up working day',
+  })
+  return buildIcs(events, { name: 'Aevistle working calendar' })
+}
 
 const controlServer = new ControlServer({
   permissions: () => controlSettings,
@@ -148,6 +178,8 @@ const controlServer = new ControlServer({
     // eslint-disable-next-line no-console
     console[level === 'error' ? 'error' : 'log'](`[control] ${message}`, detail ?? '')
   },
+  calendarSubscribeEnabled: () => controlSettings.calendarSubscribeEnabled,
+  buildCalendarIcs: () => buildCalendarIcsText(),
   execute: (request) =>
     new Promise<ControlResponse>((resolve) => {
       const window = mainWindow
@@ -167,6 +199,126 @@ const controlServer = new ControlServer({
       window.webContents.send(IPC.controlRequest, request)
     }),
 })
+
+const pairingServer = new PairingServer({
+  log: (level, message, detail) => {
+    // eslint-disable-next-line no-console
+    console[level === 'error' ? 'error' : 'log'](`[pairing] ${message}`, detail ?? '')
+  },
+})
+pairingServer.onEvent((event) => {
+  mainWindow?.webContents.send(IPC.pairingEvent, event)
+})
+
+/**
+ * The accepting side of ongoing sync — see `syncServer.ts`'s module doc.
+ *
+ * Never started here. Like `pairingServer`, it opens a socket only once the
+ * renderer asks for one (`IPC.applySyncListener`), because the renderer is
+ * the side that knows whether `state.pairedDevices` holds an 'ongoing' entry
+ * — and binding a LAN interface for a user who has never paired anything buys
+ * a firewall prompt and nothing else.
+ */
+const pendingSync = new Map<string, (response: SyncServerResponse) => void>()
+const syncServer = new SyncServer({
+  log: (level, message, detail) => {
+    // eslint-disable-next-line no-console
+    console[level === 'error' ? 'error' : 'log'](`[sync] ${message}`, detail ?? '')
+  },
+  hasDevice: (pairId) => hasSecret(pairId, 'sync'),
+  execute: (request) =>
+    new Promise<SyncServerResponse | null>((resolve) => {
+      const window = mainWindow
+      if (!window || window.webContents.isDestroyed()) {
+        resolve(null)
+        return
+      }
+      const timer = setTimeout(() => {
+        pendingSync.delete(request.id)
+        resolve({ id: request.id, ok: false, error: 'timed out waiting for the app to answer' })
+      }, 30_000)
+      pendingSync.set(request.id, (response) => {
+        clearTimeout(timer)
+        pendingSync.delete(request.id)
+        resolve(response)
+      })
+      window.webContents.send(IPC.syncServerRequest, request)
+    }),
+})
+
+/**
+ * Is this a URL a LAN relay is willing to touch?
+ *
+ * `pairingJoinRequest` and `syncRequest` both exist so the renderer's own
+ * `connect-src 'self'` does not stop it reaching a LAN host (see `feeds.ts`
+ * for the same problem with two public hosts). Without this check either
+ * would instead be a generic SSRF proxy: anything in the renderer could ask
+ * the main process to fetch an arbitrary URL on its behalf. So both the
+ * scheme (`http:` — no TLS cert exists for a self-picked LAN address) and the
+ * path (the one route the matching server actually serves) are pinned, and
+ * the host has to be a private IPv4 address, never a public one and never a
+ * hostname that could resolve to one. `expectedPath` is the one difference
+ * between the two callers — `/pair` for `pairingServer.ts`'s one-shot
+ * handshake, `/sync` for `syncServer.ts`'s ongoing listener.
+ */
+function isLanRelayUrl(raw: string, expectedPath: string): boolean {
+  let url: URL
+  try {
+    url = new URL(raw)
+  } catch {
+    return false
+  }
+  if (url.protocol !== 'http:' || url.pathname !== expectedPath) return false
+  const octets = url.hostname.split('.').map(Number)
+  if (octets.length !== 4 || octets.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) {
+    return false
+  }
+  const [a, b] = octets
+  return (
+    a === 10 ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    (a === 169 && b === 254) || // link-local — some hotspot configurations hand these out
+    a === 127 // same-machine, for development
+  )
+}
+
+async function pairingJoinRequest(url: string, body: unknown): Promise<unknown> {
+  if (!isLanRelayUrl(url, '/pair')) {
+    throw new Error('Pairing only talks to a private LAN address.')
+  }
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body ?? {}),
+    signal: AbortSignal.timeout(15_000),
+  })
+  const text = await response.text()
+  try {
+    return JSON.parse(text)
+  } catch {
+    throw new Error('The other device sent back something unexpected.')
+  }
+}
+
+/** The initiating half of `core/syncLoop.ts` reaching a peer — see `isLanRelayUrl`'s doc. */
+async function syncRequest(url: string, body: unknown): Promise<unknown> {
+  if (!isLanRelayUrl(url, '/sync')) {
+    throw new Error('Sync only talks to a private LAN address.')
+  }
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body ?? {}),
+    signal: AbortSignal.timeout(15_000),
+  })
+  const text = await response.text()
+  try {
+    return JSON.parse(text)
+  } catch {
+    throw new Error('The other device sent back something unexpected.')
+  }
+}
 
 /**
  * Where the server ended up, for the settings screen to show. Read back from
@@ -780,6 +932,8 @@ function registerIpc(): void {
     // waiting to be noticed, not a feature.
     if (kind === 'imap') await deleteAccountInboxCache(id).catch(() => {})
   })
+  // `kind` is fixed here, not taken from the renderer — see `PlatformBridge.getSyncSecret`'s doc.
+  ipcMain.handle(IPC.getSyncSecret, (_e, keyRef: string) => getSecret(keyRef, 'sync'))
 
   ipcMain.handle(IPC.sendNow, async (_e, draft: MessageDraft, account: MailAccount) => {
     const secret = await getSecret(account.id)
@@ -1171,6 +1325,14 @@ function registerIpc(): void {
     },
   )
 
+  /**
+   * The calendar's per-reminder body preview reuses this rather than opening
+   * a render path of its own — a scheduled draft's HTML carries the same
+   * injection surface as a received message, so it goes through the same
+   * allowlist. See `CalendarDayPanel.tsx`.
+   */
+  ipcMain.handle(IPC.sanitizeHtml, async (_e, html: string) => sanitizeMessageHtml(html).html)
+
   ipcMain.handle(
     IPC.setMessageFlags,
     async (
@@ -1231,7 +1393,10 @@ function registerIpc(): void {
 
   ipcMain.handle(
     IPC.applyControl,
-    async (_e, settings: { enabled: boolean; allowSending: boolean }): Promise<ControlEndpoint | null> => {
+    async (
+      _e,
+      settings: { enabled: boolean; allowSending: boolean; calendarSubscribeEnabled: boolean },
+    ): Promise<ControlEndpoint | null> => {
       controlSettings = settings
       await controlServer.apply()
       return readEndpoint()
@@ -1241,6 +1406,24 @@ function registerIpc(): void {
   ipcMain.handle(IPC.controlResponse, (_e, response: ControlResponse) => {
     pendingControl.get(response.id)?.(response)
   })
+
+  ipcMain.handle(
+    IPC.startPairingHost,
+    (_e, mode: PairMode, pairId?: string): Promise<PairingPayload> => pairingServer.start(mode, pairId),
+  )
+  ipcMain.handle(IPC.stopPairingHost, () => pairingServer.stop())
+  ipcMain.handle(IPC.pairingJoinRequest, (_e, url: string, body: unknown) =>
+    pairingJoinRequest(url, body),
+  )
+
+  ipcMain.handle(IPC.syncRequest, (_e, url: string, body: unknown) => syncRequest(url, body))
+  ipcMain.handle(IPC.syncServerResponse, (_e, response: SyncServerResponse) => {
+    pendingSync.get(response.id)?.(response)
+  })
+  ipcMain.handle(
+    IPC.applySyncListener,
+    (_e, enabled: boolean): Promise<SyncListenerStatus> => syncServer.apply(enabled),
+  )
 
   ipcMain.handle(IPC.appInfo, () => ({
     version: app.getVersion(),
@@ -1473,6 +1656,8 @@ app.on('before-quit', () => {
   quitting = true
   scheduler.stop()
   void controlServer.dispose()
+  void pairingServer.stop()
+  void syncServer.stop()
   closeAllConnections()
   // Held-open IDLE sockets would otherwise keep the process from exiting
   // cleanly, and leave the provider counting a connection that is gone.

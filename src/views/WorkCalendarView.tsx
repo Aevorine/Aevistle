@@ -28,7 +28,7 @@
  * used to destroy a list somebody had typed out of a government notice.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   MonthGrid,
   datesBetween,
@@ -39,8 +39,8 @@ import {
   type DayMark,
   type GridScope,
 } from '../components/MonthGrid'
-import { CalendarDayPanel, JobSheet, conflictLine, type DayEntry } from '../components/CalendarDayPanel'
-import type { DaySend } from '../components/MonthGrid'
+import { CalendarDayPanel, JobSheet, SeriesSheet, conflictLine, type DayEntry } from '../components/CalendarDayPanel'
+import type { DaySend, SendDeliveryStatus } from '../components/MonthGrid'
 import {
   Button,
   Card,
@@ -95,11 +95,44 @@ import {
 import { feedFetchVia } from '../core/feeds'
 import { findConflicts, type Conflict } from '../core/conflicts'
 import { buildIcs, calendarToEvents, eventsToCalendarDates, jobsToEvents, parseIcs } from '../core/ics'
-import { planReschedule, planRestagger } from '../core/reschedule'
-import { seedComposeDate } from '../core/composeSeed'
+import { dayDelta, planReschedule, planRestagger, shiftInstantByDays } from '../core/reschedule'
+import { isInsideWindow, resolveTimeZone, wallClockIn } from '../core/deliveryWindow'
+import { seedComposeDate, seedComposeDates } from '../core/composeSeed'
 import { LOAD_STEPS, loadLevel } from '../core/calendarLoad'
+import { activeSolarTermForMonth, type SolarTermId } from '../core/solarTerms'
+
+/** Every 节气 name, for the runecircuit-only line under the period heading. */
+const SOLAR_TERM_LABEL: Record<SolarTermId, TranslationKey> = {
+  xiaohan: 'calendar.solarTerm.xiaohan',
+  dahan: 'calendar.solarTerm.dahan',
+  lichun: 'calendar.solarTerm.lichun',
+  yushui: 'calendar.solarTerm.yushui',
+  jingzhe: 'calendar.solarTerm.jingzhe',
+  chunfen: 'calendar.solarTerm.chunfen',
+  qingming: 'calendar.solarTerm.qingming',
+  guyu: 'calendar.solarTerm.guyu',
+  lixia: 'calendar.solarTerm.lixia',
+  xiaoman: 'calendar.solarTerm.xiaoman',
+  mangzhong: 'calendar.solarTerm.mangzhong',
+  xiazhi: 'calendar.solarTerm.xiazhi',
+  xiaoshu: 'calendar.solarTerm.xiaoshu',
+  dashu: 'calendar.solarTerm.dashu',
+  liqiu: 'calendar.solarTerm.liqiu',
+  chushu: 'calendar.solarTerm.chushu',
+  bailu: 'calendar.solarTerm.bailu',
+  qiufen: 'calendar.solarTerm.qiufen',
+  hanlu: 'calendar.solarTerm.hanlu',
+  shuangjiang: 'calendar.solarTerm.shuangjiang',
+  lidong: 'calendar.solarTerm.lidong',
+  xiaoxue: 'calendar.solarTerm.xiaoxue',
+  daxue: 'calendar.solarTerm.daxue',
+  dongzhi: 'calendar.solarTerm.dongzhi',
+}
 import { saveGeneratedFile } from '../core/download'
-import type { Recurrence, ScheduledJob } from '../core/types'
+import { accountLabel, groupAccounts } from '../core/accounts'
+import { DragTimezoneTip } from '../components/DragTimezoneTip'
+import type { OutboxItem } from '../core/outbox'
+import { pad2, type Contact, type LogEntry, type Recurrence, type ScheduledJob } from '../core/types'
 import {
   addIsoDays,
   applyWorkCalendarDetailed,
@@ -133,6 +166,21 @@ const DAY_MS = 86_400_000
 /** How wide a de-stagger may spread a pile-up, as the sentences say it. */
 const STAGGER_WINDOW_MIN = Math.round(STAGGER_WINDOW_MS / 60_000)
 
+/** Lines the drag preview tooltip shows before it switches to "+N more". */
+const MAX_DRAGTIP_LINES = 3
+
+/**
+ * How close a log line or an outbox item's own timestamp has to sit to an
+ * occurrence's fire time to be read as *about that send*, rather than some
+ * other run of the same repeating reminder.
+ *
+ * Wide enough to cover the offline queue's own worst case — `MAX_ATTEMPTS`
+ * attempts of `backoffMs` sum to a little over two hours — with slack left for
+ * a quiet-hours release or ordinary clock drift. Not unbounded: a window that
+ * never closes would eventually tie a Tuesday's failure to Thursday's send.
+ */
+const STATUS_MATCH_WINDOW_MS = 3 * 60 * 60_000
+
 /** Remembers which country's names to use for the chips. See `holidayNameFor`. */
 const PRESET_MEMORY_KEY = 'aevistle.workcal.preset'
 
@@ -142,16 +190,47 @@ export function WorkCalendarView({ onCompose }: { onCompose?: () => void } = {})
   const toast = useToast()
   const { confirm, confirmElement } = useConfirm()
   const calendar = state.settings.workCalendar ?? DEFAULT_WORK_CALENDAR
+  const heatmapOn = state.settings.calendarHeatmapEnabled ?? true
+  const setHeatmapOn = (v: boolean) => dispatch({ type: 'patchSettings', patch: { calendarHeatmapEnabled: v } })
 
   const now = new Date()
   const todayIso = toIsoDate(now.getTime())
   const [cursor, setCursor] = useState({ year: now.getFullYear(), month: now.getMonth() })
+  /** The runecircuit style's monthly wash — ignored entirely by every other style. */
+  const solarTerm = useMemo(() => activeSolarTermForMonth(cursor.year, cursor.month), [cursor.year, cursor.month])
   const [scope, setScope] = useState<GridScope | 'day'>('month')
   const [focusedDate, setFocusedDate] = useState<IsoDate>(todayIso)
   const [selection, setSelection] = useState<DateRange | null>(null)
+  /**
+   * Days queued for the gap-compose batch. `IsoDate`s rather than a range: a
+   * shutdown is contiguous and already has `selection` for that; a batch of
+   * reminders for a handful of scattered dates is a different shape of
+   * gesture and gets its own set. Cleared on every compose and on request.
+   */
+  const [gapDates, setGapDates] = useState<Set<IsoDate>>(new Set())
+  /**
+   * The drag-time recipient timezone preview — recomputed on every cell the
+   * pointer crosses (see `onDragHover` below) and cleared on drop or cancel.
+   * `null` means nothing is being dragged, or nothing about the drag is worth
+   * saying.
+   */
+  const [dragPreview, setDragPreview] = useState<{ x: number; y: number; lines: string[] } | null>(null)
   const [paste, setPaste] = useState('')
   const [target, setTarget] = useState<'holidays' | 'workdays'>('holidays')
   const [sheetJobId, setSheetJobId] = useState<string | null>(null)
+  /** The series sheet, opened from `JobSheet` for a job a single drag cannot act on alone. */
+  const [seriesJobId, setSeriesJobId] = useState<string | null>(null)
+  /**
+   * A day opened from the badge, shown as a panel under the grid rather than
+   * by switching `scope` to `'day'` — the point of the quick view is staying
+   * on the month you were looking at. Distinct from `focusedDate`, which keeps
+   * moving with the keyboard and the drag-and-drop regardless of whether this
+   * panel is open.
+   */
+  const [quickPanelIso, setQuickPanelIso] = useState<IsoDate | null>(null)
+  const [filterAccountId, setFilterAccountId] = useState('all')
+  const [filterTag, setFilterTag] = useState('all')
+  const [filterRecipient, setFilterRecipient] = useState('')
   const [presetId, setPresetId] = useState<string | undefined>(() => {
     try {
       return localStorage.getItem(PRESET_MEMORY_KEY) ?? undefined
@@ -325,6 +404,81 @@ export function WorkCalendarView({ onCompose }: { onCompose?: () => void } = {})
     [state.jobs, calendar],
   )
 
+  // --- filtering, initials, and delivery status ------------------------------
+  //
+  // Every index below is built once per render of its own inputs, the same
+  // discipline `collidingMinutes` and `movedTo` already keep inside the marks
+  // memo further down — a lookup per occurrence instead of a scan per
+  // occurrence. `conflictScan` above and `users` above it both stay over
+  // `state.jobs`, unfiltered: a filter that could hide a real conflict would
+  // be worse than no filter at all.
+
+  /** Normalised address → contact, for the initials chips and the tag filter. */
+  const contactsByAddress = useMemo(() => {
+    const map = new Map<string, Contact>()
+    for (const contact of state.contacts) {
+      const address = contact.address.trim().toLowerCase()
+      if (address) map.set(address, contact)
+    }
+    return map
+  }, [state.contacts])
+
+  const accountGroups = useMemo(() => groupAccounts(state.accounts), [state.accounts])
+  const allTags = useMemo(
+    () => [...new Set(state.contacts.flatMap((c) => c.tags))].sort((a, b) => a.localeCompare(b)),
+    [state.contacts],
+  )
+
+  const filterActive =
+    filterAccountId !== 'all' || filterTag !== 'all' || filterRecipient.trim().length > 0
+
+  const filteredJobs = useMemo(() => {
+    if (!filterActive) return state.jobs
+    const needle = filterRecipient.trim().toLowerCase()
+    return state.jobs.filter((job) => {
+      if (filterAccountId !== 'all' && job.draft.accountId !== filterAccountId) return false
+      const addresses = [...job.draft.to, ...job.draft.cc, ...job.draft.bcc]
+      if (filterTag !== 'all') {
+        const tagged = addresses.some((a) =>
+          (contactsByAddress.get(a.trim().toLowerCase())?.tags ?? []).includes(filterTag),
+        )
+        if (!tagged) return false
+      }
+      if (needle && !addresses.some((a) => a.toLowerCase().includes(needle))) return false
+      return true
+    })
+  }, [state.jobs, filterActive, filterAccountId, filterTag, filterRecipient, contactsByAddress])
+
+  const clearFilters = () => {
+    setFilterAccountId('all')
+    setFilterTag('all')
+    setFilterRecipient('')
+  }
+
+  /** `LogEntry`s that name a job, grouped — the past half of a delivery status. */
+  const logsByJob = useMemo(() => {
+    const map = new Map<string, LogEntry[]>()
+    for (const log of state.logs) {
+      if (log.kind !== 'send' || !log.jobId) continue
+      const list = map.get(log.jobId)
+      if (list) list.push(log)
+      else map.set(log.jobId, [log])
+    }
+    return map
+  }, [state.logs])
+
+  /** Outbox items that name a job, grouped — the "still trying" half. */
+  const outboxByJob = useMemo(() => {
+    const map = new Map<string, OutboxItem[]>()
+    for (const item of state.outbox) {
+      if (!item.jobId) continue
+      const list = map.get(item.jobId)
+      if (list) list.push(item)
+      else map.set(item.jobId, [item])
+    }
+    return map
+  }, [state.outbox])
+
   /**
    * The last instant the grid can possibly draw — twice, because one policy
    * needs slack and three do not.
@@ -397,7 +551,9 @@ export function WorkCalendarView({ onCompose }: { onCompose?: () => void } = {})
       }
     }
 
-    for (const job of state.jobs) {
+    const nowMs = Date.now()
+
+    for (const job of filteredJobs) {
       if (!job.enabled) continue
       const policy = job.recurrence.workdayPolicy ?? 'off'
       const raw = computeOccurrences(job.recurrence, {
@@ -420,10 +576,21 @@ export function WorkCalendarView({ onCompose }: { onCompose?: () => void } = {})
         if (!movedTo.has(to)) movedTo.set(to, move.from)
       }
 
+      // One lookup per job, not per occurrence: the first recipient and its
+      // contact never change across a job's own sends.
+      const firstTo = job.draft.to[0]
+      const contactName = firstTo ? contactsByAddress.get(firstTo.trim().toLowerCase())?.name?.trim() : undefined
+      const initialsSource = contactName || firstTo?.split('@')[0]
+      const initials = initialsSource ? initialsSource.charAt(0).toUpperCase() : undefined
+
       for (const at of occurrences) {
         const iso = toIsoDate(at)
         const shifted = !rawDates.has(iso)
         const from = shifted ? movedTo.get(iso) : undefined
+        // Only a send that has already fired can have a delivery status — a
+        // future occurrence has nothing yet to correlate against.
+        const status =
+          at <= nowMs ? sendStatusFor(job.id, at, outboxByJob, logsByJob, job) : undefined
 
         /*
          * The line the square will print. Built here, where the occurrence
@@ -440,6 +607,8 @@ export function WorkCalendarView({ onCompose }: { onCompose?: () => void } = {})
           subject: job.draft.subject,
           shifted,
           conflict: collidingMinutes.has(Math.floor(at / 60_000)),
+          initials,
+          status,
         }
 
         const mark = marks.get(iso)
@@ -457,6 +626,7 @@ export function WorkCalendarView({ onCompose }: { onCompose?: () => void } = {})
           at,
           shifted,
           originalIso: from !== undefined ? toIsoDate(from) : undefined,
+          status,
         }
         const list = entriesByDate.get(iso)
         if (list) list.push(entry)
@@ -487,7 +657,7 @@ export function WorkCalendarView({ onCompose }: { onCompose?: () => void } = {})
     }
 
     return { marks, entriesByDate }
-  }, [state.jobs, calendar, conflictScan, previewUntil])
+  }, [filteredJobs, calendar, conflictScan, previewUntil, contactsByAddress, outboxByJob, logsByJob])
 
   // --- moving a reminder ----------------------------------------------------
 
@@ -513,14 +683,25 @@ export function WorkCalendarView({ onCompose }: { onCompose?: () => void } = {})
       return
     }
 
+    // The same sentences the hover tooltip was showing, recomputed rather than
+    // carried over from `dragPreview` state — the pointer may have kept moving
+    // between the last `dragover` and this drop's `onMoveJob`, and this is the
+    // instant the decision actually gets made on. See `dragWarningLines`.
+    const warnings = dragWarningLines(job, fromIso, toIso, calendar, contactsByAddress, t)
+
     const ok = await confirm({
       title: t('cal.move.title'),
       body: [
-        t(plan.reasonKey as TranslationKey, translateValues(plan.reasonValues, t)),
-        plan.outcome === 'series' ? t('cal.move.seriesNote') : '',
+        [
+          t(plan.reasonKey as TranslationKey, translateValues(plan.reasonValues, t)),
+          plan.outcome === 'series' ? t('cal.move.seriesNote') : '',
+        ]
+          .filter(Boolean)
+          .join(' '),
+        ...warnings,
       ]
         .filter(Boolean)
-        .join(' '),
+        .join(' · '),
       confirmLabel: t('cal.move.confirm'),
       cancelLabel: t('common.cancel'),
     })
@@ -536,6 +717,107 @@ export function WorkCalendarView({ onCompose }: { onCompose?: () => void } = {})
       }),
     })
   }
+
+  /**
+   * The drag preview, updated as the pointer crosses cells.
+   *
+   * `MonthGrid` throttles this to once per cell entered; the lookup and the
+   * sentence-building happen here rather than there because `dragWarningLines`
+   * needs `state.jobs`, `contactsByAddress` and `t`, none of which the grid
+   * component knows about — it only ever handles ids and dates.
+   */
+  const onDragHover = useCallback(
+    (info: { jobId: string; fromIso: IsoDate; toIso: IsoDate; fromAt: number; x: number; y: number }) => {
+      const job = state.jobs.find((j) => j.id === info.jobId)
+      if (!job) {
+        setDragPreview(null)
+        return
+      }
+      const full = dragWarningLines(job, info.fromIso, info.toIso, calendar, contactsByAddress, t)
+      if (full.length === 0) {
+        setDragPreview(null)
+        return
+      }
+      const shown = full.length > MAX_DRAGTIP_LINES ? full.slice(0, MAX_DRAGTIP_LINES) : full
+      const hidden = full.length - shown.length
+      setDragPreview({
+        x: info.x,
+        y: info.y,
+        lines: hidden > 0 ? [...shown, t('cal.dragpreview.multiple', { n: hidden })] : shown,
+      })
+    },
+    [state.jobs, calendar, contactsByAddress, t],
+  )
+
+  /** Ctrl/Cmd-click on an empty square: add or drop it from the gap-compose batch. */
+  const onGapToggle = useCallback((iso: IsoDate) => {
+    setGapDates((prev) => {
+      const next = new Set(prev)
+      if (next.has(iso)) next.delete(iso)
+      else next.add(iso)
+      return next
+    })
+  }, [])
+
+  const composeForGaps = () => {
+    if (gapDates.size === 0 || !onCompose) return
+    if (!seedComposeDates([...gapDates].sort())) return
+    setGapDates(new Set())
+    onCompose()
+  }
+
+  /**
+   * `SeriesSheet`'s bulk reschedule — a UI front door onto the exact same
+   * `planReschedule` shift a drag on the grid performs, not a second way to
+   * move a job. `job.occurrences[0]` (rather than, say, today) is the anchor
+   * because it is a date `planReschedule`'s weekly branch can trust: it is an
+   * actual fire time the current rule produced, so its weekday is guaranteed
+   * to be one the rule names, the same guarantee a real drag has.
+   */
+  const shiftSeries = (job: ScheduledJob, days: number) => {
+    if (job.occurrences.length === 0 || days === 0) return
+    const fromIso = toIsoDate(job.occurrences[0])
+    void moveJob(job.id, fromIso, addIsoDays(fromIso, days))
+  }
+
+  /**
+   * `SeriesSheet`'s template swap. Only the message changes — `recurrence` is
+   * untouched, so every occurrence keeps the time it already had.
+   */
+  const swapSeriesTemplate = async (job: ScheduledJob, templateId: string) => {
+    const tmpl = state.templates.find((tp) => tp.id === templateId)
+    if (!tmpl) return
+    pushUndo(job.name, [{ type: 'upsertJob', job }])
+    await scheduleDraft({
+      ...job,
+      draft: { ...job.draft, subject: tmpl.subject, body: tmpl.body, bodyFormat: tmpl.bodyFormat },
+    })
+    toast.push({ tone: 'success', title: t('cal.series.swapped', { name: tmpl.name }) })
+  }
+
+  /**
+   * A link inside an expanded HTML body preview was clicked — the same
+   * confirm-then-open the inbox reader uses for exactly the same reason: the
+   * click came from inside a sanitized-but-still-sender-authored document.
+   */
+  const openLinkSafely = useCallback(
+    async (url: string) => {
+      let host = url
+      try {
+        host = new URL(url).host
+      } catch {
+        /* keep the raw string if it does not parse */
+      }
+      const ok = await confirm({
+        title: t('confirm.openLinkTitle'),
+        body: t('confirm.openLinkBody', { host }),
+        confirmLabel: t('confirm.openLinkConfirm'),
+        cancelLabel: t('common.cancel'),
+      })
+      if (ok) void bridge?.openExternal(url)
+    },
+    [confirm, bridge, t],
+  )
 
   // --- starting one from the calendar ---------------------------------------
 
@@ -666,6 +948,7 @@ export function WorkCalendarView({ onCompose }: { onCompose?: () => void } = {})
   }
 
   const sheetJob = sheetJobId ? state.jobs.find((j) => j.id === sheetJobId) : undefined
+  const seriesJob = seriesJobId ? state.jobs.find((j) => j.id === seriesJobId) : undefined
 
   // --- .ics -----------------------------------------------------------------
 
@@ -874,6 +1157,9 @@ export function WorkCalendarView({ onCompose }: { onCompose?: () => void } = {})
           })
 
   const shiftPeriod = (by: number) => {
+    // The quick view names a day; a day that has scrolled off screen is not
+    // worth still showing a panel for.
+    setQuickPanelIso(null)
     if (scope === 'month') {
       const d = new Date(cursor.year, cursor.month + by, 1)
       setCursor({ year: d.getFullYear(), month: d.getMonth() })
@@ -932,12 +1218,19 @@ export function WorkCalendarView({ onCompose }: { onCompose?: () => void } = {})
           <Card>
             <CardHeader
               title={periodLabel}
-              hint={t('workcal.gridHint')}
+              hint={
+                state.settings.visualStyle === 'runecircuit'
+                  ? `${t('workcal.gridHint')} · ${t(SOLAR_TERM_LABEL[solarTerm])}`
+                  : t('workcal.gridHint')
+              }
               action={
                 <div className="btn-row">
                   <Segmented
                     value={scope}
-                    onChange={(v) => setScope(v)}
+                    onChange={(v) => {
+                      setScope(v)
+                      setQuickPanelIso(null)
+                    }}
                     ariaLabel={t('cal.scope.label')}
                     options={[
                       { value: 'month', label: t('cal.scope.month') },
@@ -953,6 +1246,7 @@ export function WorkCalendarView({ onCompose }: { onCompose?: () => void } = {})
                     onClick={() => {
                       setCursor({ year: now.getFullYear(), month: now.getMonth() })
                       setFocusedDate(todayIso)
+                      setQuickPanelIso(null)
                     }}
                   >
                     {t('workcal.today')}
@@ -965,9 +1259,69 @@ export function WorkCalendarView({ onCompose }: { onCompose?: () => void } = {})
             />
             <div className="card__body">
               {scope === 'day' ? null : (
+                <div className="field__row workcal__filters">
+                  <Field label={t('cal.filter.account')}>
+                    <select
+                      className="input"
+                      value={filterAccountId}
+                      onChange={(e) => setFilterAccountId(e.target.value)}
+                    >
+                      <option value="all">{t('cal.filter.allAccounts')}</option>
+                      {accountGroups.map((group) =>
+                        group.name ? (
+                          <optgroup key={group.name} label={group.name}>
+                            {group.accounts.map((a) => (
+                              <option key={a.id} value={a.id}>
+                                {accountLabel(a)}
+                              </option>
+                            ))}
+                          </optgroup>
+                        ) : (
+                          group.accounts.map((a) => (
+                            <option key={a.id} value={a.id}>
+                              {accountLabel(a)}
+                            </option>
+                          ))
+                        ),
+                      )}
+                    </select>
+                  </Field>
+                  <Field label={t('cal.filter.tag')}>
+                    <select className="input" value={filterTag} onChange={(e) => setFilterTag(e.target.value)}>
+                      <option value="all">{t('cal.filter.allTags')}</option>
+                      {allTags.map((tag) => (
+                        <option key={tag} value={tag}>
+                          {tag}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label={t('cal.filter.recipient')}>
+                    <input
+                      className="input"
+                      type="text"
+                      value={filterRecipient}
+                      onChange={(e) => setFilterRecipient(e.target.value)}
+                    />
+                  </Field>
+                  {filterActive ? (
+                    <>
+                      <span className="workcal__filterhint">
+                        {t('cal.filter.activeHint', { n: filteredJobs.length, total: state.jobs.length })}
+                      </span>
+                      <Button variant="ghost" icon={<IconX size={14} />} onClick={clearFilters}>
+                        {t('cal.filter.clear')}
+                      </Button>
+                    </>
+                  ) : null}
+                </div>
+              )}
+
+              {scope === 'day' ? null : (
                 <MonthGrid
                   year={cursor.year}
                   month={cursor.month}
+                  solarTerm={solarTerm}
                   scope={scope}
                   anchorDate={focusedDate}
                   calendar={calendar}
@@ -979,9 +1333,13 @@ export function WorkCalendarView({ onCompose }: { onCompose?: () => void } = {})
                   onSelect={setSelection}
                   onOpenDay={(iso) => {
                     setFocusedDate(iso)
-                    setScope('day')
+                    setQuickPanelIso(iso)
                   }}
                   onMoveJob={(jobId, from, to) => void moveJob(jobId, from, to)}
+                  onDragHover={onDragHover}
+                  onDragHoverEnd={() => setDragPreview(null)}
+                  gapDates={gapDates}
+                  onGapToggle={onGapToggle}
                   /* The square lists what it holds; the drag that was already
                      here still moves it, and a click now opens it. */
                   showSends
@@ -996,8 +1354,20 @@ export function WorkCalendarView({ onCompose }: { onCompose?: () => void } = {})
                   onCreateDay={onCompose ? createOnDay : undefined}
                   createHint={onCompose ? t('cal.create.hint') : undefined}
                   rtl={dir === 'rtl'}
-                  label={t('cal.gridLabel')}
+                  label={
+                    filterActive
+                      ? `${t('cal.gridLabel')} — ${t('cal.filter.activeHint', {
+                          n: filteredJobs.length,
+                          total: state.jobs.length,
+                        })}`
+                      : t('cal.gridLabel')
+                  }
                   badgeLabel={(iso, mark) => t('cal.badge', { n: mark.count, date: iso })}
+                  heatmapOn={heatmapOn}
+                  initialsAriaLabel={(name) => t('cal.badge.initialsAria', { name })}
+                  sendStatusLabel={(status) =>
+                    t('cal.status.badgeAria', { status: t(`cal.status.${status}` as TranslationKey) })
+                  }
                   weekdayLabel={(day) =>
                     new Intl.DateTimeFormat(undefined, { weekday: 'short' }).format(
                       // 2024-01-07 was a Sunday, so this indexes weekdays without
@@ -1024,12 +1394,41 @@ export function WorkCalendarView({ onCompose }: { onCompose?: () => void } = {})
                 />
               )}
 
+              {scope !== 'day' && quickPanelIso ? (
+                <div className="workcal__quickpanel">
+                  <div className="workcal__quickpanelhead">
+                    <span className="section-label">{t('cal.quick.title')}</span>
+                    <IconButton label={t('cal.quick.close')} onClick={() => setQuickPanelIso(null)}>
+                      <IconX size={14} />
+                    </IconButton>
+                  </div>
+                  <CalendarDayPanel
+                    iso={quickPanelIso}
+                    entries={entriesByDate.get(quickPanelIso) ?? []}
+                    working={isWorkingDayIso(quickPanelIso, calendar)}
+                    holidayName={calendar.holidays.includes(quickPanelIso) ? nameFor(quickPanelIso) : undefined}
+                    calendar={calendar}
+                    conflicts={conflictScan.byDate.get(quickPanelIso) ?? []}
+                    onToggleDay={toggleDay}
+                    onMove={(jobId, from, to) => void moveJob(jobId, from, to)}
+                    onOpenJob={setSheetJobId}
+                    onCreate={onCompose ? createOnDay : undefined}
+                    onDeStagger={(conflict) => void deStagger(conflict)}
+                    staggerWindowMinutes={STAGGER_WINDOW_MIN}
+                    sanitizeHtml={bridge?.sanitizeHtml}
+                    onOpenLink={openLinkSafely}
+                    compact
+                  />
+                </div>
+              ) : null}
+
               {scope === 'day' ? (
                 <CalendarDayPanel
                   iso={focusedDate}
                   entries={entriesByDate.get(focusedDate) ?? []}
                   working={isWorkingDayIso(focusedDate, calendar)}
                   holidayName={calendar.holidays.includes(focusedDate) ? nameFor(focusedDate) : undefined}
+                  calendar={calendar}
                   conflicts={dayConflicts}
                   onToggleDay={toggleDay}
                   onMove={(jobId, from, to) => void moveJob(jobId, from, to)}
@@ -1037,6 +1436,8 @@ export function WorkCalendarView({ onCompose }: { onCompose?: () => void } = {})
                   onCreate={onCompose ? createOnDay : undefined}
                   onDeStagger={(conflict) => void deStagger(conflict)}
                   staggerWindowMinutes={STAGGER_WINDOW_MIN}
+                  sanitizeHtml={bridge?.sanitizeHtml}
+                  onOpenLink={openLinkSafely}
                 />
               ) : null}
 
@@ -1062,6 +1463,38 @@ export function WorkCalendarView({ onCompose }: { onCompose?: () => void } = {})
                 <div className="field__hint">{t('cal.range.hint')}</div>
               )}
 
+              {scope !== 'day' && onCompose ? (
+                gapDates.size > 0 ? (
+                  <div className="rangebar" role="group" aria-label={t('cal.gap.composeFor', { n: gapDates.size })}>
+                    <Button variant="secondary" icon={<IconPlus size={15} />} onClick={composeForGaps}>
+                      {t('cal.gap.composeFor', { n: gapDates.size })}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      onClick={() => {
+                        setGapDates(new Set())
+                        toast.push({ tone: 'info', title: t('cal.gap.cleared') })
+                      }}
+                    >
+                      {t('common.cancel')}
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="field__hint">{t('cal.gap.selectHint')}</div>
+                )
+              ) : null}
+
+              {scope !== 'day' ? (
+                <div className="workcal__heatmaptoggle">
+                  <Switch
+                    checked={heatmapOn}
+                    onChange={setHeatmapOn}
+                    title={t('cal.heatmap.toggle')}
+                    description={t('cal.heatmap.hint')}
+                  />
+                </div>
+              ) : null}
+
               {scope !== 'day' ? (
                 <div className="monthgrid__legend">
                   <span><i className="swatch swatch--off" /> {t('workcal.dayOff')}</span>
@@ -1073,19 +1506,23 @@ export function WorkCalendarView({ onCompose }: { onCompose?: () => void } = {})
                     The heatmap's own key. A scale nobody can read is decoration:
                     without this, five shades of the accent say only "some of
                     these are darker", and the reader has no way to learn that
-                    the darkest one means eight sends or more.
+                    the darkest one means eight sends or more. Gated by the same
+                    switch that gates the tint itself — a key for a scale that
+                    is not being painted would be the decoration.
                   */}
-                  <span className="monthgrid__legendscale">
-                    {t('cal.legendLoad')}
-                    <i className="swatch swatch--load" data-load="1" />
-                    <i className="swatch swatch--load" data-load="2" />
-                    <i className="swatch swatch--load" data-load="3" />
-                    <i className="swatch swatch--load" data-load="4" />
-                    <i className="swatch swatch--load" data-load="5" />
-                    <span className="monthgrid__legendmax">
-                      {t('cal.legendLoadMax', { n: LOAD_STEPS[LOAD_STEPS.length - 1] })}
+                  {heatmapOn ? (
+                    <span className="monthgrid__legendscale">
+                      {t('cal.legendLoad')}
+                      <i className="swatch swatch--load" data-load="1" />
+                      <i className="swatch swatch--load" data-load="2" />
+                      <i className="swatch swatch--load" data-load="3" />
+                      <i className="swatch swatch--load" data-load="4" />
+                      <i className="swatch swatch--load" data-load="5" />
+                      <span className="monthgrid__legendmax">
+                        {t('cal.legendLoadMax', { n: LOAD_STEPS[LOAD_STEPS.length - 1] })}
+                      </span>
                     </span>
-                  </span>
+                  ) : null}
                 </div>
               ) : null}
             </div>
@@ -1507,12 +1944,86 @@ export function WorkCalendarView({ onCompose }: { onCompose?: () => void } = {})
               recurrence: { ...sheetJob.recurrence, workdayPolicy: policy },
             })
           }}
+          onViewSeries={() => {
+            setSeriesJobId(sheetJob.id)
+            setSheetJobId(null)
+          }}
         />
       ) : null}
+
+      {seriesJob ? (
+        <SeriesSheet
+          job={seriesJob}
+          calendar={calendar}
+          templates={state.templates}
+          onClose={() => setSeriesJobId(null)}
+          onPause={() => void toggleJob(seriesJob.id, false)}
+          onShift={(days) => shiftSeries(seriesJob, days)}
+          onSwapTemplate={(templateId) => void swapSeriesTemplate(seriesJob, templateId)}
+        />
+      ) : null}
+
+      {dragPreview ? <DragTimezoneTip x={dragPreview.x} y={dragPreview.y} lines={dragPreview.lines} /> : null}
 
       {confirmElement}
     </div>
   )
+}
+
+/**
+ * What dragging `job` from `fromIso` to `toIso` would mean for the people
+ * receiving it, in their own zone — the drag-time preview, and the same
+ * sentences `moveJob`'s confirm dialog appends so the decision survives from
+ * hover to drop. Computed fresh each time rather than cached: it is cheap
+ * (`job.draft.to/cc/bcc` is never more than a handful of addresses), and a
+ * cached answer would be one more thing that could disagree with where the
+ * pointer actually is.
+ *
+ * Only a recipient matched by address in the contact book *and* carrying a
+ * stored `deliveryWindow` gets a line. Everyone else is silently absent —
+ * never a guess dressed up as a reading. See `core/deliveryWindow.ts`.
+ */
+function dragWarningLines(
+  job: ScheduledJob,
+  fromIso: IsoDate,
+  toIso: IsoDate,
+  calendar: WorkCalendar,
+  contactsByAddress: Map<string, Contact>,
+  t: (key: TranslationKey, values?: Record<string, string | number>) => string,
+): string[] {
+  const lines: string[] = []
+  const delta = dayDelta(fromIso, toIso)
+  // `job.recurrence.startAt`, not a specific occurrence's own instant: the
+  // caller only ever has one to hand (the badge falls back to the day's
+  // earliest send), and shifting the rule's own anchor keeps the same
+  // wall-clock time of day a real move would produce. See `planReschedule`.
+  const candidateAt = shiftInstantByDays(job.recurrence.startAt, delta)
+
+  const seen = new Set<string>()
+  for (const raw of [...job.draft.to, ...job.draft.cc, ...job.draft.bcc]) {
+    const address = raw.trim().toLowerCase()
+    if (!address || seen.has(address)) continue
+    seen.add(address)
+    const contact = contactsByAddress.get(address)
+    const window = contact?.deliveryWindow
+    if (!contact || !window) continue
+    const zone = resolveTimeZone(window.timeZone)
+    if (zone === null) continue
+    const wall = wallClockIn(candidateAt, zone)
+    if (wall === null) continue
+
+    const time = `${pad2(Math.floor(wall.minutes / 60))}:${pad2(wall.minutes % 60)}`
+    const name = contact.name.trim() || address
+    lines.push(
+      isInsideWindow(candidateAt, window)
+        ? t('cal.dragpreview.recipientTime', { time, name })
+        : t('cal.dragpreview.outsideWindow', { time, name, from: window.from, to: window.to }),
+    )
+  }
+
+  if (calendar.holidays.includes(toIso)) lines.push(t('cal.dragpreview.holiday'))
+
+  return lines
 }
 
 /** Reason values that are themselves translation keys, resolved. */
@@ -1534,6 +2045,50 @@ function namesOf(conflict: Conflict, jobs: Array<{ id: string; name: string }>):
     .map((id) => jobs.find((j) => j.id === id)?.name)
     .filter((n): n is string => Boolean(n))
   return names.length > 2 ? `${names.slice(0, 2).join(', ')}…` : names.join(', ')
+}
+
+/**
+ * What became of one past occurrence — delivered, failed, still retrying, or
+ * unknown — read off whatever the app actually recorded about it.
+ *
+ * In order: the offline queue first, because it names the *current* state of
+ * a send that has not finished yet; then the logs, taking the most recent
+ * entry inside the window as the authoritative one, since a queued send
+ * writes a fresh log line on every attempt and the last one is what actually
+ * happened; then the job's own `lastResult`, but only when its `lastRunAt` is
+ * plausibly *this* occurrence and not some later one. No match anywhere
+ * returns `undefined` — never a guess. See `core/receipts.ts` for the same
+ * stance applied to bounces.
+ */
+function sendStatusFor(
+  jobId: string,
+  at: number,
+  outboxByJob: Map<string, OutboxItem[]>,
+  logsByJob: Map<string, LogEntry[]>,
+  job: ScheduledJob,
+): SendDeliveryStatus | undefined {
+  for (const item of outboxByJob.get(jobId) ?? []) {
+    if (Math.abs(item.queuedAt - at) > STATUS_MATCH_WINDOW_MS) continue
+    if (item.status === 'failed') return 'failed'
+    if (item.status === 'waiting' || item.status === 'sending') return 'retrying'
+  }
+
+  const nearby = (logsByJob.get(jobId) ?? [])
+    .filter((l) => Math.abs(l.at - at) <= STATUS_MATCH_WINDOW_MS)
+    .sort((a, b) => a.at - b.at)
+  const last = nearby[nearby.length - 1]
+  if (last) {
+    if (last.level === 'info') return 'delivered'
+    if (last.level === 'error') return 'failed'
+    return 'retrying'
+  }
+
+  if (job.lastRunAt !== undefined && Math.abs(job.lastRunAt - at) <= STATUS_MATCH_WINDOW_MS) {
+    if (job.lastResult === 'ok') return 'delivered'
+    if (job.lastResult === 'failed') return 'failed'
+  }
+
+  return undefined
 }
 
 /** "6–12 Oct" for the week header. */

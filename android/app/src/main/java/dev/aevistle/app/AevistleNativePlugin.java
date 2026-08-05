@@ -23,10 +23,17 @@ import com.getcapacitor.annotation.PermissionCallback;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.io.BufferedInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.InetSocketAddress;
+import java.net.Socket;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -103,6 +110,27 @@ public class AevistleNativePlugin extends Plugin {
         String kind = call.getString("kind", "smtp");
         JSObject result = new JSObject();
         result.put("value", new SecretStore(getContext()).has(accountId, kind));
+        call.resolve(result);
+    }
+
+    /**
+     * Read back only an 'ongoing' pairing's own long-lived key (see
+     * `core/syncLoop.ts`). `kind` is hard-coded to `"sync"` rather than taken
+     * from the call the way `setSecret`/`hasSecret`/`deleteSecret` above take
+     * it — those three legitimately need the caller to name a kind; this one
+     * deliberately does not, so it cannot become a general secret reader for
+     * an SMTP or IMAP credential no matter what a caller passes.
+     */
+    @PluginMethod
+    public void getSyncSecret(PluginCall call) {
+        String accountId = call.getString("accountId", "");
+        String value = new SecretStore(getContext()).get(accountId, "sync");
+        JSObject result = new JSObject();
+        // `org.json.JSONObject.put` silently *removes* a key whose value is a
+        // plain Java `null` rather than serialising it — the caller would see
+        // `r.value === undefined`, not `null`. `JSONObject.NULL` is what
+        // actually round-trips as JSON `null`.
+        result.put("value", value == null ? JSONObject.NULL : value);
         call.resolve(result);
     }
 
@@ -399,6 +427,246 @@ public class AevistleNativePlugin extends Plugin {
                 call.reject(e.getMessage() == null ? e.toString() : e.getMessage(), e);
             }
         });
+    }
+
+    // -----------------------------------------------------------------------
+    // LAN relay
+    //
+    // The transport under both halves of cross-device pairing on Android:
+    // `pairingJoinRequest` (one POST to /pair) and `syncRequest`
+    // (`core/syncLoop.ts`'s repeated POSTs to /sync). The WebView cannot make
+    // either request itself — `connect-src 'self'` refuses a LAN address as
+    // flatly as it refuses the public feeds above.
+    //
+    // Two things here are not what the desktop's equivalent does:
+    //
+    //   - The socket is raw rather than HttpURLConnection. Cleartext is denied
+    //     by default (`res/xml/network_security_config.xml`) and every HTTP
+    //     stack on Android enforces that before it opens anything, while that
+    //     file's carve-out cannot name a numeric LAN range — Android's
+    //     `domain` rules have no CIDR form. So the decision about a peer's
+    //     address is made here, on the address about to be dialled, which is
+    //     where that file says it has to be. Plaintext at all because no
+    //     certificate exists for an address a router handed out this morning;
+    //     what crosses the socket is already sealed by `core/pairingCrypto.ts`
+    //     — a public key and ciphertext, never a secret.
+    //   - The destination is checked before it is dialled, because anything
+    //     running in the WebView can reach this method and an unchecked relay
+    //     is a fetch-anything primitive wearing the app's network identity.
+    // -----------------------------------------------------------------------
+
+    /** A device on the same Wi-Fi answers in milliseconds; a stale address should give up rather than hang the pairing screen. */
+    private static final int RELAY_CONNECT_TIMEOUT_MS = 4000;
+    /** The desktop relay's own ceiling — a full sync payload is sealed and hashed on the far side before a byte comes back. */
+    private static final int RELAY_READ_TIMEOUT_MS = 15000;
+    private static final long RELAY_MAX_BYTES = 8L * 1024 * 1024;
+
+    @PluginMethod
+    public void pairingRequest(final PluginCall call) {
+        final String url = call.getString("url");
+        final String body = call.getString("body", "{}");
+        if (url == null) {
+            call.reject("url is required");
+            return;
+        }
+        io.execute(() -> {
+            try {
+                LanResponse response = relayPost(url, body);
+                JSObject payload = new JSObject();
+                payload.put("status", response.status);
+                payload.put("body", response.body);
+                call.resolve(payload);
+            } catch (Exception e) {
+                call.reject(e.getMessage() == null ? e.toString() : e.getMessage(), e);
+            }
+        });
+    }
+
+    /**
+     * Status and body text, same shape as {@link FeedFetcher.Result} and for
+     * the same reason: the other device answering 401 or 410 is an answer the
+     * JS side reads and explains, not a transport failure.
+     */
+    private static final class LanResponse {
+        final int status;
+        final String body;
+
+        LanResponse(int status, String body) {
+            this.status = status;
+            this.body = body;
+        }
+    }
+
+    private static LanResponse relayPost(String rawUrl, String body) throws Exception {
+        URL url = new URL(rawUrl);
+        if (!isLanRelayUrl(url)) {
+            throw new SecurityException("Pairing only talks to a private LAN address.");
+        }
+        int port = url.getPort() == -1 ? 80 : url.getPort();
+        byte[] payload = body.getBytes(StandardCharsets.UTF_8);
+
+        try (Socket socket = new Socket()) {
+            socket.connect(new InetSocketAddress(url.getHost(), port), RELAY_CONNECT_TIMEOUT_MS);
+            socket.setSoTimeout(RELAY_READ_TIMEOUT_MS);
+
+            OutputStream out = socket.getOutputStream();
+            out.write(("POST " + url.getPath() + " HTTP/1.1\r\n"
+                    + "Host: " + url.getHost() + ":" + port + "\r\n"
+                    + "Content-Type: application/json\r\n"
+                    + "Accept: application/json\r\n"
+                    + "Content-Length: " + payload.length + "\r\n"
+                    + "Connection: close\r\n"
+                    + "\r\n").getBytes(StandardCharsets.US_ASCII));
+            out.write(payload);
+            out.flush();
+
+            return readResponse(new BufferedInputStream(socket.getInputStream()));
+        }
+    }
+
+    /**
+     * Mirrors `isLanRelayUrl` in `electron/main.ts` — same scheme, same two
+     * paths, same address ranges. A literal address only: a hostname would
+     * hand the choice of destination to whatever answers DNS, and there is no
+     * name for a machine on the far side of a QR code anyway.
+     */
+    private static boolean isLanRelayUrl(URL url) {
+        if (!"http".equals(url.getProtocol())) return false;
+        if (url.getUserInfo() != null || url.getQuery() != null || url.getRef() != null) return false;
+        String path = url.getPath();
+        if (!"/pair".equals(path) && !"/sync".equals(path)) return false;
+        return isPrivateIPv4(url.getHost());
+    }
+
+    private static boolean isPrivateIPv4(String host) {
+        if ("localhost".equals(host)) return true;
+
+        String[] parts = host.split("\\.", -1);
+        if (parts.length != 4) return false;
+        int[] octets = new int[4];
+        for (int i = 0; i < 4; i++) {
+            String part = parts[i];
+            if (part.isEmpty() || part.length() > 3) return false;
+            // A leading zero is octal to the resolver and decimal to
+            // Integer.parseInt: "010.0.0.1" would pass this check as 10.x and
+            // then connect to 8.0.0.1, which is a public address.
+            if (part.length() > 1 && part.charAt(0) == '0') return false;
+            for (int c = 0; c < part.length(); c++) {
+                if (part.charAt(c) < '0' || part.charAt(c) > '9') return false;
+            }
+            octets[i] = Integer.parseInt(part);
+            if (octets[i] > 255) return false;
+        }
+
+        return octets[0] == 10
+                || (octets[0] == 172 && octets[1] >= 16 && octets[1] <= 31)
+                || (octets[0] == 192 && octets[1] == 168)
+                || (octets[0] == 169 && octets[1] == 254)
+                || octets[0] == 127;
+    }
+
+    private static LanResponse readResponse(InputStream in) throws IOException {
+        String[] statusLine = readLine(in).split(" ");
+        int status = -1;
+        if (statusLine.length >= 2 && statusLine[0].startsWith("HTTP/")) {
+            try {
+                status = Integer.parseInt(statusLine[1]);
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        if (status < 0) throw new IOException("The other device did not answer with HTTP");
+
+        long declared = -1;
+        boolean chunked = false;
+        while (true) {
+            String header = readLine(in);
+            if (header.isEmpty()) break;
+            int colon = header.indexOf(':');
+            if (colon < 0) continue;
+            String name = header.substring(0, colon).trim().toLowerCase(java.util.Locale.ROOT);
+            String value = header.substring(colon + 1).trim();
+            if ("content-length".equals(name)) {
+                try {
+                    declared = Long.parseLong(value);
+                } catch (NumberFormatException ignored) {
+                }
+            } else if ("transfer-encoding".equals(name)) {
+                chunked = value.toLowerCase(java.util.Locale.ROOT).contains("chunked");
+            }
+        }
+
+        byte[] body;
+        if (chunked) body = readChunked(in);
+        else if (declared >= 0) body = readExactly(in, declared);
+        else body = readUntilClose(in);
+        return new LanResponse(status, new String(body, StandardCharsets.UTF_8));
+    }
+
+    /**
+     * Node's http server never computes a Content-Length for `res.end(json)`,
+     * so every reply from `electron/pairingServer.ts` and
+     * `electron/syncServer.ts` arrives chunked. A client that only understood
+     * Content-Length would hand the chunk sizes to `JSON.parse` as if they
+     * were the body.
+     */
+    private static byte[] readChunked(InputStream in) throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        while (true) {
+            String line = readLine(in);
+            int extension = line.indexOf(';');
+            if (extension >= 0) line = line.substring(0, extension);
+            int size;
+            try {
+                size = Integer.parseInt(line.trim(), 16);
+            } catch (NumberFormatException e) {
+                throw new IOException("The other device sent a malformed reply");
+            }
+            if (size <= 0) return out.toByteArray();
+            if (out.size() + (long) size > RELAY_MAX_BYTES) {
+                throw new IOException("The other device sent more than this app will read");
+            }
+            out.write(readExactly(in, size));
+            readLine(in);
+        }
+    }
+
+    private static byte[] readExactly(InputStream in, long count) throws IOException {
+        if (count > RELAY_MAX_BYTES) {
+            throw new IOException("The other device sent more than this app will read");
+        }
+        byte[] buffer = new byte[(int) count];
+        int filled = 0;
+        while (filled < buffer.length) {
+            int read = in.read(buffer, filled, buffer.length - filled);
+            if (read == -1) throw new IOException("The other device closed the connection early");
+            filled += read;
+        }
+        return buffer;
+    }
+
+    private static byte[] readUntilClose(InputStream in) throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        byte[] chunk = new byte[8192];
+        int read;
+        while ((read = in.read(chunk)) != -1) {
+            if (out.size() + read > RELAY_MAX_BYTES) {
+                throw new IOException("The other device sent more than this app will read");
+            }
+            out.write(chunk, 0, read);
+        }
+        return out.toByteArray();
+    }
+
+    /** A header or chunk-size line. EOF ends it, which is what stops both loops above. */
+    private static String readLine(InputStream in) throws IOException {
+        ByteArrayOutputStream line = new ByteArrayOutputStream();
+        int c;
+        while ((c = in.read()) != -1) {
+            if (c == '\n') break;
+            if (c != '\r') line.write(c);
+            if (line.size() > 8192) throw new IOException("The other device sent a malformed reply");
+        }
+        return line.toString("US-ASCII");
     }
 
     // -----------------------------------------------------------------------

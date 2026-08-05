@@ -34,6 +34,7 @@ import {
   worthShowing,
 } from '../components/deliveryPreview'
 import { CHAIN_STAGES, buildChain, leadLabelKey } from '../core/chain'
+import { SEEDED_HOUR, takeComposeDates } from '../core/composeSeed'
 import { summarizeRecurrence } from '../core/schedule'
 import { upcoming } from '../core/upcoming'
 import { HealthBoard } from '../components/HealthBoard'
@@ -72,6 +73,7 @@ import {
   DEFAULT_BURST,
   DEFAULT_RETRY,
   defaultRecurrence,
+  newId,
 
   type Attachment,
   type BurstPolicy,
@@ -795,6 +797,38 @@ export function ComposeView({
       status: 'armed',
       createdAt: now,
       updatedAt: now,
+    }
+
+    /*
+     * The working calendar's gap-compose: several dates ctrl/cmd-clicked into
+     * a batch, then "Compose for N dates" landed here with one draft. Each
+     * date becomes its own independent `once` job at `SEEDED_HOUR` — the same
+     * hour `nextComposeStart` seeds a single date at — sharing this draft but
+     * nothing else: no `chainId`, because a chain is lead-time-before-one-
+     * event and this is N unrelated events that happen to share a message.
+     * Takes priority over the schedule on screen, which nobody touched to get
+     * here — `RecurrenceEditor` still shows the ordinary next-whole-hour seed,
+     * since consuming *this* queue is deliberately deferred to submit time
+     * rather than done on mount alongside the single-date one.
+     */
+    const gapDates = takeComposeDates()
+    if (gapDates && gapDates.length > 0) {
+      for (const dayMs of gapDates) {
+        const start = new Date(dayMs)
+        start.setHours(SEEDED_HOUR, 0, 0, 0)
+        const at = start.getTime()
+        await scheduleDraft({
+          ...base,
+          id: newId('job'),
+          recurrence: { ...defaultRecurrence(at), kind: 'once', startAt: at, timeOfDay: hhmm(at) },
+          occurrences: [],
+        })
+      }
+      setScheduleOpen(false)
+      toast.push({ tone: 'success', title: t('compose.multiConfirm', { n: gapDates.length }) })
+      dispatch({ type: 'resetDraft', accountId: draft.accountId })
+      clearSchedule()
+      return
     }
 
     // One reminder or several, built the same way — `buildChain` returns a

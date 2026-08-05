@@ -80,6 +80,24 @@ export interface AndroidPermissionState {
   canAskNotifications: boolean
 }
 
+/**
+ * Camera access for `components/PairingScanner.tsx` is deliberately absent
+ * from `AndroidPermissionApi` below — it does not need a plugin method to go
+ * with it the way notifications and exact alarms do.
+ *
+ * `getUserMedia()` is a Web API the WebView already implements; the scanner
+ * calls it directly, the same call a `<video>`-based page anywhere would
+ * make. What is missing without this file's involvement is only the runtime
+ * *permission* dialog, and Capacitor's own `BridgeActivity` (see
+ * `MainActivity.java`) already supplies that: its `WebChromeClient`
+ * implements `onPermissionRequest` and raises the standard Android camera
+ * dialog for `android.permission.CAMERA`, the same class of dialog
+ * `requestNotificationPermission` below raises by hand — just already wired
+ * up by the framework for anything a page asks a `<video>` element for.
+ * `AndroidManifest.xml` declaring the permission (with `uses-feature
+ * android:required="false"`, so a camera-less device can still install the
+ * app) is the only piece this repo owns.
+ */
 export interface AndroidPermissionApi {
   /** What the app is allowed to do right now. Cheap; safe to poll on resume. */
   permissionState(): Promise<AndroidPermissionState>
@@ -110,6 +128,8 @@ interface AevistleNativePlugin extends AndroidPermissionApi {
   setSecret(opts: { accountId: string; secret: string; kind?: SecretKind }): Promise<void>
   hasSecret(opts: { accountId: string; kind?: SecretKind }): Promise<{ value: boolean }>
   deleteSecret(opts: { accountId: string; kind?: SecretKind }): Promise<void>
+  /** `kind` is fixed to `'sync'` on the native side — see `AevistleNativePlugin.java`'s doc. */
+  getSyncSecret(opts: { accountId: string }): Promise<{ value: string | null }>
 
   sendNow(opts: { draft: MessageDraft; account: MailAccount }): Promise<SendResult>
   testConnection(opts: { account: MailAccount; secret?: string }): Promise<SendResult>
@@ -156,6 +176,18 @@ interface AevistleNativePlugin extends AndroidPermissionApi {
   }): Promise<void>
   fetchRemoteImage(opts: { url: string }): Promise<{ value: string }>
   fetchFeed(opts: { url: string }): Promise<FeedResponse>
+  /**
+   * Relay one POST to a LAN endpoint — the WebView is as CSP-blocked from a
+   * direct `fetch()` to a LAN address as it is from `fetchFeed`'s public
+   * hosts. Mirrors `fetchFeed`'s shape (raw status + body text, parsed on the
+   * JS side) rather than returning JSON directly, so a malformed reply from
+   * the other device surfaces as a normal parse error instead of a
+   * native-side one. Generic by design: both `pairingJoinRequest` (one POST
+   * to `/pair`) and `syncRequest` (`core/syncLoop.ts`'s repeated POSTs to
+   * `/sync`) are "relay this JSON body to this LAN URL", so one native method
+   * serves both rather than two that would differ only in the path.
+   */
+  pairingRequest(opts: { url: string; body: string }): Promise<{ status: number; body: string }>
   downloadInboxAttachment(opts: {
     config: InboxAccountState
     folderPath: string
@@ -199,6 +231,7 @@ export function createAndroidBridge(): PlatformBridge & AndroidPermissionApi {
     setSecret: (accountId, secret, kind) => Native.setSecret({ accountId, secret, kind }),
     hasSecret: (accountId, kind) => Native.hasSecret({ accountId, kind }).then((r) => r.value),
     deleteSecret: (accountId, kind) => Native.deleteSecret({ accountId, kind }),
+    getSyncSecret: (deviceId) => Native.getSyncSecret({ accountId: deviceId }).then((r) => r.value),
 
     async sendNow(draft, account) {
       const started = Date.now()
@@ -328,6 +361,29 @@ export function createAndroidBridge(): PlatformBridge & AndroidPermissionApi {
     purgeInboxMessages: (config, items) => Native.purgeInboxMessages({ config, items }),
     fetchRemoteImage: (url) => Native.fetchRemoteImage({ url }).then((r) => r.value),
     fetchFeed: (url) => Native.fetchFeed({ url }),
+
+    // Android only ever plays JOINER — there is no way to hold a LAN socket
+    // open from the WebView, and nothing here needs one: the QR code already
+    // came from a HOST that is doing the listening.
+    async pairingJoinRequest(url, body) {
+      const result = await Native.pairingRequest({ url, body: JSON.stringify(body) })
+      try {
+        return JSON.parse(result.body)
+      } catch {
+        throw new Error('The other device sent back something unexpected.')
+      }
+    },
+    // Android is a `SyncLoop` initiator only — see `core/syncLoop.ts`'s
+    // module doc on why only Electron main can *accept* a sync request.
+    // Reaching one is the same relay `pairingJoinRequest` already uses.
+    async syncRequest(url, body) {
+      const result = await Native.pairingRequest({ url, body: JSON.stringify(body) })
+      try {
+        return JSON.parse(result.body)
+      } catch {
+        throw new Error('The other device sent back something unexpected.')
+      }
+    },
     // No native push exists yet — WorkManager's periodic sync updates its own
     // cache silently and the UI catches up on the next manual or app-open
     // sync, the same way `onJobEvent` is declared here but never actually

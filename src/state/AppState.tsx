@@ -20,6 +20,7 @@ import {
   type ReactNode,
 } from 'react'
 import {
+  ATMOSPHERE_MOTION_MIN,
   DEFAULT_RETRY,
   DEFAULT_SETTINGS,
   SCHEMA_VERSION,
@@ -99,6 +100,21 @@ import { mergeRemoved, rememberRemoved, restoreRemoved, withoutRemoved } from '.
 import { executeControl } from './controlExecutor'
 import type { ControlRequest } from '../core/control'
 import { createI18n, detectLocale, localeMeta, type I18n } from '../i18n'
+import {
+  findPairedDevice,
+  removePairedDevice,
+  touchSynced,
+  type PairedDevice,
+} from '../core/pairedDevices'
+import { pushConflictSnapshots, type ConflictSnapshot } from '../core/syncConflict'
+import {
+  respondToSyncRequest,
+  SyncLoop,
+  type PerformExchangeResult,
+  type SyncApplyPatch,
+  type SyncListenerStatus,
+  type SyncServerRequest,
+} from '../core/syncLoop'
 
 /** Headers only — mirrors the log cap's role of keeping `state.json` small; bodies live on disk, see `inboxStore.ts`. */
 const INBOX_MESSAGE_CAP = 1000
@@ -424,6 +440,8 @@ function initialState(): AppState {
     outbox: [],
     codeHits: [],
     recentRecipients: [],
+    pairedDevices: [],
+    syncConflicts: [],
     schemaVersion: SCHEMA_VERSION,
   }
 }
@@ -473,6 +491,16 @@ type Action =
   | { type: 'markAllCodesRead' }
   | { type: 'clearCodeHits' }
   | { type: 'recordRecipients'; addresses: string[]; names?: Record<string, string> }
+  | { type: 'upsertPairedDevice'; device: PairedDevice }
+  | { type: 'removePairedDevice'; id: string }
+  | {
+      type: 'applySyncResult'
+      deviceId: string
+      patch: SyncApplyPatch
+      conflicts: ConflictSnapshot[]
+      syncedAt: number
+    }
+  | { type: 'restoreSyncConflict'; id: string }
   | { type: 'reset' }
 
 /**
@@ -657,11 +685,16 @@ export function reducer(state: AppState, action: Action): AppState {
 
     case 'upsertContact': {
       const exists = state.contacts.some((c) => c.id === action.contact.id)
+      // Stamped here rather than at every call site — `pinned` toggles,
+      // imports and the edit dialog all go through this one action, and
+      // `updatedAt` exists for `core/syncConflict.ts` to tell "changed since
+      // the last sync" apart from "always looked like this".
+      const contact = { ...action.contact, updatedAt: Date.now() }
       return {
         ...state,
         contacts: exists
-          ? state.contacts.map((c) => (c.id === action.contact.id ? action.contact : c))
-          : [...state.contacts, action.contact],
+          ? state.contacts.map((c) => (c.id === contact.id ? contact : c))
+          : [...state.contacts, contact],
       }
     }
 
@@ -945,6 +978,70 @@ export function reducer(state: AppState, action: Action): AppState {
         : { ...state, recentRecipients }
     }
 
+    case 'upsertPairedDevice': {
+      const exists = state.pairedDevices.some((d) => d.id === action.device.id)
+      return {
+        ...state,
+        pairedDevices: exists
+          ? state.pairedDevices.map((d) => (d.id === action.device.id ? action.device : d))
+          : [...state.pairedDevices, action.device],
+      }
+    }
+
+    case 'removePairedDevice':
+      return { ...state, pairedDevices: removePairedDevice(state.pairedDevices, action.id) }
+
+    /**
+     * One sync cycle's worth of change, landed in one dispatch — see
+     * `core/syncLoop.ts`'s `performExchange`. `patch` only ever names arrays
+     * that actually changed (an untouched scope is `undefined`, not an empty
+     * array), so every field here falls back to what was already there.
+     */
+    case 'applySyncResult': {
+      const { patch, conflicts, deviceId, syncedAt } = action
+      return {
+        ...state,
+        accounts: patch.accounts ?? state.accounts,
+        jobs: patch.jobs ?? state.jobs,
+        contacts: patch.contacts ?? state.contacts,
+        templates: patch.templates ?? state.templates,
+        settings:
+          patch.appearance || patch.workCalendar
+            ? {
+                ...state.settings,
+                ...(patch.appearance ?? {}),
+                ...(patch.workCalendar ? { workCalendar: patch.workCalendar } : {}),
+              }
+            : state.settings,
+        pairedDevices: touchSynced(state.pairedDevices, deviceId, syncedAt),
+        syncConflicts: pushConflictSnapshots(state.syncConflicts, conflicts),
+      }
+    }
+
+    /** "Keep mine instead" — puts the losing record from `core/syncConflict.ts`'s rollback bucket back, then forgets the snapshot: restoring twice would mean the second press has nothing left to restore *from*. */
+    case 'restoreSyncConflict': {
+      const snapshot = state.syncConflicts.find((s) => s.id === action.id)
+      if (!snapshot) return state
+      const replaceById = <T extends { id: string }>(records: T[], record: T): T[] =>
+        records.map((r) => (r.id === record.id ? record : r))
+      let next = state
+      switch (snapshot.kind) {
+        case 'account':
+          next = { ...next, accounts: replaceById(next.accounts, snapshot.losing as MailAccount) }
+          break
+        case 'job':
+          next = { ...next, jobs: replaceById(next.jobs, snapshot.losing as ScheduledJob) }
+          break
+        case 'contact':
+          next = { ...next, contacts: replaceById(next.contacts, snapshot.losing as Contact) }
+          break
+        case 'template':
+          next = { ...next, templates: replaceById(next.templates, snapshot.losing as Template) }
+          break
+      }
+      return { ...next, syncConflicts: next.syncConflicts.filter((s) => s.id !== action.id) }
+    }
+
     case 'reset':
       return initialState()
 
@@ -1017,8 +1114,13 @@ export interface AppApi {
   addLog: (entry: Omit<LogEntry, 'id' | 'at'>) => void
   saveAccount: (account: MailAccount, secret?: string) => Promise<void>
   deleteAccount: (id: string) => Promise<void>
-  /** `queue: false` opts out of the offline queue — used by the queue's own retry. */
-  sendDraftNow: (draft: MessageDraft, opts?: { queue?: boolean }) => Promise<SendResult>
+  /**
+   * `queue: false` opts out of the offline queue — used by the queue's own retry.
+   * `jobId`, when this send is a scheduled reminder firing, names it — carried
+   * onto the log line and, if the send has to be queued, onto the outbox item,
+   * which is what lets the working calendar answer "did that one arrive".
+   */
+  sendDraftNow: (draft: MessageDraft, opts?: { queue?: boolean; jobId?: string }) => Promise<SendResult>
   scheduleDraft: (job: ScheduledJob) => Promise<void>
   toggleJob: (id: string, enabled: boolean) => Promise<void>
   deleteJob: (id: string) => Promise<void>
@@ -1085,6 +1187,22 @@ export interface AppApi {
   undo: () => string | null
   /** What the next undo would put back, for the menu item and the toast. */
   undoLabel: string | null
+
+  /**
+   * "This device will be asked to re-pair next time it tries to sync" — see
+   * `devices.revokeConfirm`. Deletes the record and its keystore entry; the
+   * other device's next `SyncLoop` cycle simply fails to decrypt, which is
+   * the whole mechanism, not a special case of it.
+   */
+  revokePairedDevice: (id: string) => Promise<void>
+  /** "Keep mine instead" on one flagged sync conflict. See `core/syncConflict.ts`. */
+  restoreSyncConflict: (id: string) => void
+  /**
+   * How the LAN sync listener actually got on, or `null` where nothing has
+   * asked for one — no 'ongoing' pairing, or a platform that cannot host.
+   * `DevicesCard` is where a bind that failed gets explained.
+   */
+  syncListener: SyncListenerStatus | null
 }
 
 const AppContext = createContext<AppApi | null>(null)
@@ -1206,6 +1324,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
           outbox: stored.outbox ?? [],
           codeHits: stored.codeHits ?? [],
           recentRecipients: stored.recentRecipients ?? [],
+          pairedDevices: stored.pairedDevices ?? [],
+          syncConflicts: stored.syncConflicts ?? [],
           schemaVersion: SCHEMA_VERSION,
         }
 
@@ -1517,11 +1637,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // --- theme, style, accent, density, direction --------------------------
   useEffect(() => {
     const root = document.documentElement
-    const { themeMode, visualStyle, accent, density, listDensity } = state.settings
+    const { themeMode, visualStyle, accent, accentBase, accentCyber, themeIntensity, density, listDensity } =
+      state.settings
     if (themeMode === 'system') root.removeAttribute('data-theme')
     else root.setAttribute('data-theme', themeMode)
     root.setAttribute('data-style', visualStyle ?? 'aurora')
     root.setAttribute('data-accent', accent)
+    // runecircuit's own two-axis accent (A10) — set unconditionally, same as
+    // `data-accent` above; theme.css's selectors are what actually gate these
+    // to `[data-style="runecircuit"]`, so setting them for every other style
+    // too is inert rather than wrong.
+    root.setAttribute('data-accent-base', accentBase ?? 'ink')
+    root.setAttribute('data-accent-cyber', accentCyber ?? 'cyan')
+    // The ceremonial-layer dial (A8). A *global* CSS var — see the comment
+    // beside `--intensity`'s declaration in theme.css for why that is safe —
+    // and an inline style property, which always outranks a stylesheet rule
+    // regardless of which style block last touched `:root`.
+    const intensity = themeIntensity ?? 60
+    root.style.setProperty('--intensity', String(intensity / 100))
+    root.setAttribute('data-atmosphere-motion', intensity >= ATMOSPHERE_MOTION_MIN ? 'on' : 'off')
     root.setAttribute('data-density', density)
     root.setAttribute('data-list-density', listDensity ?? 'standard')
     const localeInfo = localeMeta(locale)
@@ -1683,6 +1817,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [bridge, addLog],
   )
 
+  const revokePairedDevice = useCallback(
+    async (id: string) => {
+      const failed = bridge ? await forgetSecrets(bridge, [[id, 'sync']]) : null
+      dispatch({ type: 'removePairedDevice', id })
+      if (failed) {
+        addLog({
+          kind: 'security',
+          level: 'warn',
+          title: 'Device removed, but its sync key could not be deleted',
+          detail: failed,
+        })
+      }
+    },
+    [bridge, addLog],
+  )
+
+  const restoreSyncConflict = useCallback((id: string) => {
+    dispatch({ type: 'restoreSyncConflict', id })
+  }, [])
+
   /**
    * Send one draft.
    *
@@ -1697,7 +1851,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
    * timer mid-retry.
    */
   const sendDraftNow = useCallback(
-    async (draft: MessageDraft, opts: { queue?: boolean } = {}): Promise<SendResult> => {
+    async (draft: MessageDraft, opts: { queue?: boolean; jobId?: string } = {}): Promise<SendResult> => {
       const live = liveRef.current
       const account = live.accounts.find((a) => a.id === draft.accountId)
       if (!bridge || !account) {
@@ -1768,7 +1922,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         live.settings.offlineQueueEnabled !== false &&
         isQueueable(result)
       if (queued) {
-        dispatch({ type: 'enqueue', item: queueItem(draft, result) })
+        dispatch({ type: 'enqueue', item: queueItem(draft, result, undefined, opts.jobId) })
       }
 
       /**
@@ -1795,6 +1949,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             ? `Queued: ${draft.subject || '(no subject)'}`
             : 'Send failed',
         detail: result.error,
+        jobId: opts.jobId,
         recipients: result.ok ? result.accepted.length : undefined,
         durationMs: result.durationMs,
         messageId: result.messageId,
@@ -1975,7 +2130,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // was last handed to the scheduler.
       const outgoing =
         job.id === DIGEST_JOB_ID ? withDigestBody(job, liveRef.current, i18n) : job
-      const result = await sendDraftNow(outgoing.draft)
+      const result = await sendDraftNow(outgoing.draft, { jobId: job.id })
       dispatch({
         type: 'upsertJob',
         job: {
@@ -2448,18 +2603,146 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return bridge.onControlRequest((request) => controlHandler.current(request))
   }, [bridge])
 
-  // Start or stop the loopback server whenever either switch moves.
+  // Start or stop the loopback server whenever any of the three switches move.
   const controlEnabled = state.settings.controlEnabled === true
   const controlAllowSending = state.settings.controlAllowSending === true
+  const calendarSubscribeEnabled = state.settings.calendarSubscribeEnabled === true
   useEffect(() => {
     if (!ready || !bridge?.applyControl) return
     void bridge
-      .applyControl({ enabled: controlEnabled, allowSending: controlAllowSending })
+      .applyControl({ enabled: controlEnabled, allowSending: controlAllowSending, calendarSubscribeEnabled })
       .catch(() => {
         /* A port that will not open is reported by the settings card, which
            reads the endpoint back rather than trusting this call. */
       })
-  }, [ready, bridge, controlEnabled, controlAllowSending])
+  }, [ready, bridge, controlEnabled, controlAllowSending, calendarSubscribeEnabled])
+
+  // --- ongoing sync ---------------------------------------------------------
+  //
+  // Two halves, matching `core/syncLoop.ts`'s "symmetric exchange" doc: this
+  // device *asking* (`SyncLoop`, a foreground timer) and this device
+  // *answering* (`onSyncServerRequest`, desktop only — see `bridge.ts`). Both
+  // land the same way once an exchange completes: an `applySyncResult`
+  // dispatch, any account secrets written through `setSecret` exactly as an
+  // ordinary account save would, and a log line for the audit trail the
+  // module doc on `pairedDevices.ts` promises.
+
+  const applyExchangeOutcome = useCallback(
+    (deviceLabel: string, deviceId: string, result: PerformExchangeResult, at: number) => {
+      dispatch({
+        type: 'applySyncResult',
+        deviceId,
+        patch: result.patch,
+        conflicts: result.conflicts,
+        syncedAt: at,
+      })
+      for (const s of result.accountSecrets) void bridge?.setSecret(s.accountId, s.secret, 'smtp')
+      const changedCount =
+        (result.patch.accounts?.length ?? 0) +
+        (result.patch.jobs?.length ?? 0) +
+        (result.patch.contacts?.length ?? 0) +
+        (result.patch.templates?.length ?? 0)
+      if (changedCount > 0 || result.conflicts.length > 0) {
+        addLog({
+          kind: 'system',
+          level: 'info',
+          title: `Synced with ${deviceLabel}`,
+          detail:
+            result.conflicts.length > 0
+              ? `${changedCount} record(s) updated, ${result.conflicts.length} conflict(s) resolved automatically`
+              : `${changedCount} record(s) updated`,
+        })
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [bridge, addLog],
+  )
+
+  // The listener is not opened by the main process on launch — see
+  // `electron/syncServer.ts`. This is the side that knows whether there is
+  // anything to answer for, so it is the side that asks, and a returning user
+  // with an 'ongoing' pairing gets their listener back the moment their state
+  // has loaded.
+  const [syncListener, setSyncListener] = useState<SyncListenerStatus | null>(null)
+  const wantsSyncListener = state.pairedDevices.some((d) => d.mode === 'ongoing')
+
+  useEffect(() => {
+    if (!ready || !bridge?.applySyncListener) return
+    const apply = bridge.applySyncListener
+    let cancelled = false
+    const run = () => {
+      void apply(wantsSyncListener).then(
+        (status) => {
+          if (!cancelled) setSyncListener(wantsSyncListener ? status : null)
+        },
+        () => {
+          if (!cancelled) setSyncListener(wantsSyncListener ? { listening: false, error: 'failed' } : null)
+        },
+      )
+    }
+    run()
+    // A machine whose state loaded before its Wi-Fi came up has no interface to
+    // bind, and would otherwise stay unreachable until the app was restarted.
+    window.addEventListener('online', run)
+    return () => {
+      cancelled = true
+      window.removeEventListener('online', run)
+    }
+  }, [ready, bridge, wantsSyncListener])
+
+  const syncResponder = useRef<(request: SyncServerRequest) => void>(() => {})
+  syncResponder.current = (request) => {
+    void (async () => {
+      const b = bridge
+      if (!b?.respondToSyncServer) return
+      if (!b.getSyncSecret) {
+        void b.respondToSyncServer({ id: request.id, ok: false, error: 'not ready' })
+        return
+      }
+      const outcome = await respondToSyncRequest(
+        {
+          findDevice: (pairId) => findPairedDevice(liveRef.current.pairedDevices, pairId),
+          getSecret: (keyRef) => b.getSyncSecret!(keyRef),
+          getState: () => liveRef.current,
+          getCalendar: () => liveRef.current.settings.workCalendar ?? DEFAULT_WORK_CALENDAR,
+          now: () => Date.now(),
+        },
+        request.pairId,
+        request.envelope,
+      )
+      if ('error' in outcome) {
+        void b.respondToSyncServer({ id: request.id, ok: false, error: outcome.error })
+        return
+      }
+      applyExchangeOutcome(outcome.outcome.device.label, outcome.outcome.device.id, outcome.outcome, Date.now())
+      void b.respondToSyncServer({ id: request.id, ok: true, envelope: outcome.envelope })
+    })()
+  }
+
+  useEffect(() => {
+    if (!bridge?.onSyncServerRequest) return
+    return bridge.onSyncServerRequest((request) => syncResponder.current(request))
+  }, [bridge])
+
+  useEffect(() => {
+    if (!ready || !bridge?.syncRequest || !bridge?.getSyncSecret) return
+    const b = bridge
+    const loop = new SyncLoop({
+      now: () => Date.now(),
+      getState: () => liveRef.current,
+      getCalendar: () => liveRef.current.settings.workCalendar ?? DEFAULT_WORK_CALENDAR,
+      getPairedDevices: () => liveRef.current.pairedDevices,
+      getSecret: (keyRef) => b.getSyncSecret!(keyRef),
+      transport: { postJson: (url, body) => b.syncRequest!(url, body) },
+      onSynced: (device, result, at) => applyExchangeOutcome(device.label, device.id, result, at),
+      onError: (device, message) => {
+        addLog({ kind: 'error', level: 'warn', title: `Could not sync with ${device.label}`, detail: message })
+      },
+    })
+    loop.start()
+    return () => loop.stop()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, bridge])
 
   // --- offline queue ------------------------------------------------------
   //
@@ -2484,7 +2767,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         dispatch({ type: 'patchOutbox', id: item.id, patch: { status: 'sending' } })
         // `queue: false` — a retry that failed must update this item, not
         // enqueue a second copy of it.
-        const result = await sendDraftNow(item.draft, { queue: false })
+        const result = await sendDraftNow(item.draft, { queue: false, jobId: item.jobId })
         if (result.ok) {
           dispatch({ type: 'dequeue', id: item.id })
         } else {
@@ -2599,6 +2882,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       pushUndo,
       undo,
       undoLabel,
+      revokePairedDevice,
+      restoreSyncConflict,
+      syncListener,
     }),
     [
       state,
@@ -2638,6 +2924,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       pushUndo,
       undo,
       undoLabel,
+      revokePairedDevice,
+      restoreSyncConflict,
+      syncListener,
     ],
   )
 

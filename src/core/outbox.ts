@@ -65,9 +65,23 @@ export interface OutboxItem {
   lastError?: string
   lastErrorKind?: ErrorKind
   status: OutboxStatus
+  /**
+   * The scheduled reminder this send belongs to, when it came from one.
+   *
+   * Absent for a draft queued straight from the compose screen — there is no
+   * job to name. Optional so an item written before this existed still reads:
+   * it simply cannot be tied back to a reminder, which is the truth. See the
+   * working calendar's delivery-status dots, the one reader of this field.
+   */
+  jobId?: string
 }
 
-export function queueItem(draft: MessageDraft, result?: SendResult, now = Date.now()): OutboxItem {
+export function queueItem(
+  draft: MessageDraft,
+  result?: SendResult,
+  now = Date.now(),
+  jobId?: string,
+): OutboxItem {
   return {
     id: newId('out'),
     draft: {
@@ -83,6 +97,7 @@ export function queueItem(draft: MessageDraft, result?: SendResult, now = Date.n
     lastError: result?.error,
     lastErrorKind: result?.errorKind,
     status: 'waiting',
+    jobId,
   }
 }
 

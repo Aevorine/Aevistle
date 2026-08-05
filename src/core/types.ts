@@ -13,6 +13,8 @@ import type { SendCondition } from './conditions'
 import type { OutboxItem } from './outbox'
 import type { DraftSnapshot } from './snapshots'
 import type { CalendarWarning, WorkCalendar, WorkdayPolicy } from './workCalendar'
+import type { PairedDevice } from './pairedDevices'
+import type { ConflictSnapshot } from './syncConflict'
 
 export type Platform = 'desktop' | 'android' | 'web'
 
@@ -29,9 +31,10 @@ export type AuthMethod = 'password' | 'none'
  * `'smtp'` keeps that bare key so every secret ever written stays readable
  * with zero migration; `'imap'` gets a namespaced key so a receiving
  * credential for the same account can never collide with (and silently
- * overwrite) the sending one.
+ * overwrite) the sending one. `'sync'` is the same idea for an 'ongoing'
+ * paired device's long-lived key — see `core/pairedDevices.ts`'s `keyRef`.
  */
-export type SecretKind = 'smtp' | 'imap'
+export type SecretKind = 'smtp' | 'imap' | 'sync'
 
 /**
  * An outgoing mail account. Note what is *absent*: the password. Secrets live
@@ -470,6 +473,15 @@ export interface Contact {
    */
   deliveryWindow?: DeliveryWindow
   createdAt: number
+  /**
+   * Optional so a contact saved before this existed still loads. Read as
+   * `createdAt` at the point something needs a definite number — see
+   * `core/syncScope.ts` and `core/syncConflict.ts`, the two places that
+   * actually compare it, for why "never edited since creation" is the right
+   * fallback rather than "just synced" (`Date.now()`), which would make every
+   * pre-existing contact look like it just changed.
+   */
+  updatedAt?: number
 }
 
 export interface Template {
@@ -485,6 +497,16 @@ export interface Template {
 export type ThemeMode = 'system' | 'light' | 'dark'
 export type AccentId = 'azure' | 'indigo' | 'teal' | 'violet' | 'amber' | 'rose' | 'emerald'
 /**
+ * `runecircuit`'s own two-axis accent, replacing the seven-way `AccentId`
+ * picker for that style only — see the block comment beside `--accent-classical`
+ * in theme.css for why one dial was not enough. `accentBase` is the printed-ink
+ * half (a card border at rest, the nav underline, the seal-stamp ring);
+ * `accentCyber` is the live-trace half that `--accent`/`--accent-text` keep
+ * resolving from, same as always.
+ */
+export type AccentBase = 'ink' | 'crimson' | 'moonwhite' | 'gold'
+export type AccentCyber = 'cyan' | 'magenta' | 'blue'
+/**
  * How the whole surface is drawn, one layer above `ThemeMode`.
  *
  * Theme decides bright or dim; this decides what the page is made of — the
@@ -492,7 +514,14 @@ export type AccentId = 'azure' | 'indigo' | 'teal' | 'violet' | 'amber' | 'rose'
  * lines sit. `midnight` is dark-committed and `contrast` is the accessibility
  * one; see the block comments in `styles/theme.css` for what each is for.
  */
-export type VisualStyle = 'aurora' | 'graphite' | 'paper' | 'midnight' | 'nordic' | 'contrast'
+export type VisualStyle =
+  | 'aurora'
+  | 'graphite'
+  | 'paper'
+  | 'midnight'
+  | 'nordic'
+  | 'runecircuit'
+  | 'contrast'
 export type Density = 'comfortable' | 'compact'
 export type LocaleId = 'en' | 'zh-CN' | 'fr' | 'es' | 'ru' | 'ar'
 /**
@@ -511,6 +540,22 @@ export interface Settings {
    */
   visualStyle: VisualStyle
   accent: AccentId
+  /**
+   * `runecircuit`'s own accent choice, on the two axes described beside
+   * `AccentBase`/`AccentCyber` above. Optional and defaulted at the read site
+   * (`?? 'ink'` / `?? 'cyan'`), same convention as `listDensity` — an install
+   * from before this existed has never touched either dial.
+   */
+  accentBase?: AccentBase
+  accentCyber?: AccentCyber
+  /**
+   * How strongly `runecircuit`'s ceremonial layer shows: card grain, the
+   * hover glow's neon mix, the solar-term wash, seal-stamp/ink-bloom motion.
+   * 0-100; read as `--intensity` (0-1) everywhere those tokens are declared.
+   * Optional for the same reason `accentBase` is — an older install reads as
+   * the default via `?? 60`, not as "off".
+   */
+  themeIntensity?: number
   density: Density
   locale: LocalePreference
   /** Ask before sending to more than N recipients at once. */
@@ -555,6 +600,15 @@ export interface Settings {
    */
   workCalendar?: WorkCalendar
   /**
+   * Tint each day on the working calendar by how many sends land on it.
+   *
+   * On by default; the switch exists for the reader who finds five shades of
+   * the accent distracting rather than informative, not because the heatmap is
+   * expensive to compute — `loadLevel` runs once per day inside the marks memo
+   * either way, and this only decides whether the result reaches the grid.
+   */
+  calendarHeatmapEnabled?: boolean
+  /**
    * Hold a send that fails for a reason a retry could fix, and try again on a
    * backoff instead of losing it. On by default — the alternative is retyping.
    */
@@ -580,6 +634,20 @@ export interface Settings {
    * undone, and mail that has left cannot.
    */
   controlAllowSending?: boolean
+  /**
+   * Serve the working calendar as a live `.ics` address on the same loopback
+   * server the control interface uses, so a desktop calendar app can subscribe
+   * once and stay current instead of being re-exported by hand. Off by
+   * default, and independent of `controlEnabled` — mirroring it rather than
+   * riding on it: someone who wants their calendar app to see holidays and
+   * make-up days has not thereby agreed to let a program create reminders, and
+   * the reverse is just as true.
+   *
+   * Unlike the control API this route is deliberately unauthenticated (see
+   * `electron/controlServer.ts`), so it is judged on its own — only the
+   * working calendar's dates go out, never a reminder's recipients or subject.
+   */
+  calendarSubscribeEnabled?: boolean
 
   // --- sending account -----------------------------------------------------
   /**
@@ -688,10 +756,22 @@ export interface Settings {
   greetingAccountId?: string
 }
 
+/**
+ * Below this `themeIntensity`, `runecircuit`'s seal-stamp/ink-bloom motion is
+ * skipped outright — `data-atmosphere-motion` in AppState.tsx — rather than
+ * just playing faintly. A keyframe scaled to near-zero opacity is still a
+ * keyframe someone has to sit through; a low intensity should mean "quiet",
+ * not "the same animation, harder to see".
+ */
+export const ATMOSPHERE_MOTION_MIN = 15
+
 export const DEFAULT_SETTINGS: Settings = {
   themeMode: 'system',
   visualStyle: 'aurora',
   accent: 'azure',
+  accentBase: 'ink',
+  accentCyber: 'cyan',
+  themeIntensity: 60,
   density: 'comfortable',
   locale: 'system',
   bulkConfirmThreshold: 10,
@@ -710,11 +790,13 @@ export const DEFAULT_SETTINGS: Settings = {
   quietEnd: '07:00',
   connectTimeoutSeconds: 20,
   workCalendar: { weekend: [0, 6], holidays: [], workdays: [] },
+  calendarHeatmapEnabled: true,
   offlineQueueEnabled: true,
   draftHistoryEnabled: true,
   updateCheckOnStart: true,
   controlEnabled: false,
   controlAllowSending: false,
+  calendarSubscribeEnabled: false,
   inboxCacheMaxMb: 500,
   inboxCacheRetentionDays: 90,
   inboxSyncMinutes: 5,
@@ -1041,6 +1123,10 @@ export interface AppState {
   codeHits: CodeHit[]
   /** Addresses sent to before, for the compose screen's quick picks. */
   recentRecipients: RecentRecipient[]
+  /** Devices paired with `mode: 'ongoing'`. See `core/pairedDevices.ts`. Empty for a 'once' pairing, which keeps no record. */
+  pairedDevices: PairedDevice[]
+  /** Losing records from an automatic newer-wins sync resolution, kept for one-click "keep mine instead". See `core/syncConflict.ts`. */
+  syncConflicts: ConflictSnapshot[]
   schemaVersion: number
 }
 

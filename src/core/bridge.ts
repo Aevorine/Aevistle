@@ -9,6 +9,8 @@
 
 import type { ControlEndpoint, ControlRequest, ControlResponse } from './control'
 import type { FeedResponse } from './feeds'
+import type { PairingEvent, PairingPayload, PairMode } from './pairing'
+import type { SyncListenerStatus, SyncServerRequest, SyncServerResponse } from './syncLoop'
 import type {
   AppState,
   Attachment,
@@ -215,9 +217,63 @@ export interface PlatformBridge {
   applyControl?(settings: {
     enabled: boolean
     allowSending: boolean
+    calendarSubscribeEnabled: boolean
   }): Promise<ControlEndpoint | null>
   onControlRequest?(handler: (request: ControlRequest) => void): () => void
   respondToControl?(response: ControlResponse): Promise<void>
+
+  // --- LAN pairing (device-to-device, end-to-end encrypted) ---------------
+  // See `src/core/pairing.ts`. HOST is desktop-only — only Electron main can
+  // open a socket on the LAN interface. JOINER is `pairingJoinRequest` alone:
+  // both desktop and Android need it (a phone scanning a laptop's code, or a
+  // laptop scanning a phone's), and both are equally blocked from calling
+  // `fetch()` on a LAN address directly by `connect-src 'self'` — so this is
+  // present on every platform bridge except the browser preview, which has no
+  // trusted layer to relay through.
+  /** HOST: start a ~2-minute LAN pairing session and return the QR payload. `pairId` is required for `mode: 'ongoing'` — see `pairingServer.ts`. */
+  startPairingHost?(mode: PairMode, pairId?: string): Promise<PairingPayload>
+  /** HOST: stop early. */
+  stopPairingHost?(): Promise<void>
+  /** HOST: listening/connected/expired/stopped/error, as they happen. */
+  onPairingEvent?(handler: (event: PairingEvent) => void): () => void
+  /** JOINER: relay one POST to a LAN pairing endpoint through the trusted layer. */
+  pairingJoinRequest?(url: string, body: unknown): Promise<unknown>
+
+  // --- ongoing sync ---------------------------------------------------------
+  // See `src/core/syncLoop.ts`. Present on every platform: a `SyncLoop`
+  // always plays the initiating side (`syncRequest`, the same "relay one POST
+  // through the trusted layer" shape as `pairingJoinRequest`). Only the
+  // desktop bridge also implements `onSyncServerRequest`/`respondToSyncServer`
+  // — the accepting side, same HOST-only reasoning as pairing.
+  /** Relay one POST to `http://<lan-ip>:<port>/sync`. */
+  syncRequest?(url: string, body: unknown): Promise<unknown>
+  /**
+   * HOST only: open the LAN sync listener, or close it.
+   *
+   * Deliberately not automatic on launch. Binding a LAN interface is what
+   * raises the Windows firewall prompt, so an app that promises no server had
+   * better not ask for one before the user has paired anything — see
+   * `electron/syncServer.ts`. The caller passes "this machine has at least one
+   * 'ongoing' pairing", and the returned status is what the settings screen
+   * shows when the socket did not come up.
+   */
+  applySyncListener?(enabled: boolean): Promise<SyncListenerStatus>
+  /** HOST only: a request arrived on the ongoing-sync listener and wants an answer. */
+  onSyncServerRequest?(handler: (request: SyncServerRequest) => void): () => void
+  respondToSyncServer?(response: SyncServerResponse): Promise<void>
+  /**
+   * Read back an 'ongoing' pairing's own long-lived key — `keyRef` in,
+   * base64 key material out, or `null` if it was revoked.
+   *
+   * The one deliberate exception to "a renderer never reads a secret back":
+   * `setSecret`/`hasSecret`/`deleteSecret` are the whole story for an SMTP or
+   * IMAP password, which can send mail or read a mailbox from anywhere once
+   * it leaks. A sync key only unlocks LAN data-sync with a device that
+   * already completed an authenticated pairing — see `core/pairedDevices.ts`'s
+   * module doc — so `core/syncLoop.ts` needs it in the renderer to do its own
+   * AES-GCM, the same WebCrypto every other pairing key already uses.
+   */
+  getSyncSecret?(keyRef: string): Promise<string | null>
 
   // --- files --------------------------------------------------------------
   pickFiles(): Promise<Attachment[]>
@@ -333,6 +389,16 @@ export interface PlatformBridge {
     folderPath: string,
     uid: number,
   ): Promise<InboxMessageBody>
+  /**
+   * Sanitize an HTML string the same way a received message's body is
+   * sanitized before rendering — script/style/iframe stripped, remote images
+   * replaced with the blank placeholder — so a scheduled draft's HTML preview
+   * never opens a second, unaudited render path. Desktop only, like every
+   * other `sanitize-html`-backed call; where it is absent (Android, the
+   * browser preview) the calendar's body preview falls back to plain text
+   * rather than rendering anything unsanitized.
+   */
+  sanitizeHtml?(html: string): Promise<string>
   /**
    * `seen` best-effort mirrors to the server's `\Seen` flag; `tag` never
    * leaves the device (see `InboxTag`). Local state always updates regardless

@@ -44,6 +44,19 @@ export interface ControlHooks {
   /** Where `control/` and `drop/` live. */
   dataRoot(): string
   log(level: 'info' | 'warn' | 'error', message: string, detail?: string): void
+
+  // --- calendar subscribe ---------------------------------------------------
+  // A second, independent doorway on the same server — see `GET /calendar.ics`
+  // in `handle()` for why it is a separate hook rather than folded into
+  // `permissions()`'s `enabled`.
+  /** Current value of `Settings.calendarSubscribeEnabled`. Read per request. */
+  calendarSubscribeEnabled(): boolean
+  /**
+   * The working calendar as an `.ics` file, or `null` when it could not be
+   * built (no window to ask, or the app is between requests at startup).
+   * Never the reminders themselves — see the header on `GET /calendar.ics`.
+   */
+  buildCalendarIcs(): Promise<string | null>
 }
 
 const OPS = new Set<ControlOp>([
@@ -78,11 +91,18 @@ export class ControlServer {
   /**
    * Start or stop to match the current settings. Safe to call repeatedly — the
    * settings screen calls it on every change.
+   *
+   * Two settings can each keep this server alive on their own — the control
+   * interface and calendar subscribe are independent toggles (see
+   * `Settings.calendarSubscribeEnabled`) sharing one loopback port, so the
+   * server runs whenever *either* one wants it and stops only once *both* are
+   * off.
    */
   async apply(): Promise<void> {
     const { enabled } = this.hooks.permissions()
-    if (enabled && !this.server) await this.start()
-    else if (!enabled && this.server) await this.stop()
+    const shouldRun = enabled || this.hooks.calendarSubscribeEnabled()
+    if (shouldRun && !this.server) await this.start()
+    else if (!shouldRun && this.server) await this.stop()
   }
 
   /**
@@ -215,6 +235,55 @@ export class ControlServer {
         send(200, { ok: true, app: 'aevistle' })
         return
       }
+
+      /*
+       * `GET /calendar.ics` — deliberately unauthenticated. Design decision,
+       * not an oversight:
+       *
+       * The bearer token above exists because `/control` can create reminders
+       * and, with sending switched on, send mail — actions worth gating hard.
+       * This route only ever reads back `buildCalendarIcs()`, which is the
+       * working calendar's holidays and make-up days: the same thing
+       * `exportCalendarIcs` already writes to a file with no login on your
+       * disk either. Never the reminders — those carry recipients and
+       * subjects, which is exactly the sensitive half this route stays away
+       * from.
+       *
+       * More to the point, a token would not *work* here. The whole appeal of
+       * "subscribe" is `webcal://127.0.0.1:PORT/calendar.ics` handed to
+       * Outlook, Thunderbird or Apple Calendar's own subscribe dialog, which
+       * polls it on its own schedule — none of them offer a place to put a
+       * custom `Authorization` header, because the convention they all follow
+       * has none. Requiring one would just mean the feature does not work
+       * with a real calendar app, in exchange for protection an attacker does
+       * not need anyway: the port is loopback-only, so reaching it already
+       * means code running as the same OS user, who could read the exported
+       * file — or the settings themselves — directly.
+       *
+       * What *does* stand between this and a malicious web page open in a
+       * browser tab is the response headers `send()` already sets below:
+       * `access-control-allow-origin: null` refuses every origin, so a page's
+       * own `fetch()` cannot read the body back even though the request
+       * reaches the loopback port. That, the off-by-default setting, and the
+       * loopback bind are the three guards this route gets; a bearer token
+       * would be a fourth that breaks the one thing the feature is for.
+       */
+      if (url.pathname === '/calendar.ics' && req.method === 'GET') {
+        if (!this.hooks.calendarSubscribeEnabled()) {
+          send(404, { ok: false, error: 'calendar subscribe is switched off in Settings' })
+          return
+        }
+        const ics = await this.hooks.buildCalendarIcs()
+        res.writeHead(200, {
+          'content-type': 'text/calendar; charset=utf-8',
+          'cache-control': 'no-store',
+          'access-control-allow-origin': 'null',
+          'x-content-type-options': 'nosniff',
+        })
+        res.end(ics ?? '')
+        return
+      }
+
       if (req.method !== 'POST' || url.pathname !== '/control') {
         send(404, { ok: false, error: 'POST /control' })
         return

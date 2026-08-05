@@ -17,6 +17,8 @@ import {
 import type { InboxEvent, JobEvent } from '../src/core/bridge'
 import type { DownloadProgress } from '../src/core/update'
 import type { ControlRequest } from '../src/core/control'
+import type { PairingEvent } from '../src/core/pairing'
+import type { SyncServerRequest } from '../src/core/syncLoop'
 
 /**
  * Tray commands that arrived before the page had a listener.
@@ -77,6 +79,7 @@ const api: DesktopApi = {
   watchInbox: (configs) => ipcRenderer.invoke(IPC.watchInbox, configs),
   getMessageBody: (config, folderPath, uid) =>
     ipcRenderer.invoke(IPC.getMessageBody, config, folderPath, uid),
+  sanitizeHtml: (html) => ipcRenderer.invoke(IPC.sanitizeHtml, html),
   setMessageFlags: (config, folderPath, uid, patch) =>
     ipcRenderer.invoke(IPC.setMessageFlags, config, folderPath, uid, patch),
   deleteInboxMessages: (accountId, items) =>
@@ -136,6 +139,25 @@ const api: DesktopApi = {
     ipcRenderer.on(IPC.controlRequest, listener)
     return () => ipcRenderer.removeListener(IPC.controlRequest, listener)
   },
+
+  startPairingHost: (mode, pairId) => ipcRenderer.invoke(IPC.startPairingHost, mode, pairId),
+  stopPairingHost: () => ipcRenderer.invoke(IPC.stopPairingHost),
+  pairingJoinRequest: (url, body) => ipcRenderer.invoke(IPC.pairingJoinRequest, url, body),
+  onPairingEvent: (handler) => {
+    const listener = (_event: unknown, payload: PairingEvent) => handler(payload)
+    ipcRenderer.on(IPC.pairingEvent, listener)
+    return () => ipcRenderer.removeListener(IPC.pairingEvent, listener)
+  },
+
+  applySyncListener: (enabled) => ipcRenderer.invoke(IPC.applySyncListener, enabled),
+  syncRequest: (url, body) => ipcRenderer.invoke(IPC.syncRequest, url, body),
+  respondToSyncServer: (response) => ipcRenderer.invoke(IPC.syncServerResponse, response),
+  onSyncServerRequest: (handler) => {
+    const listener = (_event: unknown, payload: SyncServerRequest) => handler(payload)
+    ipcRenderer.on(IPC.syncServerRequest, listener)
+    return () => ipcRenderer.removeListener(IPC.syncServerRequest, listener)
+  },
+  getSyncSecret: (keyRef) => ipcRenderer.invoke(IPC.getSyncSecret, keyRef),
 
   onUpdateProgress: (handler) => {
     const listener = (_event: unknown, payload: DownloadProgress) => handler(payload)

@@ -92,6 +92,64 @@ export function takeComposeSeed(defer: Defer = deferToNextTick): number | null {
   return value
 }
 
+// ---------------------------------------------------------------------------
+// Several dates at once — the working calendar's gap-compose
+// ---------------------------------------------------------------------------
+//
+// A second, independent queue rather than an array stuffed into `pending`
+// above: the single-date seed is *consumed by the initial render* of the
+// recurrence editor (`nextComposeStart`, called from a `useState` initialiser),
+// while this one is read at *submit time* by `ComposeView`'s confirm handler.
+// Those are different moments in the same screen's life, so folding them into
+// one slot would mean whichever fired first silently ate the other's seed.
+
+let pendingDates: number[] | null = null
+let clearScheduledDatesTick = false
+
+/**
+ * Remember which days a batch of new reminders is for.
+ *
+ * Same refusal as `seedComposeDate`: anything that is not a full list of real
+ * `YYYY-MM-DD`s leaves nothing behind, rather than scheduling a partial batch
+ * silently short of the dates that were actually picked.
+ */
+export function seedComposeDates(isos: IsoDate[]): boolean {
+  const days = isos.map((iso) => parseIsoDate(iso).getTime())
+  if (days.length === 0 || days.some((d) => Number.isNaN(d))) return false
+  pendingDates = days
+  clearScheduledDatesTick = false
+  return true
+}
+
+/** What is waiting, without spending it. */
+export function peekComposeDatesSeed(): IsoDate[] | null {
+  return pendingDates === null ? null : pendingDates.map(toIsoDate)
+}
+
+/** Drop the seed. Used when the navigation that would have consumed it did not happen. */
+export function clearComposeDatesSeed(): void {
+  pendingDates = null
+  clearScheduledDatesTick = false
+}
+
+/**
+ * The seed, spent — the same next-tick discipline as `takeComposeSeed`, for
+ * the same StrictMode reason: every read inside one render pass must see the
+ * same answer, so the clear is deferred past it rather than happening on read.
+ */
+export function takeComposeDates(defer: Defer = deferToNextTick): number[] | null {
+  if (pendingDates === null) return null
+  const value = pendingDates
+  if (!clearScheduledDatesTick) {
+    clearScheduledDatesTick = true
+    defer(() => {
+      pendingDates = null
+      clearScheduledDatesTick = false
+    })
+  }
+  return value
+}
+
 /**
  * When a brand-new reminder should start.
  *

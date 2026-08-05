@@ -515,7 +515,13 @@ check('AND-01', 'No component is needlessly exported', () => {
   if (/android:allowBackup="true"/.test(manifest)) {
     problems.push('allowBackup is true — schedules and settings would be copied off the device by adb backup')
   }
-  if (/android\.permission\.(READ_CONTACTS|ACCESS_FINE_LOCATION|READ_EXTERNAL_STORAGE|CAMERA|RECORD_AUDIO)/.test(manifest)) {
+  // CAMERA is not in this list: `PairingScanner.tsx` uses it to scan a
+  // pairing QR code, purely local `getUserMedia` frames decoded on-device
+  // (`core/qrDecode.ts`) — nothing is uploaded, recorded, or stored, and the
+  // manifest declares `uses-feature android:required="false"` so a
+  // camera-less device can still install the app. Pasting the code by hand
+  // works without this permission at all; it is a shortcut, never load-bearing.
+  if (/android\.permission\.(READ_CONTACTS|ACCESS_FINE_LOCATION|READ_EXTERNAL_STORAGE|RECORD_AUDIO)/.test(manifest)) {
     problems.push('the manifest requests a permission this app has no reason to need')
   }
   if (problems.length === 0) return null

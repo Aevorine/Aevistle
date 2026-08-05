@@ -1,6 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!--
+        `usesCleartextTraffic` stays alongside `networkSecurityConfig` even
+        though the config wins wherever both are read: the two agree that the
+        default is deny, and the attribute is what store and audit scanners
+        actually look at.
+    -->
     <application
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
@@ -8,6 +14,7 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:usesCleartextTraffic="false"
+        android:networkSecurityConfig="@xml/network_security_config"
         android:theme="@style/AppTheme">
 
         <activity
@@ -106,4 +113,18 @@
 
     <!-- Finish an in-flight send if the screen goes off mid-upload. -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!--
+        Scan a pairing QR code (`PairingScanner.tsx`) — the camera preview and
+        frame decoding happen entirely in the WebView via `getUserMedia`, the
+        same plain Web API a browser page would use. Nothing here goes through
+        a plugin: declaring the permission is this manifest's whole part in
+        it, and Capacitor's own WebView bridge raises the runtime dialog when
+        the page first asks (see `core/bridge-android.ts`'s note). Scanning
+        also has a paste fallback, so this permission is never load-bearing
+        for pairing to work at all — only for the camera shortcut to it.
+    -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
 </manifest>

@@ -1,6 +1,6 @@
 {
   "name": "aevistle",
-  "version": "0.1.13",
+  "version": "0.1.14",
   "private": true,
   "description": "Schedule email to send later on Windows and Android: one-off email reminders or recurring email — daily, weekly, monthly, cron — with attachments, sent while the app is closed. A working calendar keeps sends off public holidays; delivery windows land them in the recipient's time zone.",
   "keywords": [
@@ -72,7 +72,7 @@
     "check:markup": "node scripts/check-markup.mjs",
     "check:gestures": "node scripts/check-gestures.mjs",
     "audit:deps": "node scripts/audit-deps.mjs high",
-    "check": "npm run typecheck && npm run check:time && npm run check:backup && npm run check:retention && npm run check:socket-drop && npm run check:imap-auth && npm run check:autoconfig && npm run check:occurrence-bound && npm run check:yearly && npm run check:job-status && npm run check:inbox-removal && npm run check:i18n && npm run check:css && npm run check:shortcuts && npm run check:transfer && npm run check:upcoming && npm run check:workcal && npm run check:feeds && npm run check:calvars && npm run check:ics && npm run check:conflicts && npm run check:digest && npm run check:greetings && npm run check:console && npm run check:window && npm run check:delivery-ui && npm run check:markup && npm run check:gestures && npm run check:code-extract && npm run check:dates && npm run check:inbox-calendar && npm run check:qr && npm run check:features && npm run audit:self && npm run audit:deps",
+    "check": "npm run typecheck && npm run check:time && npm run check:backup && npm run check:retention && npm run check:socket-drop && npm run check:imap-auth && npm run check:autoconfig && npm run check:occurrence-bound && npm run check:yearly && npm run check:job-status && npm run check:inbox-removal && npm run check:i18n && npm run check:css && npm run check:visual-styles && npm run check:shortcuts && npm run check:transfer && npm run check:upcoming && npm run check:workcal && npm run check:feeds && npm run check:calvars && npm run check:ics && npm run check:conflicts && npm run check:digest && npm run check:greetings && npm run check:console && npm run check:window && npm run check:delivery-ui && npm run check:markup && npm run check:gestures && npm run check:code-extract && npm run check:dates && npm run check:inbox-calendar && npm run check:qr && npm run check:qr-decode && npm run check:pairing-crypto && npm run check:ipc-contract && npm run check:android-plugin && npm run check:solarterms && npm run check:runecircuit-scope && npm run check:features && npm run audit:self && npm run audit:deps",
     "check:features": "node scripts/check-innovations.mjs",
     "dist:win:out": "npm run build && electron-builder --win --publish never -c.directories.output=%TEMP%/aevistle-release",
     "release": "node scripts/release.mjs",
@@ -83,12 +83,20 @@
     "check:css": "node scripts/check-css-tokens.mjs",
     "check:code-extract": "node scripts/check-code-extract.mjs",
     "check:qr": "node scripts/check-qr.mjs",
+    "check:qr-decode": "node scripts/check-qr-decode.mjs",
     "check:calvars": "node scripts/check-calendar-vars.mjs",
     "check:dates": "node scripts/check-date-extract.mjs",
-    "check:inbox-calendar": "node scripts/check-inbox-calendar.mjs"
+    "check:inbox-calendar": "node scripts/check-inbox-calendar.mjs",
+    "check:solarterms": "node scripts/check-solarterms.mjs",
+    "check:runecircuit-scope": "node scripts/check-runecircuit-scope.mjs",
+    "check:pairing-crypto": "node scripts/check-pairing-crypto.mjs",
+    "check:android-plugin": "node scripts/check-android-plugin.mjs",
+    "check:ipc-contract": "node scripts/check-ipc-contract.mjs",
+    "check:visual-styles": "node scripts/check-visual-styles.mjs"
   },
   "dependencies": {
     "imapflow": "^1.6.5",
+    "jsqr": "^1.4.0",
     "mailparser": "^3.9.14",
     "nodemailer": "^9.0.3",
     "sanitize-html": "^2.17.6"

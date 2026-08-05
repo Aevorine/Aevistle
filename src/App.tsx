@@ -10,9 +10,11 @@ import {
   IconActivity,
   IconCalendar,
   IconClock,
+  IconCloudNode,
   IconFileText,
   IconInbox,
   IconKey,
+  IconKeyNode,
   IconMail,
   IconPanelLeft,
   IconSettings,
@@ -91,6 +93,14 @@ const NAV_ICONS = {
   calendar: IconCalendar,
   activity: IconActivity,
   settings: IconSettings,
+} as const
+
+/** The only two `NAV_ICONS` entries `runecircuit` redraws — a full icon-set
+    swap was explicitly out of scope, so this stays a small, named pair
+    rather than growing into a second copy of the map above. */
+const RUNE_NAV_ICONS = {
+  mail: IconCloudNode,
+  key: IconKeyNode,
 } as const
 
 const COLLAPSE_KEY = 'aevistle.sidebar.collapsed'
@@ -373,7 +383,10 @@ function Shell() {
 
         <nav className="nav" aria-label="Primary">
           {NAV.map((item) => {
-            const Icon = NAV_ICONS[item.icon]
+            const Icon =
+              state.settings.visualStyle === 'runecircuit' && (item.icon === 'mail' || item.icon === 'key')
+                ? RUNE_NAV_ICONS[item.icon]
+                : NAV_ICONS[item.icon]
             return (
               <button
                 key={item.id}

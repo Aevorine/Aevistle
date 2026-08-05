@@ -42,6 +42,48 @@ import {
 export const BACKUP_KIND = 'aevistle.backup'
 export const BACKUP_VERSION = 1
 
+/**
+ * The account fields safe to hand to anything outside this machine — every
+ * persisted field except a live secret, which only the OS keystore can keep.
+ * `hasSecret` is cleared rather than carried: it describes *this* machine's
+ * keystore, and a `true` arriving anywhere else would claim a password exists
+ * that does not.
+ *
+ * Exported so `core/syncScope.ts` shapes the sync-scoped 'accounts' payload
+ * the same way rather than re-deriving "safe to export" on its own — the one
+ * place that payload is allowed to differ (a live pairing session may attach
+ * an actual secret) still starts from this shape and adds to it, never
+ * reimplements it.
+ */
+export function accountFields(accounts: MailAccount[]): MailAccount[] {
+  return accounts.map((account) => ({ ...account, hasSecret: false }))
+}
+
+/** Everything in `Settings` that is purely "how the app looks", not "how it behaves". */
+export type AppearanceSettings = Pick<
+  Settings,
+  'themeMode' | 'visualStyle' | 'accent' | 'accentBase' | 'accentCyber' | 'themeIntensity' | 'density' | 'listDensity'
+>
+
+/**
+ * The settings subset a sync 'appearance' scope means — not the whole
+ * `Settings` object, which also holds the data folder, quiet hours, retention
+ * policy and a dozen other decisions nobody asking to "match my theme on the
+ * other device" meant to send along.
+ */
+export function appearanceSettings(settings: Settings): AppearanceSettings {
+  return {
+    themeMode: settings.themeMode,
+    visualStyle: settings.visualStyle,
+    accent: settings.accent,
+    accentBase: settings.accentBase,
+    accentCyber: settings.accentCyber,
+    themeIntensity: settings.themeIntensity,
+    density: settings.density,
+    listDensity: settings.listDensity,
+  }
+}
+
 export interface BackupFile {
   kind: typeof BACKUP_KIND
   version: number
@@ -75,10 +117,7 @@ export function buildBackup(state: AppState, appVersion: string): BackupFile {
     version: BACKUP_VERSION,
     app: appVersion,
     createdAt: Date.now(),
-    // `hasSecret` is cleared on the way out: it describes this machine's
-    // keystore, and carrying a true into a restore would make the app believe
-    // a password exists that does not.
-    accounts: state.accounts.map((account) => ({ ...account, hasSecret: false })),
+    accounts: accountFields(state.accounts),
     jobs: state.jobs,
     contacts: state.contacts,
     templates: state.templates,
@@ -135,7 +174,7 @@ export function readBackup(text: string): BackupFile {
     version: candidate.version,
     app: typeof candidate.app === 'string' ? candidate.app : 'unknown',
     createdAt: typeof candidate.createdAt === 'number' ? candidate.createdAt : 0,
-    accounts: asArray<MailAccount>(candidate.accounts).map((a) => ({ ...a, hasSecret: false })),
+    accounts: accountFields(asArray<MailAccount>(candidate.accounts)),
     jobs: asArray<ScheduledJob>(candidate.jobs),
     contacts: asArray<Contact>(candidate.contacts),
     templates: asArray<Template>(candidate.templates),
@@ -161,30 +200,44 @@ export function applyBackup(
   state: AppState,
   backup: BackupFile,
   mode: 'merge' | 'replace',
+  /**
+   * Exact-duplicate records to drop before merging, keyed by which array they
+   * replace. Sync-only: hashing a record is async (`crypto.subtle.digest` in
+   * `core/syncScope.ts`'s `hashRecord`) and this function has to stay
+   * synchronous, so a caller that wants duplicates skipped runs
+   * `syncScope.dedupeAgainstLocal` first and hands back whichever of
+   * `backup`'s records survived that pass. The plain manual restore in
+   * `BackupCard.tsx` never passes this, so its behaviour is unchanged.
+   */
+  deduped?: {
+    accounts?: MailAccount[]
+    jobs?: ScheduledJob[]
+    contacts?: Contact[]
+    templates?: Template[]
+  },
 ): AppState {
+  const accounts = deduped?.accounts ?? backup.accounts
+  const jobs = deduped?.jobs ?? backup.jobs
+  const contacts = deduped?.contacts ?? backup.contacts
+  const templates = deduped?.templates ?? backup.templates
+
   if (mode === 'replace') {
     return {
       ...state,
-      accounts: backup.accounts,
-      jobs: backup.jobs,
-      contacts: backup.contacts,
-      templates: backup.templates,
+      accounts,
+      jobs,
+      contacts,
+      templates,
       settings: backup.settings,
     }
   }
 
-  const mergeById = <T extends { id: string }>(mine: T[], theirs: T[]): T[] => {
-    const byId = new Map(mine.map((item) => [item.id, item]))
-    for (const item of theirs) byId.set(item.id, item)
-    return [...byId.values()]
-  }
-
   return {
     ...state,
-    accounts: mergeById(state.accounts, backup.accounts),
-    jobs: mergeById(state.jobs, backup.jobs),
-    contacts: mergeById(state.contacts, backup.contacts),
-    templates: mergeById(state.templates, backup.templates),
+    accounts: mergeById(state.accounts, accounts),
+    jobs: mergeById(state.jobs, jobs),
+    contacts: mergeById(state.contacts, contacts),
+    templates: mergeById(state.templates, templates),
     // Settings are the user's current preferences on *this* machine — theme,
     // density, where the data folder is. Overwriting them from a file is
     // rarely what "merge my contacts back in" was meant to do.
@@ -194,6 +247,17 @@ export function applyBackup(
 
 function asArray<T>(value: unknown): T[] {
   return Array.isArray(value) ? (value as T[]) : []
+}
+
+/**
+ * Later id wins, earlier order otherwise preserved. Exported so
+ * `core/syncLoop.ts` merges an incoming diff the same way a restored backup
+ * does, rather than a second definition of "merge" drifting from this one.
+ */
+export function mergeById<T extends { id: string }>(mine: readonly T[], theirs: readonly T[]): T[] {
+  const byId = new Map(mine.map((item) => [item.id, item]))
+  for (const item of theirs) byId.set(item.id, item)
+  return [...byId.values()]
 }
 
 /** `Aevistle-backup-2026-08-02.aevistle` — sorts by date and says what it is. */

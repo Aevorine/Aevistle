@@ -586,6 +586,21 @@ textarea {
   font-size: var(--text-sm);
   color: var(--text-3);
   line-height: var(--leading-relaxed);
+  /* A hint is often the place a machine string surfaces — the sync scope
+     picker lists the accounts a password is about to travel for, and an email
+     address is one token with nothing to break at. `anywhere` rather than
+     `break-word` for the reason `.zonepick__id` spells out: only `anywhere`
+     lets the box shrink below the width of the token instead of overflowing
+     it, and `.view` scrolls sideways when something does. */
+  overflow-wrap: anywhere;
+}
+/* A hint that is reporting a problem — the pairing file's PIN/scope errors and
+   the sync scope picker's "select at least one" both reach for this alongside
+   the base class. Without it the message read in the same muted grey as an
+   ordinary hint, which is exactly the one place a validation error should not
+   blend in. */
+.field__hint--error {
+  color: var(--danger);
 }
 /* A hint whose tail is a run of removable chips — the per-account remote-image
    allowlist. The element also carries `.field__hint`, so the row still reads
@@ -694,6 +709,22 @@ textarea {
   }
 }
 
+/* `SyncScopePicker`'s own frame, and deliberately not `.form-rows`.
+
+   The gutter rule above indents `> .switch` by 5.5em so paired controls line up
+   with the fields beside them. This block has no field to line up with: it is a
+   `.section-label`, five switches, the account list that explains the first of
+   them, and a validation hint — and only the switches match that selector, so
+   the heading and both sentences stayed at the card edge while the controls
+   they are about sat 104px to the side of them. In the pairing-file card there
+   is no `Field` in the body at all, so the switches were indented against
+   nothing. Its own class, its own rhythm, no gutter. */
+.scopepick {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
 .input,
 .textarea,
 .select {
@@ -721,6 +752,15 @@ textarea {
 .input[type='date'],
 .input[type='time'] {
   padding-block: 10px;
+}
+
+/* The intensity slider (runecircuit's appearance settings). `accent-color` is
+   the same one-line recolour `.job__select`'s checkbox already uses — the
+   native control follows `--accent` without a hand-built track/thumb. */
+.range {
+  width: 100%;
+  accent-color: var(--accent);
+  cursor: pointer;
 }
 .input::placeholder,
 .textarea::placeholder {
@@ -1029,11 +1069,18 @@ textarea {
   text-align: center;
   font-size: var(--text-sm);
   font-weight: 700;
-  color: var(--text-3);
+  /* --text-2, not --text-3, for the reason `.page-subtitle` gives: --text-3 is
+     tuned against a card, and this row is the one part of the grid that reads
+     directly against `.monthgrid`'s own background. Under `runecircuit` that
+     background is the solar-term wash, and --text-3 measured 3.9–4.5:1
+     through it — under AA for 18 of the 24 terms at the shipped intensity and
+     for all 24 at the top of the dial. The day cells are opaque
+     (`--surface-inset`) and were never affected. */
+  color: var(--text-2);
   padding-block: 2px;
 }
 .monthgrid__weekday[data-weekend='true'] {
-  color: var(--text-2);
+  color: var(--text-1);
 }
 .monthgrid__pad {
   /* Occupies its column so the following days stay under the right weekday. */
@@ -1124,6 +1171,12 @@ textarea {
 .monthgrid__num {
   font-variant-numeric: tabular-nums;
   font-weight: 600;
+  /* Pinned rather than inherited. `.monthgrid__sends` starts at a fixed offset
+     from the top of the cell, and with `--leading-normal` the number's line box
+     was already past it — `paper` (1.75) and `runecircuit` (1.72) pushed the
+     digits down under the first send row's tinted background. The number is one
+     line of two glyphs; it has no use for reading leading. */
+  line-height: 1.2;
 }
 /* How many reminders land here. Filled when the calendar moved one onto this
    day, so "it did something" is visible without reading a tooltip. */
@@ -1149,8 +1202,16 @@ textarea {
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   line-height: 1.4;
-  background: color-mix(in srgb, var(--accent) 20%, transparent);
-  color: var(--accent);
+  /* Opaque, and the digits darker than the accent itself.
+     `--accent` on a 20%-`--accent` *translucent* plate is 3.5:1 before the
+     square underneath is even considered, and the badge is a sibling of the
+     day button rather than a child, so the heatmap tint composited straight
+     through it: 2.3:1 at the darkest step, on the day whose count is largest.
+     Mixing the plate against `--surface-1` stops the tint reaching it at all,
+     and mixing the digits toward `--text-1` carries the rest — 4.6:1 at the
+     worst accent-and-style pairing in the file, against 2.3 before. */
+  background: color-mix(in srgb, var(--accent) 20%, var(--surface-1));
+  color: color-mix(in srgb, var(--accent) 55%, var(--text-1));
   cursor: pointer;
   transition: transform var(--dur-fast) var(--ease);
 }
@@ -1667,6 +1728,12 @@ textarea {
 .banner__body {
   flex: 1;
   min-width: 0;
+  /* Banners are where failures are reported, and a failure's message is very
+     often a URL, a file path or `listen EADDRINUSE 0.0.0.0:47821` — one
+     unbreakable token that ran out of the banner and out of the card. Same
+     reasoning as `.mono`, which `AccountDialog` reaches for inside its own
+     Banner for exactly this. */
+  overflow-wrap: anywhere;
 }
 .banner__title {
   font-weight: 700;
@@ -1711,6 +1778,30 @@ textarea {
   display: flex;
   flex-direction: column;
   gap: var(--sp-2);
+}
+
+/* The drag-time recipient timezone preview — a small tooltip that follows the
+   cursor while a reminder badge is being dragged across the working calendar.
+   Fixed and unclickable: it is a readout, not a control, and must never steal
+   the drop from the cell underneath it. */
+.dragtip {
+  position: fixed;
+  z-index: 250;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: min(280px, calc(100vw - var(--sp-6)));
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  background: var(--surface-1);
+  box-shadow: var(--shadow-lg);
+  font-size: var(--text-sm);
+  color: var(--text-2);
+}
+.dragtip__line {
+  white-space: normal;
 }
 
 .toasts {
@@ -2308,6 +2399,16 @@ textarea {
   font-size: var(--text-xs);
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
+}
+/* The controls on a `.log` row that has any — the paired-device rows and the
+   sync-conflict rows. Its own element rather than bare buttons on the row, so
+   the ≤560px block has one thing to move onto a second line instead of trying
+   to shrink labels that are `white-space: nowrap`. */
+.log__actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
 }
 
 .spinner {
@@ -4047,6 +4148,212 @@ textarea {
   color: var(--text-3);
   word-break: break-all;
   text-align: center;
+}
+
+/* --- LAN pairing (B1/B2) -------------------------------------------------- */
+
+.pairqr {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-3);
+}
+.pairqr__hint {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--text-sm);
+  text-align: center;
+}
+.pairqr__frame {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+/* Fixed white plate, same reasoning as `.qrbox__code`: a camera reading an
+   inverted code is a coin flip, and this is the one surface here not being
+   read by a person. */
+.pairqr__code {
+  width: min(60vw, 280px);
+  height: auto;
+  border-radius: var(--r-md);
+  background: #fff;
+}
+.pairqr__placeholder {
+  width: min(60vw, 280px);
+  aspect-ratio: 1;
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  border: 1px dashed var(--border-strong);
+}
+/* The countdown ring sits just outside the code's own corner rather than over
+   it, so it never competes with the modules a camera is trying to read. */
+.pairqr__ring {
+  position: absolute;
+  /* Logical, not `top`/`right`, for the reason `.devlink__pulse` below states:
+     under `ar.ts`'s RTL layout the near corner of the frame is the other one,
+     and the browser should be the thing that knows that. */
+  inset-block-start: calc(-1 * var(--sp-3));
+  inset-inline-end: calc(-1 * var(--sp-3));
+  width: 32px;
+  height: 32px;
+  transform: rotate(-90deg);
+}
+.pairqr__ringTrack {
+  fill: none;
+  stroke: var(--border-strong);
+  stroke-width: 3;
+}
+.pairqr__ringValue {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 3;
+  stroke-linecap: round;
+  transition: stroke-dashoffset var(--dur) linear;
+}
+.pairqr__status {
+  text-align: center;
+  min-height: 2.6em;
+}
+.pairqr__statusLine {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--text-sm);
+}
+.pairqr__statusLine--ok {
+  color: var(--success);
+  font-weight: 600;
+}
+.pairqr__countdown {
+  margin: var(--sp-1) 0 0;
+  color: var(--text-3);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+.pairqr__note {
+  margin: 0;
+  color: var(--text-3);
+  font-size: var(--text-xs);
+  text-align: center;
+}
+
+/* --- device-link visualisation (components/DeviceLinkAnimation.tsx) ------
+   Two glyphs and a line — see the component doc for why that is the only
+   shape this app draws for "syncing". Logical (`inset-inline-start`) rather
+   than `left`, so the pulse still travels from the near device to the far one
+   under `ar.ts`'s RTL layout instead of visually running backwards. */
+.devlink {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+}
+.devlink--inline {
+  gap: var(--sp-1);
+}
+.devlink--full {
+  gap: var(--sp-4);
+}
+.devlink__glyph {
+  display: grid;
+  place-items: center;
+  flex: none;
+  color: var(--text-2);
+}
+.devlink--connected .devlink__glyph {
+  color: var(--success);
+}
+.devlink--error .devlink__glyph {
+  color: var(--text-3);
+}
+.devlink__line {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1 1 auto;
+  min-width: 20px;
+  height: 14px;
+}
+.devlink--card .devlink__line,
+.devlink--full .devlink__line {
+  min-width: 44px;
+}
+.devlink__seg {
+  flex: 1 1 0;
+  height: 2px;
+  border-radius: var(--r-full);
+  background: var(--border-strong);
+}
+.devlink--error .devlink__seg {
+  background: var(--danger);
+  opacity: 0.5;
+}
+.devlink__seg--full {
+  position: relative;
+  overflow: hidden;
+  flex: 1 1 100%;
+}
+.devlink--connected .devlink__seg--full {
+  background: var(--success);
+}
+.devlink__break {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  color: var(--danger);
+}
+/* The travelling pulse. `--dur-pulse` (see theme.css) rather than the
+   `--dur`/`--dur-slow` family: those are tuned for a click's own reaction and
+   read as a flicker at that length looped forever. */
+.devlink__pulse {
+  position: absolute;
+  top: 50%;
+  inset-inline-start: 0;
+  width: 8px;
+  height: 8px;
+  margin-top: -4px;
+  margin-inline-start: -4px;
+  border-radius: var(--r-full);
+  background: var(--accent);
+  box-shadow: 0 0 6px 1px var(--accent);
+  animation: devlink-travel var(--dur-pulse) ease-in-out infinite;
+}
+@keyframes devlink-travel {
+  0% {
+    inset-inline-start: 0%;
+    opacity: 0;
+  }
+  12% {
+    opacity: 1;
+  }
+  88% {
+    opacity: 1;
+  }
+  100% {
+    inset-inline-start: 100%;
+    opacity: 0;
+  }
+}
+
+/* --- pairing scanner (components/PairingScanner.tsx) ---------------------- */
+.pairscan {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-3);
+}
+.pairscan__frame {
+  width: min(60vw, 280px);
+  aspect-ratio: 1;
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: var(--surface-inset);
+  border: 1px solid var(--border);
+}
+.pairscan__video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 /* --- message reader ------------------------------------------------------ */
@@ -5859,6 +6166,14 @@ textarea {
   background: color-mix(in srgb, var(--accent) 12%, var(--surface-inset));
 }
 
+/* Queued for the gap-compose batch (ctrl/cmd-click). A dashed ring in
+   `--info` rather than `--accent`'s solid one, so a square cannot be misread
+   as a shift-click range selection while both are somehow live at once. */
+.monthgrid__day[data-gap='true'] {
+  box-shadow: inset 0 0 0 2px var(--info);
+  background: color-mix(in srgb, var(--info) 12%, var(--surface-inset));
+}
+
 /* A day the conflict scan flagged. Border only, so it composes with the
    holiday/make-up background instead of fighting it. */
 .monthgrid__day[data-conflict='warning'] {
@@ -5964,9 +6279,16 @@ textarea {
 }
 
 .dayrow {
+  /*
+   * A column, not the row it used to be — `.dayrow__main` below carries the
+   * horizontal line this rule used to draw directly. The expand affordance
+   * (C3), the holiday-shift suggestion (C5) and the body preview all attach
+   * *under* that line, and a flex row has nowhere honest to put a sibling
+   * that is supposed to span the whole width.
+   */
   display: flex;
-  align-items: center;
-  gap: var(--sp-3);
+  flex-direction: column;
+  gap: var(--sp-2);
   padding: var(--sp-2) var(--sp-3);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
@@ -5980,6 +6302,11 @@ textarea {
   /* The calendar put this one here; it is not where the rule asked for.
      Inline-start so the marker follows the reading direction. */
   border-inline-start: 3px solid var(--accent);
+}
+.dayrow__main {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
 }
 .dayrow__time {
   display: inline-flex;
@@ -6014,6 +6341,51 @@ textarea {
   display: inline-flex;
   align-items: center;
   gap: var(--sp-1);
+}
+.dayrow__chevron {
+  transition: transform 0.15s ease;
+}
+.dayrow__chevron[data-open='true'] {
+  transform: rotate(180deg);
+}
+
+/* The per-row holiday-shift suggestion (C5) — a banner already knows how to
+   hold a sentence and a couple of buttons; this just keeps it flush with the
+   row above it rather than the page gutter `.banner` assumes elsewhere. */
+.dayrow__holidaysuggest {
+  margin: 0;
+}
+
+/*
+ * The body preview (C3), opened one row at a time. Both the HTML frame and
+ * the plain-text fallback share a height budget — a message can be any
+ * length, and a day panel embedded under the month grid cannot grow to fit
+ * it without pushing the grid itself off screen.
+ */
+.dayrow__preview {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: var(--sp-2);
+}
+.dayrow__previewframe {
+  width: 100%;
+  border: 0;
+  min-height: 120px;
+  max-height: 260px;
+  background: #fff;
+}
+.dayrow__previewtext {
+  margin: 0;
+  max-height: 260px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font: inherit;
+  color: var(--text-2);
+}
+.dayrow__previewempty {
+  margin: 0;
+  color: var(--text-3);
+  font-size: var(--text-sm);
 }
 
 /* --- a reminder, opened from the calendar -------------------------------- */
@@ -6054,6 +6426,12 @@ textarea {
   margin-top: var(--sp-1);
   font-size: var(--text-xs);
   color: var(--text-3);
+}
+
+/* The day-count field in `SeriesSheet`'s bulk-reschedule row — wide enough for
+   a signed two-digit number, not the full-width an `.input` defaults to. */
+.series-shift__input {
+  width: 6em;
 }
 
 /* --- conflicts ----------------------------------------------------------- */
@@ -6292,6 +6670,23 @@ textarea {
     justify-content: flex-end;
     gap: var(--sp-2);
   }
+  /* `.log` needs the same treatment for the same reason, and did not get it
+     until a `.log` row grew a full-label button. `.btn` is `white-space:
+     nowrap`, so "Garder la mienne à la place" is ~270px that cannot shrink;
+     `.log__body` is the only flexible thing on the row, so it collapsed to
+     nothing and `.log__title` — which is `text-overflow: ellipsis` — clipped
+     the one sentence saying what the row was about to zero width.
+
+     Only the rows that grew an action wrap: `.log__actions` is what claims
+     the second line, and the plain dot/body/time rows in Activity have none,
+     so they are untouched. */
+  .log {
+    flex-wrap: wrap;
+  }
+  .log__actions {
+    flex: 1 1 100%;
+    justify-content: flex-end;
+  }
   .icon-btn {
     width: var(--tap-min);
     height: var(--tap-min);
@@ -6372,7 +6767,12 @@ textarea {
   .daypicker__day {
     min-height: var(--tap-min);
   }
-  .swatch {
+  /* `.accent-swatches .swatch` pins 30×30 at (0,2,0) and a media query adds no
+     specificity, so a bare `.swatch` here lost to it and the accent rows — the
+     three that are actually tapped, now that `runecircuit` adds two more of
+     them — stayed 30px on the screen this block exists to guarantee 44px on. */
+  .swatch,
+  .accent-swatches .swatch {
     width: var(--tap-min);
     height: var(--tap-min);
   }
@@ -6446,7 +6846,12 @@ textarea {
    floating in the middle of the list. */
 .monthgrid[data-lines='true'] .monthgrid__day {
   aspect-ratio: auto;
-  min-height: 96px;
+  /* 100, not 96: the send rows start 24px down (1px border + 3px padding + the
+     number's own 19.2px line box) and stop 4px from the bottom, so the list
+     gets 72px — three 20.9px rows and their two gaps, with room to spare. At
+     96px the budget was 70px and a third row plus the "+N more" button did not
+     fit; see `MAX_CELL_SENDS` for the other half of that fix. */
+  min-height: 100px;
   align-items: flex-start;
   justify-content: flex-start;
   padding: 3px 5px;
@@ -6466,7 +6871,11 @@ textarea {
    holiday toggle the moment anything was scheduled on it. */
 .monthgrid__sends {
   position: absolute;
-  inset-block-start: 22px;
+  /* Clears the date number: 1px border + 3px padding + the 19.2px line box
+     `.monthgrid__num` now pins for exactly this reason. It was 22px against a
+     line box that tracked `--leading-normal`, so two shipped styles pushed the
+     digits into the first row. */
+  inset-block-start: 24px;
   inset-block-end: 4px;
   inset-inline: 4px;
   display: flex;
@@ -6599,6 +7008,16 @@ textarea {
 .monthgrid__day[data-load='5'] {
   --load-tint: color-mix(in oklab, var(--accent) 34%, transparent);
 }
+/* The ramp was checked against `--text-1` (7.8:1 at step 5) and not against the
+   override directly above it: a weekend or a holiday is `data-working='false'`,
+   which paints the date in `--text-3`, the lowest-contrast text token there is.
+   Composited under the tint that lands at 4.4:1 by step 1 and 3.0:1 by step 5 —
+   and a non-working day carrying mail is exactly the square someone is looking
+   for. `--text-2` holds 4.6:1 at the darkest step and still reads as dimmer
+   than a working day, which is all the `data-working` state was saying. */
+.monthgrid__day[data-load][data-working='false'] {
+  color: var(--text-2);
+}
 
 /* The key for it. Five unlabelled shades are decoration; the scale only
    becomes information once the reader can find out that the darkest one means
@@ -6683,11 +7102,19 @@ textarea {
   }
 }
 
-/* And below 560px the list goes entirely. See the note at the top of this
-   section: 38px holds a date or a line of text, not both. The count badge and
-   the day panel are what the phone gets, and the heatmap keeps working — a
-   tinted square costs no height at all. */
-@media (max-width: 560px) {
+/* And below 700px the list goes entirely.
+
+   700, not 560, because the row stops fitting long before the phone layer
+   starts. Measured at a 600px window: the content column is ~534px, a cell is
+   ~66px and the row's usable inner width is ~48px. "9:00 AM" at 14px tabular
+   is ~49px on its own, and the delivery-status dot added another 9px to every
+   row — so the *time* was being cut, and the time is the one field the note at
+   the top of this section promises is never truncated. At 700px the inner
+   width is ~66px and the time plus its dot fit with room left.
+
+   Below that the count badge and the day panel are what the calendar gets, and
+   the heatmap keeps working — a tinted square costs no height at all. */
+@media (max-width: 700px) {
   .monthgrid__sends {
     display: none;
   }
@@ -6700,6 +7127,8 @@ textarea {
   .monthgrid[data-lines='true'][data-scope='week'] .monthgrid__day {
     min-height: 88px;
   }
+}
+@media (max-width: 560px) {
   /* The phone block above grows every `.swatch` to a 44px tap target. These
      five are `<i>` elements in a legend — nothing taps them, and five 44px
      squares plus a label is 300px of a 360px screen for a colour key. */
@@ -6707,6 +7136,153 @@ textarea {
     width: 18px;
     height: 18px;
   }
+}
+
+/* --- ANCHOR:calendar-marks (C1/C6/C8/C9) ---
+
+   Three small additions to the calendar console above: recipient chips inside
+   the day badge, a delivery-status dot on a listed send, and the layout for
+   the filter row and the inline quick panel. */
+
+/* The badge grows sideways to hold up to three overlapping avatars instead of
+   a bare number. `data-chips` itself is set purely by send count (three or
+   fewer) with no regard for how wide the cell actually is — three 14px chips
+   plus padding run to roughly the same width as the 38px cell this app is
+   built down to (see the "38px holds a date or a line of text" note below),
+   which at that width would sit almost edge-to-edge over the day number
+   itself. `.monthgrid__markscount` is the number, rendered alongside the
+   chips and hidden by default; the ≤560px query *after these rules* swaps
+   which of the two is display:none, so the badge shrinks back to the plain
+   count exactly where the rest of this section already sheds detail for the
+   same reason.
+
+   "After" is load-bearing. The swap used to live in the ≤560px block above,
+   at the same (0,2,0)/(0,1,0) specificity as these — and a media query adds
+   none — so these later rules simply won it back: on a phone the avatars were
+   shown, not hidden, inside a badge the phone layer has already collapsed to a
+   3px underline with `font-size: 0`. Three 14px chips overflowed it and sat on
+   top of the date. */
+.monthgrid__marks[data-chips='true'] {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  padding: 2px 4px 2px 2px;
+}
+.monthgrid__marksavatars {
+  display: inline-flex;
+}
+.monthgrid__markschip {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  margin-inline-start: -6px;
+  border: 1px solid currentColor;
+  border-radius: var(--r-full);
+  background: var(--surface-1);
+  color: inherit;
+  /* 小五, the scale's floor, reserved for exactly this: a badge glyph. It was
+     a bare 8px — two thirds of the smallest token there is — on a mark that
+     can be a Han initial, which at that size is a smudge rather than a letter.
+     Three chips at 18px with a 6px overlap is 48px of an ≥84px cell, which is
+     the width `data-chips` survives at now that the send list bows out at
+     700px rather than 560. */
+  font-size: var(--text-2xs);
+  font-weight: 700;
+  line-height: 1;
+}
+.monthgrid__markschip:first-child {
+  margin-inline-start: 0;
+}
+.monthgrid__markscount {
+  display: none;
+}
+@media (max-width: 560px) {
+  /* The phone badge is a 3px underline (see `.monthgrid__marks` in the phone
+     block above). Nothing legible fits inside 3px, so the chips go and the
+     underline stands on its own — the day panel is where "who" is read. The
+     count rides along hidden either way: `font-size: 0` up there means the
+     digits would render as nothing even if this showed them. */
+  .monthgrid__marks[data-chips='true'] {
+    display: block;
+    min-width: 0;
+    padding: 0;
+  }
+  .monthgrid__marksavatars {
+    display: none;
+  }
+}
+
+/* A send's delivery status, as a dot rather than a word — there is no room for
+   a word on a 38px square. The sentence itself is folded into the row's own
+   label, both here and in the day panel, so nothing is lost to a screen
+   reader; this is decoration on top of that, not a second source of truth. */
+.sendstatus {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-inline-end: 3px;
+  border-radius: var(--r-full);
+  background: var(--text-3);
+  vertical-align: middle;
+}
+.sendstatus[data-status='delivered'] {
+  background: var(--success);
+}
+.sendstatus[data-status='failed'] {
+  background: var(--danger);
+}
+.sendstatus[data-status='retrying'] {
+  background: var(--warning);
+  animation: statuspulse 2s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sendstatus[data-status='retrying'] { animation: none; }
+}
+
+/* The account/tag/recipient filter, above the grid. `.field__row` already
+   wraps at narrow widths — see app.css's own note on it — so this reuses it
+   rather than laying out a fourth flavour of the same row. */
+.workcal__filters {
+  align-items: flex-end;
+}
+.workcal__filters .field {
+  min-width: 10em;
+}
+.workcal__filterhint {
+  font-size: var(--text-xs);
+  color: var(--text-3);
+}
+
+/* The heatmap's own switch, sitting just above the legend it controls. */
+.workcal__heatmaptoggle {
+  margin-top: var(--sp-3);
+}
+
+/* The day panel, opened inline under the grid instead of taking over the
+   screen. Bordered so it reads as a drawer rather than another card. */
+.workcal__quickpanel {
+  margin-top: var(--sp-3);
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-inset);
+  /* The per-row body preview has a height budget; the list around it did not,
+     and that is the one that decides how far the legend, the heatmap toggle
+     and the range bar get pushed down the page. Nine entries on a holiday —
+     each row ~64px, each holiday row plus a ~90px suggestion banner — is a
+     ~900px drawer wedged between the grid and everything under it. It scrolls
+     inside itself instead. Only this instance: the `scope === 'day'` panel
+     owns the whole screen and has nothing below it to push. */
+  max-height: min(50vh, 480px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.workcal__quickpanelhead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--sp-2);
 }
 
 /* --- ANCHOR:digest-greetings (B6/B8) --- */
@@ -7246,3 +7822,281 @@ textarea {
   }
 }
 /* --- end B4 · 收件箱 → 日历 --- */
+
+/* ==========================================================================
+   Runecircuit — circuit traces, typography pairing, card grain and glow,
+   the solar-term wash, ceremonial feedback, and the two-axis accent
+
+   Everything below is scoped to `[data-style="runecircuit"]` and adds to the
+   base rules above rather than replacing them — a real `--border` still does
+   every job it did before this file existed; what changes is layered on top
+   of it with an extra `background-image` or a `color-mix()`'d `border-color`.
+   Tokens referenced here (`--circuit-trace`, `--circuit-node`,
+   `--texture-grain`, `--neon-*`, `--solarterm-*`, `--accent-classical`,
+   `--intensity`) are defined once, in the style's own block in theme.css (or,
+   for `--intensity`, at the top of `:root`), and already resolve per theme
+   without being restated here. `--intensity` and `data-atmosphere-motion` are
+   set by AppState.tsx from `Settings.themeIntensity`; see core/types.ts's
+   `ATMOSPHERE_MOTION_MIN`.
+
+   Reading surfaces are deliberately absent from every selector below — no
+   `.compose-body`, `.reader`, or list-row text container ever gains a
+   `--circuit-trace`, `--texture-grain`, `--neon-*`, or `--solarterm-*` touch.
+   That is chunk-06's A7 audit, and it is a property of the selector list
+   itself: every one of them targets `.card`, `.monthgrid`, `.nav__item`,
+   `.toast`, or `.job` — chrome, never prose. */
+
+/* --- circuit traces under the working calendar -----------------------------
+   `--circuit-trace` draws the board's grid lines, `--circuit-node` marks
+   where four cells meet. Neither one touches the day cell's own
+   `border-color` (app.css, `.monthgrid__day`) — that hairline is what a
+   keyboard user's roving tabindex and a screen reader's grid role both
+   depend on, so it stays exactly what every other style leaves it as. */
+[data-style="runecircuit"] .monthgrid {
+  /* Two layers, deliberately not one: `background-color` is the solar-term
+     wash (A6) and `background-image` is the circuit grid, so the grid stays
+     pixel-identical across a month change while only the colour underneath it
+     shifts. `--solarterm-active` is set by whichever of the 24 selectors
+     below matches this month's `data-solar-term`; `transparent` when there is
+     none yet (first paint, before `WorkCalendarView` has computed one). */
+  background-color: var(--solarterm-active, transparent);
+  background-image:
+    repeating-linear-gradient(90deg, var(--circuit-trace) 0 1px, transparent 1px 34px),
+    repeating-linear-gradient(0deg, var(--circuit-trace) 0 1px, transparent 1px 34px);
+  background-position: -1px -1px;
+}
+/* One rule per term, each doing nothing but naming which of the 24
+   `--solarterm-*` tokens (theme.css) is "the one showing" — the wash itself is
+   painted once, above, so a term never needs its own copy of the grid rule. */
+[data-style="runecircuit"] .monthgrid[data-solar-term="xiaohan"] { --solarterm-active: var(--solarterm-xiaohan); }
+[data-style="runecircuit"] .monthgrid[data-solar-term="dahan"] { --solarterm-active: var(--solarterm-dahan); }
+[data-style="runecircuit"] .monthgrid[data-solar-term="lichun"] { --solarterm-active: var(--solarterm-lichun); }
+[data-style="runecircuit"] .monthgrid[data-solar-term="yushui"] { --solarterm-active: var(--solarterm-yushui); }
+[data-style="runecircuit"] .monthgrid[data-solar-term="jingzhe"] { --solarterm-active: var(--solarterm-jingzhe); }
+[data-style="runecircuit"] .monthgrid[data-solar-term="chunfen"] { --solarterm-active: var(--solarterm-chunfen); }
+[data-style="runecircuit"] .monthgrid[data-solar-term="qingming"] { --solarterm-active: var(--solarterm-qingming); }
+[data-style="runecircuit"] .monthgrid[data-solar-term="guyu"] { --solarterm-active: var(--solarterm-guyu); }
+[data-style="runecircuit"] .monthgrid[data-solar-term="lixia"] { --solarterm-active: var(--solarterm-lixia); }
+[data-style="runecircuit"] .monthgrid[data-solar-term="xiaoman"] { --solarterm-active: var(--solarterm-xiaoman); }
+[data-style="runecircuit"] .monthgrid[data-solar-term="mangzhong"] { --solarterm-active: var(--solarterm-mangzhong); }
+[data-style="runecircuit"] .monthgrid[data-solar-term="xiazhi"] { --solarterm-active: var(--solarterm-xiazhi); }
+[data-style="runecircuit"] .monthgrid[data-solar-term="xiaoshu"] { --solarterm-active: var(--solarterm-xiaoshu); }
+[data-style="runecircuit"] .monthgrid[data-solar-term="dashu"] { --solarterm-active: var(--solarterm-dashu); }
+[data-style="runecircuit"] .monthgrid[data-solar-term="liqiu"] { --solarterm-active: var(--solarterm-liqiu); }
+[data-style="runecircuit"] .monthgrid[data-solar-term="chushu"] { --solarterm-active: var(--solarterm-chushu); }
+[data-style="runecircuit"] .monthgrid[data-solar-term="bailu"] { --solarterm-active: var(--solarterm-bailu); }
+[data-style="runecircuit"] .monthgrid[data-solar-term="qiufen"] { --solarterm-active: var(--solarterm-qiufen); }
+[data-style="runecircuit"] .monthgrid[data-solar-term="hanlu"] { --solarterm-active: var(--solarterm-hanlu); }
+[data-style="runecircuit"] .monthgrid[data-solar-term="shuangjiang"] { --solarterm-active: var(--solarterm-shuangjiang); }
+[data-style="runecircuit"] .monthgrid[data-solar-term="lidong"] { --solarterm-active: var(--solarterm-lidong); }
+[data-style="runecircuit"] .monthgrid[data-solar-term="xiaoxue"] { --solarterm-active: var(--solarterm-xiaoxue); }
+[data-style="runecircuit"] .monthgrid[data-solar-term="daxue"] { --solarterm-active: var(--solarterm-daxue); }
+[data-style="runecircuit"] .monthgrid[data-solar-term="dongzhi"] { --solarterm-active: var(--solarterm-dongzhi); }
+/* Four cells sharing a corner each paint one quarter of a via-dot, clipped to
+   their own box — the quarter that would fall outside a cell never renders,
+   so no JS or extra markup is needed to find where the grid lines cross. */
+[data-style="runecircuit"] .monthgrid__cell {
+  background-image:
+    radial-gradient(circle at 0 0, var(--circuit-node) 0 3px, transparent 3px),
+    radial-gradient(circle at 100% 0, var(--circuit-node) 0 3px, transparent 3px),
+    radial-gradient(circle at 0 100%, var(--circuit-node) 0 3px, transparent 3px),
+    radial-gradient(circle at 100% 100%, var(--circuit-node) 0 3px, transparent 3px);
+  background-repeat: no-repeat;
+}
+/* `.monthgrid__row` is deliberately `display: contents` (see the comment
+   above that rule) so ARIA gets the row and CSS grid gets the cell. A
+   `display: contents` box generates no box of its own, so it cannot paint a
+   background under any style — there is no rule to add here without
+   reintroducing the bug that comment fixed. */
+
+/* --- typography pairing: headings in 'Aevistle Rune' -----------------------
+   Section names (`--text-lg`, 四号) and screen titles (`--text-xl`, 小二) —
+   the sizes 楷体 was drawn to be read at. Never `--font-sans`: see the note
+   beside the @font-face pair in theme.css for why 小四 body copy stays out. */
+[data-style="runecircuit"] .section-label,
+/* `.card__title` is the header form of the thing `.section-label` is the
+   inline form of — see the note beside `.card__hint` — and `.modal__title` is
+   the same 四号 role in a dialog. Leaving either out put a Songti heading
+   directly beside a KaiTi one on the same screen, which reads as a rendering
+   bug rather than as a pairing. `.brand__name` and `.composetop__title` are
+   the two other 四号 names of things; the compose screen's field labels are
+   there because app.css states outright that the name of a field is the name
+   of a function. */
+[data-style="runecircuit"] .card__title,
+[data-style="runecircuit"] .modal__title,
+[data-style="runecircuit"] .brand__name,
+[data-style="runecircuit"] .composetop__title,
+[data-style="runecircuit"] .view--compose .field > .field__label,
+[data-style="runecircuit"] .view--compose .switch__title,
+[data-style="runecircuit"] .page-title,
+[data-style="runecircuit"] .stat__value,
+[data-style="runecircuit"] .bootfail__title {
+  font-family: 'Aevistle Rune', var(--font-sans);
+}
+/* No `--text-2xl` (二号 hero) rule exists anywhere in this codebase yet —
+   nothing currently sets that font-size. Whichever screen adds one belongs
+   in the selector list above, beside the three `--text-xl` rules. */
+
+/* Numerals stay in the coding monospace `--font-mono` already draws from,
+   even under a calligraphic heading font: a verification code or a byte
+   count set in 楷体 would be unreadable at a glance, which is the one thing a
+   number like that exists to be. This is every place in app.css that reads
+   `font-variant-numeric: var(--numeric)` — the actual `--numeric` token
+   usages, not every incidental `tabular-nums`. */
+[data-style="runecircuit"] .btn-row__note,
+[data-style="runecircuit"] .codecard__value,
+[data-style="runecircuit"] .checkbar__wait,
+[data-style="runecircuit"] .chip--timer,
+[data-style="runecircuit"] .codewhy__alts code,
+[data-style="runecircuit"] .recipicker__count,
+[data-style="runecircuit"] .recipicker__all,
+[data-style="runecircuit"] .recipicker__groupcount,
+[data-style="runecircuit"] .zonepick__now,
+[data-style="runecircuit"] .datecard__when {
+  font-family: var(--font-mono);
+}
+/* A heading-adjacent numeral with nothing of its own to opt into yet — a
+   count sitting beside a `.section-label`, say. Not wired to a component in
+   this chunk; the class exists so the next one that needs it does not
+   reinvent the declaration. */
+[data-style="runecircuit"] .rune-numeral {
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--numeric);
+}
+
+/* --- grain and neon on cards ------------------------------------------------
+   `:not(.compose-card)`: the `Card` component (`components/ui.tsx`) always
+   prepends the base `card` class, so `.compose-card` — the frame around the
+   message being written — is also a `.card`. A bare `.card` selector would
+   therefore texture and glow the one surface this is explicitly not for; see
+   chunk-06's A7 audit. The reader has no `.card` in its ancestry at all, so
+   it needed no exclusion here. */
+/* `position: relative` + `isolation: isolate` exist for one reason: the grain
+   moved from a plain `background-image` on `.card` itself (its original A2
+   form) to a `::before`, below, so `opacity` could scale the grain alone by
+   `--intensity` without also fading the border and the text sitting on top of
+   it — the exact interference an element-level `opacity` on `.card` would
+   cause, which is why A2 used a background layer in the first place. Isolating
+   the stacking context is what lets that `::before` sit at `z-index: -1`
+   (painted after `.card`'s own background, before `.card__body`'s content —
+   precisely where the old single-layer background-image painted) without a
+   negative z-index escaping past sibling cards in the page.
+
+   Resting border tint now reads the *classical* half of the accent
+   (`--accent-classical`, A10) rather than a hardcoded `--neon-cyan` — a card
+   at rest is the day-scroll half of this style's duality. Hover reads
+   `--accent` (the cyber half, unchanged in meaning) — hovering is what powers
+   the trace on. Both mix percentages scale by `--intensity` (A8), same as the
+   grain's opacity. */
+[data-style="runecircuit"] .card:not(.compose-card) {
+  position: relative;
+  isolation: isolate;
+  border-color: color-mix(
+    in oklab,
+    var(--accent-classical, var(--neon-cyan)) calc(22% * var(--intensity, 1)),
+    var(--border)
+  );
+  transition:
+    border-color var(--dur) var(--ease),
+    box-shadow var(--dur) var(--ease);
+}
+[data-style="runecircuit"] .card:not(.compose-card)::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background-image: var(--texture-grain);
+  background-repeat: repeat;
+  background-size: 90px 90px;
+  opacity: var(--intensity, 1);
+  pointer-events: none;
+}
+/* Ring plus bloom, the same formula `midnight`'s `--shadow-accent` uses for
+   the same reason: a hover state needs its own light source when the surface
+   under it is dark enough that a drop shadow would fall on nothing. */
+[data-style="runecircuit"] .card:hover:not(.compose-card) {
+  border-color: color-mix(in oklab, var(--accent) calc(55% * var(--intensity, 1)), var(--border));
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--accent) calc(30% * var(--intensity, 1)), transparent),
+    0 8px 26px color-mix(in srgb, var(--accent) calc(32% * var(--intensity, 1)), transparent);
+}
+
+/* --- the active-nav underline reads the classical half too (A10) ----------
+   `--accent-classical-marker`, not `--accent-classical`: this is a 3px bar on
+   the `--surface-2` sidebar, so it is a UI component under WCAG 1.4.11's 3:1
+   rather than a fill with text on it. Three of the four bases are the same
+   colour either way; `moonwhite` in the light theme is 1.06:1 as a fill and
+   the token stands the cyber half in for it. See theme.css. */
+[data-style="runecircuit"] .nav__item[aria-current="page"]::before {
+  background: var(--accent-classical-marker, var(--accent));
+}
+
+/* --- ceremonial feedback (A5) -----------------------------------------------
+   Gated on `[data-atmosphere-motion="on"]` as well as the style itself: below
+   `ATMOSPHERE_MOTION_MIN` (core/types.ts) AppState.tsx flips that attribute to
+   `"off"`, and both rules below stop matching — the elements fall back to
+   their ordinary, non-runecircuit-specific animation (`.toast--success`
+   inherits the base `.toast`'s `toast-in`; a removed `.job` simply unmounts,
+   same as every other style) rather than playing the same keyframe scaled
+   down to where it is only technically still there. `prefers-reduced-motion`
+   (theme.css) sits underneath both regardless, same as every other animation
+   in this file. */
+[data-style="runecircuit"][data-atmosphere-motion="on"] .toast--success {
+  animation: seal-stamp var(--dur-slow) var(--ease-out);
+}
+@keyframes seal-stamp {
+  0% {
+    opacity: 0;
+    translate: 0 12px;
+    scale: 0.9;
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent-classical-marker, var(--accent)) 0%, transparent);
+  }
+  45% {
+    opacity: 1;
+    translate: 0 0;
+    scale: 1.06;
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent-classical-marker, var(--accent)) 45%, transparent);
+  }
+  100% {
+    opacity: 1;
+    translate: 0 0;
+    scale: 1;
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent-classical-marker, var(--accent)) 0%, transparent);
+  }
+}
+
+/* A row's exit, for `ScheduleView`'s `remove` — the one list-view handler in
+   this app that deletes a row from state with no removal transition at all
+   today. `data-removing="true"` is set for exactly `--dur-slow` before the
+   row is actually removed from `state.jobs` (see the component for the
+   double-fire guard: a second delete on a row already animating out is a
+   no-op, not a second timer racing the first), so the animation is what the
+   user watches rather than an instant disappearance. Radial rather than a
+   plain fade, because a fade reads as "this stopped being interested in you"
+   and this is a deletion — something spreading through the row and taking it
+   with it is closer to what actually happened. */
+[data-style="runecircuit"][data-atmosphere-motion="on"] .job[data-removing="true"] {
+  animation: ink-bloom var(--dur-slow) var(--ease-out) forwards;
+  pointer-events: none;
+}
+@keyframes ink-bloom {
+  from {
+    opacity: 1;
+    background-image: radial-gradient(
+      circle at 50% 50%,
+      color-mix(in srgb, var(--danger) 55%, transparent) 0%,
+      transparent 0%
+    );
+  }
+  to {
+    opacity: 0;
+    filter: blur(3px);
+    background-image: radial-gradient(
+      circle at 50% 50%,
+      color-mix(in srgb, var(--danger) 55%, transparent) 0%,
+      transparent 140%
+    );
+  }
+}
+/* --- end runecircuit --- */
