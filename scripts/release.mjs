@@ -26,8 +26,9 @@
  */
 
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+import os from 'node:os'
 import path from 'node:path'
 
 const TAG = process.argv[2]
@@ -77,6 +78,77 @@ const ARTIFACTS = [
   `Aevistle-${VERSION}-win-x64-portable.exe`,
   `Aevistle-${VERSION}.apk`,
 ]
+
+// --- 0. the APK actually is the version its filename claims -----------------
+//
+// v0.1.14 shipped with `versionName "0.1.13"` baked into its manifest: the APK
+// in `release/` had been built sixteen minutes before the commit that bumped
+// `android/app/build.gradle`, and nothing re-checked it before this script
+// hashed, signed, and uploaded it under the new tag. Every check downstream —
+// hashing, signing, the redownload-and-verify at the end — verifies that the
+// *bytes* published match the *bytes* built. None of them ask whether the
+// *app* those bytes contain agrees with the tag it is published under, so a
+// stale rebuild sailed through every one of them.
+//
+// This reads the version the running app will actually report (`aapt dump
+// badging`, the same tool a reviewer would reach for) and refuses to publish
+// on a mismatch, rather than trusting that whoever ran the build did it in
+// the right order.
+
+step(0, 'Checking the APK reports the version it is being published as')
+const apkPath = path.join('release', `Aevistle-${VERSION}.apk`)
+if (existsSync(apkPath)) {
+  const aapt = findAapt()
+  if (!aapt) {
+    fail(
+      'Could not find aapt to verify the APK version.',
+      'Install Android SDK build-tools, or set ANDROID_HOME.',
+    )
+  }
+  const badging = spawnSync(aapt, ['dump', 'badging', apkPath], { encoding: 'utf8' })
+  if (badging.status !== 0) fail(`Could not read ${apkPath} with aapt.`, badging.stderr)
+  const builtVersion = /versionName='([^']*)'/.exec(badging.stdout)?.[1]
+  if (builtVersion !== VERSION) {
+    fail(
+      `${apkPath} reports versionName '${builtVersion}', not '${VERSION}'.`,
+      'Rebuild with `npm run build:android` after bumping android/app/build.gradle, then rerun this script.',
+    )
+  }
+  console.log(`  ✓ ${apkPath} reports versionName '${VERSION}'`)
+} else {
+  console.log(`  (skipped: ${apkPath} does not exist yet — step 1 will report that.)`)
+}
+
+/** Find `aapt`, the way `scripts/build-android.mjs` finds the SDK it lives in. */
+function findAapt() {
+  const roots = [process.env.ANDROID_HOME, process.env.ANDROID_SDK_ROOT]
+
+  try {
+    const local = readFileSync(path.join('android', 'local.properties'), 'utf8')
+    const dir = /sdk\.dir\s*=\s*(.+)/.exec(local)?.[1]?.trim()
+    // local.properties escapes Windows backslashes as `\:` and `\\`.
+    if (dir) roots.push(dir.replace(/\\:/g, ':').replace(/\\\\/g, '\\'))
+  } catch {
+    /* no local.properties — rely on env vars and default install paths */
+  }
+
+  roots.push(
+    path.join(os.homedir(), 'AppData', 'Local', 'Android', 'Sdk'),
+    path.join(os.homedir(), 'Library', 'Android', 'sdk'),
+    path.join(os.homedir(), 'Android', 'Sdk'),
+  )
+
+  for (const root of roots) {
+    const buildTools = root && path.join(root, 'build-tools')
+    if (!buildTools || !existsSync(buildTools)) continue
+    const versions = readdirSync(buildTools).sort().reverse()
+    for (const version of versions) {
+      const exe = path.join(buildTools, version, process.platform === 'win32' ? 'aapt.exe' : 'aapt')
+      if (existsSync(exe)) return exe
+    }
+  }
+  return null
+}
 
 // --- 1. hashes ---------------------------------------------------------------
 
