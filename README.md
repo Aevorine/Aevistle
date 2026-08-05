@@ -110,6 +110,36 @@ things that deliberately stay behind → **[docs/PRIVACY.md](docs/PRIVACY.md)**.
 Thirty-six of these, each with the reasoning behind it →
 **[docs/FEATURES.md](docs/FEATURES.md)**
 
+## New in 0.1.15
+
+- **📲 Android updates itself.** The check always worked; downloading and
+  installing were desktop-only, so the phone could announce a new version and
+  then offer a link to a web page. It now fetches the APK in-app with a
+  progress bar, verified against the release's published `SHA256SUMS`, and
+  hands it to the system installer — which still asks you to confirm. The file
+  is written to app-private storage, not a shared Downloads folder.
+- **🏠 A Home tab, and a bottom bar that fits.** Nine tabs never fit a 360px
+  screen; the bar had quietly been a horizontal scroller with four of them
+  off-screen. It is five now — Compose, Codes, Home, Inbox, Settings — with
+  schedules, contacts, templates, the working calendar and the send log behind
+  Home. The desktop sidebar still lists all nine, and `Ctrl+1`–`Ctrl+9` still
+  reach all nine on both.
+- **⚙️ Settings is a list, not fourteen screens of scrolling.** Sixteen sections
+  in one column made reaching Privacy a scroll past every other section. On a
+  phone it is now sixteen rows that open one at a time; the desktop keeps its
+  two-column grid. Explanatory text under toggles stands down on phones —
+  warnings and errors never do.
+- **📡 Pairing dials the right network card.** It used to publish the first
+  address the OS listed, which on a machine with a VPN, a hypervisor or a
+  container runtime was routinely a virtual adapter no phone can reach — a
+  four-second timeout on the other device and no clue anywhere. Addresses are
+  ranked now, the chosen one is printed beside the QR code, and a multi-homed
+  machine gets a picker.
+
+Also fixed: toggle switches whose knob never moved on older Android WebView
+builds, and a "launch at login" entry a source checkout could leave pointing at
+Electron's own placeholder window.
+
 ## New in 0.1.14
 
 - **🔗 Pair two devices over your LAN, and nothing else.** Scan a QR code on the
@@ -142,7 +172,7 @@ Grab the latest build from **[Releases](https://github.com/Aevorine/Aevistle/rel
 |---|---|---|
 | Windows 10/11 (x64) | `Aevistle-<version>-win-x64-setup.exe` | Installer, adds a Start-menu and desktop shortcut |
 | Windows 10/11 (x64) | `Aevistle-<version>-win-x64-portable.exe` | Single file, no installation, runs from a USB stick |
-| Android 7.0+ | `Aevistle-<version>.apk` | Phones and tablets. Enable "install unknown apps" for your browser or file manager first. |
+| Android 7.0+ | `Aevistle-<version>.apk` | Phones and tablets. Enable "install unknown apps" for your browser or file manager for this first install; later updates are offered inside the app. |
 
 `<version>` is whatever the [latest release](https://github.com/Aevorine/Aevistle/releases/latest)
 page is showing — the badge at the top of this page reads it from the same

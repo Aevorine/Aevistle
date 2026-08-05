@@ -5196,10 +5196,57 @@ textarea {
 .modal__body--screen > .view {
   padding-top: 0;
 }
-/* The dialog header states which screen this is; the screen's own heading
-   would repeat it two lines lower, and its `subtitle` explains a screen the
-   user has just chosen by name. */
+/*
+ * The heading *text* goes, the heading's actions stay.
+ *
+ * This rule used to be `.page-head { display: none }`, which was wrong in a
+ * way that only shows up on a phone: `PageHead` is not just a title. Its
+ * `action` slot is where these screens keep their primary control — "New
+ * reminder", "New contact", "New template", "Export CSV". Hiding the whole
+ * element took every one of them away, so opening Contacts from Home gave you
+ * a list of contacts and no way to add one.
+ *
+ * Only the title and subtitle are redundant here: the dialog's own header
+ * already names the screen, two lines higher, and the subtitle explains a
+ * screen the user has just chosen by name. The actions are not redundant
+ * anywhere.
+ */
+.modal__body--screen .page-head__text {
+  display: none;
+}
 .modal__body--screen .page-head {
+  /*
+   * Without its text the head is just an actions row, so it gives up
+   * everything it owned as a *heading*:
+   *
+   *   - `position: sticky` pinned it against the page scroller. Inside a dialog
+   *     the scroller is the dialog body, so it hovered a row of buttons over
+   *     the content it was supposed to sit above.
+   *   - the translucent blurred background was there to let the page show
+   *     through while it was pinned. Nothing is pinned now, and against the
+   *     dialog's own surface it read as a grey band of unexplained colour.
+   *   - `min-height` reserved room for a title and subtitle that are hidden.
+   */
+  position: static;
+  min-height: 0;
+  padding: 0 0 var(--sp-3);
+  background: none;
+  backdrop-filter: none;
+}
+/*
+ * The rule under the heading goes too.
+ *
+ * It is drawn with `inset-inline: calc(-1 * var(--sp-5))` so that it spans the
+ * whole scroll area rather than the content column — right on a page, and
+ * visibly wrong in a dialog, where it ran past the panel's rounded edge and was
+ * clipped mid-line. There is already a border under the dialog's own header
+ * two rows up; a second one under the buttons divides nothing.
+ */
+.modal__body--screen .page-head::after {
+  display: none;
+}
+/* Nothing left to head — don't leave its padding behind as a mystery gap. */
+.modal__body--screen .page-head:not(:has(.page-head__actions)) {
   display: none;
 }
 

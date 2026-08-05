@@ -105,6 +105,43 @@ réellement, et les deux choses qui restent volontairement en arrière →
 Trente-six entrées comme celles-ci, chacune avec le raisonnement derrière →
 **[FEATURES.md](FEATURES.md)**
 
+## Nouveautés de la 0.1.15
+
+- **📲 Android se met à jour tout seul.** La vérification a toujours fonctionné ;
+  le téléchargement et l'installation étaient réservés au bureau, si bien que le
+  téléphone pouvait annoncer une nouvelle version puis ne proposer qu'un lien
+  vers une page web. Il récupère désormais l'APK dans l'application, avec une
+  barre de progression, vérifié contre le `SHA256SUMS` publié avec la version,
+  puis le confie à l'installateur du système — qui vous demande toujours de
+  confirmer. Le fichier est écrit dans le stockage privé de l'application, pas
+  dans un dossier Téléchargements partagé.
+- **🏠 Un onglet Accueil, et une barre du bas qui tient.** Neuf onglets n'ont
+  jamais tenu sur un écran de 360 px ; la barre était devenue un défilement
+  horizontal avec quatre d'entre eux hors écran. Ils sont cinq désormais —
+  Rédiger, Codes, Accueil, Boîte de réception, Réglages — avec les
+  planifications, les contacts, les modèles, le calendrier de travail et le
+  journal d'envoi derrière Accueil. La barre latérale du bureau en liste
+  toujours neuf, et `Ctrl+1`–`Ctrl+9` atteignent toujours les neuf des deux
+  côtés.
+- **⚙️ Les réglages sont une liste, pas quatorze écrans de défilement.** Seize
+  sections en une colonne : atteindre Confidentialité imposait de défiler devant
+  toutes les autres. Sur téléphone, ce sont maintenant seize lignes qui
+  s'ouvrent une à la fois ; le bureau garde sa grille à deux colonnes. Les
+  textes explicatifs sous les interrupteurs s'effacent sur téléphone — jamais
+  les avertissements ni les erreurs.
+- **📡 L'appairage compose la bonne carte réseau.** Il publiait la première
+  adresse listée par le système, ce qui, sur une machine avec un VPN, un
+  hyperviseur ou un moteur de conteneurs, était régulièrement un adaptateur
+  virtuel qu'aucun téléphone ne peut joindre — quatre secondes d'attente sur
+  l'autre appareil et pas le moindre indice. Les adresses sont maintenant
+  classées, celle retenue est affichée à côté du QR code, et une machine
+  multi-réseaux obtient un sélecteur.
+
+Également corrigé : les interrupteurs dont le bouton ne bougeait jamais sur les
+anciennes versions d'Android System WebView, et une entrée « lancer au
+démarrage » qu'une exécution depuis les sources pouvait laisser pointée sur la
+fenêtre d'exemple d'Electron.
+
 ## Nouveautés de la 0.1.14
 
 - **🔗 Appairer deux appareils par votre réseau local, et rien d’autre.** Scannez

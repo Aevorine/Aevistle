@@ -103,6 +103,42 @@ que se quedan a propósito → **[PRIVACY.md](PRIVACY.md)**.
 Treinta y seis entradas como estas, cada una con el razonamiento detrás →
 **[FEATURES.md](FEATURES.md)**
 
+## Novedades de 0.1.15
+
+- **📲 Android se actualiza solo.** La comprobación siempre funcionó; la descarga
+  y la instalación eran exclusivas del escritorio, así que el teléfono podía
+  anunciar una versión nueva y luego ofrecer solo un enlace a una página web.
+  Ahora obtiene el APK dentro de la aplicación, con barra de progreso,
+  verificado contra el `SHA256SUMS` publicado con la versión, y se lo entrega al
+  instalador del sistema — que sigue pidiéndote confirmación. El archivo se
+  escribe en el almacenamiento privado de la aplicación, no en una carpeta de
+  Descargas compartida.
+- **🏠 Una pestaña Inicio, y una barra inferior que cabe.** Nueve pestañas nunca
+  cupieron en una pantalla de 360 px; la barra se había convertido en un
+  desplazamiento horizontal con cuatro de ellas fuera de pantalla. Ahora son
+  cinco — Redactar, Códigos, Inicio, Bandeja de entrada, Ajustes — con las
+  programaciones, los contactos, las plantillas, el calendario laboral y el
+  registro de envíos detrás de Inicio. La barra lateral del escritorio sigue
+  listando las nueve, y `Ctrl+1`–`Ctrl+9` siguen alcanzándolas todas en ambos.
+- **⚙️ Los ajustes son una lista, no catorce pantallas de desplazamiento.**
+  Dieciséis secciones en una columna hacían que llegar a Privacidad exigiera
+  pasar por todas las demás. En el teléfono ahora son dieciséis filas que se
+  abren de una en una; el escritorio conserva su rejilla de dos columnas. Los
+  textos explicativos bajo los interruptores se retiran en el teléfono — los
+  avisos y errores nunca.
+- **📡 El emparejamiento marca la tarjeta de red correcta.** Publicaba la primera
+  dirección que enumeraba el sistema, lo que en una máquina con VPN,
+  hipervisor o motor de contenedores era habitualmente un adaptador virtual que
+  ningún teléfono puede alcanzar — cuatro segundos de espera agotada en el otro
+  dispositivo y ninguna pista en ninguna parte. Ahora las direcciones se
+  ordenan, la elegida se imprime junto al código QR, y una máquina con varias
+  redes recibe un selector.
+
+También corregido: los interruptores cuyo botón nunca se movía en versiones
+antiguas de Android System WebView, y una entrada de «iniciar al arrancar» que
+una ejecución desde el código fuente podía dejar apuntando a la ventana de
+ejemplo de Electron.
+
 ## Novedades de 0.1.14
 
 - **🔗 Empareja dos dispositivos por tu red local, y por nada más.** Escanea un

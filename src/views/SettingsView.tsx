@@ -351,7 +351,25 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
           to sit flush against each other as a single list rather than floating
           apart with card gaps between them. `--list` is that difference. */}
       <div className={`view__inner ${narrow ? 'view__inner--list' : 'view__inner--grid'}`}>
-        <PageHead title={t('settings.title')} subtitle={t('settings.subtitle')} />
+        {/*
+          No subtitle on a phone.
+
+          "Accounts, appearance, data and updates" is a summary of the list
+          directly beneath it, which on this layout is sixteen labelled rows
+          starting one line lower — so it names four of the sixteen and then
+          gets out of the way of the other twelve. It is also inside a *sticky*
+          head, so it does not scroll away: it holds ~28px at the top of every
+          screenful of a list the whole point of which was to stop Settings
+          being a scroll.
+
+          Kept on a desktop, where the head is one row of a wide grid and the
+          summary is the only thing telling you what this screen covers before
+          you read sixteen cards.
+        */}
+        <PageHead
+          title={t('settings.title')}
+          subtitle={narrow ? undefined : t('settings.subtitle')}
+        />
 
         {/* Top of the screen, not tucked into the data card: an app that came
             up factory-fresh because its state file would not parse is
