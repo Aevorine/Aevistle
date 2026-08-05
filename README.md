@@ -110,6 +110,25 @@ things that deliberately stay behind → **[docs/PRIVACY.md](docs/PRIVACY.md)**.
 Thirty-six of these, each with the reasoning behind it →
 **[docs/FEATURES.md](docs/FEATURES.md)**
 
+## New in 0.1.16
+
+Repairs to the phone layout 0.1.15 introduced — no feature changed, and nothing
+about how mail is scheduled, sent, stored or encrypted was touched.
+
+- **Dialogs are the screen, not a card floating on it.** A settings section
+  opened with a gutter all round and the tab bar showing through underneath.
+  Content dialogs now go edge to edge, closed with the button in the header;
+  short confirmations deliberately stay cards.
+- **Screens opened from Home had lost their main button.** Hiding a duplicated
+  heading also hid the element carrying each screen's primary control, so
+  Contacts offered no way to add a contact. Only the heading text goes now.
+- **Settings stopped repeating itself** — the sticky subtitle that summarised
+  the rows directly beneath it, and each section naming itself twice.
+
+Measured on the running window rather than reasoned about: the three content
+dialogs each report `(0, 0, 390, 800)` in a `390×800` viewport, the
+confirmation `350×254` with symmetric gutters.
+
 ## New in 0.1.15
 
 - **📲 Android updates itself.** The check always worked; downloading and

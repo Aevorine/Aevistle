@@ -105,6 +105,28 @@ réellement, et les deux choses qui restent volontairement en arrière →
 Trente-six entrées comme celles-ci, chacune avec le raisonnement derrière →
 **[FEATURES.md](FEATURES.md)**
 
+## Nouveautés de la 0.1.16
+
+Réparations de la mise en page mobile introduite par la 0.1.15 — aucune
+fonctionnalité n'a changé, et rien de la façon dont le courrier est planifié,
+envoyé, stocké ou chiffré n'a été touché.
+
+- **Les dialogues sont l'écran, pas une carte flottant dessus.** Une section des
+  réglages s'ouvrait avec une gouttière tout autour et la barre d'onglets
+  visible en dessous. Les dialogues de contenu occupent maintenant tout l'écran
+  et se ferment par le bouton de leur en-tête ; les courtes confirmations
+  restent délibérément des cartes.
+- **Les écrans ouverts depuis Accueil avaient perdu leur bouton principal.**
+  Masquer un titre en double masquait aussi l'élément qui porte la commande
+  principale de chaque écran : Contacts n'offrait plus aucun moyen d'ajouter un
+  contact. Seul le texte du titre disparaît désormais.
+- **Les réglages ont cessé de se répéter** — le sous-titre épinglé qui résumait
+  les lignes juste en dessous, et chaque section se nommant deux fois.
+
+Mesuré sur la fenêtre en cours d'exécution plutôt que déduit : les trois
+dialogues de contenu rapportent chacun `(0, 0, 390, 800)` dans une fenêtre
+`390×800`, la confirmation `350×254` avec des gouttières symétriques.
+
 ## Nouveautés de la 0.1.15
 
 - **📲 Android se met à jour tout seul.** La vérification a toujours fonctionné ;

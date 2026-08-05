@@ -103,6 +103,28 @@ que se quedan a propósito → **[PRIVACY.md](PRIVACY.md)**.
 Treinta y seis entradas como estas, cada una con el razonamiento detrás →
 **[FEATURES.md](FEATURES.md)**
 
+## Novedades de 0.1.16
+
+Reparaciones de la disposición para teléfono que introdujo 0.1.15 — ninguna
+funcionalidad cambió, y no se tocó nada de cómo se programa, envía, almacena o
+cifra el correo.
+
+- **Los diálogos son la pantalla, no una tarjeta flotando sobre ella.** Una
+  sección de ajustes se abría con un margen alrededor y la barra de pestañas
+  asomando por debajo. Los diálogos de contenido ahora ocupan toda la pantalla y
+  se cierran con el botón de su cabecera; las confirmaciones breves siguen
+  siendo tarjetas a propósito.
+- **Las pantallas abiertas desde Inicio habían perdido su botón principal.**
+  Ocultar un encabezado duplicado ocultaba también el elemento que lleva el
+  control principal de cada pantalla: Contactos no ofrecía forma alguna de
+  añadir un contacto. Ahora solo desaparece el texto del encabezado.
+- **Los ajustes dejaron de repetirse** — el subtítulo fijo que resumía las filas
+  justo debajo, y cada sección nombrándose dos veces.
+
+Medido sobre la ventana en ejecución en lugar de deducido: los tres diálogos de
+contenido informan cada uno `(0, 0, 390, 800)` en una ventana `390×800`, y la
+confirmación `350×254` con márgenes simétricos.
+
 ## Novedades de 0.1.15
 
 - **📲 Android se actualiza solo.** La comprobación siempre funcionó; la descarga
