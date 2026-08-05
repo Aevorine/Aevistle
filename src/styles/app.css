@@ -2588,112 +2588,132 @@ textarea {
     display: none;
   }
 
-  /* --- dialogs are screens here, not cards ---------------------------------
-   *
-   * On a desktop a dialog is a card floating over the page: scrim down each
-   * side, rounded corners, a shadow lifting it off what it covers. That
-   * vocabulary needs room either side to read as anything, and on a 390px
-   * phone there is none — so `padding: var(--sp-5)` on the scrim plus
-   * `max-height: 94vh` produced a panel with a ~20px gutter all round, corners
-   * curving away from screen edges they were almost touching, and the tab bar
-   * showing underneath through the blur. It read as a card that had failed to
-   * position itself rather than as a screen, which is the report this fixes.
-   *
-   * A phone has one honest answer: the dialog *is* the screen. Edge to edge,
-   * square corners, no shadow, covering the tab bar completely — and closed
-   * with the button in its header, which is now the only way out and therefore
-   * has to be (and is) always visible.
-   *
-   * Sized by stretching inside the scrim rather than with `100vh`/`100dvh`.
-   * The scrim is already `position: fixed; inset: 0`, so stretching to it is
-   * exact on every engine; `100vh` is famously wrong on mobile browsers with
-   * retracting chrome, and `dvh` — which fixes that — only landed in Chromium
-   * 108, the same class of assumption that left the toggle knobs motionless on
-   * older Android System WebView builds.
-   */
-  /*
-   * The gutter moves from the scrim onto the card, deliberately.
-   *
-   * The obvious spelling is `.modal-scrim:has(> .modal--wide) { padding: 0 }`,
-   * and it is the wrong tool for the load-bearing half of this fix: `:has()`
-   * is Chromium 105, so on the older Android System WebView builds that this
-   * release already had to accommodate once — the toggle knobs that never
-   * moved — the selector would not match and dialogs would stay exactly as
-   * broken as they are now, on exactly the devices least able to spare the
-   * space. A rule that silently does nothing on old engines is worse than no
-   * rule, because it tests fine everywhere the author looks.
-   *
-   * So the scrim gives up its padding unconditionally, and the small dialogs
-   * that still want to float take an equivalent margin of their own. Plain
-   * `margin` and plain class selectors: nothing here needs an engine newer
-   * than the app's own floor.
-   */
-  .modal-scrim {
-    padding: 0;
-  }
-  /* Confirmations and short prompts stay cards. "Delete this reminder?" is two
-     buttons and a sentence; giving it the whole display would make a routine
-     yes/no look like a change of screen.
+  /* Confirmations and short prompts stay cards, and on a phone they take their
+     gutter out of their own width — see the `data-shell="mobile"` block below,
+     which takes the padding off the scrim.
 
      Sized rather than margined: the base rule is `width: min(560px, 100%)`, so
      a margin on top of it asks for 100% + 40px inside a 390px scrim, the box
      overflows and the browser pins it to the left edge — which is the same
-     "card in the wrong place" this whole block is fixing, reintroduced one
-     rule further down. The scrim already centres, so taking the gutter out of
-     the width is all that is needed. */
+     "card in the wrong place" that block is fixing, reintroduced one rule
+     further down. The scrim already centres, so taking the gutter out of the
+     width is all that is needed.
+
+     Width-based on purpose, and the only modal rule in this file that still is:
+     a 1280px tablet has room for a 560px "Delete this reminder?" and would look
+     absurd with a 1240px one. */
   .modal {
     width: calc(100% - 2 * var(--sp-5));
     max-height: calc(100% - 2 * var(--sp-5));
   }
+}
 
-  .modal--wide,
-  .modal--fullscreen {
-    margin: 0;
-    width: 100%;
-    max-width: none;
-    height: 100%;
-    max-height: none;
-    border: 0;
-    border-radius: 0;
-    box-shadow: none;
-  }
+/* ==========================================================================
+   Dialogs are screens here, not cards
+   ========================================================================== */
 
-  /*
-   * A full-height panel rises; it does not zoom.
-   *
-   * `modal-in` scales from 0.985, which on a card reads as "this came forward"
-   * and on something the size of the screen reads as the whole display
-   * flinching. The slide alone is the same gesture every mobile sheet uses.
-   */
-  .modal--wide,
-  .modal--fullscreen {
-    animation: sheet-in var(--dur-slow) var(--ease-out);
-  }
+/*
+ * On a desktop a dialog is a card floating over the page: scrim down each side,
+ * rounded corners, a shadow lifting it off what it covers. That vocabulary needs
+ * room either side to read as anything, and on a 390px phone there is none — so
+ * `padding: var(--sp-5)` on the scrim plus `max-height: 94vh` produced a panel
+ * with a ~20px gutter all round, corners curving away from screen edges they
+ * were almost touching, and the tab bar showing underneath through the blur. It
+ * read as a card that had failed to position itself rather than as a screen,
+ * which is the report this fixes.
+ *
+ * A phone has one honest answer: the dialog *is* the screen. Edge to edge,
+ * square corners, no shadow, covering the tab bar completely — and closed with
+ * the button in its header, which is the only way out and therefore has to be
+ * (and is) always visible.
+ *
+ * ## Why an attribute and not `@media (max-width: 760px)`
+ *
+ * This block lived inside that media query, and a tablet is not inside it. The
+ * Android app on an 800px portrait tablet got the desktop treatment — a floating
+ * card, scrim down the sides, and Settings rendered as a two-column grid of
+ * cards rather than rows that open — which is the "the pop-up card is in the
+ * wrong place, it should be full screen" report on a device that is a touch
+ * screen held in two hands and nothing like a desktop.
+ *
+ * Width alone cannot express the condition, because the condition is "phone
+ * *or* tablet *or* a narrow desktop window". CSS has no way to OR a media
+ * query with a selector — `:has()` is not it, and a custom property cannot
+ * branch arbitrary declarations without `@container style()`, which is far
+ * newer than this app's engine floor. So the OR is evaluated once in JavaScript,
+ * where both halves are cheap to ask (`matchMedia` plus `detectPlatform`), and
+ * the answer is written to the root element as `data-shell="mobile"`. See
+ * `components/useNarrow.ts` for the writer and `main.tsx` for why it is also
+ * set before the first paint.
+ *
+ * The rules are duplicated nowhere as a result: this is the single copy, and a
+ * narrow desktop window satisfies it through the same flag a phone does.
+ *
+ * Plain attribute and class selectors throughout. The obvious alternative for
+ * the scrim was `.modal-scrim:has(> .modal--wide) { padding: 0 }`, and `:has()`
+ * is Chromium 105 — so on the older Android System WebView builds this release
+ * already had to accommodate once (the toggle knobs that never moved) the
+ * selector would not match and dialogs would stay exactly as broken as they
+ * were, on exactly the devices least able to spare the space. A rule that
+ * silently does nothing on old engines is worse than no rule, because it tests
+ * fine everywhere the author looks.
+ *
+ * Sized by stretching inside the scrim rather than with `100vh`/`100dvh`. The
+ * scrim is already `position: fixed; inset: 0`, so stretching to it is exact on
+ * every engine; `100vh` is famously wrong on mobile browsers with retracting
+ * chrome, and `dvh` — which fixes that — only landed in Chromium 108.
+ */
+:root[data-shell="mobile"] .modal-scrim {
+  padding: 0;
+}
 
-  /*
-   * The system's own furniture, kept clear.
-   *
-   * Edge to edge means the header now sits under the status bar and the footer
-   * under the gesture bar. `.view` and `.page-head` already pay this tax for
-   * the same reason; a dialog that covers the whole screen has to pay it too,
-   * or the close button ends up beneath the clock.
-   */
-  .modal--wide .modal__header,
-  .modal--fullscreen .modal__header {
-    padding-top: calc(var(--sp-4) + env(safe-area-inset-top, 0px));
-  }
-  .modal--wide .modal__body,
-  .modal--fullscreen .modal__body {
-    padding-bottom: calc(var(--sp-5) + env(safe-area-inset-bottom, 0px));
-  }
-  /* A footer, when there is one, is the bottom-most thing and takes the inset
-     instead. The body's own bottom padding above is harmless underneath it —
-     it just becomes ordinary spacing between the last field and the buttons,
-     which is what it looks like anyway. */
-  .modal--wide > .modal__footer,
-  .modal--fullscreen > .modal__footer {
-    padding-bottom: calc(var(--sp-4) + env(safe-area-inset-bottom, 0px));
-  }
+:root[data-shell="mobile"] .modal--wide,
+:root[data-shell="mobile"] .modal--fullscreen {
+  margin: 0;
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  max-height: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+/*
+ * A full-height panel rises; it does not zoom.
+ *
+ * `modal-in` scales from 0.985, which on a card reads as "this came forward"
+ * and on something the size of the screen reads as the whole display flinching.
+ * The slide alone is the same gesture every mobile sheet uses.
+ */
+:root[data-shell="mobile"] .modal--wide,
+:root[data-shell="mobile"] .modal--fullscreen {
+  animation: sheet-in var(--dur-slow) var(--ease-out);
+}
+
+/*
+ * The system's own furniture, kept clear.
+ *
+ * Edge to edge means the header now sits under the status bar and the footer
+ * under the gesture bar. `.view` and `.page-head` already pay this tax for the
+ * same reason; a dialog that covers the whole screen has to pay it too, or the
+ * close button ends up beneath the clock.
+ */
+:root[data-shell="mobile"] .modal--wide .modal__header,
+:root[data-shell="mobile"] .modal--fullscreen .modal__header {
+  padding-top: calc(var(--sp-4) + env(safe-area-inset-top, 0px));
+}
+:root[data-shell="mobile"] .modal--wide .modal__body,
+:root[data-shell="mobile"] .modal--fullscreen .modal__body {
+  padding-bottom: calc(var(--sp-5) + env(safe-area-inset-bottom, 0px));
+}
+/* A footer, when there is one, is the bottom-most thing and takes the inset
+   instead. The body's own bottom padding above is harmless underneath it — it
+   just becomes ordinary spacing between the last field and the buttons, which
+   is what it looks like anyway. */
+:root[data-shell="mobile"] .modal--wide > .modal__footer,
+:root[data-shell="mobile"] .modal--fullscreen > .modal__footer {
+  padding-bottom: calc(var(--sp-4) + env(safe-area-inset-bottom, 0px));
 }
 
 /*

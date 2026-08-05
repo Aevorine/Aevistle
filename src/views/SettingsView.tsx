@@ -46,7 +46,7 @@ import { ControlCard } from './ControlCard'
 import { CalendarSubscribeCard } from './CalendarSubscribeCard'
 import { SectionNav } from '../components/SectionNav'
 import { SettingsSection } from '../components/SettingsSection'
-import { useNarrow } from '../components/useNarrow'
+import { useMobileShell } from '../components/useNarrow'
 import { groupAccounts, knownGroups } from '../core/accounts'
 import { useApp } from '../state/AppState'
 import { LOCALES, useI18n, type TranslationKey } from '../i18n'
@@ -146,8 +146,16 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
    * `components/SettingsSection.tsx`. Everything below renders identically in
    * both; only the wrapper decides whether a section is a card on the page or
    * a row that opens a dialog.
+   *
+   * `useMobileShell`, not `useNarrow`: an Android tablet is 800px in portrait
+   * and 1280px in landscape, so on width alone it fell to the desktop branch and
+   * got sixteen cards in a two-column grid. The sections that the report named —
+   * the daily digest, holiday greetings, publishing the calendar, pairing — were
+   * therefore not tappable rows opening a screen there; they were cards already
+   * expanded on the page, which is the thing being asked for on a phone and the
+   * wrong thing on a touch screen of any size. See `useNarrow.ts`.
    */
-  const narrow = useNarrow()
+  const narrow = useMobileShell(bridge?.platform === 'android')
 
   /** Passed to every section so the dialog's close button is translated once, here, rather than sixteen times. */
   const closeLabel = t('common.close')

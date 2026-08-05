@@ -21,6 +21,13 @@ import type {
 import { failedResult } from './bridge'
 import { fetchLatest, type DownloadProgress } from './update'
 import { feedFetchVia, type FeedResponse } from './feeds'
+import { LocalPairingHost } from './pairingHostLocal'
+import type { PairingEvent, PairMode } from './pairing'
+import type {
+  SyncListenerStatus,
+  SyncServerRequest,
+  SyncServerResponse,
+} from './syncLoop'
 import type {
   AppState,
   Attachment,
@@ -198,6 +205,12 @@ interface AevistleNativePlugin extends AndroidPermissionApi {
   readAttachment(opts: { path: string }): Promise<{ dataUrl?: string; mime?: string }>
   openPath(opts: { path: string }): Promise<void>
   saveAttachmentAs(opts: { path: string; suggestedName: string }): Promise<{ value?: string }>
+  /** See `saveTextFile` in the Java plugin — SAF create-document, bytes from the call. */
+  saveTextFile(opts: {
+    name: string
+    mime: string
+    text: string
+  }): Promise<{ ok: boolean; cancelled: boolean; name: string }>
   saveAttachmentsTo(opts: { paths: string[] }): Promise<{ folder?: string; saved?: number }>
 
   /** See `UpdateInstaller.java`. Resolves with the finished `DownloadProgress`; progress arrives on the `updateProgress` listener meanwhile. */
@@ -209,6 +222,29 @@ interface AevistleNativePlugin extends AndroidPermissionApi {
   /** Rejects with the message `unknown-sources` when the per-app install toggle is off — the native side has already opened that settings screen. */
   installUpdate(opts: { path: string }): Promise<void>
 
+  // --- LAN listeners ------------------------------------------------------
+  // The accepting side of pairing and of ongoing sync. See `LanServer.java`:
+  // the native side owns the socket and nothing else, and hands every request
+  // body straight back here, because the keys and the state it has to be
+  // judged against live on this side.
+
+  /** Every address this device might be reachable at, best first — see `LanAddresses.java`. */
+  lanAddresses(): Promise<{ addresses: string[] }>
+  /**
+   * Bind a one-shot `/pair` listener and report where it landed.
+   *
+   * Deliberately *not* "start a pairing": the payload is built here afterwards
+   * (see `startPairingHost` below), because a `PairingPayload` has to carry the
+   * port the OS assigned, which is only knowable after the bind. Rejects with
+   * the message `no-network` when this device holds no LAN address.
+   */
+  startPairingHost(opts: { host?: string }): Promise<{ host: string; port: number }>
+  stopPairingHost(): Promise<void>
+  /** Same contract as `SyncServer.apply` on the desktop, same status shape back. */
+  applySyncListener(opts: { enabled: boolean }): Promise<SyncListenerStatus>
+  /** Answer a `lanRequest`. `body` is already-serialised JSON — the socket writes it verbatim. */
+  respondToLanRequest(opts: { id: string; status: number; body: string }): Promise<void>
+
   addListener(
     eventName: 'jobEvent',
     handler: (event: JobEvent) => void,
@@ -217,9 +253,102 @@ interface AevistleNativePlugin extends AndroidPermissionApi {
     eventName: 'updateProgress',
     handler: (progress: DownloadProgress) => void,
   ): Promise<{ remove: () => Promise<void> }>
+  /**
+   * A request arrived on one of the two LAN listeners and a socket is waiting
+   * on the answer. `kind` says which listener; `body` is unparsed text.
+   */
+  addListener(
+    eventName: 'lanRequest',
+    handler: (request: { id: string; kind: 'pair' | 'sync'; body: string }) => void,
+  ): Promise<{ remove: () => Promise<void> }>
 }
 
 const Native = registerPlugin<AevistleNativePlugin>('AevistleNative')
+
+// ---------------------------------------------------------------------------
+// The two LAN listeners, on this side of the bridge
+//
+// Module scope rather than inside `createAndroidBridge`, and the subscription
+// is made on import rather than on first use. A `lanRequest` arrives because
+// another device dialled this one; there is no call of ours to hang the
+// registration off, and a request that lands before anyone subscribed is a
+// socket that sits for twelve seconds and then answers 503 — which reads on the
+// far side as "that device is not ready" for what is really a wiring race.
+// `getBridge` caches, so this module is evaluated once.
+// ---------------------------------------------------------------------------
+
+/**
+ * The HOST session. Native closes the socket when told to; this owns
+ * everything else — see `core/pairingHostLocal.ts`.
+ */
+const pairingHost = new LocalPairingHost(() => Native.stopPairingHost())
+
+/** Set by `onSyncServerRequest`; null while nothing is listening for one. */
+let syncServerHandler: ((request: SyncServerRequest) => void) | null = null
+
+/**
+ * Turn one native `lanRequest` into the right answer.
+ *
+ * The `/sync` half deliberately mirrors `electron/syncServer.ts`'s `handle`
+ * rather than shortcutting: the same shape check, the same 400, and the same
+ * decision to pass a `pairId` this layer cannot verify through to the reducer
+ * that can. What is *not* mirrored is the desktop's `hasDevice` pre-check —
+ * that exists there to avoid waking the renderer for a stranger's request, and
+ * here there is no renderer to wake and no cheaper place to ask.
+ */
+async function routeLanRequest(request: {
+  id: string
+  kind: 'pair' | 'sync'
+  body: string
+}): Promise<void> {
+  const answer = (status: number, body: unknown) =>
+    Native.respondToLanRequest({ id: request.id, status, body: JSON.stringify(body) })
+
+  if (request.kind === 'pair') {
+    // Never throws — see `LocalPairingHost.handle`, which is why there is no
+    // catch here to turn into a socket that hangs.
+    const reply = await pairingHost.handle(request.body)
+    await answer(reply.status, reply.body)
+    return
+  }
+
+  const handler = syncServerHandler
+  if (!handler) {
+    await answer(503, { ok: false, error: 'Aevistle is not ready to answer right now' })
+    return
+  }
+
+  let parsed: { pairId?: unknown; envelope?: { iv?: unknown; ciphertext?: unknown } }
+  try {
+    parsed = JSON.parse(request.body || '{}')
+  } catch {
+    await answer(400, { ok: false, error: 'malformed sync request' })
+    return
+  }
+
+  const pairId = typeof parsed.pairId === 'string' ? parsed.pairId : ''
+  const envelope = parsed.envelope
+  if (
+    !pairId ||
+    !envelope ||
+    typeof envelope.iv !== 'string' ||
+    typeof envelope.ciphertext !== 'string'
+  ) {
+    await answer(400, { ok: false, error: 'malformed sync request' })
+    return
+  }
+
+  // The native id is carried through as the `SyncServerRequest.id`, so
+  // `respondToSyncServer` can answer the socket without a second map to keep in
+  // step with this one.
+  handler({
+    id: request.id,
+    pairId,
+    envelope: { iv: envelope.iv, ciphertext: envelope.ciphertext },
+  })
+}
+
+void Native.addListener('lanRequest', (request) => void routeLanRequest(request))
 
 export function createAndroidBridge(): PlatformBridge & AndroidPermissionApi {
   const bridge: PlatformBridge & AndroidPermissionApi = {
@@ -326,6 +455,14 @@ export function createAndroidBridge(): PlatformBridge & AndroidPermissionApi {
       return result.saved === undefined ? null : { folder: result.folder ?? '', saved: result.saved }
     },
 
+    async saveTextFile(name, mime, text) {
+      const result = await Native.saveTextFile({ name, mime, text })
+      // Widened to the shared `DownloadOutcome` here rather than in Java, so the
+      // one place that decides what a save "means" stays on this side of the
+      // bridge with the desktop's version of the same answer.
+      return { ok: result.ok, cancelled: result.cancelled, name: result.name }
+    },
+
     /**
      * Arm the schedule, then — separately — let the native side decide whether
      * this was the moment to ask for notification permission.
@@ -375,9 +512,7 @@ export function createAndroidBridge(): PlatformBridge & AndroidPermissionApi {
     fetchRemoteImage: (url) => Native.fetchRemoteImage({ url }).then((r) => r.value),
     fetchFeed: (url) => Native.fetchFeed({ url }),
 
-    // Android only ever plays JOINER — there is no way to hold a LAN socket
-    // open from the WebView, and nothing here needs one: the QR code already
-    // came from a HOST that is doing the listening.
+    // JOINER: one POST to the address the QR code carried.
     async pairingJoinRequest(url, body) {
       const result = await Native.pairingRequest({ url, body: JSON.stringify(body) })
       try {
@@ -386,9 +521,8 @@ export function createAndroidBridge(): PlatformBridge & AndroidPermissionApi {
         throw new Error('The other device sent back something unexpected.')
       }
     },
-    // Android is a `SyncLoop` initiator only — see `core/syncLoop.ts`'s
-    // module doc on why only Electron main can *accept* a sync request.
-    // Reaching one is the same relay `pairingJoinRequest` already uses.
+    // `SyncLoop`'s initiating side. The same relay `pairingJoinRequest` uses,
+    // pointed at `/sync` instead.
     async syncRequest(url, body) {
       const result = await Native.pairingRequest({ url, body: JSON.stringify(body) })
       try {
@@ -396,6 +530,64 @@ export function createAndroidBridge(): PlatformBridge & AndroidPermissionApi {
       } catch {
         throw new Error('The other device sent back something unexpected.')
       }
+    },
+
+    // --- HOST, and the accepting side of sync -------------------------------
+    //
+    // Both used to be absent here, on the reasoning that the WebView cannot
+    // hold a LAN socket open. That is still true, and it turned out to be the
+    // wrong conclusion: the socket is the only part that needed to be native.
+    // `LanServer.java` holds it and decides nothing; the handshake runs in
+    // `core/pairingHostLocal.ts` on the same WebCrypto the JOINER role already
+    // used, and the sync answer runs in `state/AppState.tsx` on the same
+    // reducer the desktop answers with.
+    //
+    // What that buys is every pairing direction rather than one: a phone can
+    // show a code for a laptop, for a tablet, or for another phone, and none of
+    // the six combinations needs a desktop in the room any more.
+
+    lanAddresses: () => Native.lanAddresses().then((r) => r.addresses),
+
+    async startPairingHost(mode: PairMode, pairId?: string, host?: string) {
+      // Bind first, arm second: the payload has to carry the port the OS
+      // assigned, so there is nothing to sign until the socket exists.
+      const bound = await Native.startPairingHost({ host }).catch((e: unknown) => {
+        const message = e instanceof Error ? e.message : String(e)
+        throw new Error(
+          message === 'no-network'
+            ? // Deliberately the same sentence `electron/pairingServer.ts`
+              // throws, so the two platforms fail in one voice.
+              'No network is available to pair over — connect to Wi-Fi or a LAN first.'
+            : message,
+        )
+      })
+      return pairingHost.start(bound.host, bound.port, mode, pairId)
+    },
+
+    stopPairingHost: () => pairingHost.stop(),
+
+    onPairingEvent(handler: (event: PairingEvent) => void) {
+      return pairingHost.onEvent(handler)
+    },
+
+    applySyncListener: (enabled: boolean) => Native.applySyncListener({ enabled }),
+
+    onSyncServerRequest(handler: (request: SyncServerRequest) => void) {
+      syncServerHandler = handler
+      return () => {
+        if (syncServerHandler === handler) syncServerHandler = null
+      }
+    },
+
+    async respondToSyncServer(response: SyncServerResponse) {
+      // The id *is* the native request id — see `routeLanRequest`. The body is
+      // the whole response object, matching what `electron/syncServer.ts`
+      // sends, so `SyncLoop`'s initiating side reads one shape either way.
+      await Native.respondToLanRequest({
+        id: response.id,
+        status: response.ok ? 200 : 400,
+        body: JSON.stringify(response),
+      })
     },
     // No native push exists yet — WorkManager's periodic sync updates its own
     // cache silently and the UI catches up on the next manual or app-open

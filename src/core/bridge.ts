@@ -209,6 +209,20 @@ export interface PlatformBridge {
    * download UI is the feedback and callers keep their optimistic toast.
    */
   onDownloadDone?(handler: (outcome: DownloadOutcome) => void): () => void
+  /**
+   * Optional: write a generated file straight to a location the user picks,
+   * for platforms where `<a download>` does nothing.
+   *
+   * Android only, and it is what lets a phone export at all. `<a download>` is
+   * inert in a Capacitor WebView, so `core/download.ts` used to refuse there and
+   * say so — which meant the phone could import a backup, a transfer file, a
+   * pairing file and an .ics, and export none of the four. See `saveTextFile` in
+   * `AevistleNativePlugin.java`.
+   *
+   * Returns the same `DownloadOutcome` the desktop reports after its own save
+   * dialog, including `cancelled`, so callers need no platform branch.
+   */
+  saveTextFile?(name: string, mime: string, text: string): Promise<DownloadOutcome>
 
   // --- control interface (desktop only) ------------------------------------
   // Optional because only the desktop build can listen on a socket or watch a

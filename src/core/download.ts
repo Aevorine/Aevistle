@@ -56,18 +56,42 @@ export async function saveGeneratedFile(
   const listen = platform.onDownloadDone?.bind(platform)
 
   /*
-   * Android cannot do this at all, and must say so.
+   * Android takes a different route entirely.
    *
    * The `<a download>` below is a no-op in a Capacitor WebView: without a
    * `DownloadListener` nothing is offered, and even with one, Android's
    * DownloadManager cannot fetch a `blob:` URL. So the button ran, nothing
-   * happened, and the card said "exported" — the exact silent failure this
-   * app exists not to do. Saving here needs a native SAF round trip
-   * (`ACTION_CREATE_DOCUMENT`), which does not exist yet; until it does, an
-   * honest "not on this device" beats a success message that is a lie.
+   * happened, and the card said "exported" — the exact silent failure this app
+   * exists not to do. That was met with an honest refusal, which was the right
+   * call while nothing better existed and the wrong thing to leave in place: it
+   * meant a phone could *import* a backup, a transfer file, a pairing file and
+   * a working calendar, and export none of the four.
+   *
+   * The native SAF round trip is what was missing, and
+   * `saveTextFile` is it — the same `ACTION_CREATE_DOCUMENT` dialog
+   * `saveAttachmentAs` already used, with the bytes coming from here instead of
+   * from disk. It reports `cancelled` the way the desktop's save dialog does, so
+   * every caller's existing three-way toast (saved / cancelled / failed) is
+   * already correct with no Android branch.
+   *
+   * `unsupported` is still returned when the method is missing, which is a build
+   * running against an older native side. Refusing there is better than a
+   * success nobody wrote a file for.
    */
   if (detectPlatform() === 'android') {
-    return { outcome: null, unsupported: 'android' }
+    const save = platform.saveTextFile?.bind(platform)
+    if (!save) return { outcome: null, unsupported: 'android' }
+    try {
+      return { outcome: await save(fileName, mime, content) }
+    } catch (error) {
+      return {
+        outcome: {
+          ok: false,
+          cancelled: false,
+          name: error instanceof Error ? error.message : String(error),
+        },
+      }
+    }
   }
 
   return new Promise<SaveResult>((resolve) => {

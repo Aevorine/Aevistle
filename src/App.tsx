@@ -5,7 +5,7 @@ import { I18nContext, useI18n } from './i18n'
 import { Banner, IconButton, ToastProvider, useToast } from './components/ui'
 import { ShortcutsDialog, matchShortcut } from './components/Shortcuts'
 import { HOME_SECTIONS, MOBILE_NAV, NAV, type ViewId } from './core/nav'
-import { useNarrow } from './components/useNarrow'
+import { useMobileShell, useNarrow } from './components/useNarrow'
 import { DataFolderSetup } from './components/DataFolderSetup'
 import {
   IconActivity,
@@ -122,9 +122,26 @@ function Shell() {
    *
    * The *screens* are identical either way. Only which of them the bar can
    * reach directly changes, and Home is the door to the rest.
+   *
+   * Width, deliberately, and not `useMobileShell`. The bar is the one decision
+   * on this screen that genuinely turns on how much room there is: a 1280px
+   * tablet fits nine tabs, and folding four of them behind Home to match a phone
+   * would cost a tap each and buy nothing back. What the tablet *did* need
+   * changing is the dialog and Settings structure, which is a different question
+   * asked in a different place — see `useMobileShell` below.
    */
   const narrow = useNarrow()
   const navItems = narrow ? MOBILE_NAV : NAV
+
+  /**
+   * Keep `data-shell` on the root element in step for the rest of the run.
+   *
+   * `main.tsx` sets it before the first paint; this is what moves it when a
+   * desktop window is dragged across 760px. The return value is unused here —
+   * `SettingsView` asks the same question for itself — but the effect inside is
+   * what every full-screen dialog in the app is styled by.
+   */
+  useMobileShell(bridge?.platform === 'android')
 
   /**
    * Which tab to light up.

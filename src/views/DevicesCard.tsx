@@ -9,9 +9,21 @@
  * `bridge.startPairingHost` for a ~2-minute LAN listener, draw the payload it
  * returns as a QR code, and — when the `connected` event arrives carrying an
  * `OngoingPairingSecret` — write the long-lived key to the keystore and save
- * the `PairedDevice`. HOST-only, because only Electron main can hold a LAN
- * socket open; a build without `startPairingHost` does not draw the button at
- * all and says why instead.
+ * the `PairedDevice`.
+ *
+ * Available on the desktop and on Android both, and it was desktop-only until
+ * `LanServer.java` and `core/pairingHostLocal.ts` landed. The old restriction
+ * was read off the wrong thing: Electron main is the only place that can hold a
+ * LAN socket open *in Node*, which was taken to mean the only place that can
+ * host at all, so a phone could scan a code and never show one. Since the
+ * handshake is `core/pairing.ts` running on WebCrypto and the socket is the only
+ * genuinely native part, Android needed a `ServerSocket` and nothing else.
+ *
+ * What that fixes is not one direction but five. Every combination now works
+ * from either end — phone/computer, phone/phone, tablet/computer,
+ * tablet/tablet, tablet/phone — where before, every pairing needed a desktop in
+ * the room to be the one showing the code. A build with neither role (the web
+ * sandbox) still draws no button and says why instead.
  *
  * **Join with a code** is the JOINER role: `PairingScanner` decodes a camera
  * frame or pasted text into a `PairingPayload`, `joinPairing` completes the
@@ -45,8 +57,19 @@
  *
  * **Regenerate** re-runs the ECDH handshake with the same device (same
  * `pairId`, so sync history is untouched) and only exists for `'ongoing'`
- * rows — a `'once'` pairing kept nothing to regenerate. HOST-only, the same
- * restriction as pairing itself.
+ * rows — a `'once'` pairing kept nothing to regenerate. HOST role, the same as
+ * pairing itself, and available on the same platforms.
+ *
+ * ## Where the panels live
+ *
+ * All three panels are dialogs. They were cards appended after the list, which
+ * is a panel opening below a button on a desktop and something else entirely on
+ * a phone: Settings is itself a full-height dialog there, the devices card fills
+ * it, and so the QR code or the camera preview a tap produced was off-screen
+ * with no indication it had appeared. A dialog puts each panel where the tap
+ * was, and gives it the one thing an appended card never had — a close button.
+ * Closing runs the same teardown Cancel did, so the listener stops and the
+ * camera is released rather than being left running behind a dismissed panel.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -58,6 +81,7 @@ import {
   EmptyState,
   Field,
   IconButton,
+  Modal,
   Segmented,
   StatusChip,
   useConfirm,
@@ -113,7 +137,25 @@ export function DevicesCard() {
 
   const [scopes, setScopes] = useState<Set<SyncScopeKey>>(() => new Set(SYNC_SCOPE_KEYS))
   const [label, setLabel] = useState('')
-  const [otherPlatform, setOtherPlatform] = useState<PairedDevicePlatform>('android')
+  /**
+   * What is on the other end — asked, not inferred, and defaulted to the
+   * opposite of whatever this device is.
+   *
+   * It used to be hard-coded to `'android'` for the HOST role and to
+   * `'windows'` for the JOINER, on the reasoning that a pairing code can only
+   * have been served by the desktop build. That reasoning is gone: a phone
+   * hosts now (see `bridge-android.ts`), so a joiner accepting a code has no
+   * way to know whether it came from a laptop, a tablet or another phone, and
+   * a record that guessed wrong shows the wrong icon and the wrong name for the
+   * rest of the pairing's life.
+   *
+   * The default is the *opposite* platform rather than a fixed one because the
+   * common case for both roles is pairing a phone with a computer; someone
+   * pairing two phones changes one control.
+   */
+  const [otherPlatform, setOtherPlatform] = useState<PairedDevicePlatform>(() =>
+    bridge?.platform === 'android' ? 'windows' : 'android',
+  )
   const labelId = useFieldId('devlabel')
 
   /**
@@ -283,16 +325,17 @@ export function DevicesCard() {
         setJoinError(t('devices.joinNotOngoing'))
         return
       }
-      const name = label.trim() || t('devices.platformWindows')
+      const name = label.trim() || platformName(otherPlatform)
       await bridge.setSecret(joined.ongoing.pairId, joined.ongoing.longLivedKeyB64, 'sync')
       dispatch({
         type: 'upsertPairedDevice',
         device: {
           id: joined.ongoing.pairId,
           label: name,
-          // A pairing code can only have been served by a machine holding a
-          // LAN socket open, which is the desktop build alone.
-          platform: 'windows',
+          // Whatever the user said it was. Nothing in the handshake carries the
+          // host's platform, and since `bridge-android.ts` learned to host, the
+          // host is no longer necessarily a desktop.
+          platform: otherPlatform,
           pairedAt: Date.now(),
           mode: 'ongoing',
           scopes: [...scopes],
@@ -348,14 +391,32 @@ export function DevicesCard() {
     toast.push({ tone: 'info', title: t('devices.revoke'), detail: device.label })
   }
 
-  const shareForm = (placeholder: string) => (
+  /**
+   * The two questions both roles have to ask, in one place.
+   *
+   * The platform picker used to live only in the HOST branch. Both roles write
+   * a `PairedDevice`, both need its `platform`, and only the user knows — so it
+   * belongs to whatever they have in common rather than to one of them.
+   */
+  const shareForm = () => (
     <>
+      <Field label={t('devices.otherPlatform')}>
+        <Segmented
+          value={otherPlatform}
+          onChange={setOtherPlatform}
+          ariaLabel={t('devices.otherPlatform')}
+          options={[
+            { value: 'android', label: t('devices.platformAndroid'), icon: <IconSmartphone size={14} /> },
+            { value: 'windows', label: t('devices.platformWindows'), icon: <IconMonitor size={14} /> },
+          ]}
+        />
+      </Field>
       <Field label={t('devices.deviceLabel')} hint={t('devices.deviceLabelHint')} htmlFor={labelId}>
         <input
           id={labelId}
           className="input"
           value={label}
-          placeholder={placeholder}
+          placeholder={platformName(otherPlatform)}
           onChange={(e) => setLabel(e.target.value)}
         />
       </Field>
@@ -492,10 +553,35 @@ export function DevicesCard() {
         </div>
       </Card>
 
+      {/*
+        Dialogs, not cards appended to the list.
+
+        All three of these used to render as another `<Card>` after the one
+        above, which on a desktop reads as a panel opening underneath the
+        button. On a phone it does not: Settings is a full-height dialog, the
+        devices card fills it, and the panel a tap opened was somewhere below
+        the fold — so "Use a code from another device" turned the camera on
+        off-screen, and the QR code appeared somewhere the person holding the
+        phone had to go looking for. That is the "the pop-up card is in the
+        wrong place" and "the camera is not where the tap was" report.
+
+        A dialog puts each one where the tap was, gives it the whole screen on
+        a phone or tablet (see the `data-shell="mobile"` rules in `app.css`),
+        and — the part that was missing entirely — one unambiguous way out of
+        it. `onClose` is the same teardown the Cancel buttons already ran, so
+        closing the QR panel drops the LAN listener and closing the scanner
+        releases the camera, rather than leaving either running behind a
+        dismissed dialog.
+      */}
       {session?.kind === 'new' ? (
-        <Card>
-          <CardHeader title={t('devices.pairNew')} />
-          <div className="card__body form-rows">
+        <Modal
+          open
+          fullscreen
+          title={t('devices.pairNew')}
+          onClose={closeHost}
+          closeLabel={t('common.close')}
+        >
+          <div className="form-rows">
             {hostStarted ? (
               <>
                 <PairingQr
@@ -555,18 +641,7 @@ export function DevicesCard() {
               </>
             ) : (
               <>
-                <Field label={t('devices.otherPlatform')}>
-                  <Segmented
-                    value={otherPlatform}
-                    onChange={setOtherPlatform}
-                    ariaLabel={t('devices.otherPlatform')}
-                    options={[
-                      { value: 'android', label: t('devices.platformAndroid'), icon: <IconSmartphone size={14} /> },
-                      { value: 'windows', label: t('devices.platformWindows'), icon: <IconMonitor size={14} /> },
-                    ]}
-                  />
-                </Field>
-                {shareForm(platformName(otherPlatform))}
+                {shareForm()}
 
                 {/* Only when there is a decision to make. One address is not a
                     choice, and a select with a single option in it is a
@@ -613,13 +688,19 @@ export function DevicesCard() {
               </>
             )}
           </div>
-        </Card>
+        </Modal>
       ) : null}
 
       {session?.kind === 'regenerate' ? (
-        <Card>
-          <CardHeader title={t('devices.regenerate')} hint={session.device.label} />
-          <div className="card__body">
+        <Modal
+          open
+          fullscreen
+          title={t('devices.regenerate')}
+          onClose={closeHost}
+          closeLabel={t('common.close')}
+        >
+          <div className="form-rows">
+            <div className="field__hint field__hint--keep">{session.device.label}</div>
             <PairingQr
               payload={hostPayload}
               status={hostStatus}
@@ -629,22 +710,28 @@ export function DevicesCard() {
               lockMode
               otherPlatform={session.device.platform}
             />
-            <div className="btn-row" style={{ marginTop: 'var(--sp-2)' }}>
-              <Button variant="ghost" onClick={closeHost}>
-                {t('common.cancel')}
-              </Button>
-            </div>
           </div>
-        </Card>
+        </Modal>
       ) : null}
 
       {joining ? (
-        <Card>
-          <CardHeader title={t('devices.joinTitle')} hint={t('devices.joinHint')} />
-          <div className="card__body form-rows">
+        <Modal
+          open
+          fullscreen
+          title={t('devices.joinTitle')}
+          onClose={closeJoin}
+          closeLabel={t('common.close')}
+        >
+          <div className="form-rows">
+            <div className="field__hint field__hint--keep">{t('devices.joinHint')}</div>
             {joinDone ? (
               <>
-                <DeviceLinkAnimation status="connected" size="card" leftPlatform={thisPlatform} rightPlatform="windows" />
+                <DeviceLinkAnimation
+                  status="connected"
+                  size="card"
+                  leftPlatform={thisPlatform}
+                  rightPlatform={otherPlatform}
+                />
                 <Banner tone="success" title={t('pairing.connected')}>
                   {t('pairing.secureChannelHint')}
                 </Banner>
@@ -656,13 +743,13 @@ export function DevicesCard() {
               </>
             ) : (
               <>
-                {shareForm(t('devices.platformWindows'))}
+                {shareForm()}
                 {joinBusy ? (
                   <DeviceLinkAnimation
                     status="connecting"
                     size="card"
                     leftPlatform={thisPlatform}
-                    rightPlatform="windows"
+                    rightPlatform={otherPlatform}
                   />
                 ) : joinError ? (
                   // The camera stays off until this is cleared: the code that
@@ -680,24 +767,24 @@ export function DevicesCard() {
                       <Button variant="primary" onClick={() => setJoinError('')}>
                         {t('common.retry')}
                       </Button>
-                      <Button variant="ghost" onClick={closeJoin}>
-                        {t('common.cancel')}
-                      </Button>
                     </div>
                   </>
                 ) : scopes.size > 0 ? (
-                  <PairingScanner onDecoded={onDecoded} onCancel={closeJoin} />
+                  // No `onCancel`: the dialog's own close button is the one way
+                  // out now, and a second one inside the scanner is a second
+                  // answer to "how do I get rid of this". `PairingScanner`
+                  // releases the camera on unmount, which closing the dialog is.
+                  <PairingScanner onDecoded={onDecoded} />
                 ) : (
-                  <div className="btn-row">
-                    <Button variant="ghost" onClick={closeJoin}>
-                      {t('common.cancel')}
-                    </Button>
-                  </div>
+                  // Nothing. `SyncScopePicker` already says "choose at least
+                  // one" in place, which is both the reason the camera is off
+                  // and the thing to do about it.
+                  null
                 )}
               </>
             )}
           </div>
-        </Card>
+        </Modal>
       ) : null}
 
       <SyncConflictList />

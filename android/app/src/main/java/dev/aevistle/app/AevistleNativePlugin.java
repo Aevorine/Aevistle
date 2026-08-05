@@ -670,6 +670,221 @@ public class AevistleNativePlugin extends Plugin {
     }
 
     // -----------------------------------------------------------------------
+    // LAN listeners — the accepting side of pairing and of ongoing sync
+    //
+    // The mirror image of the relay above. That one dials another device
+    // because the WebView cannot; these accept a connection because the WebView
+    // cannot do that either — and then hand the body straight back to it,
+    // because everything that has to be *decided* about the body needs keys and
+    // state that only the WebView holds. See `LanServer.java`'s header for why
+    // the handshake is not reimplemented here, and `core/pairingHostLocal.ts`
+    // for the side that actually answers.
+    // -----------------------------------------------------------------------
+
+    /**
+     * How long a socket handler waits for the WebView to answer.
+     *
+     * Shorter than the 15s an Android peer allows for a reply, so a device that
+     * cannot answer says 503 rather than letting the other end time out — the
+     * two failures look identical on the far side and only one of them is
+     * honest. The WebView being frozen because the app was backgrounded is the
+     * ordinary case this covers, and it is exactly the limitation
+     * `devices.ongoingHint` already states on screen: sync happens while both
+     * apps are open, and nothing here wakes one that is not.
+     */
+    private static final long LAN_ANSWER_TIMEOUT_MS = 12_000L;
+
+    /**
+     * Requests waiting on the WebView, keyed by the id it will answer with.
+     *
+     * A single-slot queue per request rather than a shared lock: two devices can
+     * be mid-sync at once, and an answer arriving for one must not wake the
+     * handler for the other.
+     */
+    private final java.util.Map<String, java.util.concurrent.ArrayBlockingQueue<LanServer.Reply>> lanWaiting =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    private final java.util.concurrent.atomic.AtomicLong lanRequestSeq = new java.util.concurrent.atomic.AtomicLong();
+
+    private final LanServer.Relay lanRelay = new LanServer.Relay() {
+        @Override
+        public LanServer.Reply dispatch(String kind, String body) {
+            String id = kind + "-" + lanRequestSeq.incrementAndGet();
+            java.util.concurrent.ArrayBlockingQueue<LanServer.Reply> slot =
+                    new java.util.concurrent.ArrayBlockingQueue<>(1);
+            lanWaiting.put(id, slot);
+            try {
+                JSObject event = new JSObject();
+                event.put("id", id);
+                event.put("kind", kind);
+                event.put("body", body);
+                notifyListeners("lanRequest", event);
+                return slot.poll(LAN_ANSWER_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return null;
+            } finally {
+                lanWaiting.remove(id);
+            }
+        }
+    };
+
+    /** Lives for one ~2-minute handshake, on an OS-assigned port published only in the QR code. */
+    private final LanServer pairingServer = new LanServer("/pair", "pair", lanRelay);
+    /** Lives for as long as this device has an 'ongoing' pairing, on the fixed port `core/syncLoop.ts` names. */
+    private final LanServer syncServer = new LanServer("/sync", "sync", lanRelay);
+
+    /** Must stay identical to `SYNC_SERVER_PORT` in `src/core/syncLoop.ts`. */
+    private static final int SYNC_SERVER_PORT = 47821;
+
+    /**
+     * The pairing socket's own ceiling, as a backstop only.
+     *
+     * `PAIRING_SESSION_MS` in `core/pairing.ts` is 120s and the JS side closes
+     * this listener itself — on a completed handshake, on its own expiry timer,
+     * and when the user cancels. The slack on top is so those three normally win
+     * the race; this deadline exists for the one case they cannot cover, which is
+     * the WebView going away without having stopped anything.
+     */
+    private static final long PAIRING_SOCKET_MAX_MS = 150_000L;
+
+    @PluginMethod
+    public void lanAddresses(PluginCall call) {
+        JSObject result = new JSObject();
+        result.put("addresses", new JSArray(LanAddresses.list()));
+        call.resolve(result);
+    }
+
+    @PluginMethod
+    public void startPairingHost(PluginCall call) {
+        final String requested = call.getString("host");
+        io.execute(() -> {
+            try {
+                // An override is honoured only if this device actually holds
+                // that address — the same allowlist rule, and the same reason,
+                // as `PairingServer.start` on the desktop.
+                String host = LanAddresses.holds(requested) ? requested : LanAddresses.best();
+                if (host == null) {
+                    call.reject("no-network");
+                    return;
+                }
+                // Port 0: the OS assigns one, and it is published only inside
+                // the QR code. A fixed port would be guessable without ever
+                // scanning anything.
+                int port = pairingServer.start(host, 0, PAIRING_SOCKET_MAX_MS);
+                JSObject result = new JSObject();
+                result.put("host", host);
+                result.put("port", port);
+                call.resolve(result);
+            } catch (Exception e) {
+                call.reject(e.getMessage() == null ? e.toString() : e.getMessage(), e);
+            }
+        });
+    }
+
+    @PluginMethod
+    public void stopPairingHost(PluginCall call) {
+        pairingServer.close();
+        call.resolve();
+    }
+
+    /**
+     * Bring the sync listener up or down to match whether this device has
+     * anything to answer for — driven from the JS side, which is the side that
+     * knows. Same contract as `SyncServer.apply` and same `SyncListenerStatus`
+     * shape back, so `state/AppState.tsx` needs no Android branch.
+     */
+    @PluginMethod
+    public void applySyncListener(PluginCall call) {
+        final boolean enabled = Boolean.TRUE.equals(call.getBoolean("enabled", false));
+        io.execute(() -> {
+            if (!enabled) {
+                syncServer.close();
+                JSObject off = new JSObject();
+                off.put("listening", false);
+                call.resolve(off);
+                return;
+            }
+
+            if (syncServer.isListening()) {
+                JSObject already = new JSObject();
+                already.put("listening", true);
+                String host = LanAddresses.best();
+                if (host != null) already.put("address", host + ":" + SYNC_SERVER_PORT);
+                call.resolve(already);
+                return;
+            }
+
+            String host = LanAddresses.best();
+            if (host == null) {
+                JSObject none = new JSObject();
+                none.put("listening", false);
+                none.put("error", "noNetwork");
+                call.resolve(none);
+                return;
+            }
+
+            JSObject result = new JSObject();
+            try {
+                syncServer.start(host, SYNC_SERVER_PORT, 0L);
+                result.put("listening", true);
+                result.put("address", host + ":" + SYNC_SERVER_PORT);
+            } catch (java.net.BindException e) {
+                result.put("listening", false);
+                result.put("error", "portInUse");
+                result.put("detail", e.getMessage() == null ? e.toString() : e.getMessage());
+            } catch (SecurityException e) {
+                result.put("listening", false);
+                result.put("error", "blocked");
+                result.put("detail", e.getMessage() == null ? e.toString() : e.getMessage());
+            } catch (Exception e) {
+                result.put("listening", false);
+                result.put("error", "failed");
+                result.put("detail", e.getMessage() == null ? e.toString() : e.getMessage());
+            }
+            call.resolve(result);
+        });
+    }
+
+    /**
+     * The WebView's answer to a `lanRequest`.
+     *
+     * Resolves even when the id is unknown, which is the ordinary case for an
+     * answer that lost the race against {@link #LAN_ANSWER_TIMEOUT_MS}: the
+     * socket is gone, there is nothing to be done about it, and rejecting would
+     * only surface a failure on a screen that has already moved on.
+     */
+    @PluginMethod
+    public void respondToLanRequest(PluginCall call) {
+        String id = call.getString("id");
+        if (id == null) {
+            call.reject("id is required");
+            return;
+        }
+        java.util.concurrent.ArrayBlockingQueue<LanServer.Reply> slot = lanWaiting.get(id);
+        if (slot != null) {
+            slot.offer(new LanServer.Reply(
+                    call.getInt("status", 200),
+                    call.getString("body", "{}")));
+        }
+        call.resolve();
+    }
+
+    /**
+     * Both listeners go down with the Activity.
+     *
+     * Without this, a configuration change that recreates the Activity would
+     * leave the old accept threads holding the ports, and the new instance's
+     * `applySyncListener` would report `portInUse` against itself.
+     */
+    @Override
+    protected void handleOnDestroy() {
+        pairingServer.close();
+        syncServer.close();
+        super.handleOnDestroy();
+    }
+
+    // -----------------------------------------------------------------------
     // Files
     // -----------------------------------------------------------------------
 
@@ -903,6 +1118,75 @@ public class AevistleNativePlugin extends Plugin {
             }
             copyToUri(source, target);
             response.put("value", displayName(target, source.getName()));
+            call.resolve(response);
+        } catch (Exception e) {
+            call.reject("Could not save the file: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * "Save this text where I choose" — the same dialog as
+     * {@link #saveAttachmentAs}, for a file that does not exist on disk yet.
+     *
+     * Every generated export in this app (a backup, a reminder transfer file, an
+     * encrypted pairing file, a working calendar as .ics) is built as a string in
+     * the WebView and handed to `core/download.ts`, which triggers an
+     * `<a download>`. That is a no-op in a Capacitor WebView, so `download.ts`
+     * refused outright on Android and said so — honest, and it meant the phone
+     * could import all four kinds of file and export none of them.
+     *
+     * The missing piece was only ever the SAF round trip, which
+     * {@code saveAttachmentAs} already does for a file inside the data folder.
+     * This is the same journey with the bytes coming from the call instead of
+     * from disk, so nothing is written to app storage on the way — the text goes
+     * straight to the {@code content://} URI the user just pointed at.
+     */
+    @PluginMethod
+    public void saveTextFile(PluginCall call) {
+        String name = call.getString("name");
+        if (name == null || name.isEmpty()) {
+            call.reject("name is required");
+            return;
+        }
+        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT)
+                .addCategory(Intent.CATEGORY_OPENABLE)
+                // The caller's MIME, not `mimeOfName`: an .ics is `text/calendar`
+                // and the extension table here is built for attachments.
+                .setType(call.getString("mime", "application/octet-stream"))
+                .putExtra(Intent.EXTRA_TITLE, new File(name).getName());
+        startActivityForResult(call, intent, "textFileTargetPicked");
+    }
+
+    @ActivityCallback
+    private void textFileTargetPicked(PluginCall call, ActivityResult result) {
+        if (call == null) return;
+        JSObject response = new JSObject();
+        Uri target = result.getData() == null ? null : result.getData().getData();
+        String suggested = new File(call.getString("name", "export")).getName();
+
+        if (result.getResultCode() != Activity.RESULT_OK || target == null) {
+            // Cancelled is an answer, not a failure — `DownloadOutcome` has a
+            // field for it and the toast on the other side is deliberately calm.
+            response.put("ok", false);
+            response.put("cancelled", true);
+            response.put("name", suggested);
+            call.resolve(response);
+            return;
+        }
+
+        try {
+            byte[] bytes = call.getString("text", "").getBytes(StandardCharsets.UTF_8);
+            OutputStream out = getContext().getContentResolver().openOutputStream(target, "wt");
+            if (out == null) throw new IOException("that location cannot be written to");
+            try {
+                out.write(bytes);
+                out.flush();
+            } finally {
+                out.close();
+            }
+            response.put("ok", true);
+            response.put("cancelled", false);
+            response.put("name", displayName(target, suggested));
             call.resolve(response);
         } catch (Exception e) {
             call.reject("Could not save the file: " + e.getMessage(), e);
