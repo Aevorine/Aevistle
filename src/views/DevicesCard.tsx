@@ -55,10 +55,41 @@
  * request with a key this machine no longer has, at which point it is
  * prompted to re-pair. Not instant, not remote, and the copy says so.
  *
+ * It is a button with a word on it, not the bare trash icon it started as.
+ * The icon alone was found by nobody: it sits at the end of a row that already
+ * opens with an icon, so it reads as part of the decoration rather than as the
+ * one destructive control on this screen. The accessible-name problem that
+ * made it an `IconButton` in the first place — every icon in `icons.tsx` is
+ * `aria-hidden`, so an icon-only text button has no name at all — is answered
+ * just as well by a visible label, and answered for sighted users too.
+ *
+ * **Leave the pairing** is that same revoke applied to every record at once,
+ * offered from a row standing for *this* device at the top of the list. The
+ * list held only the other devices, which left this machine's own membership
+ * as the single thing on the screen with no control attached to it: someone
+ * passing a laptop on could delete the rows one by one and still had no way to
+ * say "take me out of this". It runs the same per-record teardown, so key
+ * handling lives in exactly one place, and it is one-sided for exactly the
+ * same reason — `devices.leavePairingConfirm` repeats the claim
+ * `devices.revokeConfirm` makes, that the other devices keep their own records
+ * until they revoke too.
+ *
  * **Regenerate** re-runs the ECDH handshake with the same device (same
  * `pairId`, so sync history is untouched) and only exists for `'ongoing'`
  * rows — a `'once'` pairing kept nothing to regenerate. HOST role, the same as
  * pairing itself, and available on the same platforms.
+ *
+ * **Revoke this code** kills the listener a QR code points at without closing
+ * the panel around it. Until it existed, the only way to take a code back was
+ * to dismiss the whole dialog — which is right when you are finished and wrong
+ * when you are not: someone who has just noticed the wrong person reading the
+ * screen wants that code dead *and* the panel still open, ready to mint
+ * another. It calls the same `bridge.stopPairingHost()` that `closeHost` and
+ * the address picker already call — there is one teardown here, not three —
+ * and then puts the panel into a state that cannot be mistaken for a live
+ * code: the QR is gone outright, replaced by a notice and the regenerate
+ * button. There is deliberately no arrangement in which the listener is down
+ * and a scannable code is still drawn.
  *
  * ## Where the panels live
  *
@@ -70,6 +101,25 @@
  * was, and gives it the one thing an appended card never had — a close button.
  * Closing runs the same teardown Cancel did, so the listener stops and the
  * camera is released rather than being left running behind a dismissed panel.
+ *
+ * ## The camera goes first
+ *
+ * Inside the joining dialog the scanner is the first thing in the body and the
+ * biggest thing in it. It used to be the last: the platform picker, the name
+ * field and the whole `SyncScopePicker` list rendered above it, which is
+ * 400-500px of form on a 390px phone, so the viewfinder — the entire point of
+ * the button that opened this — began below the fold. Making the panel a
+ * dialog fixed *where* it opened without fixing *what* was at the top of it,
+ * and "相机的位置操作比较不直观" is that same report arriving a second time.
+ *
+ * The three controls are not gone, they are behind a disclosure, because not
+ * one of them has to be answered before scanning: `scopes` starts as every
+ * key, `otherPlatform` starts as the opposite of whatever this device is, and
+ * an empty name falls back to the platform's own. Someone pairing a phone with
+ * a laptop and syncing all of it — the common case — taps "use a code" and
+ * gets a camera. The one answer that genuinely is required is "at least one
+ * scope", and clearing them all forces the disclosure open and puts the reason
+ * where the viewfinder was, rather than leaving a dialog with nothing in it.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -80,7 +130,6 @@ import {
   CardHeader,
   EmptyState,
   Field,
-  IconButton,
   Modal,
   Segmented,
   StatusChip,
@@ -88,7 +137,15 @@ import {
   useFieldId,
   useToast,
 } from '../components/ui'
-import { IconKey, IconLink, IconMonitor, IconQr, IconSmartphone, IconTrash } from '../components/icons'
+import {
+  IconKey,
+  IconLink,
+  IconMonitor,
+  IconQr,
+  IconRefresh,
+  IconSmartphone,
+  IconTrash,
+} from '../components/icons'
 import { PairingQr, type PairingHostStatus } from '../components/PairingQr'
 import { PairingScanner } from '../components/PairingScanner'
 import { SyncScopePicker } from '../components/SyncScopePicker'
@@ -129,11 +186,26 @@ export function DevicesCard() {
   const [hostPayload, setHostPayload] = useState<PairingPayload | null>(null)
   const [hostStatus, setHostStatus] = useState<PairingHostStatus>('listening')
   const [hostError, setHostError] = useState<string | undefined>(undefined)
+  /**
+   * The user took the code back — see `revokeCode`. Its own flag rather than a
+   * `PairingHostStatus`, because that type is the *host's* report of what the
+   * session is doing and this is the one transition the host never announces:
+   * `stopPairingHost` drops the listener without emitting anything the effect
+   * below could hear.
+   */
+  const [hostRevoked, setHostRevoked] = useState(false)
 
   const [joining, setJoining] = useState(false)
   const [joinBusy, setJoinBusy] = useState(false)
   const [joinDone, setJoinDone] = useState(false)
   const [joinError, setJoinError] = useState('')
+  /**
+   * Whether the joining dialog's name/platform/scope controls are unfolded.
+   * Closed to begin with, which is the whole of "the camera goes first" in the
+   * module doc: every one of those three has a working default, so none of
+   * them is worth the screen the viewfinder needs.
+   */
+  const [joinOptions, setJoinOptions] = useState(false)
 
   const [scopes, setScopes] = useState<Set<SyncScopeKey>>(() => new Set(SYNC_SCOPE_KEYS))
   const [label, setLabel] = useState('')
@@ -260,6 +332,7 @@ export function DevicesCard() {
     setHostPayload(null)
     setHostError(undefined)
     setHostStatus('listening')
+    setHostRevoked(false)
     try {
       const payload = await bridge.startPairingHost(
         'ongoing',
@@ -303,6 +376,7 @@ export function DevicesCard() {
     setHostPayload(null)
     setHostError(undefined)
     setHostStatus('listening')
+    setHostRevoked(false)
     void loadAddresses()
   }
 
@@ -310,7 +384,57 @@ export function DevicesCard() {
     void bridge?.stopPairingHost?.()
     setSession(null)
     setHostStarted(false)
+    setHostRevoked(false)
   }
+
+  /**
+   * Take back the code that is on screen, without taking the panel with it.
+   *
+   * The teardown is `closeHost`'s and the address picker's, unchanged and
+   * unduplicated: one `stopPairingHost()`, after which nothing on this machine
+   * will answer the token baked into that QR. What differs is only what is
+   * left standing — the dialog, so the regenerate path is one tap away instead
+   * of a fresh trip through the settings card.
+   *
+   * `hostPayload` is cleared along with the flag rather than merely being
+   * hidden. Nothing downstream should be able to redraw a code whose listener
+   * is gone; leaving the payload in state and relying on every reader to
+   * check a second variable is exactly the arrangement that ends in a
+   * scannable code with nothing behind it.
+   */
+  const revokeCode = () => {
+    void bridge?.stopPairingHost?.()
+    setHostPayload(null)
+    setHostRevoked(true)
+  }
+
+  /**
+   * The one control the two host dialogs share below the code: "revoke this"
+   * while a code is live, and "draw another" once it is not. `null` in every
+   * other state — there is nothing to revoke before a payload arrives, and a
+   * connected session has already spent its code.
+   */
+  const hostCodeAction = (open: HostSession) =>
+    hostRevoked ? (
+      <Button
+        variant="primary"
+        icon={<IconRefresh size={15} />}
+        onClick={() => void startHost(open)}
+      >
+        {t('pairing.regenerate')}
+      </Button>
+    ) : hostPayload && hostStatus === 'listening' ? (
+      <Button variant="ghost" onClick={revokeCode}>
+        {t('devices.revokeCode')}
+      </Button>
+    ) : null
+
+  /** What stands where the QR code was. See `revokeCode`. */
+  const revokedNotice = () => (
+    <Banner tone="warning" title={t('devices.codeRevoked')}>
+      {t('devices.codeRevokedHint')}
+    </Banner>
+  )
 
   // --- JOINER ---------------------------------------------------------------
 
@@ -367,6 +491,11 @@ export function DevicesCard() {
     setJoinBusy(false)
     setJoinDone(false)
     setJoinError('')
+    // Folded again on every opening: the point of the disclosure is that the
+    // camera is what a tap on "use a code" produces, and a remembered
+    // expansion would put the form back on top for everyone who ever opened
+    // it once.
+    setJoinOptions(false)
   }
 
   const closeJoin = () => {
@@ -374,9 +503,37 @@ export function DevicesCard() {
     setJoinBusy(false)
     setJoinDone(false)
     setJoinError('')
+    setJoinOptions(false)
   }
 
+  /**
+   * Open because the user opened it, or open because it has to be: an empty
+   * scope set is the one state where an answer is compulsory, and the control
+   * that answers it cannot be behind a fold.
+   *
+   * `scopes` outlives a dialog — it is settings-card state, not dialog state,
+   * so a set emptied and then closed comes back empty next time, with
+   * `joinOptions` freshly reset to `false` by `openJoin`. That is the case
+   * this second term exists for; the latch in `shareForm`'s `onChange` covers
+   * the same session.
+   */
+  const optionsOpen = joinOptions || scopes.size === 0
+
   // --- rows -----------------------------------------------------------------
+
+  /**
+   * Forget pairings on this side — the records and the keystore entries behind
+   * their `keyRef`s, which is all `revokePairedDevice` in `state/AppState.tsx`
+   * does and all either caller here needs. Factored out of `revoke` when the
+   * "leave the pairing" row arrived, so that key handling has one home rather
+   * than one per button.
+   *
+   * Sequential rather than `Promise.all`: every call ends in a `dispatch`, and
+   * a `forgetSecrets` failure on one device must not abandon the rest.
+   */
+  const forget = async (devices: PairedDevice[]) => {
+    for (const device of devices) await revokePairedDevice(device.id)
+  }
 
   const revoke = async (device: PairedDevice) => {
     const ok = await confirm({
@@ -387,8 +544,30 @@ export function DevicesCard() {
       danger: true,
     })
     if (!ok) return
-    await revokePairedDevice(device.id)
+    await forget([device])
     toast.push({ tone: 'info', title: t('devices.revoke'), detail: device.label })
+  }
+
+  /**
+   * The same thing, for every record at once, from this device's own row.
+   *
+   * One-sided in exactly the way one revoke is, and
+   * `devices.leavePairingConfirm` says so rather than letting "leave the
+   * pairing" imply a mutual divorce: this machine drops its records and its
+   * keys, the others keep theirs and find out the way they always do, when a
+   * `SyncLoop` cycle can no longer be decrypted.
+   */
+  const leavePairing = async () => {
+    const ok = await confirm({
+      title: t('devices.leavePairing'),
+      body: t('devices.leavePairingConfirm'),
+      confirmLabel: t('devices.leavePairing'),
+      cancelLabel: t('common.cancel'),
+      danger: true,
+    })
+    if (!ok) return
+    await forget(state.pairedDevices)
+    toast.push({ tone: 'info', title: t('devices.leavePairing'), detail: t('devices.thisDevice') })
   }
 
   /**
@@ -422,7 +601,17 @@ export function DevicesCard() {
       </Field>
       <SyncScopePicker
         scopes={scopes}
-        onChange={setScopes}
+        onChange={(next) => {
+          // Emptying the set is what makes this picker compulsory in the
+          // joining dialog, and a control that is about to be needed again
+          // should not fold itself away the moment it is used. Latching the
+          // disclosure open here means re-checking a scope brings the camera
+          // back without pulling the list out from under the finger that just
+          // fixed it. Meaningless in the host dialog, which has no
+          // disclosure; harmless there for the same reason.
+          if (next.size === 0) setJoinOptions(true)
+          setScopes(next)
+        }}
         accounts={state.accounts}
         jobsCount={state.jobs.length}
         contactsCount={state.contacts.length}
@@ -478,53 +667,98 @@ export function DevicesCard() {
               hint={t('devices.emptyHint')}
             />
           ) : (
-            state.pairedDevices.map((device) => (
-              <div key={device.id} className="log" style={{ alignItems: 'center' }}>
-                {platformIcon(device.platform)}
+            <>
+              {/* This device, at the top of a list that used to describe only
+                  the other end of every pairing.
+
+                  Same `.log` shape as the rows under it on purpose: it is a
+                  member of the same set, and the thing it offers — leaving —
+                  is the same revoke those rows offer, aimed at the one record
+                  holder the list never showed. Rendered only alongside real
+                  rows; with nothing paired there is no membership to leave and
+                  `EmptyState` above is the whole truth of the screen. */}
+              <div className="log" style={{ alignItems: 'center' }}>
+                {platformIcon(thisPlatform)}
                 <div className="log__body">
-                  <div className="log__title">{device.label}</div>
+                  <div className="log__title">{t('devices.thisDevice')}</div>
                   <div className="log__detail">
-                    {device.mode === 'ongoing' ? t('devices.modeOngoing') : t('devices.modeOnce')}
-                    {' · '}
-                    {t('devices.pairedOn', { when: formatDateTime(device.pairedAt) })}
-                    {' · '}
-                    {device.lastSyncedAt
-                      ? t('devices.lastSynced', { when: formatRelative(device.lastSyncedAt) })
-                      : t('sync.status.unreachable')}
-                  </div>
-                  <div className="btn-row" style={{ marginTop: 'var(--sp-1)' }}>
-                    {SYNC_SCOPE_KEYS.filter((key) => device.scopes.includes(key)).map((key) => (
-                      <StatusChip key={key} tone="neutral" label={t(`sync.scope.${key}`)} />
-                    ))}
+                    {t('devices.thisDeviceDetail', {
+                      platform: platformName(thisPlatform),
+                      n: state.pairedDevices.length,
+                    })}
                   </div>
                 </div>
-                {/* Its own element rather than two buttons loose on the row:
-                    `.btn` is `white-space: nowrap`, so at a phone width the
-                    pair could not shrink and `.log__body` — the only flexible
-                    thing here — collapsed to nothing, taking the device's name
-                    with it. The wrapper is what the ≤560px rule moves onto a
-                    second line. */}
                 <div className="log__actions">
-                  {device.mode === 'ongoing' ? (
-                    <Button
-                      variant="ghost"
-                      disabled={!canHost}
-                      title={canHost ? undefined : t('devices.regenerateHint')}
-                      onClick={() => void startHost({ kind: 'regenerate', device })}
-                    >
-                      {t('devices.regenerate')}
-                    </Button>
-                  ) : null}
-                  {/* `IconButton`, not a `Button` holding an icon: every icon
-                      in `icons.tsx` is `aria-hidden`, so a text button with
-                      only an icon in it has no accessible name at all. Same
-                      control as the delete on every other `.log` row. */}
-                  <IconButton label={t('devices.revoke')} onClick={() => void revoke(device)}>
-                    <IconTrash size={16} />
-                  </IconButton>
+                  <Button
+                    variant="ghost"
+                    icon={<IconTrash size={16} />}
+                    onClick={() => void leavePairing()}
+                  >
+                    {t('devices.leavePairing')}
+                  </Button>
                 </div>
               </div>
-            ))
+
+              {state.pairedDevices.map((device) => (
+                <div key={device.id} className="log" style={{ alignItems: 'center' }}>
+                  {platformIcon(device.platform)}
+                  <div className="log__body">
+                    <div className="log__title">{device.label}</div>
+                    <div className="log__detail">
+                      {device.mode === 'ongoing' ? t('devices.modeOngoing') : t('devices.modeOnce')}
+                      {' · '}
+                      {t('devices.pairedOn', { when: formatDateTime(device.pairedAt) })}
+                      {' · '}
+                      {device.lastSyncedAt
+                        ? t('devices.lastSynced', { when: formatRelative(device.lastSyncedAt) })
+                        : t('sync.status.unreachable')}
+                    </div>
+                    <div className="btn-row" style={{ marginTop: 'var(--sp-1)' }}>
+                      {SYNC_SCOPE_KEYS.filter((key) => device.scopes.includes(key)).map((key) => (
+                        <StatusChip key={key} tone="neutral" label={t(`sync.scope.${key}`)} />
+                      ))}
+                    </div>
+                  </div>
+                  {/* Its own element rather than two buttons loose on the row:
+                      `.btn` is `white-space: nowrap`, so at a phone width the
+                      pair could not shrink and `.log__body` — the only flexible
+                      thing here — collapsed to nothing, taking the device's name
+                      with it. The wrapper is what the ≤560px rule moves onto a
+                      second line, which is also what keeps the labelled revoke
+                      below from re-breaking that name now that it is wider than
+                      the icon it replaced. */}
+                  <div className="log__actions">
+                    {device.mode === 'ongoing' ? (
+                      <Button
+                        variant="ghost"
+                        disabled={!canHost}
+                        title={canHost ? undefined : t('devices.regenerateHint')}
+                        onClick={() => void startHost({ kind: 'regenerate', device })}
+                      >
+                        {t('devices.regenerate')}
+                      </Button>
+                    ) : null}
+                    {/* A `Button` carrying both the trash icon and the word,
+                        where this was an `IconButton` holding the icon alone.
+                        The icon-only form was chosen for a real reason — every
+                        icon in `icons.tsx` is `aria-hidden`, so a text button
+                        with nothing but an icon inside has no accessible name —
+                        and a visible label satisfies that reason outright,
+                        while also being the thing people were failing to find.
+                        A row that already opens with a platform icon does not
+                        read its closing icon as the one destructive control on
+                        the screen. */}
+                    <Button
+                      variant="ghost"
+                      icon={<IconTrash size={16} />}
+                      onClick={() => void revoke(device)}
+                    >
+                      {t('devices.revoke')}
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </>
           )}
 
           {state.pairedDevices.some((d) => d.mode === 'ongoing') ? (
@@ -584,15 +818,22 @@ export function DevicesCard() {
           <div className="form-rows">
             {hostStarted ? (
               <>
-                <PairingQr
-                  payload={hostPayload}
-                  status={hostStatus}
-                  errorMessage={hostError}
-                  onRegenerate={() => void startHost(session)}
-                  mode="ongoing"
-                  lockMode
-                  otherPlatform={otherPlatform}
-                />
+                {/* Either the code or the notice that it is no longer one —
+                    never both, and never the code without a listener behind
+                    it. See `revokeCode`. */}
+                {hostRevoked ? (
+                  revokedNotice()
+                ) : (
+                  <PairingQr
+                    payload={hostPayload}
+                    status={hostStatus}
+                    errorMessage={hostError}
+                    onRegenerate={() => void startHost(session)}
+                    mode="ongoing"
+                    lockMode
+                    otherPlatform={otherPlatform}
+                  />
+                )}
                 {hostStatus === 'connected' ? (
                   <Banner tone="info">{t('devices.hostConnectedHint')}</Banner>
                 ) : null}
@@ -622,6 +863,11 @@ export function DevicesCard() {
                   <Button variant={hostStatus === 'connected' ? 'primary' : 'ghost'} onClick={closeHost}>
                     {hostStatus === 'connected' ? t('common.done') : t('common.cancel')}
                   </Button>
+                  {/* "Revoke this code" while one is live, "generate a new
+                      code" once it is not — the same slot, because they are
+                      the two halves of one decision and the panel deliberately
+                      survives the first so it can offer the second. */}
+                  {hostCodeAction(session)}
                   {addresses.length > 1 && hostStatus !== 'connected' ? (
                     <Button
                       variant="ghost"
@@ -632,6 +878,7 @@ export function DevicesCard() {
                         void bridge?.stopPairingHost?.()
                         setHostStarted(false)
                         setHostPayload(null)
+                        setHostRevoked(false)
                       }}
                     >
                       {t('devices.hostAddressChange')}
@@ -701,15 +948,26 @@ export function DevicesCard() {
         >
           <div className="form-rows">
             <div className="field__hint field__hint--keep">{session.device.label}</div>
-            <PairingQr
-              payload={hostPayload}
-              status={hostStatus}
-              errorMessage={hostError}
-              onRegenerate={() => void startHost(session)}
-              mode="ongoing"
-              lockMode
-              otherPlatform={session.device.platform}
-            />
+            {hostRevoked ? (
+              revokedNotice()
+            ) : (
+              <PairingQr
+                payload={hostPayload}
+                status={hostStatus}
+                errorMessage={hostError}
+                onRegenerate={() => void startHost(session)}
+                mode="ongoing"
+                lockMode
+                otherPlatform={session.device.platform}
+              />
+            )}
+            {/* This panel had no button row of its own — `PairingQr` carries
+                the only control it ever needed, and closing is the header's
+                job. Taking a code back is neither of those, so the row exists
+                now, and only while there is something in it. */}
+            {hostCodeAction(session) ? (
+              <div className="btn-row">{hostCodeAction(session)}</div>
+            ) : null}
           </div>
         </Modal>
       ) : null}
@@ -723,7 +981,6 @@ export function DevicesCard() {
           closeLabel={t('common.close')}
         >
           <div className="form-rows">
-            <div className="field__hint field__hint--keep">{t('devices.joinHint')}</div>
             {joinDone ? (
               <>
                 <DeviceLinkAnimation
@@ -741,45 +998,93 @@ export function DevicesCard() {
                   </Button>
                 </div>
               </>
+            ) : joinBusy ? (
+              <DeviceLinkAnimation
+                status="connecting"
+                size="card"
+                leftPlatform={thisPlatform}
+                rightPlatform={otherPlatform}
+              />
+            ) : joinError ? (
+              // The camera stays off until this is cleared: the code that
+              // failed is still on the other device's screen, and a scanner put
+              // straight back would decode it again on the next frame. Nothing
+              // else is drawn either — the form used to sit above this, which
+              // meant the error and its Retry could be the second screenful of
+              // a dialog reporting that something went wrong.
+              <>
+                {/* `.mono`, as `AccountDialog` does with the same class of
+                    string: this is whatever `joinPairing` threw, which normally
+                    embeds `http://<host>:<port>/…` — one token with nothing to
+                    break at. */}
+                <Banner tone="danger">
+                  <div className="mono">{joinError}</div>
+                </Banner>
+                <div className="btn-row">
+                  <Button variant="primary" onClick={() => setJoinError('')}>
+                    {t('common.retry')}
+                  </Button>
+                </div>
+              </>
             ) : (
               <>
-                {shareForm()}
-                {joinBusy ? (
-                  <DeviceLinkAnimation
-                    status="connecting"
-                    size="card"
-                    leftPlatform={thisPlatform}
-                    rightPlatform={otherPlatform}
-                  />
-                ) : joinError ? (
-                  // The camera stays off until this is cleared: the code that
-                  // failed is still on the other device's screen, and a scanner
-                  // put straight back would decode it again on the next frame.
-                  <>
-                    {/* `.mono`, as `AccountDialog` does with the same class of
-                        string: this is whatever `joinPairing` threw, which
-                        normally embeds `http://<host>:<port>/…` — one token
-                        with nothing to break at. */}
-                    <Banner tone="danger">
-                      <div className="mono">{joinError}</div>
-                    </Banner>
-                    <div className="btn-row">
-                      <Button variant="primary" onClick={() => setJoinError('')}>
-                        {t('common.retry')}
-                      </Button>
-                    </div>
-                  </>
-                ) : scopes.size > 0 ? (
-                  // No `onCancel`: the dialog's own close button is the one way
-                  // out now, and a second one inside the scanner is a second
-                  // answer to "how do I get rid of this". `PairingScanner`
-                  // releases the camera on unmount, which closing the dialog is.
+                {/* The viewfinder, first and largest — see "The camera goes
+                    first" in the module doc. Everything below it is optional
+                    and says so by being folded away.
+
+                    No `onCancel`: the dialog's own close button is the one way
+                    out, and a second one inside the scanner is a second answer
+                    to "how do I get rid of this". `PairingScanner` releases the
+                    camera on unmount, which closing the dialog is. */}
+                {scopes.size > 0 ? (
                   <PairingScanner onDecoded={onDecoded} />
                 ) : (
-                  // Nothing. `SyncScopePicker` already says "choose at least
-                  // one" in place, which is both the reason the camera is off
-                  // and the thing to do about it.
-                  null
+                  // The one required answer, in the place the camera would
+                  // have been rather than as silence below a form. Clearing
+                  // every scope also forces the disclosure open (see
+                  // `optionsOpen`), so `SyncScopePicker`'s own "choose at least
+                  // one" is on screen with this, not behind a fold.
+                  <Banner tone="warning">{t('devices.joinNeedsScope')}</Banner>
+                )}
+
+                {/* Under the camera now, not above it. It is an instruction for
+                    someone already pointing a lens at something, so it reads
+                    better as a caption than as a preamble — and `--keep` still
+                    exempts it from the narrow-screen hint cull, because on a
+                    phone it is the only thing saying that pasting the text is
+                    also an option. */}
+                <div className="field__hint field__hint--keep">{t('devices.joinHint')}</div>
+
+                {/* Not drawn while the scope set is empty. `optionsOpen` is
+                    forced true there, so a toggle would be a button that
+                    visibly does nothing — the form has to stay open until the
+                    thing only it can fix is fixed. */}
+                {scopes.size > 0 ? (
+                  <div className="btn-row">
+                    <Button
+                      variant="ghost"
+                      aria-expanded={optionsOpen}
+                      onClick={() => setJoinOptions((open) => !open)}
+                    >
+                      {optionsOpen ? t('devices.joinOptionsHide') : t('devices.joinOptionsShow')}
+                    </Button>
+                  </div>
+                ) : null}
+
+                {optionsOpen ? (
+                  shareForm()
+                ) : (
+                  // What the folded form currently answers, so that leaving it
+                  // folded is a decision rather than an omission. An ordinary
+                  // hint, so a narrow screen drops it: it is an explanation of
+                  // defaults, and the defaults hold whether or not it is read.
+                  <div className="field__hint">
+                    {t('devices.joinOptionsSummary', {
+                      name: label.trim() || platformName(otherPlatform),
+                      platform: platformName(otherPlatform),
+                      n: scopes.size,
+                    })}
+                  </div>
                 )}
               </>
             )}

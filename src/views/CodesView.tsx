@@ -47,7 +47,7 @@ import { VirtualList } from '../components/VirtualList'
 import { useApp } from '../state/AppState'
 import { useCodeCheck, WAIT_PRESETS, type CheckOutcome } from '../state/CodeCheck'
 import { useI18n } from '../i18n'
-import { CODE_FRESH_MS } from '../core/codeHistory'
+import { CODE_FRESH_MS, freshHits } from '../core/codeHistory'
 import { encodeQr, qrPath } from '../core/qr'
 import { accountLabel as labelOfAccount } from '../core/accounts'
 import type { LinkPurpose } from '../core/linkPurpose'
@@ -155,15 +155,23 @@ export function CodesView({ onGoToInbox }: { onGoToInbox?: () => void }) {
    * it — the newest is already at the top, which was the only thing the fold
    * was really buying.
    */
-  const cutoff = Date.now() - CODE_FRESH_MS
-  const fresh = matching.filter((h) => h.date >= cutoff)
+  /* One clock reading for the whole render. Freshness, the countdowns and the
+     wait timer all used to call `Date.now()` separately, which meant a card
+     could be judged stale a hair before or after the timer under it agreed. */
+  const now = Date.now()
+  /* `freshHits` rather than a hand-rolled `h.date >= cutoff`, so the window
+     this screen draws and the one the nav badge counts are the same window —
+     see `core/codeHistory`, where both now live. `cutoff` stays because the
+     per-card `data-fresh` mark below is a predicate over one hit, not a
+     filter over a list. */
+  const cutoff = now - CODE_FRESH_MS
+  const fresh = freshHits(matching, now)
   const visible = matching
   const unread = state.codeHits.filter((h) => !h.readAt).length
 
   const foundKeys = useMemo(() => new Set(check.lastFoundKeys), [check.lastFoundKeys])
 
   /* Only tick while something is genuinely counting down. */
-  const now = Date.now()
   const counting =
     check.waitingUntil !== undefined ||
     visible.some((h) => h.expiresAt !== undefined && h.expiresAt > now)
@@ -239,7 +247,15 @@ export function CodesView({ onGoToInbox }: { onGoToInbox?: () => void }) {
           subtitle={
             /* Unread outranks fresh: "still to deal with" is the question this
                screen exists to answer, and an unread code from an hour ago
-               matters more than a read one from a minute ago. */
+               matters more than a read one from a minute ago.
+
+               Deliberately *not* collapsed into `actionableHits` (recent and
+               unread), which is what the nav badge counts. The badge has one
+               number to spend and must not point at history; the subtitle has
+               a whole sentence and falls back, so it can still say "3 just
+               arrived" once everything has been read. Same underlying rule,
+               two ranks of it — which is why both ranks are spelled out here
+               and the shared half is imported rather than re-derived. */
             unread > 0
               ? t('codes.subtitleUnread', { n: unread })
               : fresh.length > 0

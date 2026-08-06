@@ -61,9 +61,47 @@ export function mergeHits(existing: CodeHit[], incoming: NewHit[], now = Date.no
     .slice(0, CODE_HISTORY_CAP)
 }
 
-/** Newest-first, and only what is still worth calling "just arrived". */
+/**
+ * Newest-first, and only what is still worth calling "just arrived".
+ *
+ * Recency alone — this says nothing about whether the user has dealt with the
+ * hit. That makes it the right question for a *decoration* (the `data-fresh`
+ * mark on a card in `views/CodesView`, which means "this one is probably still
+ * valid") and the wrong question for a *count* of outstanding work. For the
+ * latter use `actionableHits` below.
+ */
 export function freshHits(hits: CodeHit[], now = Date.now()): CodeHit[] {
   return hits.filter((h) => now - h.date <= CODE_FRESH_MS)
+}
+
+/**
+ * What still needs the user: recent *and* unread.
+ *
+ * This exists because the same idea was being spelled out in two places that
+ * disagreed. The nav badge in `App.tsx` counted `freshHits` — recency only —
+ * while `views/CodesView` had long since settled on "unread outranks fresh"
+ * for its subtitle, on the grounds that an unread code from an hour ago
+ * matters more than a read one from a minute ago. The visible bug was that
+ * "全部标为已读" set `readAt` on every hit, the cards all changed state, and
+ * the badge went on showing the same number — because nothing the button did
+ * was an input to the number. To the user the button simply did nothing.
+ *
+ * So the rule lives here, once, and both halves of it are load-bearing.
+ * Dropping `readAt` gives back the bug above. Dropping the recency window
+ * gives a badge that never clears on its own: a code that expired overnight
+ * and was never copied is not work, it is history, and a badge that can only
+ * be dismissed by hand is one people learn to stop reading.
+ *
+ * Anything that wants "is this code plausibly still usable" — a card's own
+ * freshness mark, say — wants `freshHits`, not this.
+ */
+export function actionableHits(hits: CodeHit[], now = Date.now()): CodeHit[] {
+  /* `!h.readAt`, not `readAt === undefined`, to match how every other reader
+     of this field asks the question (`views/CodesView`, the `markCodeRead`
+     reducer in `state/AppState`). A `readAt` of 0 is not a real timestamp,
+     and one arriving from a hand-edited or migrated `state.json` should read
+     as "unread" everywhere or nowhere — not as unread here and read there. */
+  return freshHits(hits, now).filter((h) => !h.readAt)
 }
 
 /**

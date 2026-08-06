@@ -27,7 +27,7 @@ import { CodeCheckProvider } from './state/CodeCheck'
 import { claimStartupUpdateCheck, runUpdateCheck } from './core/update'
 import brandMark from './assets/brand.png'
 import { Skeleton } from './components/Skeleton'
-import { freshHits } from './core/codeHistory'
+import { actionableHits } from './core/codeHistory'
 
 /**
  * One chunk per screen.
@@ -249,8 +249,28 @@ function Shell() {
     () => state.inboxAccounts.flatMap((i) => i.messages).filter((m) => !m.seen).length,
     [state.inboxAccounts],
   )
-  /** Codes recent enough to still be usable — the badge is "act on this now". */
-  const freshCodeCount = useMemo(() => freshHits(state.codeHits).length, [state.codeHits])
+  /**
+   * The badge is "act on this now", so it counts what is recent *and* unread —
+   * `actionableHits`, not `freshHits`.
+   *
+   * It used to count `freshHits`, which is recency alone. Pressing "全部标为
+   * 已读" on the Codes screen genuinely marked every hit read and the cards
+   * visibly changed, but the badge kept its old number for the rest of the
+   * freshness window, because nothing the button touched was an input to it.
+   * There was no way to tell from the outside that the button had worked.
+   *
+   * The rule now lives in `core/codeHistory` and nowhere else, which is the
+   * actual fix: this and the "unread outranks fresh" subtitle in
+   * `views/CodesView` were two hand-written answers to one question, and they
+   * drifted the moment mark-all-read was added.
+   *
+   * `state.codeHits` is the only dependency, and that is on purpose. `readAt`
+   * changes produce a new array via the reducer, so marking read recomputes
+   * immediately; the recency half only goes stale, and a badge that lingers a
+   * few seconds past the ten-minute mark is not worth a timer that re-renders
+   * the whole shell — the next state change picks it up.
+   */
+  const freshCodeCount = useMemo(() => actionableHits(state.codeHits).length, [state.codeHits])
 
   // Once the first screen is up and the app is idle, pull the rest in.
   useEffect(() => {

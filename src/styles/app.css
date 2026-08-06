@@ -4534,8 +4534,16 @@ textarea {
   align-items: center;
   gap: var(--sp-3);
 }
+/* Wider than the `min(60vw, 280px)` it shared with `.pairqr__code`, because
+   the two are not the same kind of surface. The QR code is read by a camera
+   held by someone else and 280px is already more than that camera needs; this
+   is a viewfinder the user aims by hand, and it is now the first and dominant
+   thing in the join dialog (see "The camera goes first" in
+   `views/DevicesCard.tsx`). At 390px it fills the panel it is in, and the cap
+   keeps it from becoming a wall on a desktop, where the dialog is wide and the
+   webcam is not the point of the room. */
 .pairscan__frame {
-  width: min(60vw, 280px);
+  width: min(86vw, 340px);
   aspect-ratio: 1;
   border-radius: var(--r-md);
   overflow: hidden;
