@@ -2,39 +2,29 @@ appId: dev.aevistle.app
 productName: Aevistle
 copyright: Copyright © 2026 Aevistle contributors
 
-# The one string in this file that has to be short, and the reason the Start
-# menu, the desktop shortcut and the pinned taskbar button all showed a blank
-# icon.
+# Two hazards live in package.json rather than in this file, and both bite here.
 #
-# electron-builder's NSIS template passes the package.json `description`
-# straight through as the shortcut comment:
+# 1. `description` must stay under 260 characters, because the NSIS template
+#    passes it through as the shortcut comment:
 #
-#     CreateShortCut "$newStartMenuLink" "$appExe" "" "$appExe" 0 "" "" "${APP_DESCRIPTION}"
+#        CreateShortCut "$newStartMenuLink" "$appExe" "" "$appExe" 0 "" "" "${APP_DESCRIPTION}"
 #
-# (node_modules/app-builder-lib/templates/nsis/include/installer.nsh:197 and
-# :223). A .lnk stores its strings as a chain of length-prefixed UTF-16 runs —
-# NAME, then WORKING_DIR, then ICON_LOCATION — and the shell's own reader gives
-# up on a NAME longer than 260 characters (MAX_PATH). It does not truncate; it
-# keeps reading from the wrong offset, so every field *after* the description is
-# recovered as rubbish. Our package.json description is 285 characters, so the
-# shortcut's icon path came back as an unprintable non-path and Windows drew
-# nothing at all. The executable's own icon resource was never the problem: the
-# built exe carries a complete 7-frame icon group and Windows renders all of
-# 16/32/48 from it correctly.
+#    (node_modules/app-builder-lib/templates/nsis/include/installer.nsh:197 and
+#    :223). A .lnk stores its strings as a chain of length-prefixed UTF-16 runs
+#    — NAME, then WORKING_DIR, then ICON_LOCATION — and the name field's count
+#    saturates at 260 (MAX_PATH) without truncating, so everything after it is
+#    read from the wrong offset. At 285 characters the icon path came back as
+#    fifteen characters of noise and the Start menu, the desktop shortcut and
+#    the taskbar button all drew nothing. Measured at the boundary with
+#    WScript.Shell: 260 round-trips intact, 261 does not. The executable's own
+#    icon resource was never at fault — the exe carries a complete 7-frame icon
+#    group that Windows renders correctly at 16/32/48.
 #
-# Measured with WScript.Shell against shortcuts built by hand: a 260-character
-# comment round-trips an intact IconLocation, 261 does not. Kept well under the
-# line so that nobody has to remember the boundary before appending a clause.
-#
-# `extraMetadata` rather than editing package.json, because the long form is
-# still the right text for the README, the store listings and the repository
-# page. Only the shortcut needs the short one.
-extraMetadata:
-  description: >-
-    Schedule email to send later on Windows and Android: one-off reminders or
-    recurring sends — daily, weekly, monthly, cron — with attachments,
-    delivered while the app is closed.
-
+# 2. Do NOT fix that with `extraMetadata: {description: ...}`. It works, and it
+#    also rewrites the *source* package.json with the packaged app's pruned
+#    metadata: every script, every devDependency and every keyword was deleted
+#    from the repository copy by one `npm run dist:win`. Shorten the real
+#    description instead; nothing in this codebase reads it.
 directories:
   output: release
   buildResources: build
