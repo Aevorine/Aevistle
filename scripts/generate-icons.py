@@ -27,6 +27,7 @@ from PIL import Image, ImageEnhance, ImageFilter
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from generate_icons_lib import background_field, build_master, squircle_alpha  # noqa: E402
+from ico_writer import write_ico  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BUILD = os.path.join(ROOT, "build")
@@ -118,12 +119,23 @@ def main() -> None:
     tray(32).save(os.path.join(BUILD, "tray.png"), optimize=True)
     tray(64).save(os.path.join(BUILD, "tray@2x.png"), optimize=True)
 
-    # Pillow builds the multi-resolution .ico itself; listing the sizes keeps
-    # the small ones sharp instead of letting Windows downscale the 256px one.
-    master.save(
+    # Every size is rendered from the master rather than letting Windows
+    # downscale the 256px one, which keeps the small ones sharp.
+    #
+    # The container is written by ico_writer, not by Pillow: Pillow's ICO
+    # encoder PNG-compresses every frame, where the convention everywhere else
+    # is BMP/DIB below 256px. That is the only reason for the swap — it is
+    # tidiness, not a bug fix. The blank Windows icon this was written during
+    # turned out to be an over-long shortcut description corrupting the .lnk
+    # (see `extraMetadata.description` in electron-builder.yml); the all-PNG
+    # icon was tested with PrivateExtractIcons and rendered correctly. Read
+    # ico_writer's docstring before re-opening that question.
+    write_ico(
         os.path.join(BUILD, "icon.ico"),
-        format="ICO",
-        sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)],
+        [
+            master.resize((size, size), Image.LANCZOS)
+            for size in (16, 24, 32, 48, 64, 128, 256)
+        ],
     )
 
     # NSIS wizard art. The sizes are fixed by NSIS itself, not by taste.

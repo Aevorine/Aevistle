@@ -455,6 +455,29 @@ function reportMainProcessError(err: unknown): void {
 process.on('uncaughtException', reportMainProcessError)
 process.on('unhandledRejection', reportMainProcessError)
 
+/*
+ * Windows decides which taskbar button a running window belongs to by its
+ * AppUserModelID, and ours has to be the same string the installer stamped on
+ * the shortcut. electron-builder's NSIS template calls
+ * `WinShell::SetLnkAUMI "$newStartMenuLink" "${APP_ID}"`, and `APP_ID` is the
+ * `appId` from electron-builder.yml — so this literal and `dev.aevistle.app`
+ * there are one value written twice, and must be changed together.
+ *
+ * Without the call the process keeps the default ID Windows derives from the
+ * executable path, which matches nothing. The window then gets its own taskbar
+ * button instead of merging into the pinned one, "Pin to taskbar" produces a
+ * second entry that launches a second copy, and toast notifications — the
+ * thing a scheduler exists to produce — are attributed to an unregistered app.
+ * Verified on the 0.1.17 install: the Start-menu shortcut at
+ * %APPDATA%\Microsoft\Windows\Start Menu\Programs\Aevistle.lnk carries
+ * System.AppUserModel.ID = "dev.aevistle.app" in its property store, and the
+ * running process was claiming something else entirely.
+ *
+ * Called at module scope rather than inside `whenReady`, because it has to be
+ * in place before the first window or Notification exists.
+ */
+if (process.platform === 'win32') app.setAppUserModelId('dev.aevistle.app')
+
 // A second copy would run the schedule twice and send everything in duplicate.
 if (!app.requestSingleInstanceLock()) {
   app.quit()
