@@ -1507,6 +1507,10 @@ export const fr: Translations = {
 
   'pairing.scanQr': 'Scanner',
   'pairing.pasteCodeInstead': 'Coller le code à la place',
+  'pairing.showCodeText': 'Afficher le code en texte',
+  'pairing.hideCodeText': 'Masquer le texte du code',
+  'pairing.codeTextHint':
+    'Pour un appareil sans caméra, ou dont la caméra a été refusée : copiez cette ligne entière sur l’autre appareil et collez-la dans « Coller le code à la place ». Elle cesse de fonctionner dès que le code expire ou qu’un autre appareil se connecte.',
   'pairing.cameraDenied': 'L’accès à la caméra n’a pas été autorisé',
   'pairing.cameraDeniedHint': 'Vous pouvez tout de même faire l’appairage en collant le code affiché sur l’autre appareil au lieu de le scanner.',
   'pairing.invalidCode': 'Ce n’est pas un code d’appairage valide.',
@@ -1517,7 +1521,8 @@ export const fr: Translations = {
 
   'sync.scope.title': 'Éléments à envoyer',
   'sync.scope.accounts': 'Comptes',
-  'sync.scope.accountsHint': '{n} compte(s). Les mots de passe de ceux qui en ont un sont envoyés directement à l’autre appareil via cette liaison chiffrée, jamais stockés ailleurs.',
+  'sync.scope.accountsHint':
+    '{n} compte(s). Le mot de passe de chacun de ceux qui en ont un enregistré voyage scellé sur cette liaison chiffrée et va directement dans le trousseau de l’autre appareil : vous ne le retapez jamais. Il n’est écrit en clair dans aucun fichier, d’un côté comme de l’autre.',
   'sync.scope.schedule': 'Planning',
   'sync.scope.scheduleHint': '{n} rappel(s), plus votre calendrier de travail.',
   'sync.scope.contacts': 'Contacts',
@@ -1556,6 +1561,9 @@ export const fr: Translations = {
   'devices.revokeConfirm': 'Cet appareil devra se réappairer la prochaine fois qu’il tentera de synchroniser. Rien n’est supprimé sur l’autre appareil — Aevistle n’a pas de serveur pour le contacter.',
   'devices.regenerate': 'Régénérer le code',
   'devices.regenerateHint': 'Cette version ne peut pas héberger de code d’appairage — régénérez cet appairage depuis l’application de bureau ou Android.',
+  'devices.editScopes': 'Modifier ce qui est synchronisé',
+  'devices.editScopesHint':
+    'Cela change ce que cet appareil envoie. L’autre garde son propre choix — modifiez-le là-bas aussi si vous ne voulez plus rien recevoir en retour.',
   'devices.pairNew': 'Appairer un nouvel appareil',
   'devices.showCode': 'Afficher le code d’appairage',
   'devices.joinNew': 'Utiliser un code d’un autre appareil',

@@ -12,7 +12,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react'
-import { Banner, Button, Field, Segmented } from './ui'
+import { Banner, Button, Field, Segmented, useToast } from './ui'
 import { IconRefresh } from './icons'
 import { DeviceLinkAnimation, type DeviceLinkStatus } from './DeviceLinkAnimation'
 import { useI18n } from '../i18n'
@@ -65,7 +65,23 @@ export function PairingQr({
   otherPlatform,
 }: PairingQrProps) {
   const { t } = useI18n()
+  const toast = useToast()
   const [now, setNow] = useState(() => Date.now())
+  /**
+   * Whether the code is also shown as text, for a device that cannot scan it.
+   *
+   * It had to be added, not merely surfaced: `PairingScanner` has offered
+   * "paste code instead" since it was written, `pairing.cameraDeniedHint` tells
+   * a user whose camera was refused to paste "the code shown on the other
+   * device", and `devices.joinHint` says to paste "the text underneath it" —
+   * and this component drew the QR and nothing else, so there was no text
+   * underneath it and never had been. Every manual route out of a missing or
+   * denied camera pointed at something that did not exist.
+   *
+   * Folded by default because scanning is the path that works, and a 200-odd
+   * character blob sitting under the code would suggest otherwise.
+   */
+  const [showText, setShowText] = useState(false)
 
   useEffect(() => {
     if (!payload || status !== 'listening') return
@@ -78,10 +94,12 @@ export function PairingQr({
   const fraction = payload ? Math.max(0, Math.min(1, remaining / PAIRING_SESSION_MS)) : 0
   const seconds = Math.ceil(remaining / 1000)
 
-  const qr = useMemo(() => {
-    if (!payload || expired) return null
-    return encodeQr(encodePairingText(payload))
-  }, [payload, expired])
+  const codeText = useMemo(
+    () => (payload && !expired ? encodePairingText(payload) : ''),
+    [payload, expired],
+  )
+
+  const qr = useMemo(() => (codeText ? encodeQr(codeText) : null), [codeText])
 
   // `expired` folds into 'error': the picture a stopped clock draws is the
   // same broken line a refused connection does — either way, nothing is
@@ -139,6 +157,47 @@ export function PairingQr({
           </svg>
         ) : null}
       </div>
+
+      {/* The same code, in the form a device with no working camera can take.
+          `PairingScanner`'s paste box wants exactly this string, so it is
+          rendered verbatim rather than prettied up — and read-only rather than
+          disabled, because a disabled textarea is not selectable, which is the
+          whole point of it on a phone that has to hand it to a keyboard.
+
+          Only while the code is live. A code that has expired or been spent is
+          not something to leave copyable on screen, for the same reason
+          `revokeCode` in `DevicesCard.tsx` clears the payload outright rather
+          than merely hiding the QR. */}
+      {codeText && status === 'listening' ? (
+        <div className="pairqr__manual">
+          <Button variant="ghost" aria-expanded={showText} onClick={() => setShowText((open) => !open)}>
+            {showText ? t('pairing.hideCodeText') : t('pairing.showCodeText')}
+          </Button>
+          {showText ? (
+            <div className="form-rows">
+              <textarea
+                className="textarea textarea--mono"
+                rows={3}
+                readOnly
+                value={codeText}
+                aria-label={t('pairing.showCodeText')}
+                onFocus={(e) => e.currentTarget.select()}
+              />
+              <div className="field__hint field__hint--keep">{t('pairing.codeTextHint')}</div>
+              <div className="btn-row">
+                <Button
+                  onClick={() => {
+                    void navigator.clipboard?.writeText(codeText)
+                    toast.push({ tone: 'success', title: t('toast.copied') })
+                  }}
+                >
+                  {t('common.copy')}
+                </Button>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       <DeviceLinkAnimation status={linkStatus} size="inline" rightPlatform={otherPlatform} />
 

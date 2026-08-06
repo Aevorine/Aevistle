@@ -1507,6 +1507,10 @@ export const es: Translations = {
 
   'pairing.scanQr': 'Escanear',
   'pairing.pasteCodeInstead': 'Pegar el código en su lugar',
+  'pairing.showCodeText': 'Mostrar el código como texto',
+  'pairing.hideCodeText': 'Ocultar el texto del código',
+  'pairing.codeTextHint':
+    'Para un dispositivo sin cámara, o cuya cámara fue denegada: copia esta línea entera al otro dispositivo y pégala en «Pegar el código en su lugar». Deja de funcionar en cuanto el código caduca o se conecta otro dispositivo.',
   'pairing.cameraDenied': 'No se concedió acceso a la cámara',
   'pairing.cameraDeniedHint': 'Aun así puedes emparejarlo pegando el código que se muestra en el otro dispositivo, en lugar de escanearlo.',
   'pairing.invalidCode': 'Ese no es un código de emparejamiento válido.',
@@ -1517,7 +1521,8 @@ export const es: Translations = {
 
   'sync.scope.title': 'Qué enviar',
   'sync.scope.accounts': 'Cuentas',
-  'sync.scope.accountsHint': '{n} cuenta(s). Las contraseñas de las que tengan una se envían directamente al otro dispositivo por este enlace cifrado, nunca se guardan en ningún otro sitio.',
+  'sync.scope.accountsHint':
+    '{n} cuenta(s). La contraseña de cada una que tenga una guardada viaja sellada por este enlace cifrado y entra directamente en el llavero del otro dispositivo, así no vuelves a escribirla. Nunca se escribe en un archivo sin cifrar en ninguno de los dos lados.',
   'sync.scope.schedule': 'Programación',
   'sync.scope.scheduleHint': '{n} recordatorio(s), más tu calendario laboral.',
   'sync.scope.contacts': 'Contactos',
@@ -1556,6 +1561,9 @@ export const es: Translations = {
   'devices.revokeConfirm': 'A este dispositivo se le pedirá volver a emparejarse la próxima vez que intente sincronizar. No se elimina nada en el otro dispositivo — Aevistle no tiene un servidor por el que contactarlo.',
   'devices.regenerate': 'Regenerar código',
   'devices.regenerateHint': 'Esta versión no puede alojar un código de emparejamiento: regenera este emparejamiento desde la aplicación de escritorio o de Android.',
+  'devices.editScopes': 'Cambiar qué se sincroniza',
+  'devices.editScopesHint':
+    'Esto cambia lo que envía este dispositivo. El otro conserva su propia elección: cámbiala también allí si quieres que deje de llegar lo mismo de vuelta.',
   'devices.pairNew': 'Emparejar un dispositivo nuevo',
   'devices.showCode': 'Mostrar el código de emparejamiento',
   'devices.joinNew': 'Usar un código de otro dispositivo',

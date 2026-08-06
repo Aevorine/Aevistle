@@ -1519,6 +1519,10 @@ export const en = {
   // --- ANCHOR:qr-scan-devlink (B6/B10) ---
   'pairing.scanQr': 'Scan',
   'pairing.pasteCodeInstead': 'Paste code instead',
+  'pairing.showCodeText': 'Show the code as text',
+  'pairing.hideCodeText': 'Hide the code text',
+  'pairing.codeTextHint':
+    'For a device with no camera, or one whose camera was refused: copy this whole line to the other device and paste it under “Paste code instead”. It stops working the moment the code expires or another device connects.',
   'pairing.cameraDenied': 'Camera access was not granted',
   'pairing.cameraDeniedHint': 'You can still pair by pasting the code shown on the other device instead of scanning it.',
   'pairing.invalidCode': 'That is not a valid pairing code.',
@@ -1530,7 +1534,8 @@ export const en = {
   // --- ANCHOR:sync-scope (B3/B9) ---
   'sync.scope.title': 'What to send',
   'sync.scope.accounts': 'Accounts',
-  'sync.scope.accountsHint': '{n} account(s). Passwords for the ones that have one are sent straight to the other device over this encrypted link, not stored anywhere.',
+  'sync.scope.accountsHint':
+    '{n} account(s). The password for each one that has a saved password travels sealed over this encrypted link and is put straight into the other device’s keychain, so you never type it again. It is never written to a plain file on either side.',
   'sync.scope.schedule': 'Schedule',
   'sync.scope.scheduleHint': '{n} reminder(s), plus your working calendar.',
   'sync.scope.contacts': 'Contacts',
@@ -1570,6 +1575,9 @@ export const en = {
   'devices.revokeConfirm': 'This device will be asked to re-pair next time it tries to sync. Nothing is deleted on the other device — Aevistle has no server to reach it through.',
   'devices.regenerate': 'Regenerate code',
   'devices.regenerateHint': 'This build cannot host a pairing code — regenerate this pairing from the desktop or Android app instead.',
+  'devices.editScopes': 'Change what syncs',
+  'devices.editScopesHint':
+    'This changes what this device sends. The other device keeps its own choice — change it there too if you want the same thing to stop coming back.',
   'devices.pairNew': 'Pair a new device',
   'devices.showCode': 'Show the pairing code',
   'devices.joinNew': 'Use a code from another device',

@@ -10,7 +10,13 @@
 import type { ControlEndpoint, ControlRequest, ControlResponse } from './control'
 import type { FeedResponse } from './feeds'
 import type { PairingEvent, PairingPayload, PairMode } from './pairing'
-import type { SyncListenerStatus, SyncServerRequest, SyncServerResponse } from './syncLoop'
+import type { PairingEnvelope } from './pairingCrypto'
+import type {
+  SealedAccountSecrets,
+  SyncListenerStatus,
+  SyncServerRequest,
+  SyncServerResponse,
+} from './syncLoop'
 import type {
   AppState,
   Attachment,
@@ -304,6 +310,35 @@ export interface PlatformBridge {
    * AES-GCM, the same WebCrypto every other pairing key already uses.
    */
   getSyncSecret?(keyRef: string): Promise<string | null>
+  /**
+   * Seal the keystore's passwords for these accounts, for the pairing named by
+   * `keyRef`, without ever handing one back.
+   *
+   * The counterpart to the paragraph above, and the reason it does not have to
+   * be widened. Syncing an account is only worth anything if the password
+   * comes with it — the whole point is not typing it a second time on the
+   * phone — but "let the renderer read a password" and "let a password move
+   * between two devices the user paired on purpose" are different requests,
+   * and only the second one is being granted. Everything happens on this side
+   * of the boundary: the keystore read, the HKDF, the AES-GCM. What comes back
+   * is a `PairingEnvelope` and the ids it covers.
+   *
+   * `null` when the keystore holds nothing for any of them, so a caller can
+   * tell "no passwords to send" from "sent an envelope with nothing in it".
+   * See `core/secretTransport.ts`, including its note on what this boundary is
+   * and is not worth.
+   */
+  sealAccountSecrets?(keyRef: string, accountIds: string[]): Promise<SealedAccountSecrets | null>
+  /**
+   * The other end: open one of those and write every credential in it straight
+   * into this device's keystore. Resolves with the account ids written.
+   *
+   * Rejects if the envelope cannot be opened — a wrong or revoked key, or a
+   * bundle from a future version. The caller treats that as "the accounts
+   * arrived without their passwords", never as a reason to drop the rest of
+   * the sync.
+   */
+  openAccountSecrets?(keyRef: string, envelope: PairingEnvelope): Promise<string[]>
 
   // --- files --------------------------------------------------------------
   pickFiles(): Promise<Attachment[]>

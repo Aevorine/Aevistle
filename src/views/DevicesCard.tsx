@@ -254,6 +254,26 @@ export function DevicesCard() {
   const [addresses, setAddresses] = useState<string[]>([])
   const addressId = useFieldId('devaddr')
 
+  /**
+   * The device whose scopes are being edited, and the set as it stands.
+   *
+   * `PairedDevice.scopes` was written once, at pairing time, and there was no
+   * way back to it afterwards — which made "choose what syncs" a question
+   * asked exactly once, in a dialog whose whole point was that the answer had
+   * good defaults and could be skipped. Someone who paired a phone with
+   * everything checked and later decided their contacts should stay on the
+   * desktop had to revoke the pairing and run the whole handshake again.
+   *
+   * Edited on this side only, and that is not a limitation to apologise for:
+   * `buildChangedPayload` filters by the *sender's* own scopes, so turning
+   * 'contacts' off here stops this device from putting contacts on the wire.
+   * It does not, and cannot, stop the other device from sending its own — that
+   * is the other device's copy of this same switch, and this app has no way to
+   * reach across and flip it. `devices.editScopesHint` says so.
+   */
+  const [editingScopes, setEditingScopes] = useState<PairedDevice | null>(null)
+  const [draftScopes, setDraftScopes] = useState<Set<SyncScopeKey>>(() => new Set())
+
   const canHost = Boolean(bridge?.startPairingHost)
   const canJoin = Boolean(bridge?.pairingJoinRequest)
   const thisPlatform: PairedDevicePlatform = bridge?.platform === 'android' ? 'android' : 'windows'
@@ -731,6 +751,17 @@ export function DevicesCard() {
                     {device.mode === 'ongoing' ? (
                       <Button
                         variant="ghost"
+                        onClick={() => {
+                          setDraftScopes(new Set(device.scopes))
+                          setEditingScopes(device)
+                        }}
+                      >
+                        {t('devices.editScopes')}
+                      </Button>
+                    ) : null}
+                    {device.mode === 'ongoing' ? (
+                      <Button
+                        variant="ghost"
                         disabled={!canHost}
                         title={canHost ? undefined : t('devices.regenerateHint')}
                         onClick={() => void startHost({ kind: 'regenerate', device })}
@@ -1088,6 +1119,56 @@ export function DevicesCard() {
                 )}
               </>
             )}
+          </div>
+        </Modal>
+      ) : null}
+
+      {/* Changing what an existing pairing sends — see `editingScopes`.
+          The same `SyncScopePicker` both pairing roles show, so the list a
+          person is re-answering is visibly the list they answered before.
+          Saving writes only `scopes`: the key, the sync history and the
+          address are the pairing itself and have nothing to do with this
+          choice. */}
+      {editingScopes ? (
+        <Modal
+          open
+          fullscreen
+          title={t('devices.editScopes')}
+          onClose={() => setEditingScopes(null)}
+          closeLabel={t('common.close')}
+        >
+          <div className="form-rows">
+            <div className="field__hint field__hint--keep">{editingScopes.label}</div>
+            <SyncScopePicker
+              scopes={draftScopes}
+              onChange={setDraftScopes}
+              accounts={state.accounts}
+              jobsCount={state.jobs.length}
+              contactsCount={state.contacts.length}
+              templatesCount={state.templates.length}
+            />
+            {/* One-sided, and said out loud rather than left to be discovered
+                the next time something arrives that was just switched off. */}
+            <Banner tone="info">{t('devices.editScopesHint')}</Banner>
+            <div className="btn-row">
+              <Button
+                variant="primary"
+                disabled={draftScopes.size === 0}
+                onClick={() => {
+                  dispatch({
+                    type: 'upsertPairedDevice',
+                    device: { ...editingScopes, scopes: [...draftScopes] },
+                  })
+                  toast.push({ tone: 'success', title: t('devices.editScopes'), detail: editingScopes.label })
+                  setEditingScopes(null)
+                }}
+              >
+                {t('common.save')}
+              </Button>
+              <Button variant="ghost" onClick={() => setEditingScopes(null)}>
+                {t('common.cancel')}
+              </Button>
+            </div>
           </div>
         </Modal>
       ) : null}

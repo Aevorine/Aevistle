@@ -23,7 +23,9 @@ import { fetchLatest, type DownloadProgress } from './update'
 import { feedFetchVia, type FeedResponse } from './feeds'
 import { LocalPairingHost } from './pairingHostLocal'
 import type { PairingEvent, PairMode } from './pairing'
+import type { PairingEnvelope } from './pairingCrypto'
 import type {
+  SealedAccountSecrets,
   SyncListenerStatus,
   SyncServerRequest,
   SyncServerResponse,
@@ -137,6 +139,24 @@ interface AevistleNativePlugin extends AndroidPermissionApi {
   deleteSecret(opts: { accountId: string; kind?: SecretKind }): Promise<void>
   /** `kind` is fixed to `'sync'` on the native side — see `AevistleNativePlugin.java`'s doc. */
   getSyncSecret(opts: { accountId: string }): Promise<{ value: string | null }>
+  /**
+   * Seal this device's mailbox passwords for a paired device. The WebView
+   * never sees one — see `core/secretTransport.ts` and the Java method's doc.
+   *
+   * `envelope: null` when the keystore holds nothing for any of the named
+   * accounts, which is why the whole result is not simply nullable: Capacitor
+   * resolves an object, and a plugin that resolved nothing at all would be
+   * indistinguishable from one that is not implemented on this build.
+   */
+  sealAccountSecrets(opts: {
+    keyRef: string
+    accountIds: string[]
+  }): Promise<{ envelope: PairingEnvelope | null; accountIds?: string[] }>
+  /** The receiving end: open one and write it to the keystore, answering with ids only. Rejects if it will not open. */
+  openAccountSecrets(opts: {
+    keyRef: string
+    envelope: PairingEnvelope
+  }): Promise<{ accountIds: string[] }>
 
   sendNow(opts: { draft: MessageDraft; account: MailAccount }): Promise<SendResult>
   testConnection(opts: { account: MailAccount; secret?: string }): Promise<SendResult>
@@ -375,6 +395,14 @@ export function createAndroidBridge(): PlatformBridge & AndroidPermissionApi {
     deleteSecret: (accountId, kind) => Native.deleteSecret({ accountId, kind }),
     getSyncSecret: (deviceId) => Native.getSyncSecret({ accountId: deviceId }).then((r) => r.value),
 
+    async sealAccountSecrets(keyRef, accountIds): Promise<SealedAccountSecrets | null> {
+      const result = await Native.sealAccountSecrets({ keyRef, accountIds })
+      if (!result.envelope) return null
+      return { envelope: result.envelope, accountIds: result.accountIds ?? [] }
+    },
+    openAccountSecrets: (keyRef, envelope) =>
+      Native.openAccountSecrets({ keyRef, envelope }).then((r) => r.accountIds),
+
     async sendNow(draft, account) {
       const started = Date.now()
       try {
@@ -503,7 +531,24 @@ export function createAndroidBridge(): PlatformBridge & AndroidPermissionApi {
       void Native.ensureNotificationPermission().catch(() => {})
       return updated
     },
-    testInbox: (config, secret) => Native.testInbox({ config, secret }),
+    /**
+     * Shaped like `testConnection` above, and for the same reason.
+     *
+     * The Java side answers a failed *connection* with a `SendResult`, but it
+     * `call.reject`s anything that goes wrong before one is attempted — a config
+     * that will not parse, a keystore that will not open. A rejection is not a
+     * `SendResult`, so it arrived here as a bare exception where its sibling
+     * arrived as a report the dialog knows how to draw. `failedResult` is the
+     * one place that difference is flattened.
+     */
+    async testInbox(config, secret) {
+      const started = Date.now()
+      try {
+        return await Native.testInbox({ config, secret })
+      } catch (e) {
+        return failedResult(e, started)
+      }
+    },
     getMessageBody: (config, folderPath, uid) => Native.getMessageBody({ config, folderPath, uid }),
     setMessageFlags: (config, folderPath, uid, patch) =>
       Native.setMessageFlags({ config, folderPath, uid, patch }),

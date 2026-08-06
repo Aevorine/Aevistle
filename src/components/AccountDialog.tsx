@@ -298,6 +298,15 @@ export function AccountDialog({
   const runId = useRef(0)
   const inboxRunId = useRef(0)
 
+  /**
+   * The two boxes a finished test writes its answer into.
+   *
+   * They exist only to be scrolled to — see the effects below, and the comment
+   * there for the measurement that made them necessary.
+   */
+  const testReport = useRef<HTMLDivElement>(null)
+  const inboxReport = useRef<HTMLDivElement>(null)
+
   useEffect(() => {
     if (open) {
       const a = initial ?? blankAccount()
@@ -341,6 +350,33 @@ export function AccountDialog({
     }, 250)
     return () => window.clearInterval(timer)
   }, [inboxTesting])
+
+  /**
+   * Take the user to the answer. This is what "the test button does nothing"
+   * actually was.
+   *
+   * Both reports render at the far end of a form that is one long scroller, and
+   * the send test's button is in the footer, which never moves. Measured on the
+   * built bundle at 360x800 with receiving switched on: the report lands at
+   * y=2426 inside a body whose visible band ends at y=721, and `scrollTop` stays
+   * at 0 — so 1705px of form sit between the button and its own result, and
+   * pressing it changes precisely nothing on screen. A phone has no scrollbar to
+   * hint that anything appeared, which is why this reads as a dead button there
+   * and merely as a flaky one on a desktop (551px out at 1280x900).
+   *
+   * `block: 'nearest'` rather than `'center'`: a result already on screen must
+   * not be yanked around, and a report taller than the viewport should show its
+   * top — which is where the verdict is.
+   */
+  useEffect(() => {
+    if (!testResult) return
+    testReport.current?.scrollIntoView({ block: 'nearest' })
+  }, [testResult])
+
+  useEffect(() => {
+    if (!inboxTestResult) return
+    inboxReport.current?.scrollIntoView({ block: 'nearest' })
+  }, [inboxTestResult])
 
   const patch = (p: Partial<MailAccount>) => {
     setAccount((a) => ({ ...a, ...p }))
@@ -572,7 +608,19 @@ export function AccountDialog({
     try {
       const result = await onTestInbox(
         { ...inbox, accountId: account.id, enabled: true },
-        inboxSecret || undefined,
+        /*
+         * The send password, when the receive box is empty.
+         *
+         * Leaving it empty is the documented normal case — `inbox.passwordHint`
+         * says it is usually the same app password — and both back ends fall
+         * back to the *stored* SMTP secret for exactly that reason. Neither can
+         * on an account that has not been saved yet: nothing is in the keystore
+         * until Save, so the receive test refused with "No password stored for
+         * receiving" before opening a socket, on the one screen whose whole
+         * purpose is testing before you commit. The password the user is looking
+         * at is the one they meant.
+         */
+        inboxSecret || secret || undefined,
       )
       if (inboxRunId.current !== id) return
       setInboxTestResult(result)
@@ -692,7 +740,21 @@ export function AccountDialog({
       </Field>
 
       {preset ? (
-        <Banner tone="info">
+        /*
+         * Kept on a phone, for the same reason the auto-fill banner below is
+         * and with more at stake.
+         *
+         * This is the one that says the password box does not want the
+         * password they log in with, and carries the link to the page that
+         * mints the one it does want. The phone's blanket cull of
+         * `banner--info` took it, and the shape of the resulting bug is why
+         * "the tests do not work on Android" is a fair description of it:
+         * nothing on a 360px screen ever mentioned an app password, so the
+         * account was saved with a Google account password and both tests came
+         * back as authentication failures. Measured at 360x800 before this:
+         * `display: none`, 0x0, link included.
+         */
+        <Banner tone="info" keep>
           {t(preset.hintKey as 'provider.hint.appPassword')}
           {preset.appPasswordUrl ? (
             <>
@@ -710,9 +772,20 @@ export function AccountDialog({
       ) : null}
 
       <div className="field__row">
+        {/*
+          `action`, not `hint`.
+
+          A phone hides `.field__hint` outright — the rule is in the
+          `@media (max-width: 760px)` block and it is right about hints, which
+          are explanations. This is not an explanation, it is the only button
+          that re-runs auto-fill after a hand edit, and on a 360px screen it was
+          `display: none` along with the receive one below. `action` puts it on
+          the label line, which no width hides and which costs no vertical space
+          — the case `Field` grew it for.
+        */}
         <Field
           label={t('account.fromAddress')}
-          hint={
+          action={
             <button type="button" className="link" onClick={autoFill}>
               {t('account.autoFill')}
             </button>
@@ -749,6 +822,18 @@ export function AccountDialog({
       {auto ? (
         <Banner
           tone={auto.guessed ? 'warning' : 'info'}
+          /*
+           * Kept on a phone only while it has something to report.
+           *
+           * "Filled in from Gmail" under a form that visibly filled itself in is
+           * the sort of note a phone is right to drop. "3 fields you edited by
+           * hand were left alone" is not — it is the only thing on screen that
+           * explains why changing the address moved some boxes and not others,
+           * and it comes with the button that undoes them. Dropping *that* is
+           * the failure the banner was written to prevent, reintroduced by a
+           * width. The guessed variant is a warning and was never culled.
+           */
+          keep={autoOverrides.length > 0}
           action={
             autoOverrides.length > 0 ? (
               <Button variant="ghost" onClick={restoreAuto}>
@@ -912,9 +997,10 @@ export function AccountDialog({
       {inbox.enabled ? (
         <>
           <div className="field__row">
+            {/* `action` for the same reason as the address field's copy above. */}
             <Field
               label={t('inbox.imapHost')}
-              hint={
+              action={
                 <button
                   type="button"
                   className="link"
@@ -1039,12 +1125,18 @@ export function AccountDialog({
           </div>
 
           {inboxTestResult ? (
-            <TestReport result={inboxTestResult} onApply={applyInboxAdjusted} />
+            <div ref={inboxReport}>
+              <TestReport result={inboxTestResult} onApply={applyInboxAdjusted} />
+            </div>
           ) : null}
         </>
       ) : null}
 
-      {testResult ? <TestReport result={testResult} onApply={applyAdjusted} /> : null}
+      {testResult ? (
+        <div ref={testReport}>
+          <TestReport result={testResult} onApply={applyAdjusted} />
+        </div>
+      ) : null}
 
       {issues.length > 0 ? (
         <div className="issues">

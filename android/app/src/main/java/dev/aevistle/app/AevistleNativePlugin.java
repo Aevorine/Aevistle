@@ -134,6 +134,112 @@ public class AevistleNativePlugin extends Plugin {
         call.resolve(result);
     }
 
+    /**
+     * Seal this device's mailbox passwords for a paired device, and hand back
+     * only the envelope.
+     *
+     * The counterpart to `getSyncSecret` above narrowing itself to `"sync"`.
+     * That narrowing is what makes syncing an account worth anything hard: the
+     * WebView cannot read an SMTP password, and it should not learn to, so the
+     * sealing happens here instead. The keystore read, the HKDF and the AES-GCM
+     * are all on this side; what crosses back is ciphertext and a list of
+     * account ids. See `SecretTransport.java` and `src/core/secretTransport.ts`.
+     *
+     * `keyRef` is read as a `"sync"` secret only, for the same reason: a caller
+     * that could name an arbitrary kind here would have turned this into the
+     * general secret reader the boundary deliberately lacks.
+     *
+     * Resolves `{ envelope: null }` when the keystore holds nothing for any of
+     * the named accounts, so the caller can tell "no passwords to send" from
+     * "an envelope with nothing in it".
+     */
+    @PluginMethod
+    public void sealAccountSecrets(PluginCall call) {
+        String keyRef = call.getString("keyRef", "");
+        JSArray requested = call.getArray("accountIds");
+        JSObject result = new JSObject();
+        try {
+            SecretStore store = new SecretStore(getContext());
+            String syncKey = store.get(keyRef, "sync");
+            if (syncKey == null || requested == null || requested.length() == 0) {
+                result.put("envelope", JSONObject.NULL);
+                call.resolve(result);
+                return;
+            }
+
+            List<SecretTransport.AccountSecret> secrets = new ArrayList<>();
+            JSArray sealedIds = new JSArray();
+            for (int i = 0; i < requested.length(); i++) {
+                String accountId = requested.optString(i, "");
+                if (accountId.isEmpty()) continue;
+                String smtp = store.get(accountId, "smtp");
+                String imap = store.get(accountId, "imap");
+                if (smtp == null && imap == null) continue;
+                secrets.add(new SecretTransport.AccountSecret(accountId, smtp, imap));
+                sealedIds.put(accountId);
+            }
+            if (secrets.isEmpty()) {
+                result.put("envelope", JSONObject.NULL);
+                call.resolve(result);
+                return;
+            }
+
+            result.put("envelope", SecretTransport.seal(syncKey, secrets));
+            result.put("accountIds", sealedIds);
+            call.resolve(result);
+        } catch (Exception e) {
+            call.reject("Could not seal the account passwords: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * The receiving end: open one of those and write what is inside straight
+     * into this device's keystore, answering with account ids only.
+     *
+     * Rejecting rather than resolving empty when the envelope will not open —
+     * a revoked key, a tampered blob, a bundle from a newer build — because
+     * the caller turns that into "the accounts arrived without their
+     * passwords", which is a different thing from "there were none".
+     */
+    @PluginMethod
+    public void openAccountSecrets(PluginCall call) {
+        String keyRef = call.getString("keyRef", "");
+        JSObject envelope = call.getObject("envelope");
+        if (envelope == null) {
+            call.reject("envelope is required");
+            return;
+        }
+        try {
+            SecretStore store = new SecretStore(getContext());
+            String syncKey = store.get(keyRef, "sync");
+            if (syncKey == null) {
+                call.reject("no sync key for this pairing");
+                return;
+            }
+            List<SecretTransport.AccountSecret> secrets = SecretTransport.open(
+                    syncKey,
+                    envelope.getString("iv"),
+                    envelope.getString("ciphertext"));
+
+            JSArray written = new JSArray();
+            for (SecretTransport.AccountSecret secret : secrets) {
+                if (secret.smtp != null) store.put(secret.accountId, "smtp", secret.smtp);
+                if (secret.imap != null) store.put(secret.accountId, "imap", secret.imap);
+                if (secret.smtp != null || secret.imap != null) written.put(secret.accountId);
+            }
+            // An IMAP credential arriving is the same signal a typed one is:
+            // this account can be watched in the background now. Same rearm
+            // `deleteSecret` runs for the opposite transition.
+            InboxSyncScheduler.rearm(getContext());
+
+            JSObject result = new JSObject();
+            result.put("accountIds", written);
+            call.resolve(result);
+        } catch (Exception e) {
+            call.reject("Could not read the account passwords: " + e.getMessage(), e);
+        }
+    }
+
     @PluginMethod
     public void deleteSecret(PluginCall call) {
         String accountId = call.getString("accountId", "");

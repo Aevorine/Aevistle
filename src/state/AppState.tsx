@@ -113,6 +113,7 @@ import {
   type PerformExchangeResult,
   type SyncApplyPatch,
   type SyncListenerStatus,
+  type SyncSecretTransport,
   type SyncServerRequest,
 } from '../core/syncLoop'
 
@@ -2627,6 +2628,28 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // ordinary account save would, and a log line for the audit trail the
   // module doc on `pairedDevices.ts` promises.
 
+  /**
+   * The trusted layer's half of a sync cycle, per device.
+   *
+   * `undefined` on a build with no handlers behind it (the browser preview),
+   * which `core/syncLoop.ts` treats as "sync everything except the passwords"
+   * rather than as a reason to stop. Bound per device because the key
+   * credentials are sealed under belongs to one pairing — see
+   * `SyncSecretTransport`.
+   */
+  const secretsFor = useCallback(
+    (device: PairedDevice): SyncSecretTransport | undefined => {
+      const seal = bridge?.sealAccountSecrets
+      const open = bridge?.openAccountSecrets
+      if (!seal || !open) return undefined
+      return {
+        seal: (accountIds) => seal(device.keyRef, [...accountIds]),
+        open: (envelope) => open(device.keyRef, envelope),
+      }
+    },
+    [bridge],
+  )
+
   const applyExchangeOutcome = useCallback(
     (deviceLabel: string, deviceId: string, result: PerformExchangeResult, at: number) => {
       dispatch({
@@ -2706,6 +2729,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           getState: () => liveRef.current,
           getCalendar: () => liveRef.current.settings.workCalendar ?? DEFAULT_WORK_CALENDAR,
           now: () => Date.now(),
+          secrets: secretsFor,
         },
         request.pairId,
         request.envelope,
@@ -2734,6 +2758,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       getPairedDevices: () => liveRef.current.pairedDevices,
       getSecret: (keyRef) => b.getSyncSecret!(keyRef),
       transport: { postJson: (url, body) => b.syncRequest!(url, body) },
+      secrets: secretsFor,
       onSynced: (device, result, at) => applyExchangeOutcome(device.label, device.id, result, at),
       onError: (device, message) => {
         addLog({ kind: 'error', level: 'warn', title: `Could not sync with ${device.label}`, detail: message })

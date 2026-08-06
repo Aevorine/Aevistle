@@ -4403,6 +4403,20 @@ textarea {
   stroke-linecap: round;
   transition: stroke-dashoffset var(--dur) linear;
 }
+/* The code as text, for a device that cannot scan it — see `PairingQr.tsx`.
+   Full width where the rest of `.pairqr` is centred on its own content: the
+   string is 200-odd characters and a shrink-to-fit textarea would be one long
+   line with a scrollbar, which is unreadable on the phone this exists for. */
+.pairqr__manual {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.pairqr__manual .form-rows {
+  width: 100%;
+}
 .pairqr__status {
   text-align: center;
   min-height: 2.6em;
@@ -7170,6 +7184,16 @@ textarea {
   .log__actions {
     flex: 1 1 100%;
     justify-content: flex-end;
+    /* And wrap *within* that second line too. Giving the actions a line of
+       their own is only half the problem: `.btn` is `white-space: nowrap`, so
+       a row carrying three of them lays them out single-file however narrow
+       the screen is. A paired device grew a third button ("change what syncs",
+       next to "regenerate" and "revoke") and the row measured 381px of buttons
+       on a 360px viewport — "revoke" started at x=327 and ended at x=417,
+       i.e. off the edge entirely, on the one control whose whole job is to be
+       findable. Wrapping costs a line on the narrowest screens and nothing at
+       all where the three already fit. */
+    flex-wrap: wrap;
   }
   .icon-btn {
     width: var(--tap-min);
@@ -8581,3 +8605,39 @@ textarea {
   }
 }
 /* --- end runecircuit --- */
+
+/* ==========================================================================
+   A banner that carries a button, on a screen too narrow to hold both
+   ========================================================================== */
+
+/*
+ * `.banner` is one flex row: icon, body, and — when the caller passed one — a
+ * button at the trailing edge. The button does not shrink, so on a phone it
+ * takes its ~110px out of the ~310px available and leaves the sentence a
+ * hundred-odd pixels to wrap inside. Measured on the account dialog at 360x800:
+ * "已按 Gmail 自动填好服务器、端口和加密方式 / 有 1 项是你手动改过的…" came out as six lines
+ * two or three characters wide, beside a button with empty space above and
+ * below it. That is the "crushed together" this stops — and it only became
+ * visible once that banner started being shown on a phone at all, because the
+ * `banner--info` cull had been hiding the problem along with the message.
+ *
+ * The body gets a floor rather than the button getting a wrap rule: 12em is
+ * about the width at which a sentence stops reading as a column, so the row
+ * stays a row wherever it genuinely fits — a tablet, a landscape phone — and
+ * breaks only where it does not. `margin-inline-start: auto` keeps the button at
+ * the trailing edge of whichever line it lands on, which is where it was.
+ *
+ * `Banner` adds `--stack` only when it actually has an action, so every banner
+ * without one keeps the flex sizing it has always had.
+ */
+@media (max-width: 760px) {
+  .banner--stack {
+    flex-wrap: wrap;
+  }
+  .banner--stack > .banner__body {
+    flex: 1 1 12em;
+  }
+  .banner--stack > :last-child:not(.banner__body) {
+    margin-inline-start: auto;
+  }
+}

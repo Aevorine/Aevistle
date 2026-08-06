@@ -41,6 +41,7 @@
  */
 
 import { accountFields, appearanceSettings, type AppearanceSettings } from './backup'
+import type { PairingEnvelope } from './pairingCrypto'
 import type { AppState, Contact, MailAccount, ScheduledJob, Template } from './types'
 import type { WorkCalendar } from './workCalendar'
 
@@ -68,6 +69,17 @@ export type SyncAccount = MailAccount & { secret?: string }
 
 export interface ScopePayload {
   accounts?: SyncAccount[]
+  /**
+   * The passwords for `accounts`, sealed a second time under a key neither
+   * renderer derives on its own — see `core/secretTransport.ts` for why this
+   * is an opaque envelope here rather than a `secret` field on each account.
+   *
+   * Only ever set alongside `accounts`, and only on the ongoing-sync path
+   * (`core/syncLoop.ts`); the live-session `buildScopePayload` below still
+   * uses `SyncAccount.secret`, because that path has a person watching it
+   * complete and no trusted layer of its own to seal in.
+   */
+  accountSecrets?: PairingEnvelope
   schedule?: SchedulePayload
   contacts?: Contact[]
   templates?: Template[]

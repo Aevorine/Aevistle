@@ -160,6 +160,10 @@ const api: DesktopApi = {
     return () => ipcRenderer.removeListener(IPC.syncServerRequest, listener)
   },
   getSyncSecret: (keyRef) => ipcRenderer.invoke(IPC.getSyncSecret, keyRef),
+  sealAccountSecrets: (keyRef, accountIds) =>
+    ipcRenderer.invoke(IPC.sealAccountSecrets, keyRef, accountIds),
+  openAccountSecrets: (keyRef, envelope) =>
+    ipcRenderer.invoke(IPC.openAccountSecrets, keyRef, envelope),
 
   onUpdateProgress: (handler) => {
     const listener = (_event: unknown, payload: DownloadProgress) => handler(payload)

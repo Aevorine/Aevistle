@@ -40,6 +40,8 @@ export function createDesktopBridge(): PlatformBridge {
     onSyncServerRequest: (handler) => api.onSyncServerRequest(handler),
     respondToSyncServer: (response) => api.respondToSyncServer(response),
     getSyncSecret: (keyRef) => api.getSyncSecret(keyRef),
+    sealAccountSecrets: (keyRef, accountIds) => api.sealAccountSecrets(keyRef, accountIds),
+    openAccountSecrets: (keyRef, envelope) => api.openAccountSecrets(keyRef, envelope),
 
     pickFiles: () => api.pickFiles(),
     snapshotAttachments: (attachments, jobId) => api.snapshotAttachments(attachments, jobId),

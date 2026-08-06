@@ -76,6 +76,40 @@ export function syncUrl(host: string, port = SYNC_SERVER_PORT): string {
 }
 
 // ---------------------------------------------------------------------------
+// Credentials
+// ---------------------------------------------------------------------------
+
+/** What a successful seal produced — see `SyncSecretTransport.seal`. */
+export interface SealedAccountSecrets {
+  envelope: PairingEnvelope
+  /**
+   * Which of the requested accounts actually had a password to seal. The
+   * caller asks about every account it is sending; the trusted layer is the
+   * only side that knows which of them the keystore holds anything for, and
+   * the answer is what decides whether the outgoing record may claim
+   * `hasSecret` — see `buildChangedPayload`.
+   */
+  accountIds: string[]
+}
+
+/**
+ * The one thing a sync cycle cannot do in this file: touch a mailbox password.
+ *
+ * Both halves run entirely inside the trusted layer (Electron main, the
+ * Android plugin) and hand this file nothing but an opaque envelope and a list
+ * of ids. See `core/secretTransport.ts` for the crypto and for the honest
+ * account of what that boundary is and is not worth. Optional throughout,
+ * because a build that cannot offer it must still sync everything else rather
+ * than refusing to sync at all.
+ */
+export interface SyncSecretTransport {
+  /** Seal whatever the keystore holds for these accounts. `null` when it holds nothing for any of them. */
+  seal(accountIds: readonly string[]): Promise<SealedAccountSecrets | null>
+  /** Open one and write every credential in it straight back to the keystore. Resolves with the account ids written — never with a secret. */
+  open(envelope: PairingEnvelope): Promise<string[]>
+}
+
+// ---------------------------------------------------------------------------
 // Wire shapes
 // ---------------------------------------------------------------------------
 
@@ -137,12 +171,22 @@ function changedSince<T extends { updatedAt?: number }>(records: readonly T[], s
 /**
  * The outgoing half of a cycle: everything in the device's agreed scopes that
  * changed after `sinceLocal` (this device's own clock — `device.lastSyncedAt`,
- * or 0 the first time). Reuses `accountFields`/`appearanceSettings` from
- * `backup.ts`, the same "safe to hand to another device" shaping
- * `core/syncScope.ts`'s live-session payload already uses — see that file's
- * doc for why 'accounts' here never carries a password: an ongoing sync is a
- * background poll, not a moment someone is watching, so smuggling a secret
- * across it would be silent in exactly the way this app tries never to be.
+ * or 0 the first time).
+ *
+ * `accountFields` from `backup.ts` used to shape the 'accounts' scope here,
+ * which forced `hasSecret: false` on every account and meant an ongoing sync
+ * could only ever deliver an account the other device then had to be given a
+ * password for by hand. That was the honest thing to do while there was no way
+ * to move a password safely, and it is the wrong thing now that there is:
+ * `attachAccountSecrets` below hands the ids off to the trusted layer, and only
+ * the ones it says it sealed are allowed to claim `hasSecret`. An account
+ * whose password this device does not hold, or whose seal could not happen
+ * because no transport was supplied, still travels with `hasSecret: false` —
+ * the other side is never told a password exists that did not actually arrive.
+ *
+ * Note what this is *not*: `payload.accounts` still carries no secret field of
+ * its own. The credentials ride in `payload.accountSecrets`, a separately
+ * sealed envelope this file cannot open. See `core/secretTransport.ts`.
  */
 export function buildChangedPayload(
   state: AppState,
@@ -155,6 +199,9 @@ export function buildChangedPayload(
 
   if (want.has('accounts')) {
     const changed = changedSince(state.accounts, sinceLocal)
+    // `accountFields` semantics until `attachAccountSecrets` says otherwise —
+    // claiming a password that was never sealed is the one failure mode worth
+    // designing the default around.
     if (changed.length > 0) payload.accounts = accountFields(changed)
   }
   if (want.has('schedule')) {
@@ -177,6 +224,56 @@ export function buildChangedPayload(
   }
 
   return payload
+}
+
+/**
+ * Attach the passwords for whatever accounts `buildChangedPayload` put in the
+ * payload, in place.
+ *
+ * Separate from `buildChangedPayload` and `async` because it is the only part
+ * of building a payload that leaves this file at all — everything else is a
+ * pure slice of `AppState`, and making the whole builder async to accommodate
+ * one IPC round trip would have every caller awaiting a promise that resolves
+ * synchronously on the platforms that cannot seal anything.
+ *
+ * Fails soft in both directions. No transport, nothing sealed, or a trusted
+ * layer that threw: the accounts still travel, with `hasSecret: false`, which
+ * is exactly what this scope did before credentials could move at all. A sync
+ * that dropped the user's contacts because their keystore was busy would be a
+ * strictly worse answer than one that asks them to type a password.
+ */
+export async function attachAccountSecrets(
+  payload: ScopePayload,
+  secrets: SyncSecretTransport | undefined,
+  state: AppState,
+): Promise<void> {
+  if (!secrets || !payload.accounts || payload.accounts.length === 0) return
+
+  // Asked of the *local* records rather than of `payload.accounts`, whose
+  // `hasSecret` `buildChangedPayload` has already flattened to false — the
+  // question here is "which of these does this machine hold a password for",
+  // and only the untouched state answers it.
+  const holdsSecret = new Set(state.accounts.filter((a) => a.hasSecret).map((a) => a.id))
+  const wanted = payload.accounts.filter((a) => holdsSecret.has(a.id)).map((a) => a.id)
+  if (wanted.length === 0) return
+
+  let sealed: SealedAccountSecrets | null = null
+  try {
+    sealed = await secrets.seal(wanted)
+  } catch {
+    // The keystore refused, or this build has no handler behind the bridge
+    // method. Either way the accounts go without their passwords rather than
+    // the cycle failing — see the doc above.
+    return
+  }
+  if (!sealed) return
+
+  const delivered = new Set(sealed.accountIds)
+  if (delivered.size === 0) return
+  payload.accountSecrets = sealed.envelope
+  payload.accounts = payload.accounts.map((account) =>
+    delivered.has(account.id) ? { ...account, hasSecret: true } : account,
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -223,9 +320,17 @@ async function reconcileArray<T extends { id: string; updatedAt?: number }>(
  * apply, plus any conflicts it produced. `sinceLocal` is *this* device's own
  * `lastSyncedAt` for the peer — never the `since` the peer sent, which
  * describes their clock, not this one (see `PairedDevice.clockOffsetMs`'s
- * doc). Account secrets are stripped before anything touches
- * `AppState.accounts`; the caller is responsible for writing them to the
- * keystore first — see `SyncLoop.runCycle`'s `hooks.applySecret`.
+ * doc).
+ *
+ * No credential reaches `AppState.accounts` by either route. `incoming
+ * .accountSecrets` is handed straight to `secrets.open`, which writes it to
+ * the keystore inside the trusted layer and answers with account ids alone;
+ * the inline `SyncAccount.secret` (which only `core/syncScope.ts`'s
+ * live-session payload ever produces) is split off into the returned
+ * `accountSecrets` for the caller to write. An account only keeps
+ * `hasSecret: true` if one of those two actually delivered something for it —
+ * a record claiming a password that is not on this machine fails to send and
+ * reports no reason why.
  */
 export async function applyExchange(
   state: AppState,
@@ -233,16 +338,29 @@ export async function applyExchange(
   sinceLocal: number,
   sessionId: string,
   clockOffsetMs: number,
+  secrets?: SyncSecretTransport,
 ): Promise<ExchangeOutcome & { accountSecrets: Array<{ accountId: string; secret: string }> }> {
   const patch: SyncApplyPatch = {}
   let conflicts: ConflictSnapshot[] = []
   const accountSecrets: Array<{ accountId: string; secret: string }> = []
 
+  // Opened before the accounts are reconciled, so `hasSecret` below can be
+  // told the truth. A throw is not fatal: the accounts still land, without
+  // their passwords — the same outcome as a peer that sealed none.
+  let storedSecrets = new Set<string>()
+  if (incoming.accountSecrets && secrets) {
+    try {
+      storedSecrets = new Set(await secrets.open(incoming.accountSecrets))
+    } catch {
+      storedSecrets = new Set()
+    }
+  }
+
   if (incoming.accounts) {
     const stripped = incoming.accounts.map((a) => {
       const { secret, ...rest } = a
       if (secret) accountSecrets.push({ accountId: a.id, secret })
-      return { ...rest, hasSecret: rest.hasSecret && Boolean(secret) }
+      return { ...rest, hasSecret: rest.hasSecret && (Boolean(secret) || storedSecrets.has(a.id)) }
     })
     const result = await reconcileArray('account', state.accounts, stripped, sinceLocal, sessionId, clockOffsetMs)
     if (result.merged) patch.accounts = result.merged
@@ -315,6 +433,7 @@ export async function performExchange(
   device: PairedDevice,
   incoming: SyncExchangePayload,
   now: number,
+  secrets?: SyncSecretTransport,
 ): Promise<PerformExchangeResult> {
   const sessionId = `${device.id}:${now}`
   const sinceLocal = device.lastSyncedAt ?? 0
@@ -324,11 +443,15 @@ export async function performExchange(
     sinceLocal,
     sessionId,
     device.clockOffsetMs ?? 0,
+    secrets,
   )
-  const outgoing: SyncExchangePayload = {
-    since: now,
-    changed: buildChangedPayload(state, calendar, device.scopes, sinceLocal),
-  }
+  const changed = buildChangedPayload(state, calendar, device.scopes, sinceLocal)
+  // Only ever after `buildChangedPayload` has already applied `device.scopes`:
+  // an account the user unchecked is not in `changed.accounts`, so its password
+  // is never among the ids handed to the trusted layer to seal. Unchecking a
+  // scope keeps it off the wire, rather than off the screen at the far end.
+  await attachAccountSecrets(changed, secrets, state)
+  const outgoing: SyncExchangePayload = { since: now, changed }
   return { patch, conflicts, accountSecrets, outgoing }
 }
 
@@ -342,6 +465,8 @@ export interface RespondHooks {
   getState(): AppState
   getCalendar(): WorkCalendar
   now(): number
+  /** Per-device, because the key credentials are sealed under is this pairing's — see `SyncSecretTransport`. Absent on a build with no trusted layer to seal in. */
+  secrets?(device: PairedDevice): SyncSecretTransport | undefined
 }
 
 /** Everything a caller needs to actually commit the exchange to state and the keystore — kept separate from the sealed reply so `respondToSyncRequest` can answer before the renderer has finished dispatching. */
@@ -369,7 +494,14 @@ export async function respondToSyncRequest(
   }
 
   const now = hooks.now()
-  const result = await performExchange(hooks.getState(), hooks.getCalendar(), device, incoming, now)
+  const result = await performExchange(
+    hooks.getState(),
+    hooks.getCalendar(),
+    device,
+    incoming,
+    now,
+    hooks.secrets?.(device),
+  )
   const replyEnvelope = await sealWithRandomIv(key, result.outgoing)
   return { envelope: replyEnvelope, outcome: { ...result, device } }
 }
@@ -385,6 +517,8 @@ export interface SyncLoopHooks {
   getPairedDevices(): PairedDevice[]
   getSecret(keyRef: string): Promise<string | null>
   transport: SyncTransport
+  /** Per-device, for the same reason `RespondHooks.secrets` is. */
+  secrets?(device: PairedDevice): SyncSecretTransport | undefined
   /** Called once a device's exchange succeeds — the caller dispatches the patch, records the conflicts, and updates the device's `lastSyncedAt`. */
   onSynced(device: PairedDevice, result: PerformExchangeResult, at: number): void
   /** The device could not be reached this cycle — logged, never queued. See the module doc. */
@@ -438,12 +572,13 @@ export class SyncLoop {
         return
       }
       const key = await importLongLivedKey(keyB64)
+      const secrets = this.hooks.secrets?.(device)
       const now = this.hooks.now()
       const sinceLocal = device.lastSyncedAt ?? 0
-      const outgoing: SyncExchangePayload = {
-        since: now,
-        changed: buildChangedPayload(this.hooks.getState(), this.hooks.getCalendar(), device.scopes, sinceLocal),
-      }
+      const state = this.hooks.getState()
+      const changed = buildChangedPayload(state, this.hooks.getCalendar(), device.scopes, sinceLocal)
+      await attachAccountSecrets(changed, secrets, state)
+      const outgoing: SyncExchangePayload = { since: now, changed }
       const requestEnvelope = await sealWithRandomIv(key, outgoing)
 
       let raw: unknown
@@ -465,7 +600,18 @@ export class SyncLoop {
       }
 
       const theirs = await openWithRandomIv<SyncExchangePayload>(key, response.envelope)
-      const result = await performExchange(this.hooks.getState(), this.hooks.getCalendar(), device, theirs, now)
+      // Builds (and seals) an outgoing payload this side has already sent and
+      // will discard — the price of both directions running the one function,
+      // and cheap in the steady state where nothing changed since last cycle
+      // and there is no account to seal a password for.
+      const result = await performExchange(
+        this.hooks.getState(),
+        this.hooks.getCalendar(),
+        device,
+        theirs,
+        now,
+        secrets,
+      )
       this.hooks.onSynced(device, result, now)
     } catch (e) {
       this.hooks.onError?.(device, e instanceof Error ? e.message : String(e))

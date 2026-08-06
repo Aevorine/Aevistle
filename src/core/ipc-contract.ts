@@ -36,7 +36,13 @@ import type { DownloadProgress, UpdateAsset, UpdateInfo } from './update'
 import type { ControlEndpoint, ControlRequest, ControlResponse } from './control'
 import type { FeedResponse } from './feeds'
 import type { PairingEvent, PairingPayload, PairMode } from './pairing'
-import type { SyncListenerStatus, SyncServerRequest, SyncServerResponse } from './syncLoop'
+import type { PairingEnvelope } from './pairingCrypto'
+import type {
+  SealedAccountSecrets,
+  SyncListenerStatus,
+  SyncServerRequest,
+  SyncServerResponse,
+} from './syncLoop'
 
 /**
  * Tray menu items that are a request to the *window*, not to the app.
@@ -279,6 +285,21 @@ export interface DesktopApi {
   respondToSyncServer(response: SyncServerResponse): Promise<void>
   /** See `PlatformBridge.getSyncSecret`'s doc in `bridge.ts` for why this exists at all. */
   getSyncSecret(keyRef: string): Promise<string | null>
+  /**
+   * Seal the keystore's passwords for these accounts under this pairing's own
+   * key, and return only the envelope.
+   *
+   * Deliberately not `getSecret(accountId)` plus sealing in the renderer,
+   * which is the shape that would have been half the code: the reason this
+   * privilege boundary has no secret reader on it is that the renderer is
+   * where web content runs, and adding one for the convenience of a background
+   * poll would be paying for a feature with the app's one real security
+   * property. Main reads the keystore, main does the crypto, and the widest
+   * thing the renderer gains is a ciphertext. See `core/secretTransport.ts`.
+   */
+  sealAccountSecrets(keyRef: string, accountIds: string[]): Promise<SealedAccountSecrets | null>
+  /** The receiving end: open one and write what is inside straight to the keystore, answering with account ids only. */
+  openAccountSecrets(keyRef: string, envelope: PairingEnvelope): Promise<string[]>
 }
 
 /** IPC channel names, in one place so main and preload cannot disagree. */
@@ -343,4 +364,6 @@ export const IPC = {
   syncServerRequest: 'aevistle:sync-server-request',
   syncServerResponse: 'aevistle:sync-server-response',
   getSyncSecret: 'aevistle:get-sync-secret',
+  sealAccountSecrets: 'aevistle:seal-account-secrets',
+  openAccountSecrets: 'aevistle:open-account-secrets',
 } as const

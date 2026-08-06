@@ -277,15 +277,38 @@ export function Banner({
   title,
   children,
   action,
+  keep,
 }: {
   tone?: BannerTone
   title?: string
   children?: ReactNode
   action?: ReactNode
+  /**
+   * Survive the phone's cull of `banner--info`.
+   *
+   * A phone hides every info banner (see the `@media (max-width: 760px)` block
+   * in app.css) on the reasoning that they explain how a screen works and a
+   * small screen has no room for explanations. That is right for "here is how
+   * pairing works" and wrong for an info banner that is *reporting* something —
+   * the account dialog's says which of your hand-edited fields auto-fill just
+   * refused to overwrite, and hiding it is precisely how auto-fill comes to look
+   * broken. The `:not(.banner--keep)` escape hatch already existed in the
+   * stylesheet for exactly this; this is the prop that reaches it.
+   */
+  keep?: boolean
 }) {
   const Icon = tone === 'success' ? IconCheckCircle : tone === 'info' ? IconInfo : IconAlert
   return (
-    <div className={`banner banner--${tone}`} role={tone === 'danger' ? 'alert' : undefined}>
+    <div
+      className={`banner banner--${tone}${keep ? ' banner--keep' : ''}${
+        // A button beside the text needs ~110px it will not give back, which on
+        // a 360px screen leaves the sentence wrapping inside a column a few
+        // characters wide. `--stack` is what app.css hangs the phone rule off;
+        // it is emitted only where there is an action, so nothing else moves.
+        action ? ' banner--stack' : ''
+      }`}
+      role={tone === 'danger' ? 'alert' : undefined}
+    >
       <Icon className="banner__icon" size={16} />
       <div className="banner__body">
         {title ? <div className="banner__title">{title}</div> : null}

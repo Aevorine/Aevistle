@@ -1501,6 +1501,10 @@ export const zhCN: Translations = {
 
   'pairing.scanQr': '扫描',
   'pairing.pasteCodeInstead': '改为粘贴配对码',
+  'pairing.showCodeText': '以文本形式显示配对码',
+  'pairing.hideCodeText': '隐藏配对码文本',
+  'pairing.codeTextHint':
+    '如果对方设备没有摄像头，或者摄像头权限被拒绝：把这一整行复制到对方设备，粘贴到"改为粘贴配对码"里。配对码一过期、或者已有设备连上，它就立即失效。',
   'pairing.cameraDenied': '未获得摄像头访问权限',
   'pairing.cameraDeniedHint': '你仍然可以配对——粘贴另一台设备上显示的配对码即可，无需扫描。',
   'pairing.invalidCode': '这不是有效的配对码。',
@@ -1511,7 +1515,8 @@ export const zhCN: Translations = {
 
   'sync.scope.title': '要发送的内容',
   'sync.scope.accounts': '账号',
-  'sync.scope.accountsHint': '{n} 个账号。有密码的账号会通过这条加密连接直接发给对方设备，不会存放在任何地方。',
+  'sync.scope.accountsHint':
+    '{n} 个账号。已保存密码的账号，密码会加密封装后通过这条连接送过去，直接写入对方设备的系统密钥库，这样你就不用再输一遍。两边都不会把它写进明文文件。',
   'sync.scope.schedule': '定时任务',
   'sync.scope.scheduleHint': '{n} 个提醒，以及你的工作日历。',
   'sync.scope.contacts': '联系人',
@@ -1550,6 +1555,9 @@ export const zhCN: Translations = {
   'devices.revokeConfirm': '下次这台设备尝试同步时会被要求重新配对。对方设备上不会删除任何东西——Aevistle 没有服务器可以联系到它。',
   'devices.regenerate': '重新生成配对码',
   'devices.regenerateHint': '当前版本无法承载配对码——请在桌面版或安卓版应用里重新生成这次配对。',
+  'devices.editScopes': '修改同步内容',
+  'devices.editScopesHint':
+    '这里改的是本设备往外发什么。对方设备保留它自己的选择——如果你不想再收到某一类内容，也要到那台设备上改一次。',
   'devices.pairNew': '配对新设备',
   'devices.showCode': '显示配对码',
   'devices.joinNew': '使用另一台设备的配对码',

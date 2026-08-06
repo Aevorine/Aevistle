@@ -67,7 +67,17 @@ import {
 import { listLanIPv4, PairingServer } from './pairingServer'
 import type { PairingPayload, PairMode } from '../src/core/pairing'
 import { SyncServer } from './syncServer'
-import type { SyncListenerStatus, SyncServerResponse } from '../src/core/syncLoop'
+import type {
+  SealedAccountSecrets,
+  SyncListenerStatus,
+  SyncServerResponse,
+} from '../src/core/syncLoop'
+import type { PairingEnvelope } from '../src/core/pairingCrypto'
+import {
+  openAccountSecrets as openAccountSecretBundle,
+  sealAccountSecrets as sealAccountSecretBundle,
+  type AccountSecret,
+} from '../src/core/secretTransport'
 import {
   dataFolderSize,
   dataLocation,
@@ -505,6 +515,21 @@ function revealWindow(): void {
 }
 
 /**
+ * How stale the window's `blur` may be and still count as "the tray click is
+ * what took the focus away".
+ *
+ * See `toggleWindowFromTray`. Measured on Windows 11 with Electron 43: the
+ * shell deactivates the window and *then* delivers the tray notification, and
+ * the gap between the two is a few milliseconds. 400ms is that measurement with
+ * a wide margin for a loaded machine, and is still far shorter than any human
+ * sequence of "click another app, then go for the tray icon".
+ */
+const TRAY_DISMISS_GRACE_MS = 400
+
+/** When `mainWindow` last lost focus. See `toggleWindowFromTray`. */
+let lastBlurAt = 0
+
+/**
  * One click on the tray icon toggles the window.
  *
  * Three starting states and only one of them means "hide": the window is in
@@ -512,16 +537,45 @@ function revealWindow(): void {
  * merely *visible* is not the same thing — it can be minimised (which Electron
  * still reports as visible, the trap this function exists to avoid) or sitting
  * behind a browser, and in both of those cases the click means "bring it here".
+ *
+ * Asking `isFocused()` is the obvious way to tell those apart and it is the
+ * wrong one, which is why this used to only ever show the window and never hide
+ * it. On Windows the shell takes the foreground for itself the moment the tray
+ * icon is pressed, and only afterwards posts the notification that becomes this
+ * event — so by the time we are asked, the window we are being asked about has
+ * already been deactivated and `isFocused()` is false *whatever* the user was
+ * looking at. Measured on 0.1.18 against the shipped build: window visible, not
+ * minimised, foreground per the OS, and three consecutive tray clicks left it
+ * exactly where it was. `BrowserWindow.getFocusedWindow()` is null at the same
+ * instant, so there is no second opinion to ask for.
+ *
+ * What still distinguishes the two cases is *when* the focus was lost. A window
+ * the user is looking at was focused until this click took it away, so its blur
+ * is milliseconds old. A window buried behind a browser lost focus when they
+ * switched to the browser — seconds or minutes ago. So the question becomes
+ * "was this window focused immediately before the click", and `lastBlurAt`
+ * answers it. `isFocused()` is still consulted first, because a shell that does
+ * *not* steal the foreground would leave the window genuinely focused and there
+ * is no reason to make that case depend on a timer.
+ *
+ * Hiding is not unconditional. `minimiseToTray` is the user saying whether the
+ * tray is somewhere they are willing to let a window go; with it off, the
+ * window goes to the taskbar instead, because making it vanish into an icon
+ * they have declined to depend on is how a window gets lost.
  */
 function toggleWindowFromTray(): void {
   if (!mainWindow || mainWindow.isDestroyed()) {
     createWindow()
     return
   }
+  const justBlurred = lastBlurAt > 0 && Date.now() - lastBlurAt <= TRAY_DISMISS_GRACE_MS
   const inFront =
-    mainWindow.isVisible() && !mainWindow.isMinimized() && mainWindow.isFocused()
+    mainWindow.isVisible() &&
+    !mainWindow.isMinimized() &&
+    (mainWindow.isFocused() || justBlurred)
   if (inFront) {
-    mainWindow.hide()
+    if (desktopPrefs.minimiseToTray) mainWindow.hide()
+    else mainWindow.minimize()
     return
   }
   revealWindow()
@@ -661,6 +715,15 @@ function createWindow(): void {
   mainWindow.on('move', scheduleWindowSave)
   mainWindow.on('maximize', scheduleWindowSave)
   mainWindow.on('unmaximize', scheduleWindowSave)
+
+  // The only reader is `toggleWindowFromTray`, which cannot use `isFocused()`
+  // to tell "the user is looking at this" from "this is buried behind a
+  // browser" — see the comment there. A fresh window has never been focused, so
+  // the timestamp starts cleared rather than inheriting the last window's.
+  lastBlurAt = 0
+  mainWindow.on('blur', () => {
+    lastBlurAt = Date.now()
+  })
 
   if (DEV_SERVER) {
     void mainWindow.loadURL(DEV_SERVER)
@@ -957,6 +1020,58 @@ function registerIpc(): void {
   })
   // `kind` is fixed here, not taken from the renderer — see `PlatformBridge.getSyncSecret`'s doc.
   ipcMain.handle(IPC.getSyncSecret, (_e, keyRef: string) => getSecret(keyRef, 'sync'))
+
+  /**
+   * Move mailbox passwords to a paired device without either renderer ever
+   * holding one. Both halves stay on this side of the boundary — see
+   * `src/core/secretTransport.ts` and `PlatformBridge.sealAccountSecrets`.
+   *
+   * `keyRef` names a pairing, and only ever reads a `'sync'` secret with it,
+   * the same narrowing `IPC.getSyncSecret` above applies for the same reason:
+   * a renderer that could pass an arbitrary account id here would have talked
+   * this handler into being the secret reader the boundary does not have.
+   */
+  ipcMain.handle(
+    IPC.sealAccountSecrets,
+    async (_e, keyRef: string, accountIds: string[]): Promise<SealedAccountSecrets | null> => {
+      const syncKey = await getSecret(keyRef, 'sync')
+      if (!syncKey) return null
+      const secrets: AccountSecret[] = []
+      for (const accountId of accountIds) {
+        const smtp = await getSecret(accountId, 'smtp')
+        const imap = await getSecret(accountId, 'imap')
+        if (!smtp && !imap) continue
+        secrets.push({ accountId, ...(smtp ? { smtp } : {}), ...(imap ? { imap } : {}) })
+      }
+      if (secrets.length === 0) return null
+      return {
+        envelope: await sealAccountSecretBundle(syncKey, secrets),
+        accountIds: secrets.map((s) => s.accountId),
+      }
+    },
+  )
+
+  ipcMain.handle(
+    IPC.openAccountSecrets,
+    async (_e, keyRef: string, envelope: PairingEnvelope): Promise<string[]> => {
+      const syncKey = await getSecret(keyRef, 'sync')
+      if (!syncKey) throw new Error('no sync key for this pairing')
+      const secrets = await openAccountSecretBundle(syncKey, envelope)
+      const written: string[] = []
+      for (const secret of secrets) {
+        // Same invalidation an ordinary password change triggers above: a
+        // pooled connection still logged in as the old user would keep sending
+        // successfully, from the wrong account, for as long as it stayed open.
+        if (secret.smtp) {
+          invalidateConnection(secret.accountId)
+          await setSecret(secret.accountId, secret.smtp, 'smtp')
+        }
+        if (secret.imap) await setSecret(secret.accountId, secret.imap, 'imap')
+        if (secret.smtp || secret.imap) written.push(secret.accountId)
+      }
+      return written
+    },
+  )
 
   ipcMain.handle(IPC.sendNow, async (_e, draft: MessageDraft, account: MailAccount) => {
     const secret = await getSecret(account.id)
