@@ -227,7 +227,7 @@ sha256sum -c SHA256SUMS.txt
 Signing key fingerprint:
 
 ```
-<!-- AEVISTLE_GPG_FINGERPRINT -->0F4BCC451801F12081D04EB74DA15323A89A8783
+<!-- AEVISTLE_GPG_FINGERPRINT -->57753E473F94B09DB3AA9A6AB865B328D5535D9B
 ```
 
 If `gpg --verify` reports anything other than a good signature from that
@@ -255,22 +255,40 @@ as part of `npm run check`.
 
 ### The Android package
 
-The Android package is signed with a key that has not changed since the first
-release and will not change. Check that the APK you have is the one this
-project built:
+> **Signer changed at v0.1.19 (2026-08-06).** The original signing keystore
+> was lost — not compromised, just absent from every machine and backup this
+> project builds from. Every release through v0.1.18 was signed with it; every
+> release from v0.1.19 on is signed with a newly generated key. Android will
+> refuse to install v0.1.19 as an upgrade over v0.1.18 or earlier — the
+> platform treats a different signer as a different app, by design. Anyone on
+> v0.1.18 or earlier must uninstall before installing v0.1.19+. This is stated
+> here rather than smoothed over because the paragraph below used to promise
+> this would never happen.
+
+Check that the APK you have is the one this project built:
 
 ```bash
 apksigner verify --print-certs Aevistle-<version>.apk
 ```
+
+Releases through v0.1.18:
 
 ```
 Signer #1 certificate SHA-256 digest: 563e9757d43f821986d271d0c27e9b7422124d9d7d024d230dd28f6f7697d08d
 Signer #1 certificate SHA-1 digest:   15e23a5fb7ec677cabcfd50529c22e873d20a29d
 ```
 
-A different fingerprint means a different signer — not a new version of this
-app. The Windows builds are **not** code-signed (see "Hardening choices"), so
-`SHA256SUMS.txt` is the only integrity check available for those.
+Releases from v0.1.19 on:
+
+```
+Signer #1 certificate SHA-256 digest: 21cf7b4971a6eb635d78623fb41a4b28069c16159436913ab21f1af3e2916745
+Signer #1 certificate SHA-1 digest:   866b48cea89f629b81db729d542b4bbbbf20dea6
+```
+
+A fingerprint outside both of these means a different signer — not a new
+version of this app. The Windows builds are **not** code-signed (see
+"Hardening choices"), so `SHA256SUMS.txt` is the only integrity check
+available for those.
 
 It runs on the source tree, so it works on a clone as well as on this
 repository.
