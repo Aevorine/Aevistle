@@ -2003,6 +2003,26 @@ textarea {
   flex-direction: column;
   gap: var(--sp-4);
 }
+/*
+ * A flex item's automatic minimum size — the floor that normally stops a
+ * flex container from shrinking a child past its own content — is defined by
+ * spec to collapse to 0 the moment the item's own `overflow` is anything but
+ * `visible`. `.card--flush` (the account list, among others) sets
+ * `overflow: hidden`, so the moment one held more rows than `.modal__body`
+ * had room for, its default `flex-shrink: 1` let this column flex container
+ * squeeze the card down to whatever height fit — clipping the extra rows
+ * inside the card's own `overflow: hidden` — instead of the card keeping its
+ * full content height and `.modal__body`'s `overflow-y: auto` scrolling past
+ * it. Measured on the accounts screen with 20 accounts on a 390px‑wide
+ * window: `.modal__body` reported `scrollHeight === clientHeight`, i.e.
+ * nothing to scroll, while sixteen of the twenty rows were never visible or
+ * reachable by any input. `flex-shrink: 0` is the fix — the card is exactly
+ * as tall as its content wants, on every screen that opens one this way, and
+ * the scrolling happens exactly once, in the container built to do it.
+ */
+.modal__body > .card {
+  flex-shrink: 0;
+}
 .modal__footer {
   flex: none;
   display: flex;
@@ -8954,13 +8974,29 @@ textarea {
 /* --- the inbox tab strip --------------------------------------------------
    A tab is now a grip and a button inside one box. The box is the flex child
    `.segmented__item` used to be, and takes over its `flex: 1`, so a strip of
-   three tabs still divides the width three ways. */
+   three tabs still divides the width three ways.
+
+   `min-width: 0` used to sit here too, on the general reflex that a flex
+   child should get out of its container's way. It does the opposite for a
+   `white-space: nowrap` label with no `text-overflow: ellipsis` behind it:
+   a flex item's automatic minimum size — the floor that stops the item from
+   being shrunk past its own content — collapses to 0 the moment `min-width`
+   is set explicitly, so past three or four accounts `flex: 1` divided the
+   strip's width by the account count and squeezed every slot below the
+   width its own label needed. Nothing there clips or wraps that overflow, so
+   the names spilled out of their slots and over each other — measured at 20
+   accounts, a slot 48px wide holding a label that needed 108–118px, and the
+   twenty rendered as one illegible smear of Chinese characters. Leaving
+   `min-width` at its default (`auto`, i.e. "the content's own width") is
+   what makes `.segmented`'s existing `overflow-x: auto` the escape valve it
+   was built to be: few tabs still divide the width evenly exactly as before
+   — `flex-grow` is untouched — many tabs make the strip scroll sideways
+   instead of crushing every label into the next one. */
 .segmented__slot {
   position: relative;
   flex: 1;
   display: inline-flex;
   align-items: center;
-  min-width: 0;
   border-radius: var(--r-xs);
 }
 .reorder-handle--tab {

@@ -506,26 +506,41 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
                       {needsStoredPassword(a) ? ` · ${t('account.password')}: ${t('common.none')}` : ''}
                     </div>
                   </div>
-                  {!isDefault ? (
+                  {/*
+                    `.log__actions`, not bare buttons on the row — see the
+                    class's own comment in `app.css`. Bare, `!isDefault`'s
+                    "Make default" button is `white-space: nowrap` text that
+                    cannot shrink; `.log__body` is the only flexible thing on
+                    the row, so on a narrow window it collapsed toward zero
+                    and pushed `overflow-wrap: anywhere` onto the address/host
+                    line, which is what wrapped it one character at a time
+                    instead of at the spaces around its own `·` separators.
+                    Grouped like this, the ≤760px rule that already exists for
+                    `.log__actions` gives the buttons a line of their own
+                    instead of squeezing the text next to them.
+                  */}
+                  <div className="log__actions">
+                    {!isDefault ? (
+                      <Button
+                        variant="ghost"
+                        onClick={() => patch({ defaultAccountId: a.id })}
+                      >
+                        {t('account.makeDefault')}
+                      </Button>
+                    ) : null}
                     <Button
                       variant="ghost"
-                      onClick={() => patch({ defaultAccountId: a.id })}
+                      onClick={() => {
+                        setEditing(a)
+                        setDialogOpen(true)
+                      }}
                     >
-                      {t('account.makeDefault')}
+                      {t('common.edit')}
                     </Button>
-                  ) : null}
-                  <Button
-                    variant="ghost"
-                    onClick={() => {
-                      setEditing(a)
-                      setDialogOpen(true)
-                    }}
-                  >
-                    {t('common.edit')}
-                  </Button>
-                  <IconButton label={t('common.delete')} onClick={() => removeAccount(a)}>
-                    <IconTrash size={16} />
-                  </IconButton>
+                    <IconButton label={t('common.delete')} onClick={() => removeAccount(a)}>
+                      <IconTrash size={16} />
+                    </IconButton>
+                  </div>
                 </div>
               )
               }),
@@ -597,6 +612,7 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
           icon={<IconLink size={17} />}
           narrow={narrow}
           closeLabel={closeLabel}
+          hideOnNarrow
         >
           <DevicesCard />
         </SettingsSection>
@@ -617,6 +633,7 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
           icon={<IconCalendar size={17} />}
           narrow={narrow}
           closeLabel={closeLabel}
+          hideOnNarrow
         >
           <CalendarSubscribeCard />
         </SettingsSection>
@@ -922,6 +939,7 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
           icon={<IconFileText size={17} />}
           narrow={narrow}
           closeLabel={closeLabel}
+          hideOnNarrow
         >
         <DigestCard />
 
@@ -940,6 +958,7 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
           icon={<IconStar size={17} />}
           narrow={narrow}
           closeLabel={closeLabel}
+          hideOnNarrow
         >
         <GreetingsCard />
 

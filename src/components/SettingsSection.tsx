@@ -48,6 +48,7 @@ export function SettingsSection({
   icon,
   narrow,
   closeLabel,
+  hideOnNarrow,
   children,
 }: {
   /**
@@ -63,6 +64,18 @@ export function SettingsSection({
   icon: ReactNode
   narrow: boolean
   closeLabel: string
+  /**
+   * Drops the row (and the dialog behind it) on a phone, leaving only the
+   * anchor div, for the handful of sections `HomeView`'s `HOME_FEATURES`
+   * already puts one tap away from the tab bar. A wide window has no such
+   * shortcut — Settings is already the only door — so this never touches the
+   * `!narrow` branch below, and the row keeps its place there unconditionally.
+   * Without it, opening the app to Home and then to Settings offered the same
+   * digest/greetings/calendar-subscribe/pairing card behind two different
+   * buttons, which read as the phone not knowing where it put its own
+   * features rather than as two doors to one room.
+   */
+  hideOnNarrow?: boolean
   children: ReactNode
 }) {
   const [open, setOpen] = useState(false)
@@ -74,6 +87,10 @@ export function SettingsSection({
         {children}
       </>
     )
+  }
+
+  if (hideOnNarrow) {
+    return <div id={id} className="settings-section" />
   }
 
   return (

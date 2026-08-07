@@ -205,6 +205,26 @@ export function VirtualList<T>({
   }, [windowed])
 
   /**
+   * Recompute the range whenever the item list itself changes — not only on
+   * scroll or resize.
+   *
+   * The subscribe effect above re-runs solely on `[windowed]`, so it never
+   * fires when one windowed list replaces another — the inbox's "all
+   * accounts" tab and a single account's tab, both over `threshold`. `range`
+   * then kept the start/end indices computed for the list that just left,
+   * applied to the new one: the same numeric index now names a different
+   * message, at a different true height (the "all accounts" row carries an
+   * extra account chip a single-account row does not), so the translateY
+   * computed from the new `offsets` no longer matched what `range` was
+   * actually drawing. That mismatch is what showed up as rows overlapping
+   * until a scroll or resize happened to trigger a fresh binary search.
+   */
+  useLayoutEffect(() => {
+    if (!windowed) return
+    recomputeRef.current()
+  }, [keys, windowed])
+
+  /**
    * Correct the estimated heights from the DOM, after layout and before paint,
    * so a row never shows at its estimate and then snaps to its real height.
    *
