@@ -56,7 +56,7 @@ export const es: Translations = {
 
   'home.title': 'Inicio',
   'home.subtitle': 'Programaciones, contactos, plantillas, el calendario laboral y el registro de envíos.',
-  'nav.inbox': 'Bandeja de entrada',
+  'nav.inbox': 'Recibidos',
   'nav.schedule': 'Programados',
   'nav.contacts': 'Contactos',
   'nav.templates': 'Plantillas',

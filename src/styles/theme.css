@@ -250,8 +250,17 @@
 
   /* ---- layout ----
      Widened alongside the type scale: 16px body copy needs roughly 15% more
-     measure than the 14px it replaced before lines start wrapping awkwardly. */
-  --sidebar-w: 244px;
+     measure than the 14px it replaced before lines start wrapping awkwardly.
+     Narrowed again in a later round: 244px was sized to fit the longest nav
+     label (Spanish "Bandeja de entrada") without truncating, which was more
+     rail than the other five languages needed. Shortening that one label
+     (and French's, the second-longest) to the equally-standard short forms
+     "Recibidos" / "Réception" dropped the true minimum to Spanish
+     "Programados" at ~84px, so the rail could give the width back to the
+     content pane it sits next to — measured zero-truncation (scrollWidth ==
+     clientWidth on every `.nav__label`) across all six languages at this
+     value, in the actual rendered DOM, not estimated. */
+  --sidebar-w: 208px;
   --sidebar-w-collapsed: 68px;
   --pagehead-h: 60px;
   /* What `.actionbar` actually measures with its current padding — the send

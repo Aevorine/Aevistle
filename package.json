@@ -1,6 +1,6 @@
 {
   "name": "aevistle",
-  "version": "0.1.21",
+  "version": "0.1.22",
   "private": true,
   "description": "Schedule email to send later on Windows and Android: one-off reminders or recurring email — daily, weekly, monthly, cron — with attachments, sent while the app is closed. A working calendar keeps sends off public holidays.",
   "keywords": [

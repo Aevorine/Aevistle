@@ -56,7 +56,7 @@ export const fr: Translations = {
 
   'home.title': 'Accueil',
   'home.subtitle': 'Planifications, contacts, modèles, le calendrier de travail et le journal d’envoi.',
-  'nav.inbox': 'Boîte de réception',
+  'nav.inbox': 'Réception',
   'nav.schedule': 'Programmés',
   'nav.contacts': 'Contacts',
   'nav.templates': 'Modèles',
