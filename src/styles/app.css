@@ -140,7 +140,7 @@ textarea {
      matching the card colour made the whole window look like one flat sheet. */
   background: var(--surface-2);
   border-inline-end: 1px solid var(--border-subtle);
-  padding: var(--sp-3);
+  padding: var(--sp-2);
   gap: var(--sp-1);
 }
 
@@ -148,7 +148,10 @@ textarea {
   display: flex;
   align-items: center;
   gap: var(--sp-3);
-  padding: var(--sp-3) var(--sp-3) var(--sp-4);
+  /* Bottom padding matches the top/sides now: with the tagline gone this is
+     a single line of text, and the old --sp-4 bottom pad (sized to balance
+     two lines) left a visibly lopsided gap under it. */
+  padding: var(--sp-3);
   min-width: 0;
 }
 
@@ -181,14 +184,6 @@ textarea {
   letter-spacing: var(--tracking-tight);
   white-space: nowrap;
 }
-.brand__tagline {
-  font-size: var(--text-sm);
-  color: var(--text-3);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 .nav {
   display: flex;
   flex-direction: column;
@@ -202,8 +197,8 @@ textarea {
   position: relative;
   display: flex;
   align-items: center;
-  gap: var(--sp-3);
-  padding: var(--sp-2) var(--sp-3);
+  gap: var(--sp-2);
+  padding: var(--sp-2);
   min-height: 44px;
   border: 0;
   border-radius: var(--r-sm);
@@ -494,6 +489,70 @@ textarea {
   flex: 1;
   height: 1px;
   background: var(--border-subtle);
+}
+
+/*
+ * `AccountDialog`'s four titled blocks (address, send server, more settings,
+ * receive mail) — the same radius, hairline and surface step as `.card`
+ * above, so a form that used to be one long column of rows now reads as
+ * separate, deliberate groups with room to breathe between them.
+ */
+.account-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-4) var(--sp-5);
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+}
+.account-section__title {
+  font-size: var(--text-lg);
+  font-weight: 700;
+  line-height: var(--leading-tight);
+  color: var(--text-1);
+}
+/*
+ * `.modal__body` is a flex column, and every direct child defaults to
+ * `flex-shrink: 1`. `.modal__body > .card` above exists because a shrinkable
+ * child with its own `overflow: hidden` gets squeezed instead of the body
+ * scrolling past it; these sections do not hide overflow, but pinning them at
+ * `flex-shrink: 0` costs nothing and keeps the same guarantee if that ever
+ * changes.
+ */
+.modal__body > .account-section,
+.modal__body > .account-more {
+  flex-shrink: 0;
+}
+
+/*
+ * "More settings" — label, group, reply-to, auto-negotiate and the invalid-
+ * certificate switch. Same card chrome as `.account-section` above,
+ * `<summary>` standing in for the section title. Collapsed by default only on
+ * a phone (`AccountDialog`'s `moreOpen`, seeded from `useNarrow()`) — every
+ * field inside is optional or warning-only in `validateAccount`, bar a
+ * malformed reply-to, which that component forces this open for.
+ */
+.account-more {
+  padding: var(--sp-4) var(--sp-5);
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+}
+.account-more summary {
+  cursor: pointer;
+  font-size: var(--text-lg);
+  font-weight: 700;
+  line-height: var(--leading-tight);
+  color: var(--text-1);
+}
+.account-more[open] summary {
+  margin-block-end: var(--sp-3);
+}
+.account-more__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
 }
 
 /* ==========================================================================
@@ -2800,6 +2859,24 @@ textarea {
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+/*
+ * The address box is the first thing a thumb reaches for on `AccountDialog`'s
+ * phone layout, so it gets a bigger target than the rest of the form's
+ * inputs — taller and larger type, on the phone shell only.
+ *
+ * Scoped to `data-shell="mobile"` rather than a `@media` width query, for the
+ * same reason as the block above: that attribute is the one place "narrow
+ * *or* native mobile platform" (`components/useNarrow.ts`) is already
+ * evaluated, and a width query here would miss the tablet case it exists to
+ * catch — a floating desktop-sized card would end up with a phone-sized
+ * address box glued to the top of it.
+ */
+[data-shell="mobile"] .account-hero .input {
+  min-height: 56px;
+  padding-block: 14px;
+  font-size: var(--text-lg);
 }
 
 /* ==========================================================================

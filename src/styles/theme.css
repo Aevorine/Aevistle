@@ -259,8 +259,32 @@
      "Programados" at ~84px, so the rail could give the width back to the
      content pane it sits next to — measured zero-truncation (scrollWidth ==
      clientWidth on every `.nav__label`) across all six languages at this
-     value, in the actual rendered DOM, not estimated. */
-  --sidebar-w: 208px;
+     value, in the actual rendered DOM, not estimated.
+
+     Narrowed a third time, from 208px to 143px, after `.sidebar`'s padding
+     and `.nav__item`'s padding/gap were tightened. That measurement (a
+     runtime `--sidebar-w` override plus `scrollWidth === clientWidth` on
+     every `.nav__label`, walked down a locale x width grid) tested the label
+     alone, on an item with no badge — 143px genuinely is zero-truncation
+     for bare labels. It missed `.nav__badge`: `schedule`/`inbox`/`codes`
+     draw one whenever their count is nonzero, and the badge sits in the same
+     flex row *before* the label's own `min-width: 0` gives way, so a live
+     badge eats into the label's space. A long-lived mailbox reaches
+     three-digit counts easily (300 scheduled reminders, hundreds unread),
+     and at 143px that clipped "Inbox"/"Scheduled" — and their equivalents —
+     in every one of the six languages, not just the long ones.
+
+     Fixed on two sides. `App.tsx`'s `navBadgeText()` now caps what a badge
+     ever *displays* at "99+" (the usual mail/chat convention), so the badge
+     itself stops growing past three characters no matter how large the real
+     count gets. `--sidebar-w` was re-measured with that cap: same method as
+     before — runtime override, `scrollWidth`/`clientWidth` on `.nav__label`
+     — but this time with a "99+" badge actually present on `schedule`,
+     `inbox` and `codes`, across all six languages. Per-locale floor: en
+     168px, zh-CN 165px, fr 182px, es 185px, ru 180px, ar 144px — Spanish
+     "Programados" plus its badge is again the binding case, at 184px it
+     clips by 1px. 185px is that measured floor, not a guess. */
+  --sidebar-w: 185px;
   --sidebar-w-collapsed: 68px;
   --pagehead-h: 60px;
   /* What `.actionbar` actually measures with its current padding — the send

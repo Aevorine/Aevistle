@@ -25,6 +25,7 @@
  * find that out is a worse experience than a button.
  */
 import React from 'react'
+import { I18nContext } from '../i18n'
 
 type Props = {
   children: React.ReactNode
@@ -37,6 +38,15 @@ type Props = {
 type State = { error: Error | null }
 
 export class ErrorBoundary extends React.Component<Props, State> {
+  // Legacy context API rather than `useI18n`, because a class component has
+  // no hooks. Safe here specifically because both call sites in App.tsx sit
+  // inside `I18nBridge`'s `I18nContext.Provider` — see that component's own
+  // comment. `createContext`'s default value would otherwise stand in
+  // silently (always English, never throwing), so this is not a fallback
+  // that would mask being rendered outside the provider by accident.
+  static contextType = I18nContext
+  declare context: React.ContextType<typeof I18nContext>
+
   state: State = { error: null }
 
   static getDerivedStateFromError(error: Error): State {
@@ -61,16 +71,14 @@ export class ErrorBoundary extends React.Component<Props, State> {
   render() {
     if (!this.state.error) return this.props.children
     if (this.props.fallback !== undefined) return this.props.fallback
+    const { t } = this.context
     return (
       <div className="uifail" role="alert">
-        <h2 className="uifail__title">This screen could not be displayed</h2>
+        <h2 className="uifail__title">{t('boot.uiFailTitle')}</h2>
         <p className="uifail__detail">{this.state.error.message}</p>
-        <p className="uifail__hint">
-          Your accounts, scheduled sends and mail are unaffected — they are stored on disk and
-          nothing here has changed them. Other screens still work.
-        </p>
+        <p className="uifail__hint">{t('boot.uiFailHint')}</p>
         <button className="btn btn--secondary uifail__retry" type="button" onClick={this.reset}>
-          Try again
+          {t('boot.uiFailRetry')}
         </button>
       </div>
     )

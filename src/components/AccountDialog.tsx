@@ -12,6 +12,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { Banner, Button, Field, Modal, Switch } from './ui'
 import { IconExternal, IconShield } from './icons'
 import { localeMeta, useI18n, type TranslationKey } from '../i18n'
+import { useNarrow } from './useNarrow'
 import {
   PROVIDERS,
   autoConfigForAddress,
@@ -282,6 +283,7 @@ export function AccountDialog({
   knownGroups?: string[]
 }) {
   const { t, locale } = useI18n()
+  const narrow = useNarrow()
   const [account, setAccount] = useState<MailAccount>(initial ?? blankAccount())
   const [secret, setSecret] = useState('')
   const [testing, setTesting] = useState(false)
@@ -324,6 +326,17 @@ export function AccountDialog({
     initial ? autoConfigForAddress(initial.fromAddress) : null,
   )
 
+  /**
+   * Whether "More settings" is expanded.
+   *
+   * Desktop starts open and stays that way — `!narrow` — because the section
+   * was never collapsed there and nothing about it should look different. A
+   * phone starts collapsed: everything inside (label, group, reply-to, the two
+   * switches) is optional or warning-only per `validateAccount`, so hiding it
+   * costs nothing a user cannot recover with one tap.
+   */
+  const [moreOpen, setMoreOpen] = useState(!narrow)
+
   const markTouched = (...fields: AutoField[]) =>
     setTouched((prev) => {
       const next = new Set(prev)
@@ -350,6 +363,23 @@ export function AccountDialog({
   const testReport = useRef<HTMLDivElement>(null)
   const inboxReport = useRef<HTMLDivElement>(null)
 
+  /**
+   * `<details>`'s `open` is not a normal React-controlled attribute: React
+   * happily *sets* it (`open={true}` on a closed node works every time) but
+   * does not reliably *remove* it — a node the user has natively toggled
+   * open once stays open on every subsequent render with `open={false}`,
+   * because React's reconciler does not call `removeAttribute('open')` on
+   * this particular boolean attribute. `setMoreOpen`/`onToggle` below still
+   * exist because the summary's own click needs `moreOpen` to read from for
+   * the render (and the reply-to-error effect needs to *open* it, which
+   * React can do), but *closing* it back down — the reset effect returning a
+   * reused dialog instance to its default state — has to bypass React and
+   * set the DOM node's own `.open` IDL property directly. Kept as a plain
+   * ref assignment, not a second render, because a second render would hit
+   * the exact same diffing gap.
+   */
+  const moreDetailsRef = useRef<HTMLDetailsElement>(null)
+
   useEffect(() => {
     if (open) {
       const a = initial ?? blankAccount()
@@ -368,6 +398,23 @@ export function AccountDialog({
       setOauthStatus(null)
       setOauthError(null)
       setOauthBusy(false)
+      // `moreOpen`'s own `useState(!narrow)` initialiser only runs on the
+      // component's first-ever mount. The dialog is one long-lived instance
+      // reused for every Add and every Edit — SettingsView renders a single
+      // `<AccountDialog>` with no `key` — so without this line, expanding
+      // "More settings" while adding one account left it expanded (or a
+      // dismissed expand left it collapsed) the next time any account's
+      // dialog opened, including a different account's. Belongs in this
+      // reset block for the same reason `setTouched`/`setAuto` do: it is
+      // per-open-session state, not state that should survive past `open`
+      // going false.
+      setMoreOpen(!narrow)
+      // See `moreDetailsRef`'s own comment: this is not redundant with the
+      // `setMoreOpen` call above. That updates the value the summary's
+      // click handler and the reply-to-error effect read; this is what
+      // actually closes the DOM node when the dialog was left open, which
+      // the `open={moreOpen}` prop alone does not reliably do.
+      if (moreDetailsRef.current) moreDetailsRef.current.open = !narrow
       runId.current++
       inboxRunId.current++
     }
@@ -549,6 +596,19 @@ export function AccountDialog({
   const preset = providerById(account.providerId)
   const issues = useMemo(() => validateAccount(account), [account])
   const blocked = hasErrors(issues)
+
+  /**
+   * A blocking reply-to error must never be hidden behind a closed
+   * disclosure. Desktop is already open (`moreOpen` starts `!narrow`, i.e.
+   * `true`), so this is a no-op there; on a phone it forces the section open
+   * the moment `validateAccount` reports the one error that lives inside it.
+   */
+  useEffect(() => {
+    const replyToBlocked = issues.some(
+      (issue) => issue.field === 'replyTo' && issue.severity === 'error',
+    )
+    if (replyToBlocked) setMoreOpen(true)
+  }, [issues])
 
   /**
    * Joins field names the way the reader's own language does — "A, B and C",
@@ -895,22 +955,6 @@ export function AccountDialog({
     setAccount((a) => ({ ...a, port: d.port, security: d.securityUsed }))
   }
 
-  /** Fill server, port and encryption from the address, in one click. */
-  const autoFill = () => {
-    if (!autoConfigForAddress(account.fromAddress)) {
-      setTestResult({
-        ok: false,
-        accepted: [],
-        rejected: [],
-        durationMs: 0,
-        error: t('account.autoFillUnknown'),
-        errorKind: 'config',
-      })
-      return
-    }
-    restoreAuto()
-  }
-
   const save = async () => {
     setSaving(true)
     try {
@@ -967,310 +1011,343 @@ export function AccountDialog({
         </>
       }
     >
-      <Field label={t('account.provider')}>
-        <select
-          className="select"
-          value={account.providerId ?? ''}
-          onChange={(e) => applyProvider(e.target.value)}
-        >
-          <option value="">—</option>
-          {PROVIDERS.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
-            </option>
-          ))}
-        </select>
-      </Field>
-
-      {preset ? (
-        /*
-         * Kept on a phone, for the same reason the auto-fill banner below is
-         * and with more at stake.
-         *
-         * This is the one that says the password box does not want the
-         * password they log in with, and carries the link to the page that
-         * mints the one it does want. The phone's blanket cull of
-         * `banner--info` took it, and the shape of the resulting bug is why
-         * "the tests do not work on Android" is a fair description of it:
-         * nothing on a 360px screen ever mentioned an app password, so the
-         * account was saved with a Google account password and both tests came
-         * back as authentication failures. Measured at 360x800 before this:
-         * `display: none`, 0x0, link included.
-         */
-        <Banner tone="info" keep>
-          {t(preset.hintKey as 'provider.hint.appPassword')}
-          {preset.appPasswordUrl ? (
-            <>
-              {' '}
-              <button
-                type="button"
-                className="link"
-                onClick={() => onOpenExternal(preset.appPasswordUrl!)}
-              >
-                {t('provider.openGuide')} <IconExternal size={12} />
-              </button>
-            </>
-          ) : null}
-        </Banner>
-      ) : null}
-
-      <div className="field__row">
-        {/*
-          `action`, not `hint`.
-
-          A phone hides `.field__hint` outright — the rule is in the
-          `@media (max-width: 760px)` block and it is right about hints, which
-          are explanations. This is not an explanation, it is the only button
-          that re-runs auto-fill after a hand edit, and on a 360px screen it was
-          `display: none` along with the receive one below. `action` puts it on
-          the label line, which no width hides and which costs no vertical space
-          — the case `Field` grew it for.
-        */}
-        <Field
-          label={t('account.fromAddress')}
-          action={
-            <button type="button" className="link" onClick={autoFill}>
-              {t('account.autoFill')}
-            </button>
-          }
-        >
-          <input
-            className="input"
-            type="email"
-            autoComplete="off"
-            spellCheck={false}
-            placeholder="you@example.com"
-            value={account.fromAddress}
-            onChange={(e) => onAddressChange(e.target.value)}
-          />
-        </Field>
-        <Field label={t('account.fromName')}>
-          <input
-            className="input"
-            value={account.fromName}
-            onChange={(e) => patch({ fromName: e.target.value })}
-          />
-        </Field>
-      </div>
-
       {/*
-        Says what the address just did, and offers the way back.
-
-        Auto-fill that silently refuses to touch a field the user once edited is
-        indistinguishable from auto-fill that is broken — the address changes,
-        the server does not, and there is nothing on screen to explain why. This
-        banner is that explanation, and the button beside it is the one-click
-        undo for the hand edits it is respecting.
+        Section 1 of 4: the address. First on screen and self-explanatory —
+        no title of its own — so it gets only the vertical rhythm the other
+        sections share, plus (mobile only, see `.account-hero` in app.css) a
+        bigger box for the one field a phone user reaches for first.
       */}
-      {auto ? (
-        <Banner
-          tone={auto.guessed ? 'warning' : 'info'}
-          /*
-           * Kept on a phone only while it has something to report.
-           *
-           * "Filled in from Gmail" under a form that visibly filled itself in is
-           * the sort of note a phone is right to drop. "3 fields you edited by
-           * hand were left alone" is not — it is the only thing on screen that
-           * explains why changing the address moved some boxes and not others,
-           * and it comes with the button that undoes them. Dropping *that* is
-           * the failure the banner was written to prevent, reintroduced by a
-           * width. The guessed variant is a warning and was never culled.
-           */
-          keep={autoOverrides.length > 0}
-          action={
-            autoOverrides.length > 0 ? (
-              <Button variant="ghost" onClick={restoreAuto}>
-                {t('account.autoRestore')}
-              </Button>
-            ) : undefined
-          }
-        >
-          <div>
-            {auto.guessed
-              ? t('account.autoGuessed', { domain: auto.domain })
-              : t('account.autoApplied', { provider: auto.preset.name })}
-          </div>
-          {autoOverrides.length > 0 ? (
-            <div className="banner__note">
-              {t('account.autoKept', { n: autoOverrides.length })}
-            </div>
-          ) : null}
-        </Banner>
-      ) : null}
-
-      <div className="field__row">
-        <Field label={t('account.label')}>
-          <input
-            className="input"
-            placeholder={t('account.labelPlaceholder')}
-            value={account.label}
-            onChange={(e) => {
-              markTouched('label')
-              patch({ label: e.target.value })
-            }}
-          />
-        </Field>
-        {/* Free text with suggestions rather than a managed list of groups.
-            Groups here are a filing device, and a filing device that makes you
-            create the folder first is one people stop using. */}
-        <Field label={t('account.group')} optional={t('common.optional')}>
-          <GroupInput
-            value={account.group ?? ''}
-            options={knownGroups}
-            placeholder={t('account.groupPlaceholder')}
-            onChange={(v) => patch({ group: v.trim() || undefined })}
-          />
-        </Field>
-      </div>
-
-      <div className="field__row">
-        <Field label={t('account.replyTo')} optional={t('common.optional')}>
-          <input
-            className="input"
-            type="email"
-            spellCheck={false}
-            value={account.replyTo ?? ''}
-            onChange={(e) => patch({ replyTo: e.target.value })}
-          />
-        </Field>
-      </div>
-
-      <div className="field__row">
-        <Field label={t('account.host')}>
-          <input
-            className="input"
-            spellCheck={false}
-            placeholder="smtp.example.com"
-            value={account.host}
-            onChange={(e) => {
-              markTouched('host')
-              patch({ host: e.target.value.trim() })
-            }}
-          />
-        </Field>
-        <Field label={t('account.port')}>
-          <input
-            className="input"
-            type="number"
-            min={1}
-            max={65535}
-            value={account.port}
-            onChange={(e) => {
-              markTouched('port')
-              patch({ port: Number(e.target.value) })
-            }}
-          />
-        </Field>
-        <Field label={t('account.security')}>
-          <select
-            className="select"
-            value={account.security}
-            onChange={(e) => {
-              markTouched('security')
-              patch({ security: e.target.value as TransportSecurity })
-            }}
-          >
-            <option value="ssl">{t('account.securitySsl')}</option>
-            <option value="starttls">{t('account.securityStarttls')}</option>
-            <option value="none">{t('account.securityNone')}</option>
-          </select>
-        </Field>
-      </div>
-
-      {/*
-        The mechanism picker, shown only where there is a genuine choice.
-
-        Absent for the fifteen providers that still issue a working app
-        password, because a dropdown with one real option is a question the user
-        has to answer for no reason. Absent too for an `authMethod: 'none'`
-        account — an open relay on a LAN, the one case where neither mechanism
-        applies — rather than silently rewriting it to something it is not.
-      */}
-      {oauthAvailable && account.authMethod !== 'none' ? (
+      <div className="account-section account-hero">
         <div className="field__row">
-          <Field label={t('account.authMethod')}>
-            <select
-              className="select"
-              value={account.authMethod}
-              onChange={(e) => setAuthMethod(e.target.value as AuthMethod)}
-            >
-              <option value="password">{t('account.authPassword')}</option>
-              <option value="oauth2">{t('account.authOauth2')}</option>
-            </select>
-          </Field>
-        </div>
-      ) : null}
-
-      <div className="field__row">
-        <Field label={t('account.username')}>
-          <input
-            className="input"
-            autoComplete="off"
-            spellCheck={false}
-            value={account.username}
-            onChange={(e) => {
-              markTouched('username')
-              patch({ username: e.target.value })
-            }}
-          />
-        </Field>
-        {/*
-          The password box goes away entirely under OAuth2 rather than being
-          disabled. A greyed-out field still reads as "something you were
-          supposed to fill in", and there is no password for this account to
-          have — the credential is the grant below.
-        */}
-        {isOauth ? null : (
-          <Field
-            label={t('account.password')}
-            hint={account.hasSecret && !secret ? t('account.passwordSet') : undefined}
-          >
+          <Field label={t('account.fromAddress')}>
             <input
               className="input"
-              type="password"
-              autoComplete="new-password"
-              placeholder={account.hasSecret ? '••••••••••' : ''}
-              value={secret}
+              type="email"
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="you@example.com"
+              value={account.fromAddress}
+              onChange={(e) => onAddressChange(e.target.value)}
+            />
+          </Field>
+          <Field label={t('account.fromName')}>
+            <input
+              className="input"
+              value={account.fromName}
+              onChange={(e) => patch({ fromName: e.target.value })}
+            />
+          </Field>
+        </div>
+
+        {/*
+          Says what the address just did, and offers the way back.
+
+          Auto-fill that silently refuses to touch a field the user once edited is
+          indistinguishable from auto-fill that is broken — the address changes,
+          the server does not, and there is nothing on screen to explain why. This
+          banner is that explanation, and the button beside it is the one-click
+          undo for the hand edits it is respecting.
+        */}
+        {auto ? (
+          <Banner
+            tone={auto.guessed ? 'warning' : 'info'}
+            /*
+             * Kept on a phone only while it has something to report.
+             *
+             * "Filled in from Gmail" under a form that visibly filled itself in is
+             * the sort of note a phone is right to drop. "3 fields you edited by
+             * hand were left alone" is not — it is the only thing on screen that
+             * explains why changing the address moved some boxes and not others,
+             * and it comes with the button that undoes them. Dropping *that* is
+             * the failure the banner was written to prevent, reintroduced by a
+             * width. The guessed variant is a warning and was never culled.
+             */
+            keep={autoOverrides.length > 0}
+            action={
+              autoOverrides.length > 0 ? (
+                <Button variant="ghost" onClick={restoreAuto}>
+                  {t('account.autoRestore')}
+                </Button>
+              ) : undefined
+            }
+          >
+            <div>
+              {auto.guessed
+                ? t('account.autoGuessed', { domain: auto.domain })
+                : t('account.autoApplied', { provider: auto.preset.name })}
+            </div>
+            {autoOverrides.length > 0 ? (
+              <div className="banner__note">
+                {t('account.autoKept', { n: autoOverrides.length })}
+              </div>
+            ) : null}
+          </Banner>
+        ) : null}
+      </div>
+
+      {/*
+        Section 2 of 4: the send server. Every field here stays visible and
+        fillable on every screen size — `tests/e2e/account-test-buttons-phone.spec.ts`
+        fills the address, this host and the username without expanding
+        anything, and this section must never fold any of them away.
+      */}
+      <div className="account-section">
+        <div className="account-section__title">{t('account.sectionServer')}</div>
+
+        <Field label={t('account.provider')}>
+          <select
+            className="select"
+            value={account.providerId ?? ''}
+            onChange={(e) => applyProvider(e.target.value)}
+          >
+            <option value="">—</option>
+            {PROVIDERS.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+
+        {preset ? (
+          /*
+           * Kept on a phone, for the same reason the auto-fill banner below is
+           * and with more at stake.
+           *
+           * This is the one that says the password box does not want the
+           * password they log in with, and carries the link to the page that
+           * mints the one it does want. The phone's blanket cull of
+           * `banner--info` took it, and the shape of the resulting bug is why
+           * "the tests do not work on Android" is a fair description of it:
+           * nothing on a 360px screen ever mentioned an app password, so the
+           * account was saved with a Google account password and both tests came
+           * back as authentication failures. Measured at 360x800 before this:
+           * `display: none`, 0x0, link included.
+           */
+          <Banner tone="info" keep>
+            {t(preset.hintKey as 'provider.hint.appPassword')}
+            {preset.appPasswordUrl ? (
+              <>
+                {' '}
+                <button
+                  type="button"
+                  className="link"
+                  onClick={() => onOpenExternal(preset.appPasswordUrl!)}
+                >
+                  {t('provider.openGuide')} <IconExternal size={12} />
+                </button>
+              </>
+            ) : null}
+          </Banner>
+        ) : null}
+
+        <div className="field__row">
+          <Field label={t('account.host')}>
+            <input
+              className="input"
+              spellCheck={false}
+              placeholder="smtp.example.com"
+              value={account.host}
               onChange={(e) => {
-                setSecret(e.target.value)
-                setTestResult(null)
+                markTouched('host')
+                patch({ host: e.target.value.trim() })
               }}
             />
           </Field>
-        )}
+          <Field label={t('account.port')}>
+            <input
+              className="input"
+              type="number"
+              min={1}
+              max={65535}
+              value={account.port}
+              onChange={(e) => {
+                markTouched('port')
+                patch({ port: Number(e.target.value) })
+              }}
+            />
+          </Field>
+          <Field label={t('account.security')}>
+            <select
+              className="select"
+              value={account.security}
+              onChange={(e) => {
+                markTouched('security')
+                patch({ security: e.target.value as TransportSecurity })
+              }}
+            >
+              <option value="ssl">{t('account.securitySsl')}</option>
+              <option value="starttls">{t('account.securityStarttls')}</option>
+              <option value="none">{t('account.securityNone')}</option>
+            </select>
+          </Field>
+        </div>
+
+        {/*
+          The mechanism picker, shown only where there is a genuine choice.
+
+          Absent for the fifteen providers that still issue a working app
+          password, because a dropdown with one real option is a question the user
+          has to answer for no reason. Absent too for an `authMethod: 'none'`
+          account — an open relay on a LAN, the one case where neither mechanism
+          applies — rather than silently rewriting it to something it is not.
+        */}
+        {oauthAvailable && account.authMethod !== 'none' ? (
+          <div className="field__row">
+            <Field label={t('account.authMethod')}>
+              <select
+                className="select"
+                value={account.authMethod}
+                onChange={(e) => setAuthMethod(e.target.value as AuthMethod)}
+              >
+                <option value="password">{t('account.authPassword')}</option>
+                <option value="oauth2">{t('account.authOauth2')}</option>
+              </select>
+            </Field>
+          </div>
+        ) : null}
+
+        <div className="field__row">
+          <Field label={t('account.username')}>
+            <input
+              className="input"
+              autoComplete="off"
+              spellCheck={false}
+              value={account.username}
+              onChange={(e) => {
+                markTouched('username')
+                patch({ username: e.target.value })
+              }}
+            />
+          </Field>
+          {/*
+            The password box goes away entirely under OAuth2 rather than being
+            disabled. A greyed-out field still reads as "something you were
+            supposed to fill in", and there is no password for this account to
+            have — the credential is the grant below.
+          */}
+          {isOauth ? null : (
+            <Field
+              label={t('account.password')}
+              hint={account.hasSecret && !secret ? t('account.passwordSet') : undefined}
+            >
+              <input
+                className="input"
+                type="password"
+                autoComplete="new-password"
+                placeholder={account.hasSecret ? '••••••••••' : ''}
+                value={secret}
+                onChange={(e) => {
+                  setSecret(e.target.value)
+                  setTestResult(null)
+                }}
+              />
+            </Field>
+          )}
+        </div>
+
+        {isOauth ? (
+          <OAuthPanel
+            status={oauthStatus}
+            busy={oauthBusy}
+            error={oauthError}
+            fallbackAddress={account.username || account.fromAddress}
+            onConnect={runConsent}
+            onDisconnect={disconnectOauth}
+          />
+        ) : null}
+
+        <Banner tone="success">
+          <IconShield size={13} style={{ verticalAlign: -2, marginInlineEnd: 4 }} />
+          {t('account.storedSafely')}
+        </Banner>
       </div>
 
-      {isOauth ? (
-        <OAuthPanel
-          status={oauthStatus}
-          busy={oauthBusy}
-          error={oauthError}
-          fallbackAddress={account.username || account.fromAddress}
-          onConnect={runConsent}
-          onDisconnect={disconnectOauth}
-        />
-      ) : null}
+      {/*
+        Section 3 of 4: more settings — label, group, reply-to, and the two
+        switches. Collapsed by default on a phone (`moreOpen`, wide open on
+        desktop); everything inside is optional or warning-only per
+        `validateAccount`, except a malformed reply-to, which the effect above
+        forces this open for. Controlled `<details>` so a manual click and the
+        automatic open-on-error never fight each other.
+      */}
+      <details
+        ref={moreDetailsRef}
+        className="account-more"
+        open={moreOpen}
+        onToggle={(e) => setMoreOpen(e.currentTarget.open)}
+      >
+        <summary>{t('account.moreOptions')}</summary>
+        <div className="account-more__body">
+          <div className="field__row">
+            <Field label={t('account.label')}>
+              <input
+                className="input"
+                placeholder={t('account.labelPlaceholder')}
+                value={account.label}
+                onChange={(e) => {
+                  markTouched('label')
+                  patch({ label: e.target.value })
+                }}
+              />
+            </Field>
+            {/* Free text with suggestions rather than a managed list of groups.
+                Groups here are a filing device, and a filing device that makes you
+                create the folder first is one people stop using. */}
+            <Field label={t('account.group')} optional={t('common.optional')}>
+              <GroupInput
+                value={account.group ?? ''}
+                options={knownGroups}
+                placeholder={t('account.groupPlaceholder')}
+                onChange={(v) => patch({ group: v.trim() || undefined })}
+              />
+            </Field>
+          </div>
 
-      <Banner tone="success">
-        <IconShield size={13} style={{ verticalAlign: -2, marginInlineEnd: 4 }} />
-        {t('account.storedSafely')}
-      </Banner>
+          <div className="field__row">
+            <Field label={t('account.replyTo')} optional={t('common.optional')}>
+              <input
+                className="input"
+                type="email"
+                spellCheck={false}
+                value={account.replyTo ?? ''}
+                onChange={(e) => patch({ replyTo: e.target.value })}
+              />
+            </Field>
+          </div>
 
-      <Switch
-        checked={account.autoNegotiate !== false}
-        onChange={(v) => patch({ autoNegotiate: v })}
-        title={t('account.autoNegotiate')}
-        description={t('account.autoNegotiateHint')}
-      />
+          <Switch
+            checked={account.autoNegotiate !== false}
+            onChange={(v) => patch({ autoNegotiate: v })}
+            title={t('account.autoNegotiate')}
+            description={t('account.autoNegotiateHint')}
+          />
 
-      <Switch
-        danger
-        checked={account.allowInvalidCert}
-        onChange={(v) => patch({ allowInvalidCert: v })}
-        title={t('account.allowInvalidCert')}
-        description={t('account.allowInvalidCertWarn')}
-      />
+          <Switch
+            danger
+            checked={account.allowInvalidCert}
+            onChange={(v) => patch({ allowInvalidCert: v })}
+            title={t('account.allowInvalidCert')}
+            description={t('account.allowInvalidCertWarn')}
+          />
+        </div>
+      </details>
 
+      {/*
+        Section 4 of 4: receive mail. Structure unchanged — `inbox.enabled`
+        still gates the fields below the switch.
+
+        The title and the switch stay direct children of `.modal__body`,
+        unwrapped, rather than moving inside an `.account-section` the way the
+        other three sections did:
+        `tests/e2e/account-test-buttons-phone.spec.ts` finds the switch with
+        `.modal__body > .section-label ~ .switch`, a selector that only
+        matches when both are the *same* element's direct children. Nesting
+        either one a level deeper — even for a titled-card wrapper — breaks
+        that adjacency and fails the test the same way hiding a field would.
+        The fields the switch reveals still get the same titled-card chrome
+        as the sections above, just applied to that block once it renders.
+      */}
       <div className="section-label">{t('inbox.sectionTitle')}</div>
 
       <Switch
@@ -1281,33 +1358,9 @@ export function AccountDialog({
       />
 
       {inbox.enabled ? (
-        <>
+        <div className="account-section">
           <div className="field__row">
-            {/* `action` for the same reason as the address field's copy above. */}
-            <Field
-              label={t('inbox.imapHost')}
-              action={
-                <button
-                  type="button"
-                  className="link"
-                  onClick={() => {
-                    const next = inboxDefaults(true)
-                    if (next) inboxPatch(next)
-                    else
-                      setInboxTestResult({
-                        ok: false,
-                        accepted: [],
-                        rejected: [],
-                        durationMs: 0,
-                        error: t('account.autoFillUnknown'),
-                        errorKind: 'config',
-                      })
-                  }}
-                >
-                  {t('account.autoFill')}
-                </button>
-              }
-            >
+            <Field label={t('inbox.imapHost')}>
               <input
                 className="input"
                 spellCheck={false}
@@ -1348,92 +1401,92 @@ export function AccountDialog({
             </Field>
           </div>
 
-          <div className="field__row">
-            <Field label={t('account.username')}>
-              <input
-                className="input"
-                autoComplete="off"
-                spellCheck={false}
-                value={inbox.imapUsername}
-                onChange={(e) => {
-                  markTouched('imapUsername')
-                  inboxPatch({ imapUsername: e.target.value })
-                }}
-              />
-            </Field>
-            {/*
-              One grant covers both protocols, so receiving has no second
-              credential to ask for under OAuth2.
-
-              Both Microsoft and Google issue IMAP and SMTP access from the same
-              consent — `core/oauth.ts` names both scopes in one request for
-              exactly this reason — so a second password box here would be
-              asking for something that does not exist, which is how the
-              receiving side ends up looking broken on an account that works.
-            */}
-            {isOauth ? null : (
-              <Field
-                label={t('account.password')}
-                hint={t('inbox.passwordHint')}
-              >
+            <div className="field__row">
+              <Field label={t('account.username')}>
                 <input
                   className="input"
-                  type="password"
-                  autoComplete="new-password"
-                  placeholder={
-                    inboxConfig && !inboxSecret ? t('account.passwordSet') : ''
-                  }
-                  value={inboxSecret}
-                  onChange={(e) => setInboxSecret(e.target.value)}
+                  autoComplete="off"
+                  spellCheck={false}
+                  value={inbox.imapUsername}
+                  onChange={(e) => {
+                    markTouched('imapUsername')
+                    inboxPatch({ imapUsername: e.target.value })
+                  }}
                 />
               </Field>
-            )}
-          </div>
+              {/*
+                One grant covers both protocols, so receiving has no second
+                credential to ask for under OAuth2.
 
-          <Switch
-            danger
-            checked={inbox.imapAllowInvalidCert}
-            onChange={(v) => inboxPatch({ imapAllowInvalidCert: v })}
-            title={t('account.allowInvalidCert')}
-            description={t('account.allowInvalidCertWarn')}
-          />
-
-          {/* Receiving gets its own test, next to the fields it tests. Sharing
-              the footer's button would have made "test" mean two things
-              depending on which half of the form you were looking at. */}
-          <div className="inline-actions">
-            {inboxTesting ? (
-              <>
-                <Button variant="ghost" loading disabled>
-                  {t('account.testing', { s: inboxElapsed })}
-                </Button>
-                <Button variant="ghost" onClick={cancelInboxTest}>
-                  {t('account.testCancel')}
-                </Button>
-              </>
-            ) : (
-              <div className="test-action">
-                <Button variant="secondary" onClick={runInboxTest} disabled={inboxBlocked}>
-                  {t('inbox.testConnection')}
-                </Button>
-                {inboxBlocked ? (
-                  <div className="field__hint field__hint--keep">
-                    {t('inbox.testBlockedReason', {
-                      fields: fieldListFormat.format(inboxBlockedFields),
-                    })}
-                  </div>
-                ) : null}
-              </div>
-            )}
-          </div>
-
-          {inboxTestResult ? (
-            <div ref={inboxReport}>
-              <TestReport result={inboxTestResult} onApply={applyInboxAdjusted} />
+                Both Microsoft and Google issue IMAP and SMTP access from the same
+                consent — `core/oauth.ts` names both scopes in one request for
+                exactly this reason — so a second password box here would be
+                asking for something that does not exist, which is how the
+                receiving side ends up looking broken on an account that works.
+              */}
+              {isOauth ? null : (
+                <Field
+                  label={t('account.password')}
+                  hint={t('inbox.passwordHint')}
+                >
+                  <input
+                    className="input"
+                    type="password"
+                    autoComplete="new-password"
+                    placeholder={
+                      inboxConfig && !inboxSecret ? t('account.passwordSet') : ''
+                    }
+                    value={inboxSecret}
+                    onChange={(e) => setInboxSecret(e.target.value)}
+                  />
+                </Field>
+              )}
             </div>
-          ) : null}
-        </>
-      ) : null}
+
+            <Switch
+              danger
+              checked={inbox.imapAllowInvalidCert}
+              onChange={(v) => inboxPatch({ imapAllowInvalidCert: v })}
+              title={t('account.allowInvalidCert')}
+              description={t('account.allowInvalidCertWarn')}
+            />
+
+            {/* Receiving gets its own test, next to the fields it tests. Sharing
+                the footer's button would have made "test" mean two things
+                depending on which half of the form you were looking at. */}
+            <div className="inline-actions">
+              {inboxTesting ? (
+                <>
+                  <Button variant="ghost" loading disabled>
+                    {t('account.testing', { s: inboxElapsed })}
+                  </Button>
+                  <Button variant="ghost" onClick={cancelInboxTest}>
+                    {t('account.testCancel')}
+                  </Button>
+                </>
+              ) : (
+                <div className="test-action">
+                  <Button variant="secondary" onClick={runInboxTest} disabled={inboxBlocked}>
+                    {t('inbox.testConnection')}
+                  </Button>
+                  {inboxBlocked ? (
+                    <div className="field__hint field__hint--keep">
+                      {t('inbox.testBlockedReason', {
+                        fields: fieldListFormat.format(inboxBlockedFields),
+                      })}
+                    </div>
+                  ) : null}
+                </div>
+              )}
+            </div>
+
+            {inboxTestResult ? (
+              <div ref={inboxReport}>
+                <TestReport result={inboxTestResult} onApply={applyInboxAdjusted} />
+              </div>
+            ) : null}
+          </div>
+        ) : null}
 
       {testResult ? (
         <div ref={testReport}>

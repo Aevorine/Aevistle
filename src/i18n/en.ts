@@ -4,8 +4,6 @@
  * that only shows up after shipping.
  */
 export const en = {
-  'app.tagline': 'Scheduled email reminders that actually arrive',
-
   'nav.compose': 'Compose',
   'nav.home': 'Home',
   'home.title': 'Home',
@@ -34,7 +32,7 @@ export const en = {
     'This is the browser preview, which has no mail engine. Mail checks are skipped here — run this in the installed app.',
   'selfcheck.native': 'Native bridge',
   'selfcheck.nativeHint':
-    'The app is running but its Android half did not answer, so nothing that needs the system — sending, receiving, saved passwords, alarms — can work. Reinstalling the app is the fix; this is not something you can configure.',
+    'The app’s Android half did not answer, so nothing that needs the system can work. Reinstall the app to fix it.',
   'selfcheck.notifications': 'Notification permission',
   'selfcheck.notificationsHint':
     'Scheduled mail still sends, but you will not be told when one fails.',
@@ -259,6 +257,8 @@ export const en = {
   'account.title': 'Mail accounts',
   'account.add': 'Add account',
   'account.edit': 'Edit account',
+  'account.sectionServer': 'Send server',
+  'account.moreOptions': 'More settings',
   'account.provider': 'Provider',
   'account.label': 'Display name',
   'account.labelPlaceholder': 'Work mail',
@@ -295,10 +295,7 @@ export const en = {
   'account.diagEncryption': 'Encryption',
   'account.diagTime': 'Round trip',
   'account.diagAttempts': 'Attempts',
-  'account.autoFill': 'Detect settings',
-  'account.autoFillHint': 'Fill in the server, port and encryption from the email address',
   'account.autoFillDone': 'Settings filled in from {provider}',
-  'account.autoFillUnknown': 'That address is not a provider Aevistle recognises — enter the server manually',
   'account.autoApplied': 'Filled in from {provider} — server, port and encryption',
   'account.autoGuessed': 'No preset for {domain}. These are the usual conventions (smtp./imap.) and may need correcting.',
   'account.autoKept': '{n} field(s) you edited by hand were left alone.',
@@ -331,7 +328,7 @@ export const en = {
   'preflight.warn.oauthUnconfigured': 'This build cannot sign in to this provider, so the message cannot be sent.',
   'preflight.warn.oauthUnsupported': 'This provider does not offer OAuth2 sign-in. Change the account to use a password.',
 
-  'provider.hint.microsoftNoPassword': 'Microsoft no longer accepts passwords for mail apps. Personal Outlook.com, Hotmail and Live accounts stopped accepting them — app passwords included — on 30 April 2026, and work accounts lost IMAP password sign-in in 2022-2023. Set the sign-in method below to OAuth2 and connect the account.',
+  'provider.hint.microsoftNoPassword': 'Microsoft no longer accepts passwords for mail apps: personal Outlook.com, Hotmail and Live accounts lose app passwords on 30 April 2026, and work accounts lost them earlier. Set the sign-in method below to OAuth2 and connect the account.',
   'provider.hint.appPassword': 'This provider needs an app password, not your normal login password.',
   'provider.hint.authCode': 'Enable SMTP in your mailbox settings and use the authorisation code it gives you.',
   'provider.hint.password': 'Your normal mailbox password works here.',
@@ -398,7 +395,7 @@ export const en = {
   'settings.accentCyber.blue': 'Blue',
   'settings.atmosphereIntensity': 'Atmosphere intensity',
   'settings.atmosphereIntensityHint':
-    "How strongly runecircuit's card grain, glow and ceremonial motion show. Low turns them off outright rather than just dimming them.",
+    "How strong the card texture and glow effects are. The lowest setting turns them off entirely.",
   'settings.density': 'Density',
   'settings.densityComfortable': 'Comfortable',
   'settings.densityCompact': 'Compact',
@@ -549,11 +546,11 @@ export const en = {
   'error.timeout': 'The server did not answer in time',
   'error.timeoutHint':
     'The server may be unreachable from this network, or a firewall may be blocking the port. Try the other port for this provider.',
-  'error.use465Ssl': 'Port 465 expects SSL/TLS. Change Encryption to SSL/TLS, or use port 587 with STARTTLS.',
-  'error.use587Starttls': 'Port 587 expects STARTTLS. Change Encryption to STARTTLS, or use port 465 with SSL/TLS.',
-  'error.use993Ssl': 'Port 993 expects SSL/TLS. Change Encryption to SSL/TLS, or use port 143 with STARTTLS.',
-  'error.use143Starttls': 'Port 143 expects STARTTLS. Change Encryption to STARTTLS, or use port 993 with SSL/TLS.',
-  'error.microsoftSmtpAuth': 'Microsoft no longer accepts a password here. Personal Outlook.com, Hotmail and Live accounts lost app passwords on 30 April 2026, and work accounts had basic sign-in switched off earlier. Open this account, set its sign-in method to OAuth2, and connect it.',
+  'error.use465Ssl': 'Port 465 needs SSL/TLS: switch Encryption to SSL/TLS, or use port 587 with STARTTLS.',
+  'error.use587Starttls': 'Port 587 needs STARTTLS: switch Encryption to STARTTLS, or use port 465 with SSL/TLS.',
+  'error.use993Ssl': 'Port 993 needs SSL/TLS: switch Encryption to SSL/TLS, or use port 143 with STARTTLS.',
+  'error.use143Starttls': 'Port 143 needs STARTTLS: switch Encryption to STARTTLS, or use port 993 with SSL/TLS.',
+  'error.microsoftSmtpAuth': 'Microsoft no longer accepts a password here — app passwords stop working on 30 April 2026. Open this account, set its sign-in method to OAuth2, and connect it.',
   'error.microsoftEndpoint': 'For Microsoft, use smtp-mail.outlook.com on port 587 with STARTTLS, or outlook.office365.com on port 993 with SSL/TLS for mail. Note that a password alone may no longer be accepted.',
 
   'error.auth': 'The server rejected your username or password',
@@ -716,7 +713,7 @@ export const en = {
   'confirm.purgeAll': 'Delete all {n} message(s) from the mailbox?',
   'confirm.purgeBody': 'This deletes them on the mail server. It cannot be undone, and the recycle bin cannot bring them back.',
   'confirm.emptyBin': 'Empty the recycle bin ({n})?',
-  'confirm.emptyBinBody': 'The messages stay in your mailbox — you just lose the one-click restore, and a future sync may bring them back into the list.',
+  'confirm.emptyBinBody': 'The messages stay in your mailbox — you just lose the one-click restore.',
   'toast.purged': 'Deleted {n} from the mailbox',
   'toast.purgeFailed': 'The server refused to delete',
   'toast.restored': 'Restored {n}',
@@ -754,7 +751,7 @@ export const en = {
   "control.copied": "Setup copied — paste it into your terminal",
   "control.openFolder": "Open drop folder",
   "control.unsupported": "Available in the desktop app only.",
-  'control.mobileNoServer': 'The phone and tablet apps cannot host the control interface. It needs a process holding an HTTP port open on 127.0.0.1 for as long as you are working, and Android stops the app\'s process once you leave it — so a port advertised here would answer only until the app was swiped away. Run it on the desktop app instead.',
+  'control.mobileNoServer': 'The phone and tablet apps do not support the control interface. Run it on the desktop app instead.',
   'control.mobilePaired': 'What this device can still do is receive the results. Pair it with the computer running the control interface under Paired devices, and a schedule a program creates over there arrives here on the next sync and rings as a reminder on this device. The drop folder and the Claude Code setup command stay on the desktop, where the program itself runs.',
 
   // --- calendar subscribe ---
@@ -762,7 +759,7 @@ export const en = {
   'cal.subscribe.hint': "Opens a read-only address on this machine that a calendar app can subscribe to, so it stays in step with your holidays and make-up days without a re-export every time. Deliberately not protected by the control interface's token — the calendar apps that subscribe this way have no means to send one — so treat the address as something to keep to programs you trust on this machine.",
   'cal.subscribe.url': 'Subscribe address',
   'cal.subscribe.limit': 'Only reachable while Aevistle is running, and only from this machine — nothing is published to the internet.',
-  'cal.subscribe.mobileNoServer': 'The phone and tablet apps cannot publish this address. A subscription has to keep answering for weeks, and Android stops a background listener long before that — so the address would work until the app was swiped away. Export the calendar as a file instead.',
+  'cal.subscribe.mobileNoServer': 'The phone and tablet apps do not support publishing this address. Export the calendar as a file instead.',
   'cal.subscribe.exportIcs': 'Export a .ics file',
   'cal.subscribe.exportIcsHint': 'A snapshot, not a subscription: your calendar app will not notice later edits, so export again after you change the working calendar. Days off and make-up workdays both travel, and the file imports into any calendar app on this device.',
 
@@ -779,6 +776,9 @@ export const en = {
   "health.orphanedInboxAccount": "Inbox mail left over from a deleted account: {n} — cleared automatically on next restart",
   "boot.failedTitle": "Aevistle could not start",
   "boot.failedHint": "Your data has not been changed. If this keeps happening, reinstalling the app usually fixes it.",
+  "boot.uiFailTitle": "This screen could not be displayed",
+  "boot.uiFailHint": "Your accounts, scheduled sends and mail are unaffected — they're saved on disk and untouched. Other screens still work.",
+  "boot.uiFailRetry": "Try again",
   "health.schedulerUnreachable": "Reminders are not armed — this device did not accept the schedule, so nothing will send",
   'health.saveFailing': 'Your changes are not being saved — the data folder could not be written to, so nothing from this session will survive a restart',
   'data.recovered': 'The saved data could not be read and was set aside so the app could start. Nothing was deleted — the file is still here:',
@@ -821,7 +821,7 @@ export const en = {
   'transfer.exported': 'Exported {n} reminder(s)',
   'transfer.imported': 'Imported {n} reminder(s)',
   'transfer.droppedAttachments': '{n} attachment(s) were left out because the files are not on this device.',
-  'transfer.noCredentials': 'The file contains schedules and message text only — no account, no server, no password. Attachments travel as file paths, not as contents.',
+  'transfer.noCredentials': 'The file contains no account or password information; attachments are just path references.',
   'transfer.found': 'In this file',
   'transfer.foundN': '{n} reminder(s)',
   'transfer.skippedN': '{n} skipped',
@@ -858,7 +858,7 @@ export const en = {
   "backup.attachmentsHint": "Reminders pointing at files on disk: {n}. On another machine those will need re-attaching.",
   "backup.merge": "Merge into what is here",
   "backup.replace": "Replace everything",
-  "backup.modeHint": "Merging keeps what you already have and adds the rest. Replacing discards it. Either way your preferences on this machine are left alone.",
+  "backup.modeHint": "Merging keeps what you have and adds the rest. Replacing discards it. Neither touches your preferences on this machine.",
 
   // --- command palette ---
   "palette.title": "Command palette",
@@ -1051,7 +1051,7 @@ export const en = {
   'receipt.bouncedN': '{n} bounced',
   'receipt.readN': '{n} read receipts',
   'receipt.bouncedHint': 'A delivery status notification came back for these. Something is wrong with the address or the server.',
-  'receipt.readHint': 'The recipient’s client sent a read receipt. Most clients never do, so silence here means nothing.',
+  'receipt.readHint': 'The recipient’s client sent a read receipt — but no receipt does not mean unread.',
   'compose.attachmentGone': 'file is gone',
 
   // --- undo and keyboard shortcuts ---
@@ -1357,7 +1357,7 @@ export const en = {
   'cal.cn.applied': 'Added {h} day(s) off and {w} make-up workday(s) for {year}',
   'cal.cn.missing': '{year} has not been published yet — nothing here guesses it.',
   'cal.cn.refresh': 'Check online',
-  'cal.cn.willContact': 'That button is the only thing on this screen that touches the network, and only when you press it. It fetches one public JSON file from {host}, with no cookies, no referrer and nothing that identifies you.',
+  'cal.cn.willContact': 'Pressing it fetches a public JSON file from {host}, with nothing that identifies you.',
   'cal.cn.fetched': 'Got {n} date(s) for {year}',
   'cal.cn.fetchFailed': 'Could not fetch {year}: {error}',
   'cal.cn.offline': 'The built-in tables are still in use — nothing was changed.',
@@ -1522,7 +1522,7 @@ export const en = {
   'deliver.faultUnknownZone': 'This device does not know the time zone “{zone}”.',
   'deliver.faultMalformed': 'These hours cannot be read as HH:MM.',
   'deliver.faultNeverOpens': 'This window never opens: tick at least one day, and give it an end time different from its start.',
-  'deliver.faultIgnored': 'While it stays like this the window is ignored and the mail goes out at the time you set. Nothing is ever held back because a window is wrong.',
+  'deliver.faultIgnored': 'While it stays like this the window is ignored and the mail still goes out on time.',
   'deliver.previewMoved': 'A reminder set for {planned} would actually go out at {actual} — {theirDay} {theirTime} for {name}.',
   'deliver.previewInside': 'A reminder set for {planned} is already inside this window — {theirDay} {theirTime} for {name} — so it goes out unchanged.',
   'deliver.previewIgnored': 'The window above is ignored until it is fixed, so a reminder set for {planned} goes out at exactly that time.',
@@ -1604,7 +1604,7 @@ export const en = {
   'pairing.showCodeText': 'Show the code as text',
   'pairing.hideCodeText': 'Hide the code text',
   'pairing.codeTextHint':
-    'For a device with no camera, or one whose camera was refused: copy this whole line to the other device and paste it under “Paste code instead”. It stops working the moment the code expires or another device connects.',
+    'For a device with no camera, or one whose camera was refused: copy this whole line to the other device and paste it under “Paste code instead”.',
   'pairing.cameraDenied': 'Camera access was not granted',
   'pairing.cameraDeniedHint': 'You can still pair by pasting the code shown on the other device instead of scanning it.',
   'pairing.invalidCode': 'That is not a valid pairing code.',
@@ -1660,7 +1660,7 @@ export const en = {
   'devices.regenerateHint': 'This build cannot host a pairing code — regenerate this pairing from the desktop or Android app instead.',
   'devices.editScopes': 'Change what syncs',
   'devices.editScopesHint':
-    'This changes what this device sends. The other device keeps its own choice — change it there too if you want the same thing to stop coming back.',
+    'This only changes what this device sends. The other device needs its own change too.',
   'devices.pairNew': 'Pair a new device',
   'devices.showCode': 'Show the pairing code',
   'devices.joinNew': 'Use a code from another device',
@@ -1670,7 +1670,7 @@ export const en = {
   'devices.hostDesktopOnly': 'This build cannot show a pairing code — start the pairing in the desktop or Android app, then use that code here.',
   'devices.hostAddress': 'This device’s address',
   'devices.hostAddressHint':
-    'This device is on more than one network. Pick the one your other device shares — usually the Wi-Fi address. VPN, virtual machine, container and mobile-data interfaces also appear here and cannot be reached from the other device.',
+    'Pick the address on the same network as your other device — usually the Wi-Fi address.',
   'devices.hostAddressAuto': 'Choose automatically ({address})',
   'devices.hostAddressShown': 'The code points at {address} — the other device must be on that network.',
   'devices.hostAddressChange': 'Use a different address',
@@ -1687,18 +1687,18 @@ export const en = {
   'devices.pairedOn': 'Paired {when}',
   'devices.ongoingHint': 'Sync only happens while both Aevistle apps are open at the same time — there is no server relaying this in the background, and on Android nothing wakes the app to poll on its own.',
   'devices.syncUnavailable': 'Your other devices cannot reach this device',
-  'devices.syncBlocked': 'The system would not let Aevistle open the port ongoing sync listens on. On Windows, allow Aevistle through Windows Defender Firewall for private networks, then reopen this screen.',
+  'devices.syncBlocked': 'The system blocked the port ongoing sync needs. On Windows, allow Aevistle through Windows Defender Firewall for private networks, then reopen this screen.',
   'devices.syncPortInUse': 'Another program on this device is already using port {port}, which ongoing sync needs. Close it, then reopen this screen.',
   'devices.syncNoNetwork': 'This device is not on a Wi-Fi or wired network, so there is nothing for a paired device to reach. Sync starts again on its own once you reconnect.',
   'devices.syncListenFailed': 'The port ongoing sync listens on could not be opened. Reopen this screen to try again.',
-  'devices.syncListening': 'Listening for your paired devices on {address}. If sync never happens and this is a Windows computer, check that Aevistle is allowed through Windows Defender Firewall for private networks — a blocked app is never told its traffic is being dropped.',
+  'devices.syncListening': 'Listening for your paired devices on {address}. If sync never happens and this is a Windows computer, check that Aevistle is allowed through Windows Defender Firewall for private networks.',
   'devices.revokeCode': 'Revoke this code',
   'devices.codeRevoked': 'This code has been revoked',
   'devices.codeRevokedHint': 'Nothing on this device is listening for it any more, so the other device can no longer use it. Generate a new code if you still want to pair.',
   'devices.thisDevice': 'This device',
   'devices.thisDeviceDetail': '{platform} · paired devices: {n}',
   'devices.leavePairing': 'Leave the pairing',
-  'devices.leavePairingConfirm': 'Every paired device is removed from this device, along with the keys that talk to them. This only affects this device — the others keep their own records until they revoke this one too, and find out the next time a sync fails to decrypt.',
+  'devices.leavePairingConfirm': 'This removes every paired device and its keys from this device only — it does not affect the other devices’ records.',
   'devices.joinOptionsShow': 'Options: name, device type, what to sync',
   'devices.joinOptionsHide': 'Hide options',
   'devices.joinOptionsSummary': 'Will save it as “{name}” ({platform}) and sync {n} kinds of data. Open the options to change any of that.',

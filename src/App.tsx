@@ -111,6 +111,23 @@ const RUNE_NAV_ICONS = {
 
 const COLLAPSE_KEY = 'aevistle.sidebar.collapsed'
 
+/** Caps what a `.nav__badge` ever has to render.
+ *
+ * The badge sits inside `.nav__item` next to a label that already has no
+ * spare width to give — narrowing the sidebar measured the layout against
+ * short counts only. A three-digit count ("300" scheduled reminders, "1500"
+ * unread — both things a long-lived mailbox actually reaches) pushes the
+ * badge wide enough to clip the label itself ("Inbox", "Scheduled") in every
+ * one of the six languages, not just the long ones. Capping the *display* at
+ * two digits — the same "99+" convention every mail/chat badge uses — keeps
+ * the badge's own width bounded regardless of how large the real count gets,
+ * without touching `armedCount`/`unreadInboxCount`/`freshCodeCount`
+ * themselves, which still carry the exact number everywhere else (Home's
+ * armed-reminders line, etc.). */
+function navBadgeText(count: number): string {
+  return count > 99 ? '99+' : String(count)
+}
+
 function Shell() {
   const { state, ready, bridge, bootError, dispatch, undo, toggleJob } = useApp()
   const { t } = useI18n()
@@ -409,7 +426,6 @@ function Shell() {
             </div>
             <div className="brand__text">
               <div className="brand__name">Aevistle</div>
-              <div className="brand__tagline">{t('app.tagline')}</div>
             </div>
           </div>
           {/* The same list the loaded shell will draw, so the bar does not
@@ -446,7 +462,6 @@ function Shell() {
           </div>
           <div className="brand__text">
             <div className="brand__name">Aevistle</div>
-            <div className="brand__tagline">{t('app.tagline')}</div>
           </div>
         </div>
 
@@ -477,13 +492,13 @@ function Shell() {
                 </span>
                 <span className="nav__label">{t(item.labelKey)}</span>
                 {item.id === 'schedule' && armedCount > 0 ? (
-                  <span className="nav__badge">{armedCount}</span>
+                  <span className="nav__badge">{navBadgeText(armedCount)}</span>
                 ) : null}
                 {item.id === 'inbox' && unreadInboxCount > 0 ? (
-                  <span className="nav__badge">{unreadInboxCount}</span>
+                  <span className="nav__badge">{navBadgeText(unreadInboxCount)}</span>
                 ) : null}
                 {item.id === 'codes' && freshCodeCount > 0 ? (
-                  <span className="nav__badge nav__badge--accent">{freshCodeCount}</span>
+                  <span className="nav__badge nav__badge--accent">{navBadgeText(freshCodeCount)}</span>
                 ) : null}
               </button>
             )
