@@ -38,6 +38,7 @@ import {
   type Endpoint,
 } from '../src/core/transport'
 import { classifyError, type InboxMessageBody } from '../src/core/bridge'
+import { accessTokenForAccount, hasOAuthGrant, noteOAuthAuthFailure } from './oauth'
 import { resolveHostCached } from './mailer'
 import { sanitizeMessageHtml } from './sanitizeHtml'
 import { readMessageBody, writeInboxAttachments, writeMessageBody } from './inboxStore'
@@ -180,14 +181,38 @@ async function parseCacheAndReturn(
  * connection to keep here, `syncInbox` opens one, does its work, and closes
  * it every time (see the file header on why IDLE/pooling is deferred).
  */
+/**
+ * Is there anything at all to authenticate this mailbox with?
+ *
+ * Every caller below used to ask this as `if (!secret)`, which was exactly
+ * right while a password was the only answer and is exactly wrong now: an
+ * account that signed in with OAuth2 has no password by design, and refusing it
+ * with "no password stored for receiving" would be the app describing its own
+ * missing feature as the user's missing credential.
+ */
+async function hasCredential(config: InboxAccountState, secret: string | null): Promise<boolean> {
+  return Boolean(secret) || (await hasOAuthGrant(config.accountId))
+}
+
 async function withConnection<T>(
   config: InboxAccountState,
-  secret: string,
+  secret: string | null,
   run: (client: ImapFlow) => Promise<T>,
   /** Filled in with the rung that actually worked, for the test report. */
   onEndpoint?: (endpoint: Endpoint, client: ImapFlow) => void,
 ): Promise<T> {
   assertSafeConfig(config)
+
+  /*
+   * An XOAUTH2 bearer token, when this account has a grant.
+   *
+   * Resolved from the account id alone, because `InboxAccountState` carries no
+   * `authMethod` and no `providerId` — it never needed either while a password
+   * was the only mechanism. `accessTokenForAccount` answers `null` for every
+   * account that has never completed a consent, which is what keeps this a
+   * no-op for the password path rather than a branch it has to survive.
+   */
+  const accessToken = await accessTokenForAccount(config.accountId)
 
   const ladder = endpointLadder(config.imapPort, config.imapSecurity, true)
   const totalMs = totalBudgetMs(30)
@@ -197,7 +222,7 @@ async function withConnection<T>(
   let lastError: Error = new Error('No connection attempt was made')
 
   for (const endpoint of ladder) {
-    const client = buildClient(config, secret, resolvedHost, endpoint, perRung)
+    const client = buildClient(config, secret ?? '', resolvedHost, endpoint, perRung, accessToken)
     let connected = false
     try {
       await withDeadline(() => client.connect(), perRung, () => client.close())
@@ -228,8 +253,11 @@ async function withConnection<T>(
       // surfaced as that TypeError instead of "wrong port for this security
       // mode". Duck-type on the flag imapflow actually sets (tools.js:51,
       // login.js:38, authenticate.js:17) — no import to go stale.
-      if (isAuthFailure(err)) throw err
-      if (connected && classifyError(err.message) === 'auth') throw err
+      const refusedCredentials = isAuthFailure(err) || (connected && classifyError(err.message) === 'auth')
+      // Same reasoning as the SMTP ladder's: a bearer token the server refused
+      // is worth discarding rather than re-offering until its stated expiry.
+      if (refusedCredentials && accessToken) noteOAuthAuthFailure(config.accountId)
+      if (refusedCredentials) throw err
     }
   }
 
@@ -249,6 +277,14 @@ export function buildClient(
   resolvedHost: string,
   endpoint: Endpoint,
   perAttemptMs: number,
+  /**
+   * An XOAUTH2 bearer token, for an account that signed in with OAuth2.
+   *
+   * Optional and last so that every existing caller — including
+   * `scripts/check-socket-drop.mjs`, which builds a client against a fake
+   * server with five arguments — keeps working untouched.
+   */
+  accessToken?: string | null,
 ): ImapFlow {
   const client = new ImapFlow({
     host: resolvedHost,
@@ -258,7 +294,11 @@ export function buildClient(
     // SNI and certificate identity still check against the real hostname —
     // only the connection target was swapped for the pre-resolved IP.
     servername: config.imapHost,
-    auth: { user: config.imapUsername, pass: secret },
+    // imapflow speaks XOAUTH2 natively when handed an `accessToken` instead of
+    // a `pass`; the password shape below is byte-for-byte what it always was.
+    auth: accessToken
+      ? { user: config.imapUsername, accessToken }
+      : { user: config.imapUsername, pass: secret },
     tls: {
       rejectUnauthorized: !config.imapAllowInvalidCert,
       minVersion: 'TLSv1.2',
@@ -448,7 +488,9 @@ export async function syncInbox(
   // WorkManager) always learn about a disable, not just an enable — a no-op
   // here, but that push is what lets the other side cancel its own work.
   if (!config.enabled) return config
-  if (!secret) throw new Error('No IMAP password stored for this account')
+  if (!(await hasCredential(config, secret))) {
+    throw new Error('No IMAP password stored for this account')
+  }
   return withConnection(config, secret, (client) => runSync(client, config))
 }
 
@@ -520,7 +562,7 @@ export async function testInbox(
       errorKind: 'config',
     }
   }
-  if (!secret) {
+  if (!(await hasCredential(config, secret))) {
     return {
       ok: false,
       accepted: [],
@@ -628,7 +670,9 @@ export async function fetchMessageBody(
   const cached = await readMessageBody(config.accountId, folderPath, uid)
   if (cached) return cached
 
-  if (!secret) throw new Error('No IMAP password stored for this account')
+  if (!(await hasCredential(config, secret))) {
+    throw new Error('No IMAP password stored for this account')
+  }
   return withConnection(config, secret, async (client) => {
     const lock = await client.getMailboxLock(folderPath)
     try {
@@ -661,7 +705,7 @@ export async function setServerSeenFlag(
   uid: number,
   seen: boolean,
 ): Promise<void> {
-  if (!secret) return
+  if (!(await hasCredential(config, secret))) return
   try {
     await withConnection(config, secret, async (client) => {
       const lock = await client.getMailboxLock(folderPath)
@@ -702,7 +746,7 @@ export async function purgeMessages(
   items: Array<{ folderPath: string; uid: number }>,
 ): Promise<void> {
   if (items.length === 0) return
-  if (!secret) throw new Error('No password saved for this mailbox')
+  if (!(await hasCredential(config, secret))) throw new Error('No password saved for this mailbox')
 
   const byFolder = new Map<string, number[]>()
   for (const { folderPath, uid } of items) {

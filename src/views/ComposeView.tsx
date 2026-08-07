@@ -405,7 +405,16 @@ export function ComposeView({
    */
   const warmedFor = useRef<string | null>(null)
   useEffect(() => {
-    if (!bridge?.prewarm || !account?.id || !account.hasSecret) return
+    /*
+     * `authMethod !== 'password' || hasSecret` rather than `hasSecret` alone.
+     * An OAuth2 account never sets `hasSecret` — its credential is a grant
+     * under a different keystore kind — so the bare test silently withheld
+     * pre-warming from exactly the accounts whose sign-in handshake is the
+     * slowest, and did it invisibly: nothing failed, "Send now" was just always
+     * a few seconds instead of one round trip.
+     */
+    if (!bridge?.prewarm || !account?.id) return
+    if (account.authMethod === 'password' && !account.hasSecret) return
     // Re-warm when the chosen account changes, not on every keystroke.
     const key = `${account.id}:${account.updatedAt}`
     if (warmedFor.current === key) return

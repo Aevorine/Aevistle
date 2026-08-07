@@ -5,6 +5,55 @@ export const fr: Translations = {
 
   'nav.compose': 'Rédiger',
   'nav.home': 'Accueil',
+  'selfcheck.title': 'Autodiagnostic du courrier',
+  'selfcheck.intro':
+    'Vérifie dans l’ordre chaque couche entre cet écran et votre serveur de messagerie. Le premier problème en partant du haut est celui qu’il faut traiter — ce qui suit n’en est peut-être qu’une conséquence.',
+  'selfcheck.run': 'Lancer l’autodiagnostic',
+  'selfcheck.rerun': 'Relancer',
+  'selfcheck.running': 'Vérification…',
+  'selfcheck.summary': '{pass} réussies · {warn} avertissements · {fail} échecs · {skip} sans objet',
+  'selfcheck.allClear': 'Tout ce que cet appareil peut vérifier fonctionne.',
+  'selfcheck.live':
+    'Établit une véritable connexion de test vers votre serveur. Aucun message n’est remis à qui que ce soit.',
+
+  'selfcheck.pass': 'OK',
+  'selfcheck.warn': 'Avertissement',
+  'selfcheck.fail': 'Échec',
+  'selfcheck.skip': 'Sans objet',
+
+  'selfcheck.platform': 'Plateforme',
+  'selfcheck.platformWebHint':
+    'Ceci est l’aperçu navigateur, qui n’a pas de moteur de messagerie. Les vérifications de courrier sont ignorées ici — lancez-les depuis l’application installée.',
+  'selfcheck.native': 'Pont natif',
+  'selfcheck.nativeHint':
+    'L’application tourne, mais sa moitié Android n’a pas répondu : rien de ce qui dépend du système — envoi, réception, mots de passe enregistrés, alarmes — ne peut fonctionner. La solution est de réinstaller l’application ; cela ne se configure pas.',
+  'selfcheck.notifications': 'Autorisation de notification',
+  'selfcheck.notificationsHint':
+    'Le courrier programmé part toujours, mais vous ne serez pas prévenu en cas d’échec.',
+  'selfcheck.exactAlarms': 'Alarmes exactes',
+  'selfcheck.exactAlarmsHint':
+    'Android peut repousser un envoi programmé jusqu’à une fenêtre de maintenance. Il partira quand même, mais pas à la minute choisie.',
+  'selfcheck.noAccounts': 'Comptes de messagerie',
+  'selfcheck.noAccountsHint': 'Aucun compte n’a encore été ajouté : il n’y a rien pour envoyer.',
+  'selfcheck.fields': 'Détails du compte',
+  'selfcheck.fieldsHint': 'Ces champs sont vides et sont obligatoires pour envoyer.',
+  'selfcheck.credential': 'Identifiant enregistré',
+  'selfcheck.credentialHint':
+    'Aucun mot de passe utilisable n’est enregistré. Si vous en aviez défini un, cet appareil ne sait peut-être plus le déchiffrer — ouvrez le compte et saisissez-le à nouveau.',
+  'selfcheck.credentialOauthHint': 'Ouvrez le compte et reconnectez-vous.',
+  'selfcheck.credentialUnconfiguredHint':
+    'Cette version n’a pas de client OAuth enregistré pour ce fournisseur : la connexion ne peut pas démarrer. Rien de ce que vous saisirez ici n’y changera quoi que ce soit.',
+  'selfcheck.smtp': 'Envoi (SMTP)',
+  'selfcheck.smtpHint':
+    'Le serveur a refusé la connexion ou l’authentification. Ses mots exacts sont ci-dessus.',
+  'selfcheck.imap': 'Réception (IMAP)',
+  'selfcheck.imapHint': 'L’envoi peut continuer à fonctionner. Ses mots exacts sont ci-dessus.',
+  'selfcheck.armed': 'Envois programmés armés',
+  'selfcheck.armedHint':
+    'Des tâches sont activées mais aucune n’a de prochain envoi. Le plus souvent une date de fin dépassée, ou un calendrier de travail qui exclut tous les jours restants.',
+  'selfcheck.outbox': 'Boîte d’envoi',
+  'selfcheck.outboxHint': 'Des messages ont abandonné après avoir épuisé toutes leurs tentatives.',
+
   'home.title': 'Accueil',
   'home.subtitle': 'Planifications, contacts, modèles, le calendrier de travail et le journal d’envoi.',
   'nav.inbox': 'Boîte de réception',
@@ -233,7 +282,30 @@ export const fr: Translations = {
   'account.deleteConfirm': 'Supprimer ce compte ? Les rappels programmés qui l’utilisent s’arrêteront.',
   'account.storedSafely': 'Les mots de passe ne quittent jamais votre appareil. Ils sont chiffrés par le système et ne figurent dans aucune sauvegarde ni export.',
 
-  'provider.hint.microsoftNoPassword': "Microsoft n'accepte plus les mots de passe pour les clients de messagerie. Les comptes personnels Outlook.com, Hotmail et Live les refusent — mots de passe d'application compris — depuis le 30 avril 2026 ; les comptes professionnels ont perdu la connexion IMAP par mot de passe en 2022-2023. En attendant qu'OAuth2 soit pris en charge ici, utilisez un fournisseur qui accepte encore un mot de passe d'application.",
+  // --- OAuth2 sign-in (see src/core/oauth.ts) -------------------------------
+  'account.authMethod': 'Méthode de connexion',
+  'account.authPassword': 'Mot de passe ou mot de passe d’application',
+  'account.authOauth2': 'Se connecter via le fournisseur (OAuth2)',
+  'account.oauthConnect': 'Connecter',
+  'account.oauthReconnect': 'Reconnecter',
+  'account.oauthDisconnect': 'Déconnecter',
+  'account.oauthConnecting': 'En attente de votre navigateur…',
+  'account.oauthChecking': 'Vérification de la connexion…',
+  'account.oauthConnected': 'Connecté en tant que {address}',
+  'account.oauthNotConnected': 'Pas encore connecté. Une seule connexion suffit : Aevistle peut ensuite envoyer et recevoir sans mot de passe.',
+  'account.oauthNeedsConsent': 'Le fournisseur a retiré cette connexion : l’envoi et la réception échoueront tant que vous ne l’aurez pas rétablie.',
+  'account.oauthUnconfigured': 'Cette version d’Aevistle n’a pas d’enregistrement de connexion pour ce fournisseur et ne peut donc pas se connecter. La personne qui l’a compilée doit enregistrer l’application.',
+  'account.oauthUnsupported': 'Ce fournisseur ne propose pas de connexion OAuth2. Utilisez un mot de passe.',
+  'account.oauthHint': 'Votre propre navigateur ouvre la page du fournisseur. Aevistle ne voit jamais votre mot de passe et ne conserve qu’un jeton renouvelable.',
+  'account.oauthFailed': 'Échec de la connexion : {error}',
+  'validate.accountOauthUnsupported': 'Ce fournisseur n’a pas de connexion OAuth2 — choisissez Mot de passe',
+  'validate.accountOauthUnconfigured': 'Cette version n’a pas d’enregistrement OAuth2 pour ce fournisseur ; la connexion ne fonctionnera pas',
+  'preflight.warn.oauthNotConnected': 'Ce compte n’a pas encore été connecté ; le serveur refusera.',
+  'preflight.warn.oauthNeedsConsent': 'Ce compte doit être reconnecté : le fournisseur a retiré la connexion qu’utilisait Aevistle.',
+  'preflight.warn.oauthUnconfigured': 'Cette version ne peut pas se connecter à ce fournisseur ; le message ne peut pas être envoyé.',
+  'preflight.warn.oauthUnsupported': 'Ce fournisseur ne propose pas de connexion OAuth2. Configurez le compte avec un mot de passe.',
+
+  'provider.hint.microsoftNoPassword': 'Microsoft n’accepte plus les mots de passe pour les clients de messagerie. Les comptes personnels Outlook.com, Hotmail et Live les refusent — mots de passe d’application compris — depuis le 30 avril 2026, et les comptes professionnels ont perdu la connexion IMAP par mot de passe en 2022-2023. Choisissez OAuth2 comme méthode de connexion ci-dessous, puis connectez le compte.',
   'provider.hint.appPassword': 'Ce fournisseur exige un mot de passe d’application, pas votre mot de passe habituel.',
   'provider.hint.authCode': 'Activez le SMTP dans les réglages de votre boîte et utilisez le code d’autorisation fourni.',
   'provider.hint.password': 'Votre mot de passe de messagerie habituel fonctionne ici.',
@@ -451,6 +523,7 @@ export const fr: Translations = {
   // --- added in this release ---
   'account.testCancel': 'Arrêter le test',
   'account.testCancelled': 'Test interrompu',
+  'account.testBlockedReason': 'Renseigne {fields} pour pouvoir tester.',
   'account.autoNegotiate': 'Essayer d’autres ports automatiquement',
   'account.autoNegotiateHint': 'Si le port et le chiffrement choisis ne fonctionnent pas, Aevistle essaie l’autre combinaison habituellement acceptée par ce fournisseur au lieu d’échouer.',
   'account.adjusted': 'Connecté sur le port {port} en {security}',
@@ -522,7 +595,7 @@ export const fr: Translations = {
   'error.use587Starttls': 'Le port 587 attend du STARTTLS. Passez le chiffrement en STARTTLS, ou utilisez le port 465 avec SSL/TLS.',
   'error.use993Ssl': 'Le port 993 attend SSL/TLS. Passez le chiffrement à SSL/TLS, ou utilisez le port 143 avec STARTTLS.',
   'error.use143Starttls': 'Le port 143 attend STARTTLS. Passez le chiffrement à STARTTLS, ou utilisez le port 993 avec SSL/TLS.',
-  'error.microsoftSmtpAuth': 'Microsoft n’accepte plus de mot de passe ici. Les comptes Outlook.com, Hotmail et Live ont perdu les mots de passe d’application le 30 avril 2026, et les comptes professionnels bien avant. Utilisez un fournisseur qui les accepte encore — Gmail, QQ, 163 ou iCloud — en attendant la connexion OAuth2.',
+  'error.microsoftSmtpAuth': 'Microsoft n’accepte plus de mot de passe ici. Les comptes Outlook.com, Hotmail et Live ont perdu les mots de passe d’application le 30 avril 2026, et les comptes professionnels bien avant. Ouvrez ce compte, choisissez OAuth2 comme méthode de connexion, puis connectez-le.',
   'error.microsoftEndpoint': 'Pour Microsoft : smtp-mail.outlook.com port 587 avec STARTTLS pour l’envoi, outlook.office365.com port 993 avec SSL/TLS pour la réception. Un mot de passe seul peut malgré tout être refusé.',
   'toast.sentDetail': 'Remis à {n} destinataire(s) en {ms} ms',
   'toast.quietHours': 'Retenu jusqu’à la fin des heures calmes',
@@ -545,6 +618,7 @@ export const fr: Translations = {
   'inbox.push': 'Réception instantanée',
   'inbox.pushHint': 'Garde une connexion ouverte pour que le courrier apparaisse dès son arrivée. La vérification périodique reste active en secours.',
   'inbox.testConnection': 'Tester la réception',
+  'inbox.testBlockedReason': 'Renseigne {fields} pour pouvoir tester la réception.',
   'inbox.diagMailbox': 'Boîte de réception',
   'inbox.diagCounts': '{total} messages, {unseen} non lus',
   'inbox.syncEvery': 'Vérifier les nouveaux messages',
@@ -599,6 +673,7 @@ export const fr: Translations = {
   'inbox.revealAttachment': 'Afficher dans le dossier',
   'inbox.openAttachmentFailed': "Impossible d'ouvrir {name}",
   'inbox.allAccounts': 'Tous les comptes',
+  'inbox.unknownAccount': 'Compte inconnu',
   'inbox.searchScope': 'Chercher dans',
   'inbox.scope.all': 'Tout',
   'inbox.scope.from': 'Expéditeur',
@@ -691,6 +766,7 @@ export const fr: Translations = {
 
   // --- health board ---
   "health.orphanedAccount": "{n} rappel(s) pointent vers un compte supprimé — ils échoueront",
+  "health.orphanedInboxAccount": "{n} message(s) restant(s) d'un compte supprimé — supprimés automatiquement au prochain redémarrage",
   "boot.failedTitle": "Aevistle n’a pas pu démarrer",
   "boot.failedHint": "Vos données n’ont pas été modifiées. Si cela persiste, réinstaller l’application suffit généralement.",
   "health.schedulerUnreachable": "Les rappels ne sont pas armés : cet appareil n’a pas accepté la planification, rien ne partira",
@@ -786,6 +862,10 @@ export const fr: Translations = {
   'account.group': 'Groupe',
   'account.groupPlaceholder': 'Travail, personnel, un client…',
   'account.ungrouped': 'Sans groupe',
+  'account.reorderHint':
+    'Faites glisser la poignée pour classer vos comptes dans l’ordre que vous voulez. Sur écran tactile, maintenez-la d’abord appuyée. Au clavier, mettez-la au focus et appuyez sur Ctrl ou Alt avec les flèches.',
+  'account.reorderHandle': 'Réorganiser {name}',
+  'account.reorderMoved': '{name} est maintenant en position {n} sur {total}',
   'preflight.title': 'Avant l’envoi',
   'preflight.sendsExact': '{n} envoi(s) sur les {days} prochains jours',
   'preflight.sendsAtLeast': 'Au moins {n} envois sur les {days} prochains jours',
@@ -850,6 +930,7 @@ export const fr: Translations = {
   'outbox.attempts': '{n} tentative(s)',
   'outbox.editInstead': 'Remettre dans l’éditeur',
   'outbox.discard': 'Abandonner',
+  'outbox.andMore': 'et {n} autres en attente',
   'condition.title': 'Envoyer seulement si…',
   'condition.hint': 'Vérifié au moment du déclenchement. Un échec saute l’envoi et l’indique dans le journal.',
   'condition.unavailable': 'non vérifiable ici',
@@ -1523,6 +1604,7 @@ export const fr: Translations = {
   'sync.scope.accounts': 'Comptes',
   'sync.scope.accountsHint':
     '{n} compte(s). Le mot de passe de chacun de ceux qui en ont un enregistré voyage scellé sur cette liaison chiffrée et va directement dans le trousseau de l’autre appareil : vous ne le retapez jamais. Il n’est écrit en clair dans aucun fichier, d’un côté comme de l’autre.',
+  'sync.scope.signInAgain': 'à reconnecter sur le nouvel appareil',
   'sync.scope.schedule': 'Planning',
   'sync.scope.scheduleHint': '{n} rappel(s), plus votre calendrier de travail.',
   'sync.scope.contacts': 'Contacts',

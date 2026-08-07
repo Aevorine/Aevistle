@@ -178,6 +178,9 @@ final class LanServer {
             try {
                 server.close();
             } catch (IOException ignored) {
+                // Closing regardless of outcome — the reference above is
+                // already dropped, so there is nothing left to retry or
+                // report.
             }
         }
         // Not joined. `accept()` throws the moment the socket closes and the
@@ -240,6 +243,8 @@ final class LanServer {
                     try {
                         client.close();
                     } catch (IOException ignored) {
+                        // Best-effort close of a connection this loop is
+                        // already done with either way.
                     }
                 }
             }
@@ -273,6 +278,9 @@ final class LanServer {
                 try {
                     declared = Integer.parseInt(value);
                 } catch (NumberFormatException ignored) {
+                    // `declared` stays at its previous value, which the body
+                    // reader below treats the same as no usable
+                    // Content-Length header.
                 }
             } else if ("transfer-encoding".equals(name)) {
                 chunked = value.toLowerCase(Locale.ROOT).contains("chunked");

@@ -142,8 +142,8 @@ android {
         applicationId "dev.aevistle.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 20
-        versionName "0.1.19"
+        versionCode 21
+        versionName "0.1.20"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -242,6 +242,16 @@ dependencies {
     // sanitizes received HTML before it reaches the WebView — see
     // InboxSanitizer.java.
     implementation "org.jsoup:jsoup:1.17.2"
+
+    // OAuth2 consent has to happen in the system browser, not in a WebView:
+    // RFC 8252 §8.12 forbids the embedded kind, and both Google and Microsoft
+    // refuse embedded user agents outright — so the "simpler" in-process
+    // version does not merely break the guarantee, it does not work. This is
+    // the Custom Tabs client library: it keeps the browser's own cookie jar and
+    // address bar (which is what lets a password manager fill the form and the
+    // user see who they are signing in to) while looking like part of the app.
+    // See OAuthConsent.java.
+    implementation "androidx.browser:browser:1.8.0"
 
     // Saving a received attachment to a folder the user picked. Android has no
     // writable path outside app storage, so the destination is a SAF tree URI

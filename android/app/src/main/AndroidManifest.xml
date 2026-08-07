@@ -30,6 +30,42 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
+            <!--
+                The OAuth2 consent redirect.
+
+                A private-use URI scheme, which is what RFC 8252 §7.1 prescribes
+                for a native app that cannot hold a loopback socket while the
+                user is away in a browser. The scheme is the application id
+                rather than something short and memorable like `aevistle://`,
+                deliberately: a generic scheme is one another app could
+                plausibly claim, and Android hands a contested scheme to
+                whichever app the user picks from a chooser. Reverse-DNS on a
+                domain this project controls is the collision-resistant form the
+                RFC asks for. It must stay byte-identical to
+                `ANDROID_REDIRECT_URI` in `src/core/oauth.ts` and to what is
+                registered with Google and Microsoft — a mismatch is refused at
+                the consent page, before anything reaches this filter.
+
+                `CATEGORY_BROWSABLE` is what lets a browser start it at all, and
+                is the reason this is a second filter rather than three more
+                lines in the one above: adding BROWSABLE to the LAUNCHER filter
+                would make the app's icon entry web-startable too.
+
+                Claiming a scheme does not weaken the guarantees in the block
+                above. The activity was already `exported="true"` — it is the
+                launcher — and `launchMode="singleTask"` means a redirect
+                arrives as `onNewIntent` on the running instance rather than
+                starting a second copy. What arrives is a URL carrying an
+                authorization code, and a code is worth nothing without the PKCE
+                verifier, which never leaves the process that made it.
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="dev.aevistle.app" android:host="oauth" />
+            </intent-filter>
+
         </activity>
 
         <!--

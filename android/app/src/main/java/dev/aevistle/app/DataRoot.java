@@ -4,6 +4,7 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.os.Environment;
 import android.os.StatFs;
+import android.util.Log;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -38,6 +39,7 @@ import java.io.OutputStream;
  */
 final class DataRoot {
 
+    private static final String TAG = "DataRoot";
     static final String ID_DEFAULT = "default";
     static final String ID_EXTERNAL = "external";
     static final String ID_SDCARD = "sdcard";
@@ -126,7 +128,13 @@ final class DataRoot {
                 StatFs stat = new StatFs(dir.getAbsolutePath());
                 o.put("freeBytes", stat.getAvailableBytes());
             }
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            // `o` is returned either way — the settings panel greys out
+            // whatever fields are missing rather than the caller crashing —
+            // but a volume that throws instead of just reporting unavailable
+            // is unusual enough to be worth a trace when someone is chasing
+            // a storage option that never appears.
+            Log.e(TAG, "option: could not describe storage option " + id, e);
         }
         return o;
     }

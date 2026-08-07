@@ -23,7 +23,22 @@ export type Platform = 'desktop' | 'android' | 'web'
 // ---------------------------------------------------------------------------
 
 export type TransportSecurity = 'ssl' | 'starttls' | 'none'
-export type AuthMethod = 'password' | 'none'
+
+/**
+ * How an account proves who it is.
+ *
+ * `'oauth2'` is XOAUTH2 — the SASL mechanism both SMTP and IMAP accept a
+ * bearer token through. It is not a nicety: Microsoft stopped accepting app
+ * passwords for IMAP/POP/SMTP on personal accounts on 30 April 2026, so for an
+ * outlook.com/hotmail.com/live.com address it is now the *only* mechanism that
+ * works at all, and Google is travelling the same road.
+ *
+ * The stored secret for an OAuth2 account is the long-lived **refresh** token.
+ * Access tokens are minted from it and held in memory only — they expire in
+ * about an hour, so writing them to disk would buy nothing and widen what a
+ * stolen keystore is worth. See `core/oauth.ts`.
+ */
+export type AuthMethod = 'password' | 'none' | 'oauth2'
 
 /**
  * What a stored credential is *for*. Both keystores (`electron/store.ts`'s
@@ -83,6 +98,23 @@ export interface MailAccount {
   allowInvalidCert: boolean
   /** Max messages per connection before reconnecting (provider rate limits). */
   poolMaxMessages: number
+  /**
+   * Where this account sits in a list the user has arranged by hand.
+   *
+   * Optional, and absent on every account written before drag-ordering
+   * existed. Sorting treats "no order" as "after everything that has one,
+   * in the array order it already had", so a store that has never been
+   * reordered looks exactly as it did — the field only starts mattering once
+   * somebody drags something.
+   *
+   * One number, shared by both places accounts are listed. Settings reads
+   * `state.accounts` and the inbox reads `state.inboxAccounts`, which are
+   * separate arrays whose orders were never guaranteed to agree; hanging both
+   * off this single field is what stops "third in Settings, first in the
+   * inbox" from being possible at all, rather than something the two screens
+   * have to be kept in step about by hand.
+   */
+  order?: number
   createdAt: number
   updatedAt: number
 }

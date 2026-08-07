@@ -3,9 +3,15 @@ package dev.aevistle.app;
 import android.app.Activity;
 import android.content.ClipData;
 import android.content.Intent;
+import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
+import android.content.pm.Signature;
+import android.content.pm.SigningInfo;
 import android.database.Cursor;
 import android.net.Uri;
+import android.os.Build;
 import android.provider.OpenableColumns;
+import android.util.Log;
 
 import androidx.activity.result.ActivityResult;
 
@@ -33,6 +39,7 @@ import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.URL;
+import java.security.MessageDigest;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -71,6 +78,8 @@ import java.util.concurrent.Executors;
                         alias = Permissions.ALIAS_NOTIFICATIONS)
         })
 public class AevistleNativePlugin extends Plugin {
+
+    private static final String TAG = "AevistleNativePlugin";
 
     /**
      * A pool, not a single thread.
@@ -255,6 +264,426 @@ public class AevistleNativePlugin extends Plugin {
     }
 
     // -----------------------------------------------------------------------
+    // OAuth2 sign-in
+    //
+    // The whole flow is native, and `bridge-android.ts` explains why: the
+    // WebView's own `connect-src 'self'` forbids it from POSTing to a token
+    // endpoint at all, and routing around that would put the refresh token
+    // through JavaScript — the exact thing `sealAccountSecrets` exists to avoid
+    // for passwords. So this side owns the PKCE pair, the Custom Tab, the
+    // redirect, the exchange and the keystore write, and what goes back across
+    // the bridge is an address and a boolean.
+    //
+    // The provider table is not duplicated here. Endpoints, scopes and the
+    // vendor extras all arrive as call arguments from `src/core/oauth.ts`,
+    // which is what keeps the phone and the desktop from drifting into asking
+    // for different scopes — a drift whose symptom is a mailbox that syncs on
+    // one device and 401s on the other, with nothing on screen connecting the
+    // two. {@link OAuthConsent} runs the flow; {@link OAuthTokens} owns
+    // everything after it.
+    // -----------------------------------------------------------------------
+
+    /**
+     * The consent waiting for a redirect, and the two facts needed to tell
+     * "the user came back having finished" from "the user came back having
+     * given up".
+     *
+     * Guarded by {@code consentLock} because they are genuinely touched from
+     * two threads: {@code oauthConsent} runs on Capacitor's own plugin thread
+     * (see {@code Bridge.callPluginMethod}, which posts to a HandlerThread),
+     * while {@code handleOnNewIntent}, {@code handleOnPause} and
+     * {@code handleOnResume} are delivered on the main thread. Without the
+     * lock the redirect could arrive against a half-written {@code Pending}.
+     */
+    private final Object consentLock = new Object();
+    private OAuthConsent.Pending pendingConsent;
+    private boolean consentPaused;
+    private boolean consentRedirected;
+
+    /**
+     * How long a resumed activity waits before deciding the user backed out.
+     *
+     * Android documents `onNewIntent` as arriving before `onResume` for a
+     * `singleTask` activity, so in the ordinary completing case the flow is
+     * already settled by the time resume runs and this timer never fires. The
+     * grace period is insurance against the OEM that reorders them: without it,
+     * a successful sign-in on such a device would be reported as "cancelled"
+     * one instant before its own redirect arrived, which is a bug that would
+     * only ever reproduce on somebody else's phone.
+     */
+    private static final long CONSENT_RETURN_GRACE_MS = 700L;
+
+    /**
+     * The client id registered against the certificate that signed *this* APK.
+     *
+     * Google issues one OAuth client per signing certificate, so a debug build
+     * and a release build of the same app are, as far as Google is concerned,
+     * two different applications. The JavaScript half cannot tell them apart —
+     * one `vite build` output is packaged into both — so it sends every
+     * registered id keyed by fingerprint and the choice is made here, where the
+     * signature can actually be read.
+     *
+     * An empty answer is a normal, reportable outcome rather than a failure to
+     * throw about: it means somebody is running a build whose key was never
+     * registered, which is exactly what a fresh clone on a new machine does.
+     */
+    private String clientIdForThisBuild(JSObject clientIds) {
+        if (clientIds == null) return "";
+        String fingerprint = signingFingerprint();
+        if (fingerprint.isEmpty()) return "";
+        return clientIds.optString(fingerprint, "");
+    }
+
+    /**
+     * This APK's signing certificate as an uppercase, colon-separated SHA-1 —
+     * byte for byte what `keytool -list` prints and what the Cloud Console
+     * shows, so the two can be compared by eye when they disagree.
+     *
+     * Two APIs because `minSdk` is 24. `GET_SIGNING_CERTIFICATES` arrived in
+     * API 28 and is the one that understands key rotation; below that only the
+     * deprecated `GET_SIGNATURES` exists. Using the modern call unconditionally
+     * would return nothing on Android 7 and 8 and produce the "no client
+     * registered" message on a device whose certificate is registered perfectly
+     * well — a wrong answer being worse here than no answer.
+     */
+    private String signingFingerprint() {
+        try {
+            PackageManager pm = getContext().getPackageManager();
+            String pkg = getContext().getPackageName();
+            Signature[] signatures;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                PackageInfo info = pm.getPackageInfo(pkg, PackageManager.GET_SIGNING_CERTIFICATES);
+                SigningInfo signing = info.signingInfo;
+                if (signing == null) return "";
+                /*
+                 * `getApkContentsSigners()` in both cases, and never the first
+                 * element of `getSigningCertificateHistory()`.
+                 *
+                 * The usual snippet branches on `hasMultipleSigners()` and
+                 * reads the history when there is one signer. That is wrong for
+                 * a key that has been rotated with a lineage: the history is
+                 * ordered oldest-first, so element zero is the *original*
+                 * certificate — the one that is no longer used to sign
+                 * anything, and the one Google will not accept as proof of this
+                 * client. `getApkContentsSigners()` always answers with what
+                 * actually signed these APK contents, which is precisely the
+                 * certificate Google validates the OAuth client against.
+                 *
+                 * It matters here specifically because this project's signing
+                 * key was rotated at v0.1.19. Reading the wrong end of that
+                 * array would return a fingerprint that is not registered
+                 * anywhere and report "no OAuth client for this build" on a
+                 * correctly configured release — with nothing in any log to say
+                 * the lookup key was the problem.
+                 *
+                 * The history is kept only as a fallback for the case where the
+                 * contents signers come back empty, and then it is read from
+                 * the end, where the current signer is.
+                 */
+                signatures = signing.getApkContentsSigners();
+                if (signatures == null || signatures.length == 0) {
+                    Signature[] history = signing.getSigningCertificateHistory();
+                    if (history != null && history.length > 0) {
+                        signatures = new Signature[] { history[history.length - 1] };
+                    }
+                }
+            } else {
+                @SuppressWarnings("deprecation")
+                PackageInfo info = pm.getPackageInfo(pkg, PackageManager.GET_SIGNATURES);
+                @SuppressWarnings("deprecation")
+                Signature[] legacy = info.signatures;
+                signatures = legacy;
+            }
+            if (signatures == null || signatures.length == 0) return "";
+            MessageDigest sha1 = MessageDigest.getInstance("SHA-1");
+            byte[] digest = sha1.digest(signatures[0].toByteArray());
+            StringBuilder out = new StringBuilder(digest.length * 3);
+            for (byte b : digest) {
+                if (out.length() > 0) out.append(':');
+                out.append(String.format("%02X", b));
+            }
+            return out.toString();
+        } catch (Exception e) {
+            // Reported as "unregistered" by the caller, which is the honest
+            // reading: without a fingerprint there is no id to choose, and
+            // guessing one would send the user to a provider error page.
+            android.util.Log.e("Aevistle", "could not read this build's signing certificate", e);
+            return "";
+        }
+    }
+
+    @PluginMethod
+    public void oauthConsent(final PluginCall call) {
+        final String accountId = call.getString("accountId", "");
+        final String providerId = call.getString("providerId", "");
+        final JSObject clientIds = call.getObject("clientIds");
+        final String clientId = clientIdForThisBuild(clientIds);
+        final String authorizeUrl = call.getString("authorizeUrl", "");
+        final String tokenUrl = call.getString("tokenUrl", "");
+        final String scope = call.getString("scope", "");
+        final String redirectUri = call.getString("redirectUri", "");
+        final JSObject extraAuthParams = call.getObject("extraAuthParams");
+        final String loginHint = call.getString("loginHint");
+
+        // Resolved rather than rejected, all the way down. The caller is a
+        // dialog: a rejection surfaces as the generic "unexpected problem"
+        // banner over an app that is working fine, whereas `{ ok: false }` with
+        // a sentence lands in the place the user is already looking.
+        if (accountId.isEmpty() || authorizeUrl.isEmpty()
+                || tokenUrl.isEmpty() || redirectUri.isEmpty()) {
+            call.resolve(consentFailure("This sign-in was started without everything it needs."));
+            return;
+        }
+        /*
+         * Told apart from the check above on purpose. "No client id at all" and
+         * "no client id for *this* build" look identical from the user's seat
+         * and need completely different actions, and the second one is the case
+         * a developer hits the moment they run a debug build against a release
+         * registration. Naming the fingerprint means the fix is a copy and a
+         * paste into the Cloud Console rather than an afternoon.
+         */
+        if (clientId.isEmpty()) {
+            call.resolve(consentFailure(
+                    "No OAuth client is registered for the certificate this build is signed with ("
+                            + signingFingerprint() + "). Sign-in cannot start until one is added."));
+            return;
+        }
+
+        final Activity activity = getActivity();
+        if (activity == null) {
+            call.resolve(consentFailure("Aevistle cannot open a browser right now."));
+            return;
+        }
+
+        final OAuthConsent.Pending pending;
+        final String url;
+        try {
+            pending = OAuthConsent.begin(call.getCallbackId(), accountId, providerId, clientId,
+                    tokenUrl, redirectUri, scope);
+            url = OAuthConsent.authorizeUrl(pending, authorizeUrl, extraAuthParams, loginHint);
+        } catch (Exception e) {
+            call.resolve(consentFailure("Aevistle could not prepare the sign-in: " + readable(e)));
+            return;
+        }
+
+        OAuthConsent.Pending abandoned;
+        synchronized (consentLock) {
+            abandoned = pendingConsent;
+            pendingConsent = pending;
+            consentPaused = false;
+            consentRedirected = false;
+        }
+        // A second sign-in started while one was still open — the dialog was
+        // reopened, or the first Custom Tab was swiped away without ever coming
+        // back. The old call has to be settled here or its promise never
+        // resolves and its dialog spins for the life of the process.
+        if (abandoned != null) settleConsentCall(abandoned, cancelledConsent());
+
+        // Saved through the Custom Tab's lifetime. Opening one backgrounds this
+        // activity, and a `PluginCall` that is not saved is released the moment
+        // the method returns — so without this the redirect would come home to
+        // a callback id the bridge no longer knows, and the promise would never
+        // settle. That is the single most likely way this feature ships broken,
+        // because it looks perfect right up until the browser opens.
+        getBridge().saveCall(call);
+
+        // On the UI thread: `launchUrl` is a `startActivity`, and starting one
+        // from Capacitor's plugin HandlerThread is the kind of thing that works
+        // on every device it is tested on.
+        activity.runOnUiThread(() -> {
+            try {
+                OAuthConsent.launch(activity, url);
+            } catch (Exception e) {
+                settleConsent(pending, consentFailure(readable(e)));
+            }
+        });
+    }
+
+    @PluginMethod
+    public void oauthStatus(PluginCall call) {
+        String accountId = call.getString("accountId", "");
+        boolean hasGrant = OAuthTokens.hasGrant(getContext(), accountId);
+
+        JSObject result = new JSObject();
+        result.put("hasGrant", hasGrant);
+        // Only meaningful alongside a grant. Reporting `rejected` for an
+        // account that has never signed in would put the dialog into
+        // "needs re-consent" for a mailbox with nothing to re-consent to.
+        result.put("rejected", hasGrant && OAuthTokens.rejected(getContext(), accountId));
+        String address = hasGrant ? OAuthTokens.address(getContext(), accountId) : null;
+        if (address != null) result.put("address", address);
+        call.resolve(result);
+    }
+
+    @PluginMethod
+    public void oauthDisconnect(PluginCall call) {
+        String accountId = call.getString("accountId", "");
+        OAuthTokens.forget(getContext(), accountId);
+        call.resolve();
+    }
+
+    /**
+     * The redirect coming home.
+     *
+     * `MainActivity` is `launchMode="singleTask"`, so the browser's navigation
+     * to `dev.aevistle.app://oauth/callback` is delivered here rather than
+     * starting a second copy of the app — which is why there is no second
+     * activity in the manifest for this and why the WebView underneath is still
+     * the one holding the dialog that started the flow.
+     */
+    @Override
+    protected void handleOnNewIntent(Intent intent) {
+        super.handleOnNewIntent(intent);
+        Uri data = intent == null ? null : intent.getData();
+        if (data == null) return;
+
+        final OAuthConsent.Pending pending;
+        synchronized (consentLock) {
+            if (pendingConsent == null || !isRedirectFor(pendingConsent, data)) return;
+            pending = pendingConsent;
+            // Set before anything can settle the call, so the resume that
+            // follows this intent cannot decide the user gave up while the
+            // token exchange is still in flight on the io pool.
+            consentRedirected = true;
+        }
+
+        final OAuthConsent.Redirect redirect = OAuthConsent.read(pending, data);
+        if (redirect == null) {
+            // `state` did not match. Refused outright rather than ignored: a
+            // private-use scheme is claimable by any app on the device, and
+            // ignoring a mismatch would leave this flow open for the *next*
+            // redirect, which is exactly the window an attacker would want.
+            settleConsent(pending, consentFailure(
+                    "That sign-in did not match the one Aevistle started, so nothing was saved. "
+                            + "Start the sign-in again."));
+            return;
+        }
+        if (pending.expired()) {
+            settleConsent(pending, cancelledConsent());
+            return;
+        }
+        if (redirect.cancelled) {
+            settleConsent(pending, cancelledConsent());
+            return;
+        }
+        if (redirect.error != null) {
+            settleConsent(pending, consentFailure(redirect.error));
+            return;
+        }
+
+        // The exchange is a network round trip and this is the main thread.
+        io.execute(() -> {
+            try {
+                String address = OAuthConsent.exchange(getContext(), pending, redirect.code);
+                JSObject result = new JSObject();
+                result.put("ok", true);
+                if (address != null) result.put("address", address);
+                settleConsent(pending, result);
+            } catch (Exception e) {
+                settleConsent(pending, consentFailure(readable(e)));
+            }
+        });
+    }
+
+    @Override
+    protected void handleOnPause() {
+        super.handleOnPause();
+        synchronized (consentLock) {
+            if (pendingConsent != null) consentPaused = true;
+        }
+    }
+
+    /**
+     * Back from the browser — and if no redirect came with them, the user
+     * pressed back or closed the tab.
+     *
+     * There is no callback for "the user dismissed the Custom Tab"; a resume
+     * with nothing else to show for it is the only signal Android gives. The
+     * `consentPaused` flag is what stops this from firing on the resume that
+     * happens *before* the tab opens, and `consentRedirected` is what stops it
+     * from cancelling a sign-in whose exchange is still running.
+     */
+    @Override
+    protected void handleOnResume() {
+        super.handleOnResume();
+        final OAuthConsent.Pending pending;
+        synchronized (consentLock) {
+            if (pendingConsent == null || !consentPaused || consentRedirected) return;
+            pending = pendingConsent;
+        }
+        new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
+            synchronized (consentLock) {
+                if (pendingConsent != pending || consentRedirected) return;
+            }
+            settleConsent(pending, cancelledConsent());
+        }, CONSENT_RETURN_GRACE_MS);
+    }
+
+    /** Is this the redirect this flow asked the provider to send? */
+    private static boolean isRedirectFor(OAuthConsent.Pending pending, Uri data) {
+        Uri expected = Uri.parse(pending.redirectUri);
+        return String.valueOf(expected.getScheme()).equalsIgnoreCase(String.valueOf(data.getScheme()))
+                && String.valueOf(expected.getAuthority()).equalsIgnoreCase(String.valueOf(data.getAuthority()))
+                && String.valueOf(expected.getPath()).equals(String.valueOf(data.getPath()));
+    }
+
+    /**
+     * Settle a consent exactly once, whichever of the four routes out of it got
+     * here first — the redirect, the resume, a launch failure, or a second
+     * sign-in replacing this one.
+     */
+    private void settleConsent(OAuthConsent.Pending pending, JSObject result) {
+        synchronized (consentLock) {
+            if (pendingConsent != pending) return;
+            pendingConsent = null;
+            consentPaused = false;
+            consentRedirected = false;
+        }
+        settleConsentCall(pending, result);
+    }
+
+    private void settleConsentCall(OAuthConsent.Pending pending, JSObject result) {
+        PluginCall call = getBridge().getSavedCall(pending.callbackId);
+        if (call == null) {
+            // The bridge has already let go of it — the WebView reloaded, or
+            // the activity was rebuilt while the browser was in front. There is
+            // no promise left to settle, and the reloaded page has no dialog
+            // waiting on one either, so this is a no-op rather than a loss.
+            Log.i(TAG, "settleConsent: the sign-in call was already released");
+            return;
+        }
+        call.resolve(result);
+    }
+
+    private static JSObject consentFailure(String message) {
+        JSObject result = new JSObject();
+        result.put("ok", false);
+        result.put("error", message);
+        return result;
+    }
+
+    private static JSObject cancelledConsent() {
+        JSObject result = new JSObject();
+        result.put("ok", false);
+        result.put("cancelled", true);
+        return result;
+    }
+
+    /**
+     * A sentence out of an exception, and never anything else.
+     *
+     * Nothing that reaches here carries a token or a code — the code travels in
+     * a POST body rather than in any URL this app builds, and {@link
+     * OAuthTokens} never puts a token in a message — but this is the one
+     * function whose output is handed to the WebView, so the rule is stated
+     * where it is enforced rather than left to each throw site.
+     */
+    private static String readable(Exception e) {
+        String message = e.getMessage();
+        return message == null || message.isEmpty() ? e.getClass().getSimpleName() : message;
+    }
+
+    // -----------------------------------------------------------------------
     // Mail
     // -----------------------------------------------------------------------
 
@@ -269,7 +698,7 @@ public class AevistleNativePlugin extends Plugin {
 
         io.execute(() -> {
             String secret = new SecretStore(getContext()).get(account.optString("id", ""), "smtp");
-            MailSender.Result result = MailSender.send(draft, account, secret);
+            MailSender.Result result = MailSender.send(getContext(), draft, account, secret);
             resolveResult(call, result);
         });
     }
@@ -287,7 +716,7 @@ public class AevistleNativePlugin extends Plugin {
             String secret = provided != null
                     ? provided
                     : new SecretStore(getContext()).get(account.optString("id", ""), "smtp");
-            MailSender.Result result = MailSender.test(account, secret);
+            MailSender.Result result = MailSender.test(getContext(), account, secret);
             resolveResult(call, result);
         });
     }
@@ -356,7 +785,7 @@ public class AevistleNativePlugin extends Plugin {
                 String secret = provided != null
                         ? provided
                         : inboxSecret(configJson.optString("accountId", ""));
-                resolveResult(call, MailFetcher.test(configJson, secret));
+                resolveResult(call, MailFetcher.test(getContext(), configJson, secret));
             } catch (Exception e) {
                 call.reject("Could not test the inbox connection: " + e.getMessage(), e);
             }
@@ -442,8 +871,15 @@ public class AevistleNativePlugin extends Plugin {
                 try {
                     JSONObject configJson = new JSONObject(config.toString());
                     String secret = inboxSecret(configJson.optString("accountId", ""));
-                    MailFetcher.setSeen(configJson, secret, folderPath, uidArg, patch.optBoolean("seen", true));
-                } catch (Exception ignored) {
+                    MailFetcher.setSeen(getContext(), configJson, secret, folderPath, uidArg,
+                            patch.optBoolean("seen", true));
+                } catch (Exception e) {
+                    // Best-effort against the server, per the comment above —
+                    // local state is already updated on the JS side either
+                    // way, so this must not reject. Logged so a server that
+                    // is silently rejecting every flag update is still
+                    // diagnosable from logcat instead of just never syncing.
+                    Log.e(TAG, "setInboxMessageFlags: server-side seen update failed", e);
                 }
             }
             call.resolve();
@@ -454,8 +890,16 @@ public class AevistleNativePlugin extends Plugin {
     public void deleteInboxMessages(PluginCall call) {
         String accountId = call.getString("accountId", "");
         JSArray items = call.getArray("items");
-        new InboxCache(getContext()).deleteMessages(accountId, items == null ? new JSONArray() : items);
-        call.resolve();
+        boolean ok = new InboxCache(getContext())
+                .deleteMessages(accountId, items == null ? new JSONArray() : items);
+        // See InboxCache#deleteMessages: a false here means the cache still
+        // holds the messages the caller just asked to remove. Resolving
+        // anyway would tell the JS layer a deletion happened that did not.
+        if (ok) {
+            call.resolve();
+        } else {
+            call.reject("Could not remove the messages from the local cache");
+        }
     }
 
     /**
@@ -478,7 +922,7 @@ public class AevistleNativePlugin extends Plugin {
                 String accountId = config.optString("accountId", "");
                 String secret = new SecretStore(getContext()).get(accountId, "imap");
                 JSONArray list = items == null ? new JSONArray() : items;
-                MailFetcher.purge(config, secret, list);
+                MailFetcher.purge(getContext(), config, secret, list);
                 // Cache last: a cache entry for a message still on the server is
                 // recoverable, a missing one for a message we failed to delete
                 // is a hole the user cannot see.
@@ -678,6 +1122,9 @@ public class AevistleNativePlugin extends Plugin {
             try {
                 status = Integer.parseInt(statusLine[1]);
             } catch (NumberFormatException ignored) {
+                // `status` stays -1 on a malformed status code, and the check
+                // right below turns that into the same IOException a missing
+                // status line would produce — nothing here to add.
             }
         }
         if (status < 0) throw new IOException("The other device did not answer with HTTP");
@@ -695,6 +1142,8 @@ public class AevistleNativePlugin extends Plugin {
                 try {
                     declared = Long.parseLong(value);
                 } catch (NumberFormatException ignored) {
+                    // `declared` stays -1, which the body reader below treats
+                    // the same as no Content-Length header at all.
                 }
             } else if ("transfer-encoding".equals(name)) {
                 chunked = value.toLowerCase(java.util.Locale.ROOT).contains("chunked");
@@ -1783,7 +2232,13 @@ public class AevistleNativePlugin extends Plugin {
                     if (name != null && !name.isEmpty()) return name;
                 }
             }
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            // The fallback below is always a reasonable name to show, so this
+            // stays fail-safe rather than propagating — but a query that
+            // throws instead of just returning nothing is unusual enough to
+            // be worth a trace when someone is chasing a "wrong file name"
+            // report.
+            Log.e(TAG, "displayName: could not query the content resolver for " + uri, e);
         }
         return fallback;
     }
@@ -1847,7 +2302,14 @@ public class AevistleNativePlugin extends Plugin {
                 String prefix = root.getCanonicalPath() + File.separator;
                 if (target.startsWith(prefix)) return true;
             }
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            // Fails closed either way — the return below is `false` whether
+            // this threw or the file was legitimately outside both roots —
+            // but those are two different situations for anyone auditing
+            // this path-confinement check, and only one of them is a
+            // canonicalisation problem worth looking at. Log it rather than
+            // erasing the distinction.
+            Log.e(TAG, "insideDataRoot: could not canonicalise " + file, e);
         }
         return false;
     }

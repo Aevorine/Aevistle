@@ -110,6 +110,37 @@ things that deliberately stay behind → **[docs/PRIVACY.md](docs/PRIVACY.md)**.
 Thirty-six of these, each with the reasoning behind it →
 **[docs/FEATURES.md](docs/FEATURES.md)**
 
+## New in 0.1.20
+
+**Sign in instead of typing a password.** Accounts can authenticate with OAuth
+2.0 — the authorization-code flow with PKCE, as a public client, in your system
+browser rather than an embedded WebView. No client secret exists anywhere in
+this project, and a guard in `npm run check` fails the build if one is ever
+added. Microsoft stopped accepting app passwords for IMAP, POP and SMTP on
+personal accounts on 30 April 2026, so for those addresses this is not an
+enhancement but the only mechanism left.
+
+- **A self-check that names the layer.** It walks platform → native bridge →
+  notification permission → exact alarms → account fields → credential → SMTP →
+  IMAP → armed reminders → outbox, and reports each separately. The first
+  failure going up is the one worth acting on; a probe that never ran reports
+  "skipped", never "failed".
+- **One bad record no longer blanks the window.** Error boundaries around each
+  view and the shell: a screen that cannot render costs you that screen, the
+  other tabs keep working, and the reminder due in ten minutes is still armed.
+- **Reorder your accounts** by mouse, by long-press on a phone, or by
+  Ctrl/Alt/Cmd + arrow with the new position announced aloud. Settings and the
+  inbox tab strip stay in the same order.
+- **Typing stays smooth with a full outbox.** A 150-message queue re-rendered
+  every row on every keystroke — 65 ms of blocked main thread per key, 244 ms at
+  the 95th percentile. Six are listed now, failures first, and the rest are a
+  count.
+
+Two limits stated on screen rather than discovered at send time: personal
+Outlook/Hotmail/Live addresses cannot be added on this build (no Microsoft
+client id is registered), and Gmail shows an "unverified app" screen until
+Google's review of the restricted mail scope completes.
+
 ## New in 0.1.17
 
 **Any two devices can pair now, from either end.** The phone and tablet apps can

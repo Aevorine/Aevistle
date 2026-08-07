@@ -11,7 +11,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { Banner, Button, Field, Modal, Switch } from './ui'
 import { IconExternal, IconShield } from './icons'
-import { useI18n, type TranslationKey } from '../i18n'
+import { localeMeta, useI18n, type TranslationKey } from '../i18n'
 import {
   PROVIDERS,
   autoConfigForAddress,
@@ -23,9 +23,12 @@ import {
 } from '../core/providers'
 import { advisoryKey } from '../core/transport'
 import { hasErrors, validateAccount } from '../core/validate'
+import { getBridge } from '../core/bridge'
+import { requiresOAuth, supportsOAuth, type OAuthAccountStatus } from '../core/oauth'
 import {
   defaultInboxAccountState,
   newId,
+  type AuthMethod,
   type InboxAccountState,
   type MailAccount,
   type SendResult,
@@ -36,6 +39,34 @@ const SECURITY_LABEL: Record<TransportSecurity, TranslationKey> = {
   ssl: 'account.securitySsl',
   starttls: 'account.securityStarttls',
   none: 'account.securityNone',
+}
+
+/**
+ * `validateAccount`'s `Issue.field`, worded the same as the label already
+ * printed above each input.
+ *
+ * This exists for the "why is the test button grey" text below. Reusing the
+ * field's own label rather than writing a second name for the same box means
+ * the reason and the input agree, and it means a field validation ever grows
+ * a new required check, its name shows up here for free instead of silently
+ * falling out of the sentence.
+ */
+const BLOCKED_FIELD_LABEL: Partial<Record<string, TranslationKey>> = {
+  fromAddress: 'account.fromAddress',
+  fromName: 'account.fromName',
+  replyTo: 'account.replyTo',
+  host: 'account.host',
+  port: 'account.port',
+  username: 'account.username',
+  authMethod: 'account.authMethod',
+}
+
+/** What the connection line says, per state. `connected` is formatted separately — it names the mailbox. */
+const OAUTH_STATE_LABEL: Record<string, TranslationKey> = {
+  unsupported: 'account.oauthUnsupported',
+  unconfigured: 'account.oauthUnconfigured',
+  disconnected: 'account.oauthNotConnected',
+  needsConsent: 'account.oauthNeedsConsent',
 }
 
 /**
@@ -250,7 +281,7 @@ export function AccountDialog({
   /** Existing group names, offered as completions. Purely a convenience. */
   knownGroups?: string[]
 }) {
-  const { t } = useI18n()
+  const { t, locale } = useI18n()
   const [account, setAccount] = useState<MailAccount>(initial ?? blankAccount())
   const [secret, setSecret] = useState('')
   const [testing, setTesting] = useState(false)
@@ -264,6 +295,18 @@ export function AccountDialog({
   const [inboxTesting, setInboxTesting] = useState(false)
   const [inboxElapsed, setInboxElapsed] = useState(0)
   const [inboxTestResult, setInboxTestResult] = useState<SendResult | null>(null)
+
+  /**
+   * What the trusted layer says about this account's OAuth2 grant.
+   *
+   * `null` means "not asked yet", which is different from `disconnected` and has
+   * to stay different: showing "not connected" while the answer is still in
+   * flight would send someone to re-run a consent they already completed.
+   */
+  const [oauthStatus, setOauthStatus] = useState<OAuthAccountStatus | null>(null)
+  const [oauthBusy, setOauthBusy] = useState(false)
+  /** The last consent failure, in the provider's own words. Cleared on the next attempt. */
+  const [oauthError, setOauthError] = useState<string | null>(null)
 
   /**
    * Which of the auto-fillable fields the user has taken over.
@@ -322,6 +365,9 @@ export function AccountDialog({
       setInboxElapsed(0)
       setTouched(new Set(initial ? ALL_AUTO_FIELDS : []))
       setAuto(autoConfigForAddress(a.fromAddress))
+      setOauthStatus(null)
+      setOauthError(null)
+      setOauthBusy(false)
       runId.current++
       inboxRunId.current++
     }
@@ -383,14 +429,182 @@ export function AccountDialog({
     setTestResult(null)
   }
 
+  // -------------------------------------------------------------------------
+  // OAuth2
+  //
+  // The bridge is fetched here rather than passed in as a prop. `getBridge`
+  // caches and is the documented way to reach the platform layer from outside
+  // the state tree (`core/download.ts` does the same), and the alternative —
+  // threading three more callbacks through `SettingsView` — would put the
+  // consent flow's plumbing in a file that has nothing to do with it.
+  // -------------------------------------------------------------------------
+
+  const oauthAvailable = supportsOAuth(account.providerId)
+  const isOauth = account.authMethod === 'oauth2'
+
+  const refreshOauthStatus = useMemo(
+    () => async (accountId: string, providerId: string | undefined) => {
+      try {
+        const bridge = await getBridge()
+        if (!bridge.oauthStatus) {
+          // A platform with no consent flow at all — the browser preview. Said
+          // as `unsupported` rather than left null, so the panel stops waiting.
+          setOauthStatus({ state: 'unsupported' })
+          return
+        }
+        setOauthStatus(await bridge.oauthStatus(accountId, providerId ?? ''))
+      } catch {
+        setOauthStatus({ state: 'unsupported' })
+      }
+    },
+    [],
+  )
+
+  useEffect(() => {
+    if (!open || !isOauth) return
+    void refreshOauthStatus(account.id, account.providerId)
+  }, [open, isOauth, account.id, account.providerId, refreshOauthStatus])
+
+  /**
+   * Hand the user to their browser and wait.
+   *
+   * This resolves when they are finished, which can be minutes — the button
+   * stays in its waiting state for the whole of it rather than timing out
+   * optimistically, because an app that gave up while the consent page was
+   * still open would leave a stored grant nothing in the UI knew about.
+   */
+  const runConsent = async () => {
+    setOauthBusy(true)
+    setOauthError(null)
+    try {
+      const bridge = await getBridge()
+      if (!bridge.oauthConsent) {
+        setOauthStatus({ state: 'unsupported' })
+        return
+      }
+      const result = await bridge.oauthConsent(
+        account.id,
+        account.providerId ?? '',
+        account.fromAddress,
+      )
+      if (result.ok) {
+        // The address the provider signed in as, which is not always the one
+        // that was typed — someone with three Google accounts picks from a list.
+        // It is also the exact string XOAUTH2 authenticates as, so it belongs in
+        // the username box, flagged as hand-edited so a later address edit does
+        // not quietly overwrite the mailbox the grant is actually for.
+        if (result.address && result.address !== account.username) {
+          markTouched('username')
+          patch({ username: result.address })
+        }
+      } else if (!result.cancelled && result.error) {
+        // Cancelling is not a failure and gets no red text — the state line
+        // below still says "not connected", which is the whole truth of it.
+        setOauthError(result.error)
+      }
+      await refreshOauthStatus(account.id, account.providerId)
+    } catch (e) {
+      setOauthError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setOauthBusy(false)
+    }
+  }
+
+  /**
+   * Forget the grant on this device.
+   *
+   * Deliberately not called "revoke": the mailbox keeps the authorization until
+   * the user removes Aevistle from their provider's connected-apps page, and a
+   * button that implied otherwise would leave people believing they had
+   * withdrawn access they had not.
+   */
+  const disconnectOauth = async () => {
+    setOauthBusy(true)
+    setOauthError(null)
+    try {
+      const bridge = await getBridge()
+      await bridge.oauthDisconnect?.(account.id)
+      await refreshOauthStatus(account.id, account.providerId)
+    } catch (e) {
+      setOauthError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setOauthBusy(false)
+    }
+  }
+
+  /**
+   * Switching mechanism resets what the panel is showing, never what is stored.
+   *
+   * Flipping to a password and back must not silently drop a working grant —
+   * that is `Disconnect`'s job, and it is one press away. What it does clear is
+   * the *displayed* status, which would otherwise describe the mechanism the
+   * user just switched away from.
+   */
+  const setAuthMethod = (method: AuthMethod) => {
+    patch({ authMethod: method })
+    setOauthStatus(null)
+    setOauthError(null)
+  }
+
   const preset = providerById(account.providerId)
   const issues = useMemo(() => validateAccount(account), [account])
   const blocked = hasErrors(issues)
+
+  /**
+   * Joins field names the way the reader's own language does — "A, B and C",
+   * "A、B和C" — rather than a fixed ", " that would read as broken grammar in
+   * a third of the app's locales the moment a third field is missing.
+   */
+  const fieldListFormat = useMemo(
+    () => new Intl.ListFormat(localeMeta(locale).intlTag, { style: 'long', type: 'conjunction' }),
+    [locale],
+  )
+
+  /**
+   * Why the send test button below is grey, in words, on every platform.
+   *
+   * `blocked` is true from the instant a new-account dialog opens — every
+   * required field starts empty — and desktop has always explained that for
+   * free: the per-field hints sit in the empty column beside each input. A
+   * phone has no such column, and the mobile media query below hides
+   * `.field__hint` altogether, on the reasoning that a hint restates what an
+   * input already shows. This one does not — it is the only place on a 360px
+   * screen that ever says *which* boxes are still empty — so it renders with
+   * `field__hint--keep` and is named in the media query's own comment as the
+   * reason that escape hatch exists.
+   */
+  const blockedFields = useMemo(() => {
+    const seen = new Set<string>()
+    const labels: string[] = []
+    for (const issue of issues) {
+      if (issue.severity !== 'error' || !issue.field) continue
+      const key = BLOCKED_FIELD_LABEL[issue.field]
+      if (!key || seen.has(issue.field)) continue
+      seen.add(issue.field)
+      labels.push(t(key))
+    }
+    return labels
+  }, [issues, t])
 
   const inboxPatch = (p: Partial<InboxAccountState>) => {
     setInbox((i) => ({ ...i, ...p }))
     setInboxTestResult(null)
   }
+
+  /**
+   * The receive test's own version of `blockedFields` above.
+   *
+   * Its button is disabled on a plain condition rather than `validateAccount`
+   * — receiving has no validator of its own — so the two required fields are
+   * named directly instead of read back out of an issue list.
+   */
+  const inboxBlockedFields = useMemo(() => {
+    const labels: string[] = []
+    if (!inbox.imapHost) labels.push(t('inbox.imapHost'))
+    if (!inbox.imapUsername) labels.push(t('account.username'))
+    return labels
+  }, [inbox.imapHost, inbox.imapUsername, t])
+  const inboxBlocked = inboxBlockedFields.length > 0
 
   /**
    * Everything we can work out about the receive side from what is already on
@@ -423,6 +637,20 @@ export function AccountDialog({
       host: p.host || account.host,
       port: p.port,
       security: p.security,
+      /*
+       * Some providers no longer have a password path to leave the user on.
+       *
+       * Picking "Outlook / Hotmail" and being shown a password box is the exact
+       * shape of the bug this feature exists to close: the account saves, the
+       * form looks complete, and every send fails at sign-in because Microsoft
+       * stopped accepting passwords for personal mailboxes on 30 April 2026.
+       * Selecting the only mechanism that works is not overriding a decision —
+       * nobody has made one yet, and the dropdown below is right there for
+       * anyone who disagrees.
+       */
+      ...(requiresOAuth(id) && account.authMethod !== 'none'
+        ? { authMethod: 'oauth2' as const }
+        : {}),
     })
     // Picking from the dropdown is a deliberate choice about the servers, so
     // it overwrites and it counts as hand-editing them — a later address
@@ -483,7 +711,15 @@ export function AccountDialog({
       const next: MailAccount = { ...a, fromAddress: address }
       // A guessed host is not a provider, so the dropdown goes back to "—"
       // rather than claiming a preset that does not exist.
-      if (may('providerId')) next.providerId = cfg.guessed ? undefined : p.id
+      if (may('providerId')) {
+        next.providerId = cfg.guessed ? undefined : p.id
+        // Same reasoning as `applyProvider`'s: typing an @outlook.com address
+        // has to land on the mechanism that still works, not on a password box
+        // whose contents can never be accepted.
+        if (requiresOAuth(next.providerId) && next.authMethod !== 'none') {
+          next.authMethod = 'oauth2'
+        }
+      }
       if (may('label')) next.label = cfg.guessed ? cfg.domain : p.name
       if (may('host')) next.host = p.host
       if (may('port')) next.port = p.port
@@ -710,9 +946,16 @@ export function AccountDialog({
               </Button>
             </>
           ) : (
-            <Button variant="ghost" onClick={runTest} disabled={blocked}>
-              {t('account.testConnection')}
-            </Button>
+            <div className="test-action">
+              <Button variant="ghost" onClick={runTest} disabled={blocked}>
+                {t('account.testConnection')}
+              </Button>
+              {blocked ? (
+                <div className="field__hint field__hint--keep">
+                  {t('account.testBlockedReason', { fields: fieldListFormat.format(blockedFields) })}
+                </div>
+              ) : null}
+            </div>
           )}
           <div className="modal__footer-spacer" />
           <Button variant="ghost" onClick={onClose}>
@@ -934,6 +1177,30 @@ export function AccountDialog({
         </Field>
       </div>
 
+      {/*
+        The mechanism picker, shown only where there is a genuine choice.
+
+        Absent for the fifteen providers that still issue a working app
+        password, because a dropdown with one real option is a question the user
+        has to answer for no reason. Absent too for an `authMethod: 'none'`
+        account — an open relay on a LAN, the one case where neither mechanism
+        applies — rather than silently rewriting it to something it is not.
+      */}
+      {oauthAvailable && account.authMethod !== 'none' ? (
+        <div className="field__row">
+          <Field label={t('account.authMethod')}>
+            <select
+              className="select"
+              value={account.authMethod}
+              onChange={(e) => setAuthMethod(e.target.value as AuthMethod)}
+            >
+              <option value="password">{t('account.authPassword')}</option>
+              <option value="oauth2">{t('account.authOauth2')}</option>
+            </select>
+          </Field>
+        </div>
+      ) : null}
+
       <div className="field__row">
         <Field label={t('account.username')}>
           <input
@@ -947,23 +1214,42 @@ export function AccountDialog({
             }}
           />
         </Field>
-        <Field
-          label={t('account.password')}
-          hint={account.hasSecret && !secret ? t('account.passwordSet') : undefined}
-        >
-          <input
-            className="input"
-            type="password"
-            autoComplete="new-password"
-            placeholder={account.hasSecret ? '••••••••••' : ''}
-            value={secret}
-            onChange={(e) => {
-              setSecret(e.target.value)
-              setTestResult(null)
-            }}
-          />
-        </Field>
+        {/*
+          The password box goes away entirely under OAuth2 rather than being
+          disabled. A greyed-out field still reads as "something you were
+          supposed to fill in", and there is no password for this account to
+          have — the credential is the grant below.
+        */}
+        {isOauth ? null : (
+          <Field
+            label={t('account.password')}
+            hint={account.hasSecret && !secret ? t('account.passwordSet') : undefined}
+          >
+            <input
+              className="input"
+              type="password"
+              autoComplete="new-password"
+              placeholder={account.hasSecret ? '••••••••••' : ''}
+              value={secret}
+              onChange={(e) => {
+                setSecret(e.target.value)
+                setTestResult(null)
+              }}
+            />
+          </Field>
+        )}
       </div>
+
+      {isOauth ? (
+        <OAuthPanel
+          status={oauthStatus}
+          busy={oauthBusy}
+          error={oauthError}
+          fallbackAddress={account.username || account.fromAddress}
+          onConnect={runConsent}
+          onDisconnect={disconnectOauth}
+        />
+      ) : null}
 
       <Banner tone="success">
         <IconShield size={13} style={{ verticalAlign: -2, marginInlineEnd: 4 }} />
@@ -1075,21 +1361,33 @@ export function AccountDialog({
                 }}
               />
             </Field>
-            <Field
-              label={t('account.password')}
-              hint={t('inbox.passwordHint')}
-            >
-              <input
-                className="input"
-                type="password"
-                autoComplete="new-password"
-                placeholder={
-                  inboxConfig && !inboxSecret ? t('account.passwordSet') : ''
-                }
-                value={inboxSecret}
-                onChange={(e) => setInboxSecret(e.target.value)}
-              />
-            </Field>
+            {/*
+              One grant covers both protocols, so receiving has no second
+              credential to ask for under OAuth2.
+
+              Both Microsoft and Google issue IMAP and SMTP access from the same
+              consent — `core/oauth.ts` names both scopes in one request for
+              exactly this reason — so a second password box here would be
+              asking for something that does not exist, which is how the
+              receiving side ends up looking broken on an account that works.
+            */}
+            {isOauth ? null : (
+              <Field
+                label={t('account.password')}
+                hint={t('inbox.passwordHint')}
+              >
+                <input
+                  className="input"
+                  type="password"
+                  autoComplete="new-password"
+                  placeholder={
+                    inboxConfig && !inboxSecret ? t('account.passwordSet') : ''
+                  }
+                  value={inboxSecret}
+                  onChange={(e) => setInboxSecret(e.target.value)}
+                />
+              </Field>
+            )}
           </div>
 
           <Switch
@@ -1114,13 +1412,18 @@ export function AccountDialog({
                 </Button>
               </>
             ) : (
-              <Button
-                variant="secondary"
-                onClick={runInboxTest}
-                disabled={!inbox.imapHost || !inbox.imapUsername}
-              >
-                {t('inbox.testConnection')}
-              </Button>
+              <div className="test-action">
+                <Button variant="secondary" onClick={runInboxTest} disabled={inboxBlocked}>
+                  {t('inbox.testConnection')}
+                </Button>
+                {inboxBlocked ? (
+                  <div className="field__hint field__hint--keep">
+                    {t('inbox.testBlockedReason', {
+                      fields: fieldListFormat.format(inboxBlockedFields),
+                    })}
+                  </div>
+                ) : null}
+              </div>
             )}
           </div>
 
@@ -1153,6 +1456,93 @@ export function AccountDialog({
         </div>
       ) : null}
     </Modal>
+  )
+}
+
+/**
+ * The connection state of an OAuth2 account, and the one button that changes it.
+ *
+ * Written as a panel rather than a bare button because "connected" is not a
+ * boolean the user can be left to infer. Four of the five states have different
+ * fixes and only one of them is the user's own doing:
+ *
+ *   - `unconfigured` is a missing client id in this *build*. Nothing the person
+ *     reading it can do, so it says so plainly instead of offering a button
+ *     that would open a provider error page.
+ *   - `needsConsent` is the state this whole feature exists to make visible. A
+ *     revoked refresh token is a stored secret that no longer works, and every
+ *     other check in the app — `hasSecret`, the account list, the health panel —
+ *     reports it as fine. Without a line of text here, the first symptom is a
+ *     scheduled send failing at three in the morning.
+ *   - `disconnected` is the ordinary "you have not signed in yet".
+ *   - `connected` names the mailbox, because a grant against the wrong one of
+ *     somebody's three Google accounts is otherwise invisible until mail goes
+ *     out from an address they did not expect.
+ *
+ * `status === null` is the fifth case and is deliberately not one of the four:
+ * it means the answer has not come back yet, and showing "not connected" while
+ * it is in flight would send someone to redo a consent they already completed.
+ */
+function OAuthPanel({
+  status,
+  busy,
+  error,
+  fallbackAddress,
+  onConnect,
+  onDisconnect,
+}: {
+  status: OAuthAccountStatus | null
+  busy: boolean
+  error: string | null
+  /** Shown as the connected mailbox when the provider did not name one. */
+  fallbackAddress: string
+  onConnect: () => void
+  onDisconnect: () => void
+}) {
+  const { t } = useI18n()
+  const state = status?.state
+  const connected = state === 'connected'
+  // No button for a build with no client id, and none while the answer is
+  // still on its way — both would be a control that cannot do anything.
+  const canConnect = state === 'disconnected' || state === 'needsConsent'
+
+  const tone = connected ? 'success' : state === 'needsConsent' ? 'danger' : 'info'
+
+  return (
+    <Banner
+      tone={tone}
+      keep
+      action={
+        busy ? (
+          <Button variant="ghost" loading disabled>
+            {t('account.oauthConnecting')}
+          </Button>
+        ) : connected ? (
+          <Button variant="ghost" onClick={onDisconnect}>
+            {t('account.oauthDisconnect')}
+          </Button>
+        ) : canConnect ? (
+          <Button variant="primary" onClick={onConnect}>
+            {t(state === 'needsConsent' ? 'account.oauthReconnect' : 'account.oauthConnect')}
+          </Button>
+        ) : undefined
+      }
+    >
+      <div>
+        {connected
+          ? t('account.oauthConnected', { address: status?.address || fallbackAddress })
+          : state
+            ? t(OAUTH_STATE_LABEL[state])
+            : t('account.oauthChecking')}
+      </div>
+      {/* The consent page is opened in the real browser, never in a window of
+          this app's — saying so is the only way a user can tell this apart from
+          the phishing pattern it superficially resembles. */}
+      {canConnect ? <div className="banner__note">{t('account.oauthHint')}</div> : null}
+      {error ? (
+        <div className="banner__note mono">{t('account.oauthFailed', { error })}</div>
+      ) : null}
+    </Banner>
   )
 }
 

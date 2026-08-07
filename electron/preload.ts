@@ -42,6 +42,12 @@ const api: DesktopApi = {
   hasSecret: (accountId, kind) => ipcRenderer.invoke(IPC.hasSecret, accountId, kind),
   deleteSecret: (accountId, kind) => ipcRenderer.invoke(IPC.deleteSecret, accountId, kind),
 
+  oauthConsent: (accountId, providerId, loginHint) =>
+    ipcRenderer.invoke(IPC.oauthConsent, accountId, providerId, loginHint),
+  oauthStatus: (accountId, providerId) =>
+    ipcRenderer.invoke(IPC.oauthStatus, accountId, providerId),
+  oauthDisconnect: (accountId) => ipcRenderer.invoke(IPC.oauthDisconnect, accountId),
+
   sendNow: (draft, account) => ipcRenderer.invoke(IPC.sendNow, draft, account),
   testConnection: (account, secret) => ipcRenderer.invoke(IPC.testConnection, account, secret),
   prewarm: (account) => ipcRenderer.invoke(IPC.prewarm, account),

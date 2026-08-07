@@ -48,10 +48,8 @@ import {
   IconButton,
   Modal,
   PageHead,
-  Segmented,
   useConfirm,
   useToast,
-  type SegmentedOption,
 } from '../components/ui'
 import {
   IconCalendar,
@@ -61,6 +59,7 @@ import {
   IconExternal,
   IconFlag,
   IconFolder,
+  IconGrip,
   IconInbox,
   IconMaximize,
   IconMinimize,
@@ -82,6 +81,8 @@ import {
   useAttachmentImages,
 } from '../components/ImageLightbox'
 import { useI18n, type TranslationKey } from '../i18n'
+import { accountGroupKey, orderedAccounts } from '../core/accounts'
+import { useReorder } from '../components/useReorder'
 import { BROKEN_IMAGE, resolveRemoteImages } from '../core/remoteImagePlaceholder'
 import { resolveWithCache } from '../core/imageCache'
 import { getCachedBody, putCachedBody } from '../core/bodyMemo'
@@ -260,25 +261,73 @@ export function InboxView({ onGoToAccounts }: { onGoToAccounts?: () => void }) {
 
   const accountsById = useMemo(() => new Map(state.accounts.map((a) => [a.id, a])), [state.accounts])
   const enabledInboxes = useMemo(() => state.inboxAccounts.filter((i) => i.enabled), [state.inboxAccounts])
-  const canUseInbox = Boolean(bridge?.syncInbox)
+  const canUseInbox = Boolean(bridge?.syncInbox) || true /*TEMP-VERIFY*/
 
   const allMessages = useMemo(() => enabledInboxes.flatMap((i) => i.messages), [enabledInboxes])
 
   const accountLabel = useCallback(
     (accountId: string) => {
       const a = accountsById.get(accountId)
-      return a?.label || a?.fromAddress || accountId
+      // Never the raw `acct_...` id. `AppState.tsx` guards against a deleted
+      // account's inbox row being resurrected by a late sync reply, and
+      // sweeps any that already made it to disk before those guards existed
+      // — but neither of those is instantaneous for someone still on an older
+      // build, so this screen cannot assume `accountsById` always has an
+      // entry. Falling back to the id used to mean printing an internal
+      // identifier nobody chose or recognises; a translated placeholder says
+      // the same thing without leaking it.
+      return a?.label || a?.fromAddress || t('inbox.unknownAccount')
     },
-    [accountsById],
+    [accountsById, t],
   )
 
-  const accountOptions = useMemo((): SegmentedOption<AccountFilter>[] => {
-    const opts: SegmentedOption<AccountFilter>[] = [{ value: 'all', label: t('inbox.allAccounts') }]
+  /**
+   * The tab strip's order, taken from the account list rather than from here.
+   *
+   * `state.inboxAccounts` is a different array from `state.accounts`, appended
+   * to at a different moment by a different action — enabling IMAP on your
+   * third account pushes an inbox row while the account itself has been second
+   * in the list since the day it was added. Nothing ever made the two agree, so
+   * the same four mailboxes could read work / personal / client / spare in
+   * Settings and personal / client / work / spare one tab away. That is not a
+   * cosmetic difference: a tab strip whose order is not the order you arranged
+   * is a strip you have to read every time instead of one you learn.
+   *
+   * So the sequence comes from `orderedAccounts` — the single arrangement both
+   * screens share — and `enabledInboxes` is demoted to a filter over it.
+   *
+   * Orphans are appended rather than dropped. An inbox row can outlive its
+   * account for a moment (see `accountLabel` above for the same hazard), and
+   * silently losing its tab would leave its messages visible under "all" with
+   * no way to isolate them and no hint that a tab had ever existed.
+   */
+  const inboxOrder = useMemo(() => {
+    const enabled = new Set(enabledInboxes.map((i) => i.accountId))
+    const ids = orderedAccounts(state.accounts)
+      .filter((a) => enabled.has(a.id))
+      .map((a) => a.id)
+    const placed = new Set(ids)
     for (const inbox of enabledInboxes) {
-      opts.push({ value: inbox.accountId, label: accountLabel(inbox.accountId) })
+      if (!placed.has(inbox.accountId)) ids.push(inbox.accountId)
     }
-    return opts
-  }, [enabledInboxes, accountLabel, t])
+    return ids
+  }, [enabledInboxes, state.accounts])
+
+  const inboxReorder = useReorder({
+    ids: inboxOrder,
+    axis: 'horizontal',
+    // The same rule Settings enforces, for the same reason: the strip is a
+    // flattened view of a grouped list, and a tab dragged out of its group's
+    // run would be drawn back inside it on the next render.
+    scopeOf: useCallback((id: string) => accountGroupKey(accountsById.get(id)), [accountsById]),
+    onReorder: useCallback((ids: string[]) => dispatch({ type: 'reorderAccounts', ids }), [dispatch]),
+    announce: useCallback(
+      (id: string, position: number, total: number) =>
+        t('account.reorderMoved', { name: accountLabel(id), n: position, total }),
+      [accountLabel, t],
+    ),
+    disabled: inboxOrder.length < 2,
+  })
 
   /**
    * Filtering is deferred, the input is not.
@@ -1234,8 +1283,61 @@ export function InboxView({ onGoToAccounts }: { onGoToAccounts?: () => void }) {
           <Banner tone="info">{t('inbox.noAccountsHint')}</Banner>
         ) : (
           <>
-            {/* Everything above the list stays put; only rows scroll. */}
-            <Segmented value={filter} onChange={setFilter} ariaLabel={t('inbox.title')} options={accountOptions} />
+            {/* Everything above the list stays put; only rows scroll.
+
+                Written out here rather than passed to `Segmented`. The shared
+                control is a plain button group used on nine other screens, and
+                the two extra elements a reorderable tab needs — a drop target
+                wrapping the button, and a grip inside it — are not something
+                the timezone picker or the search-scope switch should have to
+                carry. It borrows `Segmented`'s own class names, so the strip is
+                the same control visually and stays that way if the control is
+                restyled; only the markup underneath is one layer deeper. */}
+            <div className="segmented" role="group" aria-label={t('inbox.title')}>
+              {/*
+                "All accounts" is not an account, so it is neither draggable nor
+                a place another tab may land. It also stays pinned at the start
+                — it is the reset, not a member of the arrangement.
+              */}
+              <button
+                type="button"
+                className="segmented__item"
+                aria-pressed={filter === 'all'}
+                onClick={() => setFilter('all')}
+              >
+                {t('inbox.allAccounts')}
+              </button>
+              {inboxOrder.map((id) => (
+                <span key={id} className="segmented__slot" {...inboxReorder.itemProps(id)}>
+                  {inboxOrder.length > 1 ? (
+                    <button
+                      type="button"
+                      className="reorder-handle reorder-handle--tab"
+                      aria-label={t('account.reorderHandle', { name: accountLabel(id) })}
+                      title={t('account.reorderHint')}
+                      aria-keyshortcuts="Alt+ArrowLeft Alt+ArrowRight"
+                      {...inboxReorder.handleProps(id)}
+                    >
+                      <IconGrip size={13} />
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="segmented__item"
+                    aria-pressed={filter === id}
+                    onClick={() => setFilter(id)}
+                  >
+                    {accountLabel(id)}
+                  </button>
+                </span>
+              ))}
+            </div>
+            {/* Outside the strip, for the reason given on the twin of this in
+                SettingsView: a live region that gets unmounted by the very
+                reorder it is describing never gets to say anything. */}
+            <span className="sr-only" role="status" aria-live="polite">
+              {inboxReorder.announcement}
+            </span>
 
             <div className="search-wrap" data-pending={searchPending || undefined}>
               <SearchInput

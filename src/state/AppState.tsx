@@ -457,6 +457,7 @@ type Action =
   | { type: 'setDraft'; patch: Partial<MessageDraft> }
   | { type: 'resetDraft'; accountId?: string }
   | { type: 'upsertAccount'; account: MailAccount }
+  | { type: 'reorderAccounts'; ids: string[] }
   | { type: 'removeAccount'; id: string }
   | { type: 'upsertJob'; job: ScheduledJob }
   | { type: 'jobRan'; jobId: string; run: JobRun }
@@ -633,6 +634,64 @@ export function reducer(state: AppState, action: Action): AppState {
       return { ...state, accounts, draft }
     }
 
+    /**
+     * The user dragged an account somewhere, and this is where it sticks.
+     *
+     * The action carries the *whole* intended sequence of ids rather than
+     * "move X above Y". A move instruction has to be replayed against whatever
+     * the array happens to look like when it lands, and the two screens that
+     * send these do not read the array — they read the grouped, sorted view of
+     * it. Sending the finished sequence means the reducer never has to
+     * reconstruct which of several possible starting states the drag was aimed
+     * at; there is exactly one answer and the caller already computed it.
+     *
+     * Two pieces of paranoia, both cheap:
+     *
+     *   - ids that name nothing, and ids named twice, are dropped. The list is
+     *     assembled from a rendered view, and a render that raced a deletion
+     *     would otherwise resurrect an account here by putting its id back into
+     *     `accounts` — with `byId.get` returning `undefined` and the array
+     *     growing a hole that every later `a.id` read would throw on.
+     *   - accounts the caller did not mention are appended, keeping their
+     *     relative order. The inbox strip only lists mailboxes with syncing
+     *     switched on, so it *cannot* name every account; without this, one
+     *     drag in the inbox would delete every account that has no inbox.
+     *
+     * Then every account is renumbered densely from zero — not just the ones
+     * that moved. Reusing the old numbers and only patching the moved row is
+     * how ties accumulate: two accounts on `order: 3` sort by array position,
+     * which is the thing the user just overrode. A dense renumber has no ties
+     * to accumulate, and it is also what converts a store that predates the
+     * field: after the first drag every account carries an `order`, so the
+     * "absent sorts last" branch in `core/accounts` stops being reachable.
+     *
+     * Returning `state` untouched when nothing actually moved matters more
+     * here than it looks. A new `accounts` array identity is what the save
+     * effect watches, and `dragover` fires on every pixel of pointer travel —
+     * a commit that changed nothing would still rewrite the whole document to
+     * disk, and on Android that is a real write to real storage.
+     */
+    case 'reorderAccounts': {
+      const byId = new Map(state.accounts.map((a) => [a.id, a]))
+      const taken = new Set<string>()
+      const sequence: MailAccount[] = []
+      for (const id of action.ids) {
+        const account = byId.get(id)
+        if (!account || taken.has(id)) continue
+        taken.add(id)
+        sequence.push(account)
+      }
+      for (const account of state.accounts) {
+        if (!taken.has(account.id)) sequence.push(account)
+      }
+
+      const accounts = sequence.map((account, index) =>
+        account.order === index ? account : { ...account, order: index },
+      )
+      const settled = accounts.every((account, index) => state.accounts[index] === account)
+      return settled ? state : { ...state, accounts }
+    }
+
     case 'removeAccount': {
       const accounts = state.accounts.filter((a) => a.id !== action.id)
       // Any job pointing at the deleted account is disabled rather than
@@ -752,6 +811,12 @@ export function reducer(state: AppState, action: Action): AppState {
     }
 
     case 'upsertInboxAccount': {
+      // Belt and braces: `syncInboxAccount` already refuses to dispatch this
+      // for a deleted account, but that guard lives at the call site, and a
+      // call site is exactly what a future caller forgets to copy. An id
+      // `state.accounts` no longer holds has nothing left to belong to, so
+      // the reducer refuses the write itself rather than trust every caller.
+      if (!state.accounts.some((a) => a.id === action.inbox.accountId)) return state
       const exists = state.inboxAccounts.some((i) => i.accountId === action.inbox.accountId)
       // The tombstone list belongs to the app, not to the sync result: a sync
       // reports what the server holds and knows nothing about what the user
@@ -1079,6 +1144,12 @@ export interface AppApi {
    * without this the UI has no way to tell "still loading" from "gave up".
    */
   bootError: string | null
+
+  /**
+   * Ids of jobs boot had to disable because their stored record could not be
+   * rebuilt. Empty on every healthy start. See the hydrate guard in `boot`.
+   */
+  repairedJobs: string[]
   /**
    * True when handing the schedule to the platform scheduler last failed.
    *
@@ -1242,6 +1313,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [saveFailing, setSaveFailing] = useState(false)
   const [permissions, setPermissions] = useState<PermissionSnapshot | null>(null)
   const [bootError, setBootError] = useState<string | null>(null)
+  /**
+   * Jobs that boot could not rebuild and therefore disabled.
+   *
+   * Separate from `bootError` on purpose: that one replaces the entire window
+   * with a failure screen, which is right for "the document is unreadable" and
+   * badly wrong for "one of your forty reminders is damaged". This is the
+   * quieter channel — the app opens normally and `health.ts` reports what it
+   * had to switch off, so the failure is visible without being fatal.
+   */
+  const [repairedJobs, setRepairedJobs] = useState<string[]>([])
   const hydrated = useRef(false)
 
   /**
@@ -1315,7 +1396,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
       if (cancelled) return
 
-      if (stored) {
+      // The rest of boot is guarded as one unit. The comment above is only
+      // half-true without this: `getBridge` and `loadState` were wrapped, but
+      // the migration *below* them was not, and that is where the throws
+      // actually come from — it is the only part of boot that reads the shape
+      // of individual stored records rather than the document as a whole.
+      //
+      // Reproduced: one job whose `recurrence` is missing (a record merged in
+      // from a paired device on a different build, or restored from an older
+      // backup) threw inside `migrateSkipWeekends`, `setReady(true)` never
+      // ran, and every screen in the app stayed on its loading skeleton
+      // forever — navigation still worked, nothing reported an error, and the
+      // user's accounts, jobs and mail all appeared to be gone. Silently
+      // showing someone an empty app that still has all their data on disk is
+      // the worst outcome available here, and it was reachable from a single
+      // malformed field.
+      try {
+        if (stored) {
         const merged: AppState = {
           ...initialState(),
           ...stored,
@@ -1348,41 +1445,115 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // a new session re-establishes it; every edit after that is cheap
         // again. See `reshapeJob`.
         const calendar = merged.settings.workCalendar ?? DEFAULT_WORK_CALENDAR
-        merged.jobs = merged.jobs.map((job) => {
-          const recurrence = migrateSkipWeekends(job.recurrence)
-          if (!job.enabled) {
-            if (recurrence === job.recurrence && job.rawOccurrences === undefined) return job
-            return { ...job, recurrence, rawOccurrences: undefined, rawOccurrencesRunCount: undefined }
-          }
-          const { upcoming } = rearm(recurrence, job.occurrences ?? [], {
-            runsSoFar: job.runCount,
-            calendar,
-          })
-          const shaped = shapeOccurrences(
-            upcoming,
-            { recurrence },
-            merged.settings,
-            Date.now(),
-            windowsForDraft(job.draft.to, merged.contacts),
-          )
-          return {
-            ...job,
-            recurrence,
-            occurrences: shaped.occurrences,
-            calendarWarning: shaped.warning,
-            rawOccurrences: undefined,
-            rawOccurrencesRunCount: undefined,
+
+        // Rebuilt one record at a time, because the blast radius of a bad one
+        // has to *be* one record. A single `.map` that throws loses all of
+        // them plus every other screen in the app; the same throw contained
+        // here costs the user one job that stops re-arming and says so.
+        //
+        // A job that cannot be rebuilt is disabled rather than dropped. It is
+        // the only honest option: the record is damaged, so it cannot be
+        // trusted to fire at the right time, but deleting someone's reminder
+        // because this build could not parse it would destroy the very thing
+        // they are here to keep. Disabled, it survives to be looked at, and
+        // `health.ts` has something to report.
+        const damaged: string[] = []
+        merged.jobs = (Array.isArray(merged.jobs) ? merged.jobs : []).map((job) => {
+          try {
+            const recurrence = migrateSkipWeekends(job.recurrence)
+            if (!job.enabled) {
+              if (recurrence === job.recurrence && job.rawOccurrences === undefined) return job
+              return { ...job, recurrence, rawOccurrences: undefined, rawOccurrencesRunCount: undefined }
+            }
+            const { upcoming } = rearm(recurrence, job.occurrences ?? [], {
+              runsSoFar: job.runCount,
+              calendar,
+            })
+            const shaped = shapeOccurrences(
+              upcoming,
+              { recurrence },
+              merged.settings,
+              Date.now(),
+              windowsForDraft(job.draft.to, merged.contacts),
+            )
+            return {
+              ...job,
+              recurrence,
+              occurrences: shaped.occurrences,
+              calendarWarning: shaped.warning,
+              rawOccurrences: undefined,
+              rawOccurrencesRunCount: undefined,
+            }
+          } catch (err) {
+            damaged.push(job?.id ?? '(no id)')
+            console.error('[boot] job could not be rebuilt, disabling it:', job?.id, err)
+            // Quarantined, but *structurally complete*. Handing the rest of the
+            // app a job whose `recurrence` is still missing only moves the
+            // throw downstream: the schedule list reads `.timeOfDay` off it,
+            // the working-calendar screen reads `.workdayPolicy`, and each one
+            // fails in turn. One valid placeholder here is what keeps a single
+            // damaged record from being three broken screens.
+            //
+            // Disabled and with no occurrences, so the placeholder can never
+            // cause a send — it exists to be displayed and edited, not to run.
+            return {
+              ...job,
+              enabled: false,
+              occurrences: [],
+              recurrence: {
+                ...defaultRecurrence(),
+                ...(job?.recurrence ?? {}),
+              },
+            }
           }
         })
+        if (damaged.length) setRepairedJobs(damaged)
 
         // Anything left mid-flight by a crash or a quit is waiting again, not
         // sending. Without this an item stuck in `sending` is never retried and
         // never reported — the queue's own silent failure.
-        merged.outbox = merged.outbox.map((i) =>
+        merged.outbox = (Array.isArray(merged.outbox) ? merged.outbox : []).map((i) =>
           i.status === 'sending' ? { ...i, status: 'waiting' as const } : i,
         )
 
+        // A phantom inbox account, swept before anything downstream can see it.
+        //
+        // `syncInboxAccount` captures its config in a closure and then awaits an
+        // IMAP round trip that can run up to 20 seconds; `deleteAccount` does not
+        // wait for that to finish, because nothing should have to. Before the
+        // dispatch-site and reducer guards next to `upsertInboxAccount` existed, a
+        // reply landing after the account was gone resurrected an `inboxAccounts`
+        // row for an id `state.accounts` no longer held, and the debounced
+        // whole-state save wrote it to disk. Those guards stop a *new* one from
+        // being created; they do nothing for someone who already has one sitting
+        // in a file from before this build. This is the one path all state
+        // travels on the way in, so it is where that existing row gets cleaned —
+        // once, here, rather than everyone who ever reads `inboxAccounts` having
+        // to remember to check `accounts` first. `InboxView`'s account label and
+        // filter tabs would otherwise be the only place the phantom ever surfaced,
+        // as the raw `acct_...` id nobody recognises.
+        const accountIds = new Set(
+          (Array.isArray(merged.accounts) ? merged.accounts : []).map((a) => a.id),
+        )
+        merged.inboxAccounts = (Array.isArray(merged.inboxAccounts) ? merged.inboxAccounts : []).filter(
+          (i) => accountIds.has(i.accountId),
+        )
+
         dispatch({ type: 'hydrate', state: merged })
+        }
+      } catch (err) {
+        // Last resort. Everything above is already guarded per record, so
+        // reaching here means the document itself is unusable rather than one
+        // row in it — and an explicit failure the user can read and report
+        // beats the indefinite skeleton this replaced.
+        if (!cancelled) {
+          setBootError(
+            `Your saved data could not be prepared (${
+              err instanceof Error ? err.message : String(err)
+            }).`,
+          )
+        }
+        return
       }
 
       hydrated.current = true
@@ -1802,6 +1973,46 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // A deleted account's IMAP credential and cached mail are dead weight —
       // there is no UI left that could ever ask for them again.
       const failed = await forgetSecrets(bridge, [[id], [id, 'imap']])
+
+      /*
+       * The OAuth2 grant, which `forgetSecrets` cannot reach and used to be
+       * left behind.
+       *
+       * It is stored under its own keystore kinds — `oauth` for the refresh
+       * token and `oauth-grant` for the record beside it — and those are not in
+       * `SecretKind`, so there is no `deleteSecret` call that would remove
+       * them. Deleting an account therefore took away the row, the password and
+       * the IMAP credential, and quietly left a *long-lived refresh token* in
+       * the OS keystore: a credential strictly more valuable than the password
+       * next to it, because it mints new access tokens without anyone being
+       * asked anything. Nothing errored, nothing was logged, and the user had
+       * every reason to believe the account was gone.
+       *
+       * `oauthDisconnect` is the cleanup both platforms already implement —
+       * Electron's `forgetOAuthAccount` even documents itself as "called when
+       * it is deleted", which until now it was not. Called for every account
+       * rather than only those currently marked `oauth2`: an account switched
+       * back to a password keeps its grant until something clears it, and that
+       * orphan is the one nobody would think to look for. The call is a no-op
+       * when there is nothing stored.
+       *
+       * Failure is swallowed on purpose. The keystore write is best-effort
+       * cleanup of something already unreachable, and a deletion that refuses
+       * to complete because of it would leave the user with an account they
+       * cannot remove — a worse outcome than a stale token, and one they could
+       * do nothing about.
+       */
+      try {
+        await bridge?.oauthDisconnect?.(id)
+      } catch (e) {
+        addLog({
+          kind: 'security',
+          level: 'warn',
+          title: 'Account removed, but its sign-in grant could not be deleted',
+          detail: e instanceof Error ? e.message : String(e),
+        })
+      }
+
       dispatch({ type: 'removeAccount', id })
       // The row disappears either way, so a swallowed failure here reads as
       // "the password is gone" while it is still sitting in the OS credential
@@ -2303,6 +2514,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
         defaultInboxAccountState(accountId)
       try {
         const result = await bridge.syncInbox(config)
+        /*
+         * `deleteAccount` can land while this `await` is still out — a full
+         * IMAP connect, login and header fetch, up to 20 seconds — and it does
+         * not wait, because nothing should have to hold up deleting an account
+         * for a sync that may never come back at all. Dispatching anyway would
+         * resurrect an `inboxAccounts` row for an id `removeAccount` already
+         * pruned from `state.accounts`, and the debounced whole-state save
+         * would persist it: a phantom account with no matching row, showing
+         * its raw `acct_...` id because there is nothing left to look it up
+         * against.
+         *
+         * `liveRef` rather than `state.accounts`, on purpose. `state` is the
+         * value this closure captured when the sync *started*; only the state
+         * at the moment the reply *lands* can say whether the account is still
+         * there, and reading the closed-over value is precisely the staleness
+         * this guard exists to stop.
+         */
+        if (!liveRef.current.accounts.some((a) => a.id === accountId)) {
+          return { ok: !result.lastSyncError, error: result.lastSyncError, inbox: result }
+        }
         dispatch({ type: 'upsertInboxAccount', inbox: result, origin: 'sync' })
         /*
          * Handed back as well as dispatched. A caller that pressed a button and
@@ -2315,11 +2546,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
         return { ok: !result.lastSyncError, error: result.lastSyncError, inbox: result }
       } catch (e) {
         const error = e instanceof Error ? e.message : String(e)
-        dispatch({
-          type: 'upsertInboxAccount',
-          inbox: { ...config, lastSyncError: error },
-          origin: 'sync',
-        })
+        // Same race, the failure path. An account deleted mid-flight has
+        // nothing left to attach `lastSyncError` to — see the success branch
+        // above.
+        if (liveRef.current.accounts.some((a) => a.id === accountId)) {
+          dispatch({
+            type: 'upsertInboxAccount',
+            inbox: { ...config, lastSyncError: error },
+            origin: 'sync',
+          })
+        }
         return { ok: false, error }
       }
     },
@@ -2875,6 +3111,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       i18n,
       dispatch,
       bootError,
+      repairedJobs,
       schedulerUnreachable,
       saveFailing,
       permissions,
@@ -2917,6 +3154,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       bridge,
       i18n,
       bootError,
+      repairedJobs,
       schedulerUnreachable,
       saveFailing,
       permissions,

@@ -2,6 +2,7 @@ package dev.aevistle.app;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.util.Log;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -17,6 +18,7 @@ import org.json.JSONObject;
  */
 final class JobStore {
 
+    private static final String TAG = "JobStore";
     private static final String PREFS = "aevistle_jobs";
     private static final String KEY_JOBS = "jobs";
     private static final String KEY_ACCOUNTS = "accounts";
@@ -127,12 +129,45 @@ final class JobStore {
                 if (error != null) run.put("lastError", error);
                 run.put("status", status);
                 run.put("occurrences", remaining);
-            } catch (Exception ignored) {
+            } catch (Exception e) {
+                // The send already happened by the time this runs — `ok` is
+                // the real outcome, independent of anything below. If the
+                // bookkeeping above throws partway through, `run` would stay
+                // null and `queueRun` below would be skipped entirely: a send
+                // that genuinely occurred would never reach the web layer,
+                // and the Schedule screen would show the job as armed
+                // forever. Log it for logcat and fall back to a minimal
+                // report so `drainRuns` still has something to deliver.
+                Log.e(TAG, "recordRun: bookkeeping failed for job " + jobId, e);
+                run = fallbackRun(jobId, ranAt, ok, error);
             }
             break;
         }
         prefs.edit().putString(KEY_JOBS, all.toString()).apply();
         if (run != null) queueRun(run);
+    }
+
+    /**
+     * A minimal run report for when the bookkeeping in {@link #recordRun}
+     * fails partway through. Status is reported as "failed" even when `ok`
+     * was true — an overstatement, deliberately: "something needs a look"
+     * beats the job silently staying "armed" for a send that already went out.
+     */
+    private static JSONObject fallbackRun(String jobId, long ranAt, boolean ok, String error) {
+        JSONObject run = new JSONObject();
+        try {
+            run.put("jobId", jobId);
+            run.put("lastRunAt", ranAt);
+            run.put("lastResult", ok ? "ok" : "failed");
+            run.put("status", "failed");
+            run.put("lastError", error != null ? error : "recordRun bookkeeping failed");
+        } catch (Exception e) {
+            // put() only throws for a null key, and every key above is a
+            // string literal — unreachable in practice, but the checked
+            // exception still has to land somewhere.
+            Log.e(TAG, "recordRun: fallback run report itself failed for job " + jobId, e);
+        }
+        return run;
     }
 
     private static String recurrenceKind(JSONObject job) {

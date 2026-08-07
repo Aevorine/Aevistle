@@ -1,6 +1,8 @@
 package dev.aevistle.app;
 
+import android.content.Context;
 import android.text.TextUtils;
+import android.util.Log;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -34,6 +36,8 @@ import javax.mail.internet.MimeMultipart;
  * disagree about what a valid message is.
  */
 final class MailSender {
+
+    private static final String TAG = "MailSender";
 
     /** Same character class the TypeScript side rejects — CR, LF, NUL and friends. */
     private static final Pattern CONTROL_CHARS =
@@ -70,7 +74,14 @@ final class MailSender {
                 if (errorKind != null) o.put("errorKind", errorKind);
                 if (diagnostics != null) o.put("diagnostics", diagnostics);
                 if (mailbox != null) o.put("mailbox", mailbox);
-            } catch (Exception ignored) {
+            } catch (Exception e) {
+                // Every key above is a string literal, so this is unreachable
+                // in practice — but if it ever does throw, the caller (the
+                // plugin method that calls `toJson()` and resolves it to the
+                // WebView) would otherwise get back an empty or half-built
+                // object with no hint that the real result was dropped. Log
+                // it so a send that appears to have vanished is diagnosable.
+                Log.e(TAG, "toJson: could not serialise the send result", e);
             }
             return o;
         }
@@ -174,8 +185,62 @@ final class MailSender {
     // Session
     // -----------------------------------------------------------------------
 
-    private static Session buildSession(JSONObject account, final String secret, Endpoint endpoint)
+    /**
+     * The credential one operation authenticates with, resolved once before the
+     * endpoint ladder rather than per rung.
+     *
+     * Two fields rather than one string, mirroring `Credential` in
+     * `electron/mailer.ts`, because the two mechanisms are not interchangeable
+     * at the point of use: a password is a stored constant, while an access
+     * token is minted on demand, expires within the hour, and must not be
+     * fetched again for every port this class is willing to try. Exactly one is
+     * ever set; {@code authMethod: 'none'} leaves both null, which is the same
+     * "no credential" the transport already handled.
+     */
+    private static final class Credential {
+        final String password;
+        /** A bearer token — never the refresh token, which never leaves the keystore. */
+        final String accessToken;
+
+        Credential(String password, String accessToken) {
+            this.password = password;
+            this.accessToken = accessToken;
+        }
+    }
+
+    /**
+     * Turn the stored secret into something to authenticate with.
+     *
+     * For a password account this is a rename and nothing else. For an OAuth2
+     * one it is where the refresh token in the keystore becomes an hour-long
+     * bearer token — which is why it happens here, before the connection,
+     * rather than inside it: an HTTPS token request in the middle of an SMTP
+     * handshake would be spending the connection's own time budget on it, and
+     * the failure would look like a slow mail server.
+     *
+     * There is no fallback from OAuth2 to the password path, deliberately. An
+     * account whose grant has gone must say so; quietly trying a stale stored
+     * password instead would produce a provider-side authentication failure
+     * that sends the user to reset a password which is not involved, and on
+     * Microsoft personal accounts would be trying a mechanism that no longer
+     * exists at all.
+     */
+    private static Credential credentialFor(Context context, JSONObject account, String secret)
             throws Exception {
+        if (!"oauth2".equals(account.optString("authMethod", "password"))) {
+            return new Credential(secret, null);
+        }
+        String token = OAuthTokens.accessToken(context, account.optString("id", ""));
+        if (token == null) {
+            throw new IllegalStateException(
+                    "This account is set to sign in with the provider, but it has not been "
+                            + "connected on this device yet. Open the account and sign in.");
+        }
+        return new Credential(null, token);
+    }
+
+    private static Session buildSession(JSONObject account, final Credential credential,
+                                        Endpoint endpoint) throws Exception {
         String host = account.optString("host", "");
         int port = endpoint.port;
         String security = endpoint.security;
@@ -212,16 +277,44 @@ final class MailSender {
             props.put("mail.smtp.ssl.checkserveridentity", "true");
         }
 
-        boolean auth = "password".equals(account.optString("authMethod", "password"))
-                && !TextUtils.isEmpty(secret);
+        final boolean oauth = !TextUtils.isEmpty(credential.accessToken);
+        boolean auth = oauth
+                || ("password".equals(account.optString("authMethod", "password"))
+                    && !TextUtils.isEmpty(credential.password));
         props.put("mail.smtp.auth", auth ? "true" : "false");
+
+        if (oauth) {
+            /*
+             * XOAUTH2, and only XOAUTH2.
+             *
+             * JavaMail speaks the mechanism itself — it sends
+             * `AUTH XOAUTH2 <base64 of "user=…\1auth=Bearer …\1\1">`, which is
+             * the wire format Google and Microsoft document — but it is off
+             * unless the mechanism list names it, so this line is what turns it
+             * on rather than a preference among several.
+             *
+             * Naming *only* XOAUTH2 is the load-bearing part. Left to its
+             * defaults JavaMail would offer LOGIN and PLAIN as well, and an
+             * expired or refused bearer token would fall back to sending the
+             * token as a password — a plaintext credential to a server that
+             * will reject it, and a request in the provider's logs that looks
+             * like a password attempt on an account that has no password. The
+             * grant is the only mechanism this account has; when it fails the
+             * user needs to hear that, not a quieter version of it.
+             */
+            props.put("mail.smtp.auth.mechanisms", "XOAUTH2");
+        }
 
         if (!auth) return Session.getInstance(props);
 
+        // JavaMail carries the bearer token in the same slot a password would
+        // occupy; the mechanism above is what decides how it is put on the
+        // wire. `credential` guarantees only one of the two is set.
+        final String pass = oauth ? credential.accessToken : credential.password;
         return Session.getInstance(props, new Authenticator() {
             @Override
             protected PasswordAuthentication getPasswordAuthentication() {
-                return new PasswordAuthentication(username, secret);
+                return new PasswordAuthentication(username, pass);
             }
         });
     }
@@ -255,11 +348,18 @@ final class MailSender {
             result.diagnostics.put("adjusted",
                     endpoint.port != account.optInt("port", 465)
                             || !endpoint.security.equals(account.optString("security", "ssl")));
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            // A partially-filled `diagnostics` is worse than none: the caller
+            // only ever checks `!= null` before offering to adopt the
+            // endpoint that answered, so a half-built object would be trusted
+            // as complete. Null it out so that check fails closed, and log
+            // the failure since it would otherwise leave no trace at all.
+            Log.e(TAG, "recordEndpoint: could not build diagnostics for " + stage, e);
+            result.diagnostics = null;
         }
     }
 
-    static Result send(JSONObject draft, JSONObject account, String secret) {
+    static Result send(Context context, JSONObject draft, JSONObject account, String secret) {
         long started = System.currentTimeMillis();
         Result result = new Result();
 
@@ -285,6 +385,11 @@ final class MailSender {
                 if (!validAddress(address)) throw new IllegalArgumentException("Invalid recipient: " + address);
             }
 
+            // Resolved once, outside the ladder. A token minted per rung would
+            // mean up to three token requests for one message, and on a vendor
+            // that rotates refresh tokens each would retire the last.
+            Credential credential = credentialFor(context, account, secret);
+
             List<Endpoint> rungs = laddderFor(account);
             Exception last = null;
             int attempts = 0;
@@ -292,7 +397,7 @@ final class MailSender {
             for (Endpoint endpoint : rungs) {
                 attempts++;
                 try {
-                    Session session = buildSession(account, secret, endpoint);
+                    Session session = buildSession(account, credential, endpoint);
 
                     if (draft.optBoolean("individualDelivery", false)) {
                         for (String address : everyone) {
@@ -316,6 +421,14 @@ final class MailSender {
                 } catch (Exception e) {
                     last = e;
                     String message = e.getMessage() == null ? e.toString() : e.getMessage();
+                    // A bearer token the server just refused is worth throwing
+                    // away rather than re-offering until its stated expiry: the
+                    // usual cause is a grant revoked mid-session, and the next
+                    // attempt should mint a fresh token and find that out from
+                    // the token endpoint, which can say why.
+                    if ("auth".equals(classify(message)) && credential.accessToken != null) {
+                        OAuthTokens.invalidate(account.optString("id", ""));
+                    }
                     // A rejected password is rejected on every port; retrying
                     // it only burns the provider's lockout budget.
                     if (!negotiable(classify(message))) break;
@@ -327,6 +440,17 @@ final class MailSender {
             }
 
             if (last != null) throw last;
+        } catch (OAuthTokens.NeedsConsentException e) {
+            // Filed as `auth` explicitly rather than left to `classify`. It is
+            // a credential failure — the UI's auth branch is the right one, and
+            // it is the branch that offers "sign in again" — but the sentence
+            // is written for a person rather than pattern-matched from a server
+            // reply, and leaving its classification to a regex over its own
+            // wording would make rephrasing it a functional change.
+            result.ok = false;
+            result.accepted.clear();
+            result.error = e.getMessage();
+            result.errorKind = "auth";
         } catch (Exception e) {
             String message = e.getMessage() == null ? e.toString() : e.getMessage();
             result.ok = false;
@@ -347,13 +471,20 @@ final class MailSender {
      * network cared to keep it there, which is what left the dialog stuck on
      * "Testing…" with nothing to press.
      */
-    static Result test(JSONObject account, String secret) {
+    static Result test(Context context, JSONObject account, String secret) {
         long started = System.currentTimeMillis();
         Result result = new Result();
 
         List<Endpoint> rungs;
+        final Credential credential;
         try {
             rungs = laddderFor(account);
+            credential = credentialFor(context, account, secret);
+        } catch (OAuthTokens.NeedsConsentException e) {
+            result.error = e.getMessage();
+            result.errorKind = "auth";
+            result.durationMs = System.currentTimeMillis() - started;
+            return result;
         } catch (Exception e) {
             result.error = String.valueOf(e.getMessage());
             result.errorKind = classify(result.error);
@@ -369,13 +500,17 @@ final class MailSender {
             attempts++;
             Transport transport = null;
             try {
-                Session session = buildSession(account, secret, endpoint);
+                Session session = buildSession(account, credential, endpoint);
                 transport = session.getTransport("smtp");
                 transport.connect(
                         account.optString("host", ""),
                         endpoint.port,
                         account.optString("username", ""),
-                        secret);
+                        // Whichever of the two the account actually has. The
+                        // session's mechanism list decides how it is presented,
+                        // so a bearer token handed in here becomes XOAUTH2 and
+                        // a password becomes LOGIN or PLAIN, exactly as before.
+                        credential.accessToken != null ? credential.accessToken : credential.password);
                 result.ok = true;
                 recordEndpoint(result, account, endpoint, attempts, "done");
                 result.durationMs = System.currentTimeMillis() - started;
@@ -383,12 +518,20 @@ final class MailSender {
             } catch (Exception e) {
                 lastError = e.getMessage() == null ? e.toString() : e.getMessage();
                 lastEndpoint = endpoint;
+                // Same reasoning as the send ladder's: a refused bearer token
+                // must not be re-offered on the next attempt.
+                if ("auth".equals(classify(lastError)) && credential.accessToken != null) {
+                    OAuthTokens.invalidate(account.optString("id", ""));
+                }
                 if (!negotiable(classify(lastError))) break;
             } finally {
                 if (transport != null) {
                     try {
                         transport.close();
                     } catch (Exception ignored) {
+                        // Best-effort cleanup of a connection this method is
+                        // about to walk away from either way — nothing left
+                        // to do with a close failure but let it go.
                     }
                 }
             }

@@ -13,8 +13,10 @@
  * worse than no preview.
  */
 
+import { needsStoredPassword } from './accounts'
 import { evaluateConditions, type ConditionContext, type SendCondition } from './conditions'
 import { buildMergeMessages, hasVars, type MergeMessage } from './mergeVars'
+import { oauthConfigProblem, type OAuthConnectionState } from './oauth'
 import { attachmentLimitBytes, providerById } from './providers'
 import { isQuiet, type QuietHours } from './schedule'
 import type { IsoDate, WorkCalendar } from './workCalendar'
@@ -91,6 +93,17 @@ export interface PreflightOptions {
    */
   calendar?: WorkCalendar
   holidayNames?: Map<IsoDate, string>
+  /**
+   * What the trusted layer says about this account's OAuth2 grant, from
+   * `bridge.oauthStatus`.
+   *
+   * Only meaningful for `authMethod: 'oauth2'`, and optional so every existing
+   * caller keeps the behaviour it had. Supplying it is what turns "the send
+   * will fail at 03:00 and nobody will know why" into a red line on the preview
+   * — see the `needsConsent` branch below for why nothing else in the app can
+   * see that state.
+   */
+  oauthState?: OAuthConnectionState
 }
 
 function domainOf(address: string): string {
@@ -143,7 +156,42 @@ export function buildPreflight(
 
   if (!account) {
     warnings.push({ key: 'preflight.warn.noAccount', severity: 'error' })
-  } else if (!account.hasSecret && account.authMethod !== 'none') {
+  } else if (account.authMethod === 'oauth2') {
+    /*
+     * "There is a credential" and "the credential still works" are different
+     * questions, and until now only the first was ever asked.
+     *
+     * `hasSecret` cannot answer either one here. It reports on the `smtp`
+     * keystore entry, and an OAuth2 account's grant lives under a different key
+     * (see `electron/oauth.ts`), so `hasSecret` is false for a perfectly
+     * connected account — reusing the branch below would block every OAuth send
+     * with "no password saved".
+     *
+     * So the state comes from `opts.oauthState`, which the caller gets from the
+     * trusted layer, and the two build-level problems are derived here because
+     * they are true without asking anyone. A caller that supplies nothing gets
+     * no warning rather than a guess: a false "not connected" on a working
+     * account would stop mail that was going to be delivered, which is a worse
+     * outcome than the silent failure this is meant to replace.
+     */
+    const state = opts.oauthState ?? oauthConfigProblem(account.providerId)
+    if (state === 'unsupported') {
+      warnings.push({ key: 'preflight.warn.oauthUnsupported', severity: 'error' })
+    } else if (state === 'unconfigured') {
+      warnings.push({ key: 'preflight.warn.oauthUnconfigured', severity: 'error' })
+    } else if (state === 'needsConsent') {
+      // The whole reason this file grew a notion of a stale credential. A
+      // revoked refresh token is indistinguishable from a working one by every
+      // other check in the app, and the first symptom without this is a
+      // scheduled send that failed at an hour nobody was watching.
+      warnings.push({ key: 'preflight.warn.oauthNeedsConsent', severity: 'error' })
+    } else if (state === 'disconnected') {
+      warnings.push({ key: 'preflight.warn.oauthNotConnected', severity: 'error' })
+    }
+    // Reached only for non-OAuth accounts, so this was already correct — it
+    // uses the shared predicate now so the three call sites cannot drift apart
+    // again, which is how the other two came to be wrong.
+  } else if (needsStoredPassword(account)) {
     warnings.push({ key: 'preflight.warn.noPassword', severity: 'error' })
   }
 

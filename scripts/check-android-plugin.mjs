@@ -202,6 +202,151 @@ for (const name of tsMethods) {
   )
 }
 
+// --- the *payload* each side agrees on --------------------------------------
+
+/*
+ * Matching method names is not enough, and this section exists because of a
+ * near miss.
+ *
+ * `oauthConsent` used to take a single `clientId`. It now takes `clientIds`, a
+ * map keyed by signing fingerprint, and that rename had to land in two files at
+ * once. Had it landed in only one, everything above would still have passed:
+ * the method exists on both sides, TypeScript compiles (the payload is a plain
+ * object literal), Java compiles (`call.getString` of an absent key returns the
+ * default). The only symptom would have been at runtime, on a device — the
+ * consent flow refusing with "started without everything it needs" for a
+ * configuration that is perfectly correct. That is precisely the failure shape
+ * this repository's gates exist to make impossible: no error, no crash, no log,
+ * just a feature that quietly does nothing.
+ *
+ * So: every key Java reads out of a `PluginCall` must be a key the TypeScript
+ * declaration for that method promises. The reverse direction is deliberately
+ * only a warning — TypeScript may legitimately send something a handler has not
+ * started using yet, and failing on that would block the half of a two-sided
+ * change that has to land first.
+ */
+/*
+ * Any `call.getX("key")`, not an enumerated list of accessors. The first
+ * version listed them — `getString|getObject|getBool|…` — and quietly missed
+ * `getBoolean`, because `getBool` matched its prefix and then the pattern
+ * demanded a bracket that `ean(` is not. It then reported that `useDataFolder`
+ * never reads `move`, on a handler that reads it on its second line. A gate
+ * that cries wolf is a gate people learn to read past, which costs more than
+ * the one it was added to catch.
+ */
+const CALL_READ = /\bcall\.get[A-Za-z]*\s*\(\s*"([^"]+)"/g
+
+/**
+ * A handler's body, plus the bodies of any activity callbacks it hands the call
+ * off to.
+ *
+ * Capacitor's picker pattern splits a single logical handler in two: the
+ * `@PluginMethod` starts an activity and returns, and an `@ActivityCallback`
+ * receives the *same* `PluginCall` when the user comes back and reads the rest
+ * of the payload there. `saveTextFile` is the example — it reads `name` and
+ * `mime` up front and `text` only once a destination has been chosen, which is
+ * the only order that makes sense: there is nothing to write the text to until
+ * the picker resolves.
+ *
+ * Scanning only the first half reported `text` as never read, which is both
+ * wrong and the kind of wrong that matters: it is a warning about a working
+ * feature sitting next to warnings about broken ones.
+ */
+function scannedBodyOf(source, name) {
+  const own = javaBodyOf(source, name)
+  if (own === null) return null
+  let text = own
+  for (const [, callback] of own.matchAll(
+    /startActivityForResult\s*\(\s*call\s*,[^,]*,\s*"([^"]+)"\s*\)/g,
+  )) {
+    text += '\n' + (javaBodyOf(source, callback) ?? '')
+  }
+  return text
+}
+
+/** The body of a Java method, brace-matched from its signature. */
+function javaBodyOf(source, name) {
+  const head = new RegExp(`(?:public|private|protected)\\s+void\\s+${name}\\s*\\([^)]*\\)\\s*\\{`).exec(
+    source,
+  )
+  if (!head) return null
+  let depth = 1
+  let i = head.index + head[0].length
+  const start = i
+  while (i < source.length && depth > 0) {
+    if (source[i] === '{') depth++
+    else if (source[i] === '}') depth--
+    i++
+  }
+  return source.slice(start, i - 1)
+}
+
+/**
+ * The option names a TypeScript method declaration promises.
+ *
+ * Read from the `opts: { … }` object literal in the declaration, at brace depth
+ * one so that the fields of a nested shape are not mistaken for top-level keys
+ * the handler may read.
+ */
+function tsPayloadKeys(source, name) {
+  const head = new RegExp(`^\\s*${name}\\s*\\(\\s*opts\\s*:\\s*\\{`, 'm').exec(source)
+  if (!head) return null
+  let depth = 1
+  let i = head.index + head[0].length
+  const keys = []
+  let segment = ''
+  /*
+   * Split on `;` and `,` as well as newline. These declarations are written
+   * both ways in this file — `{ accountId: string; secret: string }` on one
+   * line, and one-key-per-line for the longer ones — and a newline-only scan
+   * silently returns just the first key of the single-line form. That is a
+   * parser that reports "all clear" while checking almost nothing, which is a
+   * worse failure than the one this gate is for.
+   */
+  const flush = () => {
+    const m = /^\s*([A-Za-z_$][\w$]*)\s*\??\s*:/.exec(segment)
+    if (m) keys.push(m[1])
+    segment = ''
+  }
+  while (i < source.length && depth > 0) {
+    const ch = source[i]
+    if (ch === '{') depth++
+    else if (ch === '}') depth--
+    if (depth === 0) {
+      flush()
+      break
+    }
+    // Separators only count at the top level of the options object; inside a
+    // nested shape they belong to that shape's fields.
+    if (depth === 1 && (ch === '\n' || ch === ';' || ch === ',')) flush()
+    else if (depth === 1) segment += ch
+    else if (ch === '\n') segment = ''
+    i++
+  }
+  return keys
+}
+
+for (const name of tsMethods) {
+  if (!javaMethods.has(name)) continue
+  const body = scannedBodyOf(javaSource, name)
+  const promised = tsPayloadKeys(tsSource, name)
+  // No `opts: { … }` shape to compare against — a no-argument method, or one
+  // taking a named type. Nothing to check rather than something to guess at.
+  if (!body || !promised || promised.length === 0) continue
+  for (const [, key] of body.matchAll(CALL_READ)) {
+    check(
+      `${name}() reads "${key}" from the call, but ${TS_FILE} never sends it`,
+      promised.includes(key),
+    )
+  }
+  const read = new Set([...body.matchAll(CALL_READ)].map((m) => m[1]))
+  for (const key of promised) {
+    if (!read.has(key)) {
+      warnings.push(`${name}() is sent "${key}" but the Java handler never reads it`)
+    }
+  }
+}
+
 // --- handlers nothing on the TypeScript side ever asks for ------------------
 
 const pluginConst = /const\s+([A-Za-z_$][\w$]*)\s*=\s*registerPlugin</.exec(tsSource)?.[1]

@@ -87,16 +87,26 @@ import {
   hasSecret,
   initDataRoot,
   isDefaultLocation,
+  flushState,
   loadState,
   pruneSnapshots,
   recoveredFrom,
   saveState,
+  stateWritePending,
   setDataRoot,
   setSecret,
   withDataDir,
   snapshotDir,
   pastedDir,
 } from './store'
+import {
+  forgetOAuthAccount,
+  invalidateOAuthToken,
+  oauthStatusFor,
+  runConsent,
+  useOAuthSecretStore,
+} from './oauth'
+import type { OAuthAccountStatus, OAuthConsentResult } from '../src/core/oauth'
 import { fetchMessageBody, purgeMessages, setServerSeenFlag, syncInbox, testInbox } from './imap'
 import { stopAllInboxWatchers, watchInboxes } from './imapIdle'
 import { deleteAccountInboxCache, deleteMessageCache, pruneInboxCache } from './inboxStore'
@@ -998,7 +1008,30 @@ async function openExternalSafely(url: string): Promise<void> {
 // IPC
 // ---------------------------------------------------------------------------
 
+/**
+ * Hand `electron/oauth.ts` the keystore, once.
+ *
+ * That module deliberately does not import `./store` — it is reached from
+ * `mailer.ts` and `imap.ts`, and `scripts/check-socket-drop.mjs` bundles the
+ * latter standalone with `electron` marked external. Registering the three
+ * methods here keeps the dependency pointing this way round, and means a build
+ * that never calls this simply has no OAuth accounts rather than a crash.
+ *
+ * The refs it passes are derived account ids (`<id>:oauth`), so the same
+ * `safeStorage` encryption and the same `secrets.json` cover a refresh token as
+ * cover a password. Nothing new is written in the clear.
+ */
+function registerOAuthStore(): void {
+  useOAuthSecretStore({
+    read: (ref) => getSecret(ref),
+    write: (ref, secret) => setSecret(ref, secret),
+    clear: (ref) => deleteSecret(ref),
+  })
+}
+
 function registerIpc(): void {
+  registerOAuthStore()
+
   ipcMain.handle(IPC.loadState, () => loadState())
   ipcMain.handle(IPC.saveState, (_e, state: unknown) => saveState(state))
 
@@ -1020,6 +1053,63 @@ function registerIpc(): void {
   })
   // `kind` is fixed here, not taken from the renderer — see `PlatformBridge.getSyncSecret`'s doc.
   ipcMain.handle(IPC.getSyncSecret, (_e, keyRef: string) => getSecret(keyRef, 'sync'))
+
+  // --- OAuth2 sign-in ------------------------------------------------------
+  //
+  // Three methods, and note what none of them is: a way to read a token. The
+  // consent flow runs entirely on this side — the loopback listener, the PKCE
+  // verifier, the code exchange, the write to the keystore — and what crosses
+  // back is an address and a boolean. That is the same posture as
+  // `sealAccountSecrets`, and for the same reason: the renderer is where web
+  // content runs, and a refresh token that reached it would be a standing
+  // mailbox credential sitting in a React tree.
+
+  /**
+   * Open the provider's consent page in the real browser and wait for the
+   * redirect.
+   *
+   * Long-running by nature — it resolves when the user has finished signing in,
+   * or after five minutes, or when they close the tab. Never rejects; a refusal
+   * comes back as `{ ok: false, cancelled: true }`, because a cancelled sign-in
+   * is an answer and should not raise the crash modal.
+   */
+  ipcMain.handle(
+    IPC.oauthConsent,
+    async (
+      _e,
+      accountId: string,
+      providerId: string,
+      loginHint: string,
+    ): Promise<OAuthConsentResult> => {
+      const result = await runConsent({
+        accountId,
+        presetId: providerId,
+        loginHint: loginHint || undefined,
+        // The same guard every other outbound link goes through: http/https
+        // only, handed to the OS rather than opened in a window of ours. An
+        // embedded WebView would be the one place a native app must never put a
+        // provider's password field — see `electron/oauth.ts`'s header.
+        openExternal: openExternalSafely,
+      })
+      // A new grant means the pooled connection is authenticated with a token
+      // that is now the wrong one, exactly as a password change does.
+      if (result.ok) invalidateConnection(accountId)
+      return result
+    },
+  )
+
+  ipcMain.handle(
+    IPC.oauthStatus,
+    (_e, accountId: string, providerId: string): Promise<OAuthAccountStatus> =>
+      oauthStatusFor(accountId, providerId || undefined),
+  )
+
+  /** Forget the grant. The mailbox keeps it until the user revokes it at the provider. */
+  ipcMain.handle(IPC.oauthDisconnect, async (_e, accountId: string) => {
+    invalidateConnection(accountId)
+    invalidateOAuthToken(accountId)
+    await forgetOAuthAccount(accountId)
+  })
 
   /**
    * Move mailbox passwords to a paired device without either renderer ever
@@ -1841,16 +1931,51 @@ void app.whenReady().then(() => {
   })
 })
 
-app.on('before-quit', () => {
+/** Teardown runs once even though `before-quit` can fire more than once — see below. */
+let tornDown = false
+/**
+ * How many times quitting may be deferred to let a state write finish.
+ *
+ * `flushState` resolves with nothing pending, so one round is normally the
+ * whole story. The cap exists because the renderer is still alive during it and
+ * can in principle land another `saveState` in the gap, and "quit waits for the
+ * disk" must never become "quit waits forever" — after three rounds the last
+ * word goes to shutting down.
+ */
+const MAX_QUIT_FLUSH_ROUNDS = 3
+let quitFlushRounds = 0
+
+app.on('before-quit', (event) => {
   quitting = true
-  scheduler.stop()
-  void controlServer.dispose()
-  void pairingServer.stop()
-  void syncServer.stop()
-  closeAllConnections()
-  // Held-open IDLE sockets would otherwise keep the process from exiting
-  // cleanly, and leave the provider counting a connection that is gone.
-  stopAllInboxWatchers()
+  if (!tornDown) {
+    tornDown = true
+    scheduler.stop()
+    void controlServer.dispose()
+    void pairingServer.stop()
+    void syncServer.stop()
+    closeAllConnections()
+    // Held-open IDLE sockets would otherwise keep the process from exiting
+    // cleanly, and leave the provider counting a connection that is gone.
+    stopAllInboxWatchers()
+  }
+
+  /*
+   * Do not exit on top of a half-finished save.
+   *
+   * `saveState` coalesces writes (see `store.ts`), so at any instant there can
+   * be a document the renderer believes is being persisted that has not been
+   * handed to the filesystem yet. Nothing about the atomic write loses data if
+   * the process dies mid-flight — `state.json` simply stays as it was — but
+   * "as it was" is the state before the user's last edit, and the last edit
+   * before closing the window is the one they are most likely to notice
+   * missing. So quitting waits for the disk, which is the only thing here worth
+   * a few hundred milliseconds of shutdown.
+   */
+  if (stateWritePending() && quitFlushRounds < MAX_QUIT_FLUSH_ROUNDS) {
+    quitFlushRounds++
+    event.preventDefault()
+    void flushState().finally(() => app.quit())
+  }
 })
 
 app.on('window-all-closed', () => {

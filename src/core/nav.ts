@@ -29,11 +29,17 @@ export type ViewId =
   | 'logs'
   | 'settings'
   /**
-   * The phone-only hub. Deliberately absent from `NAV`: it is not a ninth
-   * screen competing with the others, it is a container for five of them that
-   * only exists where they will not fit across the bottom of the window. On a
-   * desktop there is no Home tab and nothing to reach one with, which is why it
-   * has no number here — see `MOBILE_NAV`.
+   * The hub. Deliberately absent from `NAV`: it is not a tenth screen
+   * competing for a numbered tab and a `Ctrl+N` shortcut with the nine that
+   * already share those out completely (`check-shortcuts.mjs` asserts `NAV`
+   * and the shortcut table stay the same length), it is a container — for the
+   * five screens in `HOME_SECTIONS` that do not fit across the bottom of a
+   * phone, and, on every platform, for the four `HOME_FEATURES` tiles that
+   * otherwise live only inside Settings. `MOBILE_NAV` gives it an unnumbered
+   * slot on a phone's tab bar; `App.tsx`'s sidebar footer gives it an
+   * unnumbered button on a desktop, for the same reason neither wants to
+   * spend one of the nine numbered slots on a screen that is a doorway rather
+   * than a destination in its own right.
    */
   | 'home'
 
@@ -106,6 +112,56 @@ export const HOME_SECTIONS: ViewId[] = [
   'templates',
   'workcal',
   'logs',
+]
+
+/**
+ * Four Settings sections promoted onto Home as well as staying reachable from
+ * Settings itself — see `views/HomeView.tsx`'s module doc for the fuller story
+ * of why, and the comment on `DigestCard` in `views/SettingsView.tsx` for why
+ * two of the four are exported from that file rather than moved into ones of
+ * their own under `views/`.
+ *
+ * Not `ViewId`s, deliberately. Every `ViewId` is a screen some nav list can
+ * point a tab at — `NAV` or `MOBILE_NAV` — and none of these four is: nothing
+ * anywhere ever puts 'digest' or 'pairing' on a tab bar, so folding them into
+ * that type would hand every exhaustive `switch` over a `ViewId` a case that
+ * can never be reached from a click on either bar. They only ever open as a
+ * Home tile, on a phone and a desktop alike, so they get a narrower id of
+ * their own instead.
+ */
+export type HomeFeatureId = 'digest' | 'greetings' | 'calendarsub' | 'pairing' | 'selfcheck'
+
+export interface HomeFeatureItem {
+  id: HomeFeatureId
+  labelKey: TranslationKey
+}
+
+/**
+ * Each tile borrows the label its Settings section already carries —
+ * `settings.digest`, `settings.greetings`, `cal.subscribe.toggle`,
+ * `devices.title` — rather than a Home-specific label minted to match it. A
+ * second string that exists only to keep saying the same thing as the first
+ * is a second place for the two to quietly disagree after the next edit;
+ * reusing the key means the dialog a tile opens is named identically, in
+ * whichever of the six languages the user reads, to the Settings row that
+ * opens the same content — by construction, not by two translators agreeing.
+ */
+export const HOME_FEATURES: HomeFeatureItem[] = [
+  { id: 'digest', labelKey: 'settings.digest' },
+  { id: 'greetings', labelKey: 'settings.greetings' },
+  { id: 'calendarsub', labelKey: 'cal.subscribe.toggle' },
+  { id: 'pairing', labelKey: 'devices.title' },
+  /*
+   * Last, and on Home rather than buried in Settings.
+   *
+   * Someone reaching for this has already decided the app is broken, and the
+   * screens they would otherwise be hunting through are the ones they have
+   * just failed to get an answer out of. It is the only tile here that carries
+   * its own label rather than borrowing a Settings section's, because it has
+   * no Settings section to borrow from — it is not a feature with settings,
+   * it is a question with an answer.
+   */
+  { id: 'selfcheck', labelKey: 'selfcheck.title' },
 ]
 
 /**

@@ -9,6 +9,7 @@
 
 import type { ControlEndpoint, ControlRequest, ControlResponse } from './control'
 import type { FeedResponse } from './feeds'
+import type { OAuthAccountStatus, OAuthConsentResult } from './oauth'
 import type { PairingEvent, PairingPayload, PairMode } from './pairing'
 import type { PairingEnvelope } from './pairingCrypto'
 import type {
@@ -177,6 +178,44 @@ export interface PlatformBridge {
   setSecret(accountId: string, secret: string, kind?: SecretKind): Promise<void>
   hasSecret(accountId: string, kind?: SecretKind): Promise<boolean>
   deleteSecret(accountId: string, kind?: SecretKind): Promise<void>
+
+  // --- OAuth2 sign-in ------------------------------------------------------
+  //
+  // Optional as a group, and the account dialog treats their absence as
+  // "this platform cannot sign in this way" rather than as an error — the same
+  // way it already hides the inbox where `syncInbox` is missing. The browser
+  // preview has no trusted side to run a consent flow in, and no keystore to
+  // leave the result in, so it omits all three.
+  //
+  // What is conspicuously missing from the group is a token reader. The
+  // refresh token is written by the trusted layer and read only by the
+  // transports; the most a renderer can learn is an address and a state. See
+  // `core/oauth.ts` for why a public client's grant is the one credential worth
+  // being strict about — it cannot be rotated by changing a password.
+  /**
+   * Run a consent, end to end, and leave the refresh token in the keystore.
+   *
+   * Takes minutes, legitimately: it resolves when the user has finished in
+   * their browser. Never rejects — a cancelled sign-in comes back as
+   * `{ ok: false, cancelled: true }`, because a user closing a tab is an answer
+   * and not a fault.
+   */
+  oauthConsent?(
+    accountId: string,
+    providerId: string,
+    loginHint: string,
+  ): Promise<OAuthConsentResult>
+  /**
+   * Connected, never connected, or connected-but-rejected.
+   *
+   * The third is why this is not `hasSecret`. A refresh token the provider has
+   * revoked is still a stored secret, so every existing "is there a credential"
+   * check says yes right up until a scheduled send fails at an hour nobody is
+   * watching. Cheap: it reads the store, it does not call the provider.
+   */
+  oauthStatus?(accountId: string, providerId: string): Promise<OAuthAccountStatus>
+  /** Forget the stored grant. Revoking it at the provider stays the user's to do. */
+  oauthDisconnect?(accountId: string): Promise<void>
 
   // --- mail ---------------------------------------------------------------
   sendNow(draft: MessageDraft, account: MailAccount): Promise<SendResult>

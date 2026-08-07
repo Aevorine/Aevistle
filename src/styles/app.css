@@ -1459,6 +1459,22 @@ textarea {
   color: var(--text-1);
 }
 
+/* The sidebar's Home button, while Home is the screen you are on.
+   `.icon-btn` and not `.nav__item` because Home is deliberately not one of the
+   nine numbered tabs — see the comment above it in `App.tsx` — but it is still
+   somewhere the user *is*, and without this it was the only way of being on a
+   screen that the sidebar did not show. Borrows the accent treatment the nav
+   tabs already use rather than inventing a second idea of "selected", so the
+   two cannot drift apart. */
+.icon-btn[aria-current="page"] {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+}
+.icon-btn[aria-current="page"]:hover {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+}
+
 /* ==========================================================================
    The action bar — the two most important buttons in the app.
    Pinned to the bottom of the compose view so "Send now" and "Schedule" are
@@ -2338,6 +2354,26 @@ textarea {
   margin-block-start: var(--sp-2);
 }
 
+/*
+ * A disabled test button and the sentence saying why, stacked as one unit.
+ *
+ * The send test's button lives in the dialog footer and the receive test's
+ * lives in `.inline-actions` beside the IMAP fields — two different flex rows
+ * that this file lays out for other reasons entirely, and neither is
+ * guaranteed to wrap at every width the way `.inline-actions` does on its
+ * own. Column-stacking the button and its reason inside their own flex item
+ * means the reason always lands directly under its button regardless of what
+ * the surrounding row does, instead of depending on a wrap point in a
+ * container this rule does not own.
+ */
+.test-action {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+
 .option-list {
   display: grid;
   gap: var(--sp-2);
@@ -2581,6 +2617,19 @@ textarea {
    * diagnostic rather than explanatory — text that is the only place a fact
    * appears, like which LAN address a pairing code published. Hiding one of
    * those does not remove an explanation, it removes evidence.
+   *
+   * The add-account dialog's test buttons are the case that made "evidence"
+   * the right word for it. `validateAccount` marks the from address, server
+   * and username as errors from the moment a blank form opens, so the send
+   * test button is grey before anyone has typed a character — same on every
+   * platform. A desktop reader has the per-field hints beside each empty box
+   * and can see why. Cull those same hints on a phone with no substitute and
+   * the button is just grey, permanently, for a reason nothing on screen ever
+   * states — `AccountDialog.tsx` renders that reason as a `field__hint
+   * field__hint--keep` next to the button itself (and does the same for the
+   * receive test), because "which fields are still empty" is not a
+   * description of a control the phone user can already see; it is the one
+   * fact a disabled button owes them and has nowhere else to say.
    */
   .switch__desc:not(.switch__desc--keep),
   .field__hint:not(.field__hint--keep),
@@ -3368,6 +3417,14 @@ textarea {
   flex-direction: column;
   gap: var(--sp-1);
   margin-top: var(--sp-2);
+}
+/* The count that stands in for the rest of the queue — see `VISIBLE` in
+   `OutboxStrip.tsx`. Quieter than a row, because it is a fact about the list
+   rather than another member of it. */
+.outbox__more {
+  padding: var(--sp-1) var(--sp-3);
+  font-size: var(--text-sm);
+  color: var(--text-3);
 }
 .outbox__item {
   display: flex;
@@ -6071,6 +6128,145 @@ textarea {
   line-height: 1.6;
 }
 
+/* A view that threw during render — see `components/ErrorBoundary.tsx`.
+   Deliberately shaped like a card in the content column rather than like
+   `.bootfail`, which owns the whole window: this failure is one screen, the
+   sidebar beside it still works, and the panel should look like something
+   that went wrong *inside* the app rather than instead of it. */
+.uifail {
+  max-width: var(--reading-max);
+  margin: var(--sp-6) auto;
+  padding: var(--sp-6);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface-1);
+}
+.uifail__title {
+  margin: 0 0 var(--sp-3);
+  font-size: var(--text-lg);
+  font-weight: 700;
+  color: var(--text-1);
+}
+.uifail__detail {
+  margin: 0 0 var(--sp-3);
+  color: var(--text-2);
+  line-height: 1.6;
+  /* A thrown message can be a single unbroken token; let it wrap rather than
+     push the panel past the column. */
+  overflow-wrap: anywhere;
+}
+.uifail__hint {
+  margin: 0 0 var(--sp-4);
+  font-size: var(--text-sm);
+  color: var(--text-3);
+  line-height: 1.6;
+}
+.uifail__retry {
+  margin: 0;
+}
+
+/* ==========================================================================
+   Mail self-check
+
+   A diagnostic read top to bottom, so the layout's one job is to make "which
+   row is the first bad one" answerable at a glance and without reading. The
+   status word sits in a fixed-width column at the start of every row for
+   exactly that: a ragged left edge would mean scanning the text to find the
+   failures, which is the thing somebody arrives at this screen unable to do.
+
+   The status is a word, not only a colour. Around one man in twelve cannot
+   separate the red from the green, and this is the screen where getting that
+   wrong means being told the opposite of the truth about their own mail.
+   ========================================================================== */
+.selfcheck {
+  max-width: var(--reading-max);
+}
+.selfcheck__summary {
+  margin: var(--sp-4) 0 var(--sp-2);
+  font-weight: 600;
+  color: var(--text-1);
+}
+.selfcheck__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.selfcheck__row {
+  display: flex;
+  gap: var(--sp-3);
+  align-items: flex-start;
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-1);
+}
+/* Only the rows that need attention are tinted. Tinting the passes too would
+   make a healthy report as loud as a broken one. */
+.selfcheck__row[data-status='fail'] {
+  background: var(--danger-bg);
+}
+.selfcheck__row[data-status='warn'] {
+  background: var(--warning-bg);
+}
+.selfcheck__badge {
+  flex: none;
+  /* Wide enough for the longest status word in any of the six locales — the
+     column has to stay straight in Russian and Arabic too, not only English. */
+  min-width: 7.5em;
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--text-3);
+}
+.selfcheck__badge[data-status='pass'] {
+  color: var(--success);
+}
+.selfcheck__badge[data-status='warn'] {
+  color: var(--warning);
+}
+.selfcheck__badge[data-status='fail'] {
+  color: var(--danger);
+}
+.selfcheck__body {
+  min-width: 0;
+}
+.selfcheck__label {
+  color: var(--text-1);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.selfcheck__detail {
+  margin-block-start: var(--sp-2);
+  font-size: var(--text-sm);
+  color: var(--text-2);
+  /* A server's reply can be one unbroken token, and it must wrap rather than
+     stretch the panel — this is the block most likely to be pasted into a
+     search box, so losing characters off the edge would defeat its purpose. */
+  overflow-wrap: anywhere;
+}
+.selfcheck__hint {
+  margin-block-start: var(--sp-2);
+  font-size: var(--text-sm);
+  color: var(--text-3);
+  line-height: 1.6;
+}
+@media (max-width: 760px) {
+  /* The badge column costs too much of a 360px screen, so it goes above the
+     label instead of beside it. It is not hidden: this is the one screen where
+     the status word is the content. */
+  .selfcheck__row {
+    flex-direction: column;
+    gap: var(--sp-1);
+  }
+  .selfcheck__badge {
+    min-width: 0;
+  }
+}
+
 /* ==========================================================================
    Pictures
 
@@ -7230,8 +7426,16 @@ textarea {
 
   /* --- dialogs ----------------------------------------------------------- */
 
-  .modal__footer > .btn {
+  .modal__footer > .btn,
+  /* The send test button, wrapped in `.test-action` once it can carry a
+     disabled reason underneath it (see that rule's own comment) — it needs
+     the same growth its bare `.btn` sibling gets here, or it reverts to
+     hugging its label while Cancel and Save fill the row around it. */
+  .modal__footer > .test-action {
     flex: 1 1 auto;
+  }
+  .modal__footer > .test-action > .btn {
+    width: 100%;
   }
 
   /* --- everything you tap, measured ---------------------------------------
@@ -8639,5 +8843,155 @@ textarea {
   }
   .banner--stack > :last-child:not(.banner__body) {
     margin-inline-start: auto;
+  }
+}
+
+/* ==========================================================================
+   Reorder — the grip, the lifted row, and the line that says where it lands
+   ==========================================================================
+
+   Shared by the Settings account list (vertical rows) and the inbox account
+   tabs (a horizontal strip), because the arrangement they are editing is one
+   number on one account and the two screens have to feel like the same
+   gesture. `components/useReorder.ts` owns the behaviour; everything here is
+   the part of it the user can see.
+
+   The drop line is drawn on the row the pointer is *over*, on the side it
+   would land, rather than as a floating element positioned by script. A
+   positioned element means measuring, and measuring during a drag means
+   measuring while the list is auto-scrolling underneath — one frame of
+   staleness and the line points at the wrong gap. A pseudo-element on the
+   target cannot be stale: it is wherever the target is, including mid-scroll.
+   ========================================================================== */
+
+.reorder-handle {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  color: var(--text-3);
+  padding: 0;
+  border-radius: var(--r-xs);
+  cursor: grab;
+  /* The browser must not claim this touch for panning.
+     `touch-action` is read when the gesture starts, not when it is recognised,
+     so it cannot be switched on at the moment the row lifts — by then the page
+     has already decided it is scrolling, and the first move after the long
+     press would scroll the list and cancel the pointer instead of dragging.
+     Declaring it up front costs the ability to start a page scroll with a
+     thumb on this one 26px grip, which is the trade every drag-and-drop
+     implementation makes and the reason the grip is a separate element from
+     the row rather than the whole row being draggable. */
+  touch-action: none;
+  /* A long press over anything Android considers text raises the selection
+     handles and the paste bubble on top of the row being dragged. The JS half
+     of this is `onContextMenu` in the hook. */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  transition:
+    color var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease);
+}
+.reorder-handle:hover {
+  color: var(--text-1);
+  background: var(--surface-hover);
+}
+.reorder-handle:active {
+  cursor: grabbing;
+}
+
+/* The row is the drop target, so it is also the thing the line is drawn on. */
+.reorder-row {
+  position: relative;
+}
+
+/* Lifted, by finger or by mouse. Held rather than hidden: a row that vanishes
+   while you drag it takes the list's rhythm with it, and on a four-row phone
+   list the gap it leaves is most of the screen. */
+.reorder-row[data-reorder-active],
+.segmented__slot[data-reorder-active] {
+  opacity: 0.45;
+}
+
+/* --- the drop indicator ---------------------------------------------------
+   `inset-inline` and `inset-block` rather than left/right/top/bottom so the
+   horizontal strip's line lands on the correct side of a tab under Arabic
+   without a second rule — the hook already flips which *side* is "after", and
+   logical properties are what make that flip mean the same thing here. */
+.reorder-row[data-reorder-drop]::after,
+.segmented__slot[data-reorder-drop]::after {
+  content: '';
+  position: absolute;
+  background: var(--accent);
+  border-radius: var(--r-full);
+  pointer-events: none;
+  z-index: 1;
+}
+.reorder-row[data-reorder-drop]::after {
+  inset-inline: var(--sp-2);
+  height: 2px;
+}
+.reorder-row[data-reorder-drop='before']::after {
+  top: -1px;
+}
+.reorder-row[data-reorder-drop='after']::after {
+  bottom: -1px;
+}
+.segmented__slot[data-reorder-drop]::after {
+  inset-block: 2px;
+  width: 2px;
+}
+.segmented__slot[data-reorder-drop='before']::after {
+  inset-inline-start: -1px;
+}
+.segmented__slot[data-reorder-drop='after']::after {
+  inset-inline-end: -1px;
+}
+
+/* --- the inbox tab strip --------------------------------------------------
+   A tab is now a grip and a button inside one box. The box is the flex child
+   `.segmented__item` used to be, and takes over its `flex: 1`, so a strip of
+   three tabs still divides the width three ways. */
+.segmented__slot {
+  position: relative;
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  border-radius: var(--r-xs);
+}
+.reorder-handle--tab {
+  /* Tucked against the label rather than given a tap target of its own. The
+     strip is one control-height tall and a 44px square inside it would set the
+     height of the whole thing; the grip's usable area is the full height of
+     the tab because there is nothing above or below it to hit by mistake. */
+  align-self: stretch;
+  width: 18px;
+  margin-inline-start: 4px;
+  border-radius: var(--r-xs) 0 0 var(--r-xs);
+}
+
+/* Keyboard users get told which grip they are holding. The ring is the app's
+   own — this only makes sure the grip is not clipped out of it by the row's
+   overflow, which is what happened to the first draft on the tab strip. */
+.reorder-handle:focus-visible {
+  z-index: 2;
+}
+
+@media (max-width: 760px) {
+  /* On a phone the grip is the *only* way to reorder — there is no mouse to
+     fall back to — so it stops being a 16px glyph and becomes something a
+     thumb can find without looking. Width only: the row already stands at
+     least `--tap-min` tall, and forcing a square here would push every
+     account row taller than it needs to be for the sake of a control most
+     people touch once. */
+  .reorder-handle {
+    min-width: var(--tap-min);
+  }
+  .reorder-handle--tab {
+    min-width: 26px;
   }
 }

@@ -20,6 +20,7 @@
 
 import type { Attachment, BurstPolicy, MailAccount, MessageDraft, Recurrence } from './types'
 import { MAX_BURST_COUNT } from './types'
+import { oauthConfigProblem } from './oauth'
 import { validateCron } from './schedule'
 
 export interface Issue {
@@ -304,8 +305,41 @@ export function validateAccount(account: MailAccount): Issue[] {
   if (account.allowInvalidCert) {
     issues.push({ key: 'validate.accountInsecureTls', severity: 'warning', field: 'allowInvalidCert' })
   }
-  if (account.authMethod === 'password' && !account.username.trim()) {
+  // Not `=== 'password'` any more: XOAUTH2 carries a username too. The SASL
+  // exchange is `user=<address>\x01auth=Bearer <token>\x01\x01`, so an OAuth2
+  // account with an empty username authenticates as nobody and is refused by
+  // the server — the same failure the password path has always been checked for.
+  if (account.authMethod !== 'none' && !account.username.trim()) {
     issues.push({ key: 'validate.accountNoUser', severity: 'error', field: 'username' })
+  }
+
+  if (account.authMethod === 'oauth2') {
+    const problem = oauthConfigProblem(account.providerId)
+    if (problem === 'unsupported') {
+      // An error, because it is the user's to fix in one click: this provider
+      // has no consent flow, and the password box below it does work.
+      issues.push({
+        key: 'validate.accountOauthUnsupported',
+        severity: 'error',
+        field: 'authMethod',
+      })
+    } else if (problem === 'unconfigured') {
+      /*
+       * A warning rather than an error, and the asymmetry is deliberate.
+       *
+       * A missing client id is a property of the *build*, not of anything the
+       * person in front of the dialog typed, and blocking Save over it would
+       * throw away the servers and address they just entered in exchange for a
+       * problem they cannot solve. `buildPreflight` treats the same state as
+       * fatal, which is the right place for it: refusing to *send* is honest,
+       * refusing to *save* is punishing the wrong person.
+       */
+      issues.push({
+        key: 'validate.accountOauthUnconfigured',
+        severity: 'warning',
+        field: 'authMethod',
+      })
+    }
   }
 
   return issues

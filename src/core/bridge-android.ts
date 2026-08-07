@@ -21,6 +21,14 @@ import type {
 import { failedResult } from './bridge'
 import { fetchLatest, type DownloadProgress } from './update'
 import { feedFetchVia, type FeedResponse } from './feeds'
+import {
+  ANDROID_REDIRECT_URI,
+  androidClientIds,
+  oauthProviderFor,
+  oauthState,
+  type OAuthAccountStatus,
+  type OAuthConsentResult,
+} from './oauth'
 import { LocalPairingHost } from './pairingHostLocal'
 import type { PairingEvent, PairMode } from './pairing'
 import type { PairingEnvelope } from './pairingCrypto'
@@ -157,6 +165,52 @@ interface AevistleNativePlugin extends AndroidPermissionApi {
     keyRef: string
     envelope: PairingEnvelope
   }): Promise<{ accountIds: string[] }>
+
+  // --- OAuth2 sign-in ------------------------------------------------------
+  //
+  // The whole flow is native, and that is a security decision rather than a
+  // convenience. The naive split — build the URL here, let native open a
+  // browser, take the redirect back on a listener, exchange the code here —
+  // fails twice over: `connect-src 'self'` forbids the WebView from POSTing to
+  // a token endpoint at all, and routing around that would put the *refresh
+  // token* through JavaScript, which is exactly the thing `sealAccountSecrets`
+  // exists to avoid for passwords. So native owns the PKCE pair, the Custom
+  // Tab, the redirect, the exchange and the keystore write, and what comes back
+  // across the bridge is an address and a boolean.
+  //
+  // The provider table is still this side's, passed in on every call. Keeping
+  // endpoints, scopes and authorities in `core/oauth.ts` alone means the phone
+  // and the desktop cannot drift into asking for different scopes — the failure
+  // that would produce is a mailbox that syncs on one device and 401s on the
+  // other, with nothing on screen to connect the two.
+  /**
+   * Open the consent page and finish the exchange. Resolves when the user is
+   * done; `cancelled` when they backed out. See `AevistleNativePlugin.java`.
+   */
+  oauthConsent(opts: {
+    accountId: string
+    providerId: string
+    /**
+     * Every registered Android client id for this vendor, keyed by the SHA-1 of
+     * the certificate it was registered against. Native picks the one matching
+     * its own signature — see `OAUTH_ANDROID_CLIENT_IDS` for why the choice
+     * cannot be made on this side.
+     */
+    clientIds: Record<string, string>
+    authorizeUrl: string
+    tokenUrl: string
+    /** Space-separated, already joined, so native does not re-implement the list. */
+    scope: string
+    redirectUri: string
+    /** Vendor-specific authorize parameters (Google's `access_type`, `prompt`). */
+    extraAuthParams?: Record<string, string>
+    loginHint?: string
+  }): Promise<{ ok: boolean; address?: string; error?: string; cancelled?: boolean }>
+  /** Whether the keystore holds a grant, and whether the provider has since refused it. */
+  oauthStatus(opts: {
+    accountId: string
+  }): Promise<{ hasGrant: boolean; rejected: boolean; address?: string }>
+  oauthDisconnect(opts: { accountId: string }): Promise<void>
 
   sendNow(opts: { draft: MessageDraft; account: MailAccount }): Promise<SendResult>
   testConnection(opts: { account: MailAccount; secret?: string }): Promise<SendResult>
@@ -394,6 +448,55 @@ export function createAndroidBridge(): PlatformBridge & AndroidPermissionApi {
     hasSecret: (accountId, kind) => Native.hasSecret({ accountId, kind }).then((r) => r.value),
     deleteSecret: (accountId, kind) => Native.deleteSecret({ accountId, kind }),
     getSyncSecret: (deviceId) => Native.getSyncSecret({ accountId: deviceId }).then((r) => r.value),
+
+    async oauthConsent(accountId, providerId, loginHint): Promise<OAuthConsentResult> {
+      const provider = oauthProviderFor(providerId)
+      if (!provider) return { ok: false, error: 'This provider does not offer OAuth2 sign-in.' }
+      const clientIds = androidClientIds(provider.vendor)
+      if (Object.keys(clientIds).length === 0) {
+        return {
+          ok: false,
+          error:
+            'This build of Aevistle has no OAuth client id for Android, so it cannot start a ' +
+            'sign-in. See OAUTH_ANDROID_CLIENT_IDS in src/core/oauth.ts.',
+        }
+      }
+      try {
+        const result = await Native.oauthConsent({
+          accountId,
+          providerId,
+          clientIds,
+          authorizeUrl: provider.authorizeUrl,
+          tokenUrl: provider.tokenUrl,
+          scope: provider.scopes.join(' '),
+          redirectUri: ANDROID_REDIRECT_URI,
+          ...(provider.extraAuthParams ? { extraAuthParams: provider.extraAuthParams } : {}),
+          ...(loginHint ? { loginHint } : {}),
+        })
+        return result
+      } catch (e) {
+        // A plugin method the installed APK does not implement rejects here.
+        // Reported as an ordinary failure rather than thrown, so the dialog says
+        // "sign-in is not available on this build" instead of raising a crash
+        // banner over an app that is otherwise working.
+        return { ok: false, error: e instanceof Error ? e.message : String(e) }
+      }
+    },
+
+    async oauthStatus(accountId, providerId): Promise<OAuthAccountStatus> {
+      try {
+        const { hasGrant, rejected, address } = await Native.oauthStatus({ accountId })
+        return {
+          state: oauthState(providerId || undefined, hasGrant, rejected, 'android'),
+          ...(address ? { address } : {}),
+        }
+      } catch {
+        // Same reasoning as above: an older APK simply has no grant to report.
+        return { state: oauthState(providerId || undefined, false, false, 'android') }
+      }
+    },
+
+    oauthDisconnect: (accountId) => Native.oauthDisconnect({ accountId }),
 
     async sealAccountSecrets(keyRef, accountIds): Promise<SealedAccountSecrets | null> {
       const result = await Native.sealAccountSecrets({ keyRef, accountIds })

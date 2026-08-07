@@ -158,6 +158,9 @@ final class LanAddresses {
                 int b = Integer.parseInt(parts[1]);
                 if (a == 172 && b >= 16 && b <= 31) return 2;
             } catch (NumberFormatException ignored) {
+                // Not a dotted-quad after all; falls through to the generic
+                // rank below, same as any other address this function does
+                // not recognise.
             }
         }
         return 3;

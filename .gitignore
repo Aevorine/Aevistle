@@ -115,6 +115,17 @@ replay_pid*.log
 __pycache__/
 *.py[cod]
 
+# --- browser regression suite ----------------------------------------------
+# `tests/` carries its own dependency island so the root lockfile stays still;
+# `node_modules/` above already covers `tests/node_modules` at any depth. What
+# it does not cover is what a run leaves behind — traces and screenshots of a
+# seeded mailbox are still a mailbox, and a retained trace is a full DOM
+# recording of the app with the fixture's addresses in it.
+test-results/
+playwright-report/
+blob-report/
+.playwright/
+
 # --- misc ------------------------------------------------------------------
 coverage/
 .nyc_output/

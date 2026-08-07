@@ -285,15 +285,100 @@ export async function setDataRoot(target: string, move: boolean): Promise<MoveOu
 // ---------------------------------------------------------------------------
 
 /**
+ * Serial number for temp files, so two writes never share a name.
+ *
+ * The old code used a fixed `<target>.tmp`. That is fine for one writer and
+ * silently catastrophic for two: `saveState` is called from the debounce, from
+ * the retry after a failed write, and from the flush on the way out, and any
+ * two of those overlapping had both handles appending into the *same* temp
+ * file. The bytes interleave, the second `rename` publishes the mixture, and
+ * `state.json` is now a file that parses as nothing and gets moved aside as
+ * corrupt on the next launch. The window is small — one debounce tick — which
+ * is exactly why it would have been diagnosed as "it lost my data once".
+ *
+ * The pid is in the name too, because the data folder can be a synced folder
+ * that another machine's copy of the app also writes to.
+ */
+let tempSeq = 0
+
+/**
  * Write via a temp file + rename so a crash mid-write cannot truncate the
  * only copy of the user's schedules.
+ *
+ * `fsync` before the rename, and this is the part that is easy to leave out.
+ * Rename is atomic with respect to the *directory*: after it, the name points
+ * at the new file or the old one, never at half a name. It says nothing about
+ * whether the new file's contents have reached the platter. A power cut in the
+ * window between `write` returning (data in the OS cache) and the cache being
+ * flushed leaves a renamed `state.json` whose tail is zeroes — which is the one
+ * outcome atomic-rename is supposed to make impossible, and it looks exactly
+ * like the corruption it was meant to prevent. So the handle is flushed while
+ * it is still under the temp name, where a failure costs nothing.
+ *
+ * The flush is allowed to fail. `fsync` is not implemented on every filesystem
+ * an ambitious user can point the data folder at — SMB shares and some FUSE
+ * mounts return EINVAL — and refusing to save at all there would be a much
+ * worse trade than saving without the durability guarantee.
  */
-async function writeAtomic(file: string, contents: string): Promise<void> {
+async function writeAtomic(file: string, contents: string | Buffer): Promise<void> {
   const target = dataPath(file)
-  const temp = `${target}.tmp`
+  const temp = `${target}.${process.pid}.${++tempSeq}.tmp`
   await fs.mkdir(path.dirname(target), { recursive: true })
-  await fs.writeFile(temp, contents, { encoding: 'utf8', mode: 0o600 })
-  await fs.rename(temp, target)
+  try {
+    const handle = await fs.open(temp, 'w', 0o600)
+    try {
+      await handle.writeFile(contents, typeof contents === 'string' ? 'utf8' : null)
+      try {
+        await handle.sync()
+      } catch {
+        /* see above — no fsync here, so the rename is the only guarantee */
+      }
+    } finally {
+      await handle.close()
+    }
+    await fs.rename(temp, target)
+  } catch (e) {
+    // A temp file that never became the real one is litter, and unique names
+    // mean it would never be reused. Removing it is best-effort: the failure
+    // that brought us here is the one worth reporting.
+    await fs.rm(temp, { force: true }).catch(() => {})
+    throw e
+  }
+}
+
+/**
+ * How old a stray temp file has to be before it is assumed abandoned.
+ *
+ * Unique temp names cost one thing: nothing overwrites yesterday's crashed
+ * write any more, so they pile up in the folder the settings screen reports the
+ * size of. Sweeping them is easy; sweeping one that another process is *still
+ * writing* is not, and the data folder may be a synced folder that a second
+ * machine also writes to. Five minutes is far longer than any single write and
+ * far shorter than "the user notices stray files".
+ */
+const TEMP_SWEEP_AGE_MS = 5 * 60_000
+
+/** Clear temp files left behind by a write that never finished. Best effort. */
+async function sweepStaleTemps(): Promise<void> {
+  const root = dataLocation()
+  let entries: string[]
+  try {
+    entries = await fs.readdir(root)
+  } catch {
+    return
+  }
+  const cutoff = Date.now() - TEMP_SWEEP_AGE_MS
+  for (const entry of entries) {
+    if (!entry.endsWith('.tmp')) continue
+    if (!entry.startsWith(`${STATE_FILE}.`) && !entry.startsWith(`${SECRET_FILE}.`)) continue
+    const full = path.join(root, entry)
+    try {
+      const stat = await fs.stat(full)
+      if (stat.mtimeMs < cutoff) await fs.rm(full, { force: true })
+    } catch {
+      /* vanished, or not ours to delete */
+    }
+  }
 }
 
 async function readJson<T>(file: string): Promise<T | null> {
@@ -332,11 +417,341 @@ async function readJson<T>(file: string): Promise<T | null> {
 // ---------------------------------------------------------------------------
 
 export async function loadState<T>(): Promise<T | null> {
+  // Startup is the one moment nothing is mid-write, which makes it the only
+  // safe moment to tidy up after a write that never finished.
+  void sweepStaleTemps()
   return readJson<T>(STATE_FILE)
 }
 
+/*
+ * ---------------------------------------------------------------------------
+ * Why saving is incremental
+ * ---------------------------------------------------------------------------
+ *
+ * `AppState` is one document, but it is not one *kind* of thing. `draft`
+ * changes on every keystroke and is a few kilobytes. `logs`, `inboxAccounts`
+ * and `outbox` are the bulk of the file — thousands of cached message rows and
+ * hundreds of log entries on a real mailbox — and they change when a sync runs
+ * or a send completes, which is to say rarely, and never while someone is
+ * typing.
+ *
+ * The old implementation did not distinguish them: every save was
+ * `JSON.stringify(state, null, 2)` over the whole document. That is a
+ * *synchronous* walk of every object in the store, on the main process, tens of
+ * milliseconds per debounce tick on a large mailbox — and the main process is
+ * the thread that answers the renderer's IPC, drives the tray, and runs the
+ * scheduler. Typing a subject line into a store with 5000 cached messages meant
+ * re-serialising all 5000 of them three times a second to record a change to
+ * one string.
+ *
+ * So the document is now assembled from per-key fragments. Each top-level key
+ * is serialised on its own and the resulting string is kept; on the next save a
+ * key whose value is structurally unchanged reuses its fragment instead of
+ * being walked again. A keystroke re-serialises `draft` and concatenates the
+ * rest.
+ *
+ * Three properties this design was chosen *for*:
+ *
+ *   - It is still one file. Splitting the big slices into sidecars with a
+ *     manifest would have removed the concatenation too, but it would have
+ *     bought a genuinely hard problem — several files that must be mutually
+ *     consistent across a crash — in exchange for the cheapest part of the
+ *     work. One file keeps the existing temp-and-rename as the *entire*
+ *     consistency argument: `state.json` is replaced whole, in one operation,
+ *     or it is not replaced at all. There is no interleaving of an old slice
+ *     with a new one because there is no moment at which they are separate.
+ *
+ *   - It is invisible on disk. What is written is a plain JSON object with the
+ *     same keys as before; only the whitespace differs. A build from before
+ *     this change reads it with `JSON.parse` and cannot tell. A store written
+ *     by an older build loads here unchanged. There is no version marker
+ *     because there is nothing to version.
+ *
+ *   - It is invisible to the renderer. `saveState(state)` is the same call it
+ *     always was. The renderer has no business knowing how persistence is
+ *     chunked, and an IPC surface that exposed slices would have to be kept in
+ *     agreement with `AppState`'s shape forever.
+ *
+ * What it costs is memory: the values that produced the cached fragments are
+ * retained, so the main process now holds roughly one extra copy of the store
+ * plus the document as strings, where before both were garbage the moment the
+ * write started. That is a real cost — tens of megabytes on a large mailbox —
+ * and it is the right trade, because the renderer already holds the same data
+ * and the thing being bought is a main process that does not stall.
+ *
+ * The comparison is deliberately conservative: `sameJson` returns true only
+ * when it is certain the two values serialise identically, and answers "no" for
+ * anything it does not fully understand. A wrong "no" costs one re-serialise. A
+ * wrong "yes" would write a document describing a state that never existed.
+ */
+
+/** The values behind `sliceFragments`, kept only to compare the next save against. */
+let sliceValues: Record<string, unknown> | null = null
+/**
+ * Each of `sliceValues` as `JSON.stringify` output, already encoded to UTF-8.
+ *
+ * Buffers rather than strings, and this is not a micro-optimisation. Handing a
+ * string to `writeFile` makes Node encode the whole document to UTF-8 before it
+ * can queue the write, and that encoding runs on the event loop — so the
+ * megabytes of unchanged mail we just went to the trouble of *not*
+ * re-serialising were being walked again anyway, one save later, out of sight
+ * of any profiler pointed at `JSON.stringify`. Encoding each fragment once, at
+ * the moment it is produced, is what makes an unchanged slice genuinely free.
+ */
+let sliceFragments: Record<string, Buffer> | null = null
+
+const DOC_OPEN = Buffer.from('{\n', 'utf8')
+const DOC_CLOSE = Buffer.from('\n}\n', 'utf8')
+const DOC_EMPTY = Buffer.from('{}\n', 'utf8')
+
+const hasOwn = (o: object, k: string): boolean => Object.prototype.hasOwnProperty.call(o, k)
+
+/** Objects `JSON.stringify` treats as plain records — not Date, Map, RegExp, … */
+function isPlainRecord(value: object): boolean {
+  const proto = Object.getPrototypeOf(value)
+  return proto === Object.prototype || proto === null
+}
+
+/**
+ * Would these two values produce byte-identical JSON?
+ *
+ * "Would" is the whole contract, and it is stricter than "are these equal".
+ * Key *order* is compared positionally because `{a:1,b:2}` and `{b:2,a:1}` are
+ * the same object and different JSON, and reusing a fragment for the other
+ * order would write a document that is correct but not the one this state
+ * describes — at which point the cache no longer means what the rest of this
+ * file assumes it means.
+ *
+ * Anything exotic returns false rather than being reasoned about. A `Date`
+ * survives structured clone and serialises through `toJSON`; a `Map`
+ * serialises to `{}` whatever is in it. Neither appears in `AppState`, and the
+ * cost of being wrong about them is unbounded while the cost of re-serialising
+ * them is one walk of a slice that does not exist.
+ */
+function sameJson(a: unknown, b: unknown): boolean {
+  // Covers every primitive, including the NaN-vs-NaN case `===` gets wrong.
+  // `Object.is(0, -0)` is false where JSON agrees they are both `0`; that
+  // errs towards re-serialising, which is the safe direction.
+  if (Object.is(a, b)) return true
+  if (a === null || b === null) return false
+  if (typeof a !== 'object' || typeof b !== 'object') return false
+
+  if (Array.isArray(a)) {
+    if (!Array.isArray(b) || a.length !== b.length) return false
+    for (let i = 0; i < a.length; i++) {
+      if (!sameJson(a[i], b[i])) return false
+    }
+    return true
+  }
+  if (Array.isArray(b)) return false
+  if (!isPlainRecord(a) || !isPlainRecord(b)) return false
+
+  const keysA = Object.keys(a)
+  const keysB = Object.keys(b)
+  if (keysA.length !== keysB.length) return false
+  const recA = a as Record<string, unknown>
+  const recB = b as Record<string, unknown>
+  for (let i = 0; i < keysA.length; i++) {
+    const key = keysA[i]
+    if (key !== keysB[i]) return false
+    if (!sameJson(recA[key], recB[key])) return false
+  }
+  return true
+}
+
+/**
+ * The document, rebuilt from whichever fragments are still good.
+ *
+ * One top-level key per line rather than the two-space indent this used to
+ * write. The old format pretty-printed the entire tree, which on a real mailbox
+ * meant a 25 MB file of mostly leading spaces and put V8's slow indenting path
+ * on the hot path of every keystroke. Per-key lines keep the file greppable and
+ * diffable at the granularity anyone actually reads it at — "which slice got
+ * big", "did settings change" — while letting each fragment be produced by the
+ * fast compact `JSON.stringify` and reused as-is with no re-indenting pass.
+ *
+ * The cache is *not* invalidated when a write fails. It records what was last
+ * encoded, not what reached the disk, and since every write emits the whole
+ * document a failed one simply means the same bytes are produced again next
+ * time. Tying it to write outcomes would add a way for the two to disagree.
+ */
+function encodeState(state: unknown): Buffer {
+  if (state === null || typeof state !== 'object' || Array.isArray(state)) {
+    // Not a document with slices — an array, a primitive, a null. Nothing to
+    // cache, and leaving a stale cache behind would compare the next real
+    // state against values from a different shape entirely.
+    sliceValues = null
+    sliceFragments = null
+    return Buffer.from(JSON.stringify(state) ?? 'null', 'utf8')
+  }
+
+  const record = state as Record<string, unknown>
+  const previousValues = sliceValues
+  const previousFragments = sliceFragments
+  const values: Record<string, unknown> = {}
+  const fragments: Record<string, Buffer> = {}
+  const chunks: Buffer[] = [DOC_OPEN]
+
+  for (const key of Object.keys(record)) {
+    const value = record[key]
+    let fragment: Buffer | undefined
+    if (
+      previousValues !== null &&
+      previousFragments !== null &&
+      hasOwn(previousFragments, key) &&
+      sameJson(value, previousValues[key])
+    ) {
+      fragment = previousFragments[key]
+    } else {
+      const json = JSON.stringify(value)
+      // `undefined`, a function or a symbol: `JSON.stringify` drops the key
+      // entirely, and so must this, or the document would gain a key that
+      // stringifying the same object would not have produced.
+      if (json === undefined) continue
+      fragment = Buffer.from(json, 'utf8')
+    }
+    values[key] = value
+    fragments[key] = fragment
+    chunks.push(Buffer.from(`${chunks.length > 1 ? ',\n' : ''}${JSON.stringify(key)}:`, 'utf8'))
+    chunks.push(fragment)
+  }
+
+  sliceValues = values
+  sliceFragments = fragments
+  if (chunks.length === 1) return DOC_EMPTY
+  chunks.push(DOC_CLOSE)
+  return Buffer.concat(chunks)
+}
+
+/*
+ * ---------------------------------------------------------------------------
+ * One write at a time
+ * ---------------------------------------------------------------------------
+ *
+ * `saveState` has three callers that do not know about each other — the
+ * renderer's debounce, its retry after a failed write, and its flush on the way
+ * out — so overlapping calls happen. Letting them run concurrently was the bug
+ * `tempSeq` fixes; letting them run at all is still waste, because the loser of
+ * a race writes a document that is superseded before anyone reads it.
+ *
+ * So there is one slot. A save that arrives while a write is in flight replaces
+ * whatever was waiting, and every caller waiting on that slot resolves together
+ * when it lands. That is honest towards the renderer, which uses the resolution
+ * to mark state as persisted: the promise for save N resolves only once a
+ * document at least as new as N is on disk, which is exactly the fact "no need
+ * to write N again" depends on.
+ */
+type QueuedWrite = { contents: Buffer; resolve: () => void; reject: (e: unknown) => void }
+
+let queuedWrite: QueuedWrite | null = null
+let queuedPromise: Promise<void> | null = null
+let writeLoop: Promise<void> | null = null
+
+/**
+ * Drain the slot until it is empty, then stand down — in one synchronous turn.
+ *
+ * The teardown is inside this function rather than in a `.finally()` chained
+ * onto the promise it returns, and the difference is worth writing down because
+ * the chained form *looks* equivalent and is only accidentally safe:
+ *
+ *   1. The last job settles. `job.resolve()` does not *run* the continuations
+ *      waiting on it — it queues them as microtasks.
+ *   2. The `while` sees an empty slot and the function returns. Its promise
+ *      resolving queues the external `.finally` as a *later* microtask.
+ *   3. A continuation from step 1 runs first and calls `saveState` again.
+ *   4. `enqueueStateWrite` sees `writeLoop` still set, so it parks the job in
+ *      the slot and does not start a loop — relying on a loop that has already
+ *      exited. The job sits there with nobody to write it and a promise that
+ *      never settles: a lost save on the quit path, a hang anywhere else.
+ *
+ * Step 3 is not currently reachable. The only continuation that runs in that
+ * gap is `saveState`'s own `await`, which does nothing but return, so every
+ * external caller resumes a microtask later — after the teardown. That was
+ * checked by reverting to the chained form and re-running the concurrency
+ * tests, which still passed.
+ *
+ * It is written this way regardless. "Safe because of where exactly one `await`
+ * sits in the caller" is not a property anybody will re-derive before adding a
+ * second one, and not depending on it costs a `try/finally`. Doing the teardown
+ * in the same synchronous turn as the loop exit means any
+ * continuation that runs later sees `writeLoop === null` and starts a new
+ * loop. The re-check afterwards costs nothing and closes the case where the
+ * slot was refilled by a `job.reject()` handler running synchronously.
+ */
+async function runWriteQueue(): Promise<void> {
+  try {
+    while (queuedWrite) {
+      const job = queuedWrite
+      queuedWrite = null
+      queuedPromise = null
+      try {
+        await writeAtomic(STATE_FILE, job.contents)
+        job.resolve()
+      } catch (e) {
+        job.reject(e)
+      }
+    }
+  } finally {
+    writeLoop = null
+    if (queuedWrite) startWriteLoop()
+  }
+}
+
+function startWriteLoop(): void {
+  if (writeLoop) return
+  // Not `.finally()` — see `runWriteQueue`, which owns its own teardown.
+  writeLoop = runWriteQueue()
+}
+
+function enqueueStateWrite(contents: Buffer): Promise<void> {
+  if (queuedWrite && queuedPromise) {
+    // Superseded before it ever reached the disk. Whoever is waiting on this
+    // slot wanted "my state is saved", and newer bytes satisfy that.
+    queuedWrite.contents = contents
+    return queuedPromise
+  }
+  let resolve!: () => void
+  let reject!: (e: unknown) => void
+  const promise = new Promise<void>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  queuedWrite = { contents, resolve, reject }
+  queuedPromise = promise
+  startWriteLoop()
+  return promise
+}
+
 export async function saveState(state: unknown): Promise<void> {
-  await writeAtomic(STATE_FILE, JSON.stringify(state, null, 2))
+  // Encoding is synchronous and has to be: the object belongs to the caller,
+  // and yielding first would let the next IPC message hand us a newer one
+  // while this one is half-read. It is also the part this whole section exists
+  // to make cheap, so it is no longer the reason to worry about doing it here.
+  await enqueueStateWrite(encodeState(state))
+}
+
+/** Is there a state write that has not reached the disk yet? */
+export function stateWritePending(): boolean {
+  return writeLoop !== null
+}
+
+/**
+ * Settle every outstanding state write.
+ *
+ * Quitting is the one moment a dropped write is unrecoverable rather than
+ * merely late, and the coalescing above means a save the renderer already
+ * considers "in progress" may not have started. The loop rather than a single
+ * await is deliberate: a save can arrive while the previous one is draining,
+ * and returning after the first drain would leave exactly that one behind.
+ *
+ * Never rejects. The caller is a quit handler, and a failed write there has
+ * nowhere useful to be reported to — the individual `saveState` promise already
+ * carried the error to whoever asked for the write.
+ */
+export async function flushState(): Promise<void> {
+  while (writeLoop) {
+    await writeLoop.catch(() => {})
+  }
 }
 
 // ---------------------------------------------------------------------------

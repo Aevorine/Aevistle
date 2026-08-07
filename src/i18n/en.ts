@@ -10,6 +10,56 @@ export const en = {
   'nav.home': 'Home',
   'home.title': 'Home',
   'home.subtitle': 'Schedules, contacts, templates, the working calendar and the send log.',
+
+  // Self-check. Layer names, not friendly names: the point of this panel is to
+  // say which part of the stack gave way, so "Native bridge" is more useful
+  // than "Connection", even to someone who has to look the term up once.
+  'selfcheck.title': 'Mail self-check',
+  'selfcheck.intro':
+    'Runs each layer between this screen and your mail server, in order. The first problem from the top is the one worth fixing — anything below it may just be a consequence.',
+  'selfcheck.run': 'Run self-check',
+  'selfcheck.rerun': 'Run again',
+  'selfcheck.running': 'Checking…',
+  'selfcheck.summary': '{pass} passed · {warn} warnings · {fail} failed · {skip} not applicable',
+  'selfcheck.allClear': 'Everything this device can check is working.',
+  'selfcheck.live': 'Sends a real test message to your server. Nothing is delivered to anyone.',
+
+  'selfcheck.pass': 'OK',
+  'selfcheck.warn': 'Warning',
+  'selfcheck.fail': 'Failed',
+  'selfcheck.skip': 'Not applicable',
+
+  'selfcheck.platform': 'Platform',
+  'selfcheck.platformWebHint':
+    'This is the browser preview, which has no mail engine. Mail checks are skipped here — run this in the installed app.',
+  'selfcheck.native': 'Native bridge',
+  'selfcheck.nativeHint':
+    'The app is running but its Android half did not answer, so nothing that needs the system — sending, receiving, saved passwords, alarms — can work. Reinstalling the app is the fix; this is not something you can configure.',
+  'selfcheck.notifications': 'Notification permission',
+  'selfcheck.notificationsHint':
+    'Scheduled mail still sends, but you will not be told when one fails.',
+  'selfcheck.exactAlarms': 'Exact alarms',
+  'selfcheck.exactAlarmsHint':
+    'Android may delay a scheduled send to a maintenance window. It will still arrive, just not at the minute you chose.',
+  'selfcheck.noAccounts': 'Mail accounts',
+  'selfcheck.noAccountsHint': 'No account has been added yet, so there is nothing to send with.',
+  'selfcheck.fields': 'Account details',
+  'selfcheck.fieldsHint': 'These fields are empty and are required to send.',
+  'selfcheck.credential': 'Saved credential',
+  'selfcheck.credentialHint':
+    'No usable password is stored. If you set one before, this device may no longer be able to decrypt it — open the account and enter it again.',
+  'selfcheck.credentialOauthHint': 'Open the account and sign in again.',
+  'selfcheck.credentialUnconfiguredHint':
+    'This build has no OAuth client registered for this provider, so sign-in cannot start. Nothing you enter here will change that.',
+  'selfcheck.smtp': 'Sending (SMTP)',
+  'selfcheck.smtpHint': 'The server refused the connection or the sign-in. Its exact words are above.',
+  'selfcheck.imap': 'Receiving (IMAP)',
+  'selfcheck.imapHint': 'Sending may still work. Its exact words are above.',
+  'selfcheck.armed': 'Scheduled sends armed',
+  'selfcheck.armedHint':
+    'Jobs are switched on but none has a next send. Usually an end date that has passed, or a working calendar that rules out every remaining day.',
+  'selfcheck.outbox': 'Outbox',
+  'selfcheck.outboxHint': 'Messages have given up after using all their retries.',
   'nav.inbox': 'Inbox',
   'nav.schedule': 'Scheduled',
   'nav.contacts': 'Contacts',
@@ -233,6 +283,7 @@ export const en = {
   'account.testFail': 'Could not connect',
   'account.testCancel': 'Stop testing',
   'account.testCancelled': 'Test stopped',
+  'account.testBlockedReason': 'Fill in {fields} to test.',
   'account.autoNegotiate': 'Try other ports automatically',
   'account.autoNegotiateHint':
     'If the port and encryption you chose do not work, Aevistle tries the other combination this provider normally accepts instead of just failing.',
@@ -257,7 +308,30 @@ export const en = {
   'account.deleteConfirm': 'Delete this account? Scheduled reminders using it will stop.',
   'account.storedSafely': 'Passwords never leave your device. They are encrypted by the operating system and are not part of any backup or export.',
 
-  'provider.hint.microsoftNoPassword': 'Microsoft no longer accepts passwords for mail apps. Personal Outlook.com, Hotmail and Live accounts stopped accepting them — app passwords included — on 30 April 2026; work accounts lost IMAP password sign-in in 2022-2023. Until this app supports OAuth2, use a provider that still accepts an app password.',
+  // --- OAuth2 sign-in (see src/core/oauth.ts) -------------------------------
+  'account.authMethod': 'Sign-in method',
+  'account.authPassword': 'Password or app password',
+  'account.authOauth2': 'Sign in with the provider (OAuth2)',
+  'account.oauthConnect': 'Connect',
+  'account.oauthReconnect': 'Reconnect',
+  'account.oauthDisconnect': 'Disconnect',
+  'account.oauthConnecting': 'Waiting for your browser…',
+  'account.oauthChecking': 'Checking the connection…',
+  'account.oauthConnected': 'Connected as {address}',
+  'account.oauthNotConnected': 'Not connected yet. Sign in once and Aevistle can send and receive without a password.',
+  'account.oauthNeedsConsent': 'The provider has withdrawn this sign-in, so sending and receiving will fail until you reconnect.',
+  'account.oauthUnconfigured': 'This build of Aevistle has no sign-in registration for this provider, so it cannot connect. Whoever built it needs to register the app.',
+  'account.oauthUnsupported': 'This provider does not offer OAuth2 sign-in. Use a password.',
+  'account.oauthHint': 'Your own browser opens the provider’s page. Aevistle never sees your password, and keeps only a token it can renew.',
+  'account.oauthFailed': 'Sign-in failed: {error}',
+  'validate.accountOauthUnsupported': 'This provider has no OAuth2 sign-in — choose Password instead',
+  'validate.accountOauthUnconfigured': 'This build has no OAuth2 registration for this provider, so signing in will not work',
+  'preflight.warn.oauthNotConnected': 'This account has not been signed in yet, so the server will refuse it.',
+  'preflight.warn.oauthNeedsConsent': 'This account needs reconnecting: the provider has withdrawn the sign-in Aevistle was using.',
+  'preflight.warn.oauthUnconfigured': 'This build cannot sign in to this provider, so the message cannot be sent.',
+  'preflight.warn.oauthUnsupported': 'This provider does not offer OAuth2 sign-in. Change the account to use a password.',
+
+  'provider.hint.microsoftNoPassword': 'Microsoft no longer accepts passwords for mail apps. Personal Outlook.com, Hotmail and Live accounts stopped accepting them — app passwords included — on 30 April 2026, and work accounts lost IMAP password sign-in in 2022-2023. Set the sign-in method below to OAuth2 and connect the account.',
   'provider.hint.appPassword': 'This provider needs an app password, not your normal login password.',
   'provider.hint.authCode': 'Enable SMTP in your mailbox settings and use the authorisation code it gives you.',
   'provider.hint.password': 'Your normal mailbox password works here.',
@@ -479,7 +553,7 @@ export const en = {
   'error.use587Starttls': 'Port 587 expects STARTTLS. Change Encryption to STARTTLS, or use port 465 with SSL/TLS.',
   'error.use993Ssl': 'Port 993 expects SSL/TLS. Change Encryption to SSL/TLS, or use port 143 with STARTTLS.',
   'error.use143Starttls': 'Port 143 expects STARTTLS. Change Encryption to STARTTLS, or use port 993 with SSL/TLS.',
-  'error.microsoftSmtpAuth': 'Microsoft no longer accepts a password here. Personal Outlook.com, Hotmail and Live accounts lost app passwords on 30 April 2026, and work accounts had basic sign-in switched off earlier. Use a provider that still accepts one — Gmail, QQ, 163 or iCloud all do — until OAuth2 sign-in ships.',
+  'error.microsoftSmtpAuth': 'Microsoft no longer accepts a password here. Personal Outlook.com, Hotmail and Live accounts lost app passwords on 30 April 2026, and work accounts had basic sign-in switched off earlier. Open this account, set its sign-in method to OAuth2, and connect it.',
   'error.microsoftEndpoint': 'For Microsoft, use smtp-mail.outlook.com on port 587 with STARTTLS, or outlook.office365.com on port 993 with SSL/TLS for mail. Note that a password alone may no longer be accepted.',
 
   'error.auth': 'The server rejected your username or password',
@@ -547,6 +621,7 @@ export const en = {
   'inbox.push': 'Push new mail instantly',
   'inbox.pushHint': 'Keeps a connection open so mail appears the moment it arrives. The timed check stays on as a fallback.',
   'inbox.testConnection': 'Test receiving',
+  'inbox.testBlockedReason': 'Fill in {fields} to test receiving.',
   'inbox.diagMailbox': 'Inbox',
   'inbox.diagCounts': '{total} messages, {unseen} unread',
   'inbox.syncEvery': 'Check for new mail',
@@ -602,6 +677,7 @@ export const en = {
   'inbox.revealAttachment': 'Show in folder',
   'inbox.openAttachmentFailed': '{name} could not be opened',
   'inbox.allAccounts': 'All accounts',
+  'inbox.unknownAccount': 'Unknown account',
   'inbox.searchScope': 'Search in',
   'inbox.scope.all': 'Everything',
   'inbox.scope.from': 'Sender',
@@ -700,6 +776,7 @@ export const en = {
 
   // --- health board ---
   "health.orphanedAccount": "Pointing at an account that no longer exists: {n} — these will fail",
+  "health.orphanedInboxAccount": "Inbox mail left over from a deleted account: {n} — cleared automatically on next restart",
   "boot.failedTitle": "Aevistle could not start",
   "boot.failedHint": "Your data has not been changed. If this keeps happening, reinstalling the app usually fixes it.",
   "health.schedulerUnreachable": "Reminders are not armed — this device did not accept the schedule, so nothing will send",
@@ -795,6 +872,10 @@ export const en = {
   'account.group': 'Group',
   'account.groupPlaceholder': 'Work, Personal, a client…',
   'account.ungrouped': 'Ungrouped',
+  'account.reorderHint':
+    'Drag the grip to put your accounts in the order you want. On a touchscreen, hold it first. With a keyboard, focus it and press Ctrl or Alt with the arrow keys.',
+  'account.reorderHandle': 'Reorder {name}',
+  'account.reorderMoved': '{name} is now {n} of {total}',
   'preflight.title': 'Before it goes out',
   'preflight.sendsExact': '{n} send(s) over the next {days} days',
   'preflight.sendsAtLeast': 'At least {n} sends over the next {days} days',
@@ -859,6 +940,7 @@ export const en = {
   'outbox.attempts': '{n} attempt(s)',
   'outbox.editInstead': 'Put it back in the editor',
   'outbox.discard': 'Discard',
+  'outbox.andMore': 'and {n} more waiting',
   'condition.title': 'Only send if…',
   'condition.hint': 'Checked at the moment it fires. A check that fails skips the run and says so in the activity log.',
   'condition.unavailable': 'not checkable here',
@@ -1536,6 +1618,7 @@ export const en = {
   'sync.scope.accounts': 'Accounts',
   'sync.scope.accountsHint':
     '{n} account(s). The password for each one that has a saved password travels sealed over this encrypted link and is put straight into the other device’s keychain, so you never type it again. It is never written to a plain file on either side.',
+  'sync.scope.signInAgain': 'sign in again on the new device',
   'sync.scope.schedule': 'Schedule',
   'sync.scope.scheduleHint': '{n} reminder(s), plus your working calendar.',
   'sync.scope.contacts': 'Contacts',

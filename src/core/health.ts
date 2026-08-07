@@ -13,6 +13,7 @@
  * just anxiety.
  */
 
+import { needsStoredPassword } from './accounts'
 import type { AppState } from './types'
 
 export type HealthLevel = 'danger' | 'warning' | 'info'
@@ -117,7 +118,11 @@ export function collectHealth(
   }
 
   // An account with no stored password will fail at connect time, every time.
-  const unauthenticated = state.accounts.filter((a) => !a.hasSecret)
+  // `needsStoredPassword` rather than `!hasSecret`: an OAuth2 account holds a
+  // grant instead of a password and an IP-authenticated relay holds neither, so
+  // the bare test raised a permanent danger banner on two kinds of account that
+  // were working perfectly.
+  const unauthenticated = state.accounts.filter(needsStoredPassword)
   if (unauthenticated.length > 0) {
     issues.push({
       id: 'no-secret',
@@ -157,6 +162,46 @@ export function collectHealth(
   }
 
   // --- things that are probably not what was meant ------------------------
+
+  /**
+   * The same shape of orphan as `orphaned` above, for the inbox rather than
+   * the schedule — a row in `state.inboxAccounts` naming an id `state.accounts`
+   * no longer holds.
+   *
+   * A warning rather than a danger, unlike its schedule counterpart: an
+   * orphaned job silently fails to send, but an orphaned inbox row does not
+   * fail at anything — it just sits there, briefly, as the one place a race
+   * this app used to have left a trace. `AppState.tsx` now closes that race
+   * at its source (the dispatch in `syncInboxAccount`) and again in the
+   * `upsertInboxAccount` reducer case, and sweeps any row that already
+   * reached disk before those guards existed on the very next boot — so by
+   * the time this runs, the row is normally already gone. This check is what
+   * is left for the paths those three do not cover: a document edited by
+   * hand, one restored from a backup older than the fix, or a future writer
+   * that reaches the reducer some way this file never anticipated. Without
+   * it, the only place a leftover row ever surfaced was `InboxView`, as a
+   * filter tab labelled with its own raw `acct_...` id — which is the
+   * phantom account this whole chain of guards exists to stop.
+   *
+   * Secrets and the on-disk remote-image cache can suffer the same kind of
+   * orphaning — a credential or a cached picture left behind for an id
+   * nothing points to any more — but neither is *cheaply* checked here: both
+   * live outside `state`, behind an async platform-bridge call, and this
+   * function is a synchronous read of the document that `HealthBoard`
+   * re-runs on every keystroke in the compose form. Reaching into the
+   * keystore or the filesystem on that schedule would trade a rare orphaned
+   * file for a real, constant cost.
+   */
+  const orphanedInbox = state.inboxAccounts.filter((i) => !accountIds.has(i.accountId))
+  if (orphanedInbox.length > 0) {
+    issues.push({
+      id: 'orphaned-inbox-account',
+      level: 'warning',
+      key: 'health.orphanedInboxAccount',
+      values: { n: orphanedInbox.length },
+      goTo: 'settings',
+    })
+  }
 
   // Notifications the user will never see. Not "probably not what was meant" —
   // the send happens and its result is announced to nobody, which is the same

@@ -2,6 +2,7 @@ package dev.aevistle.app;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.util.Log;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -22,6 +23,7 @@ import java.util.List;
  */
 final class InboxCache {
 
+    private static final String TAG = "InboxCache";
     private static final String PREFS = "aevistle_inbox";
     private static final String KEY_ACCOUNTS = "accounts";
 
@@ -98,13 +100,19 @@ final class InboxCache {
      * Drop the given (folderPath, uid) pairs from an account's cached message
      * list. Local-cache-only, same as the desktop `deleteInboxMessages` IPC
      * handler — never touches the IMAP server.
+     *
+     * @return false when the pruned list could not actually be written back —
+     *         the caller should surface that as a failure rather than
+     *         resolving as if the messages were gone, because {@code upsert}
+     *         below would otherwise silently re-save the account with its
+     *         original, unpruned `messages` still attached.
      */
-    void deleteMessages(String accountId, JSONArray items) {
+    boolean deleteMessages(String accountId, JSONArray items) {
         JSONObject account = account(accountId);
-        if (account == null || items == null) return;
+        if (account == null || items == null) return true;
 
         JSONArray messages = account.optJSONArray("messages");
-        if (messages == null) return;
+        if (messages == null) return true;
 
         JSONArray kept = new JSONArray();
         for (int i = 0; i < messages.length(); i++) {
@@ -114,9 +122,18 @@ final class InboxCache {
         }
         try {
             account.put("messages", kept);
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            // `kept` is the pruned list. If it cannot be attached to
+            // `account`, the `upsert` below would save `account` exactly as
+            // it was read — the deletion the caller asked for would silently
+            // not happen while the JS layer, told nothing, believes it did.
+            // Log it and tell the caller so it can reject instead of
+            // resolving.
+            Log.e(TAG, "deleteMessages: could not prune messages for account " + accountId, e);
+            return false;
         }
         upsert(account);
+        return true;
     }
 
     private static boolean matches(JSONObject message, JSONArray items) {

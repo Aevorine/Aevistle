@@ -71,10 +71,16 @@ export const PROVIDERS: ProviderPreset[] = [
      * It used to point at https://account.live.com/proofs/AppPassword, and
      * sending someone there is now worse than sending them nowhere: Microsoft
      * stopped accepting app passwords for IMAP/POP/SMTP on personal accounts
-     * on 30 April 2026, so the page either does not issue one or issues one
-     * that will be refused. A "get an app password" button that leads to a
-     * dead end reads as the app being broken rather than the method being
-     * withdrawn, so the hint says what happened instead.
+     * on 30 April 2026 — a date that has now passed — so the page either does
+     * not issue one or issues one that is refused at sign-in. A "get an app
+     * password" button leading to a dead end reads as the app being broken
+     * rather than the method having been withdrawn, so the hint says what
+     * happened instead.
+     *
+     * As of that date this preset is OAuth2-only in practice, which is what
+     * `requiresOAuth('outlook')` in `core/oauth.ts` records and what the account
+     * dialog acts on: choosing this provider selects OAuth2 rather than leaving
+     * the user to discover that no password they can type will work.
      */
     hintKey: 'provider.hint.microsoftNoPassword',
     attachmentLimitMb: 20,

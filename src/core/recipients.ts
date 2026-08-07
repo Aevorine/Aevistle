@@ -37,14 +37,33 @@ export interface Pick {
  * inside a band matters far less than the bands being right.
  */
 export function buildPool(suggestions: Contact[], recents: RecentRecipient[]): Pick[] {
+  // Both lists come straight out of the stored document, so both can be absent
+  // on a record written by an older build or merged in from a paired device.
+  // This used to throw on the first `.filter`, which unmounted `TagField` and —
+  // with no error boundary above it at the time — the entire application with
+  // it. Treating a missing list as an empty one costs a suggestion; throwing
+  // cost the user every screen.
+  suggestions = Array.isArray(suggestions) ? suggestions : []
+  recents = Array.isArray(recents) ? recents : []
   const byAddress = new Map<string, Pick>()
   for (const c of suggestions) {
+    // `tags` is optional in every store that has ever written a contact — the
+    // field arrived after the type did — so a contact saved by an older build,
+    // imported from a backup, or merged in over sync can reach here without
+    // one. Reading `.filter` off it threw, and the throw surfaced as a blank
+    // compose screen rather than as a contact with no tags.
+    //
+    // An address is the one field a recipient cannot be without, so a record
+    // missing that is skipped rather than defaulted: there is nothing useful
+    // to put in the field, and a blank chip is worse than one absent name.
+    if (!c || typeof c.address !== 'string' || !c.address) continue
+    const tags = Array.isArray(c.tags) ? c.tags : []
     const key = c.address.toLowerCase()
     // A contact book with the same address twice is a data-entry accident, not
     // two people; keep the first and let the second only contribute its tags.
     const existing = byAddress.get(key)
     if (existing) {
-      for (const tag of c.tags) if (tag && !existing.tags.includes(tag)) existing.tags.push(tag)
+      for (const tag of tags) if (tag && !existing.tags.includes(tag)) existing.tags.push(tag)
       if (c.pinned) {
         existing.pinned = true
         existing.weight = Math.max(existing.weight, 1000)
@@ -57,11 +76,15 @@ export function buildPool(suggestions: Contact[], recents: RecentRecipient[]): P
       address: c.address,
       weight: c.pinned ? 1000 : 10,
       pinned: c.pinned,
-      tags: c.tags.filter(Boolean),
+      tags: tags.filter(Boolean),
       historyOnly: false,
     })
   }
   for (const r of recents) {
+    // Same reasoning as the contact loop above: history is written by whichever
+    // build sent the mail, so a row without an address is possible and is not
+    // worth taking the screen down for.
+    if (!r || typeof r.address !== 'string' || !r.address) continue
     const key = r.address.toLowerCase()
     const existing = byAddress.get(key)
     // Damped, so one address written to forty times cannot bury everyone.

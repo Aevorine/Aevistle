@@ -5,6 +5,55 @@ export const es: Translations = {
 
   'nav.compose': 'Redactar',
   'nav.home': 'Inicio',
+  'selfcheck.title': 'Autodiagnóstico del correo',
+  'selfcheck.intro':
+    'Comprueba en orden cada capa entre esta pantalla y tu servidor de correo. El primer problema desde arriba es el que conviene resolver: lo que aparezca por debajo puede ser solo una consecuencia.',
+  'selfcheck.run': 'Ejecutar autodiagnóstico',
+  'selfcheck.rerun': 'Volver a ejecutar',
+  'selfcheck.running': 'Comprobando…',
+  'selfcheck.summary': '{pass} correctas · {warn} avisos · {fail} fallidas · {skip} no aplicables',
+  'selfcheck.allClear': 'Todo lo que este dispositivo puede comprobar funciona.',
+  'selfcheck.live':
+    'Envía una conexión de prueba real a tu servidor. No se entrega ningún mensaje a nadie.',
+
+  'selfcheck.pass': 'Correcto',
+  'selfcheck.warn': 'Aviso',
+  'selfcheck.fail': 'Fallo',
+  'selfcheck.skip': 'No aplicable',
+
+  'selfcheck.platform': 'Plataforma',
+  'selfcheck.platformWebHint':
+    'Esta es la vista previa del navegador, que no tiene motor de correo. Las comprobaciones de correo se omiten aquí: ejecútalas en la aplicación instalada.',
+  'selfcheck.native': 'Puente nativo',
+  'selfcheck.nativeHint':
+    'La aplicación funciona, pero su mitad Android no respondió, así que nada que dependa del sistema —enviar, recibir, contraseñas guardadas, alarmas— puede funcionar. La solución es reinstalar la aplicación; esto no se puede configurar.',
+  'selfcheck.notifications': 'Permiso de notificaciones',
+  'selfcheck.notificationsHint':
+    'El correo programado se sigue enviando, pero no se te avisará cuando alguno falle.',
+  'selfcheck.exactAlarms': 'Alarmas exactas',
+  'selfcheck.exactAlarmsHint':
+    'Android puede retrasar un envío programado hasta una ventana de mantenimiento. Llegará igualmente, pero no en el minuto que elegiste.',
+  'selfcheck.noAccounts': 'Cuentas de correo',
+  'selfcheck.noAccountsHint': 'Todavía no se ha añadido ninguna cuenta, así que no hay con qué enviar.',
+  'selfcheck.fields': 'Datos de la cuenta',
+  'selfcheck.fieldsHint': 'Estos campos están vacíos y son obligatorios para enviar.',
+  'selfcheck.credential': 'Credencial guardada',
+  'selfcheck.credentialHint':
+    'No hay ninguna contraseña utilizable. Si guardaste una antes, puede que este dispositivo ya no pueda descifrarla: abre la cuenta y vuelve a introducirla.',
+  'selfcheck.credentialOauthHint': 'Abre la cuenta y vuelve a iniciar sesión.',
+  'selfcheck.credentialUnconfiguredHint':
+    'Esta versión no tiene registrado un cliente OAuth para este proveedor, así que el inicio de sesión no puede empezar. Nada de lo que introduzcas aquí lo cambiará.',
+  'selfcheck.smtp': 'Envío (SMTP)',
+  'selfcheck.smtpHint':
+    'El servidor rechazó la conexión o el inicio de sesión. Sus palabras exactas están arriba.',
+  'selfcheck.imap': 'Recepción (IMAP)',
+  'selfcheck.imapHint': 'El envío puede seguir funcionando. Sus palabras exactas están arriba.',
+  'selfcheck.armed': 'Envíos programados listos',
+  'selfcheck.armedHint':
+    'Hay tareas activadas, pero ninguna tiene un próximo envío. Suele ser una fecha de fin ya pasada, o un calendario laboral que excluye todos los días restantes.',
+  'selfcheck.outbox': 'Bandeja de salida',
+  'selfcheck.outboxHint': 'Hay mensajes que se rindieron tras agotar todos sus reintentos.',
+
   'home.title': 'Inicio',
   'home.subtitle': 'Programaciones, contactos, plantillas, el calendario laboral y el registro de envíos.',
   'nav.inbox': 'Bandeja de entrada',
@@ -233,7 +282,30 @@ export const es: Translations = {
   'account.deleteConfirm': '¿Eliminar esta cuenta? Los recordatorios programados que la usan dejarán de funcionar.',
   'account.storedSafely': 'Las contraseñas nunca salen de tu dispositivo. El sistema operativo las cifra y no aparecen en ninguna copia de seguridad ni exportación.',
 
-  'provider.hint.microsoftNoPassword': 'Microsoft ya no acepta contraseñas para clientes de correo. Las cuentas personales de Outlook.com, Hotmail y Live dejaron de aceptarlas — contraseñas de aplicación incluidas — el 30 de abril de 2026; las cuentas de trabajo perdieron el inicio de sesión IMAP con contraseña en 2022-2023. Hasta que esta aplicación admita OAuth2, usa un proveedor que aún acepte una contraseña de aplicación.',
+  // --- OAuth2 sign-in (see src/core/oauth.ts) -------------------------------
+  'account.authMethod': 'Método de inicio de sesión',
+  'account.authPassword': 'Contraseña o contraseña de aplicación',
+  'account.authOauth2': 'Iniciar sesión con el proveedor (OAuth2)',
+  'account.oauthConnect': 'Conectar',
+  'account.oauthReconnect': 'Volver a conectar',
+  'account.oauthDisconnect': 'Desconectar',
+  'account.oauthConnecting': 'Esperando a tu navegador…',
+  'account.oauthChecking': 'Comprobando la conexión…',
+  'account.oauthConnected': 'Conectado como {address}',
+  'account.oauthNotConnected': 'Todavía sin conectar. Inicia sesión una vez y Aevistle podrá enviar y recibir sin contraseña.',
+  'account.oauthNeedsConsent': 'El proveedor ha retirado este inicio de sesión, así que el envío y la recepción fallarán hasta que vuelvas a conectar.',
+  'account.oauthUnconfigured': 'Esta versión de Aevistle no tiene registro de inicio de sesión para este proveedor, así que no puede conectarse. Quien la compiló debe registrar la aplicación.',
+  'account.oauthUnsupported': 'Este proveedor no ofrece inicio de sesión OAuth2. Usa una contraseña.',
+  'account.oauthHint': 'Se abre la página del proveedor en tu propio navegador. Aevistle nunca ve tu contraseña y solo guarda un token que puede renovar.',
+  'account.oauthFailed': 'Error al iniciar sesión: {error}',
+  'validate.accountOauthUnsupported': 'Este proveedor no tiene inicio de sesión OAuth2: elige Contraseña',
+  'validate.accountOauthUnconfigured': 'Esta versión no tiene registro OAuth2 para este proveedor, así que iniciar sesión no funcionará',
+  'preflight.warn.oauthNotConnected': 'Esta cuenta aún no ha iniciado sesión; el servidor la rechazará.',
+  'preflight.warn.oauthNeedsConsent': 'Esta cuenta necesita volver a conectarse: el proveedor ha retirado el inicio de sesión que usaba Aevistle.',
+  'preflight.warn.oauthUnconfigured': 'Esta versión no puede iniciar sesión con este proveedor, así que el mensaje no se puede enviar.',
+  'preflight.warn.oauthUnsupported': 'Este proveedor no ofrece inicio de sesión OAuth2. Cambia la cuenta para que use una contraseña.',
+
+  'provider.hint.microsoftNoPassword': 'Microsoft ya no acepta contraseñas para clientes de correo. Las cuentas personales de Outlook.com, Hotmail y Live dejaron de aceptarlas — contraseñas de aplicación incluidas — el 30 de abril de 2026, y las cuentas de trabajo perdieron el inicio de sesión IMAP con contraseña en 2022-2023. Cambia abajo el método de inicio de sesión a OAuth2 y conecta la cuenta.',
   'provider.hint.appPassword': 'Este proveedor necesita una contraseña de aplicación, no la de tu cuenta habitual.',
   'provider.hint.authCode': 'Activa el SMTP en los ajustes de tu buzón y usa el código de autorización que te dé.',
   'provider.hint.password': 'Aquí funciona tu contraseña de correo habitual.',
@@ -451,6 +523,7 @@ export const es: Translations = {
   // --- added in this release ---
   'account.testCancel': 'Detener la prueba',
   'account.testCancelled': 'Prueba detenida',
+  'account.testBlockedReason': 'Rellena {fields} para poder probar.',
   'account.autoNegotiate': 'Probar otros puertos automáticamente',
   'account.autoNegotiateHint': 'Si el puerto y el cifrado elegidos no funcionan, Aevistle prueba la otra combinación que este proveedor suele aceptar en vez de fallar sin más.',
   'account.adjusted': 'Conectado por el puerto {port} usando {security}',
@@ -522,7 +595,7 @@ export const es: Translations = {
   'error.use587Starttls': 'El puerto 587 espera STARTTLS. Cambia el cifrado a STARTTLS, o usa el puerto 465 con SSL/TLS.',
   'error.use993Ssl': 'El puerto 993 espera SSL/TLS. Cambia el cifrado a SSL/TLS, o usa el puerto 143 con STARTTLS.',
   'error.use143Starttls': 'El puerto 143 espera STARTTLS. Cambia el cifrado a STARTTLS, o usa el puerto 993 con SSL/TLS.',
-  'error.microsoftSmtpAuth': 'Microsoft ya no acepta contraseñas aquí. Las cuentas Outlook.com, Hotmail y Live perdieron las contraseñas de aplicación el 30 de abril de 2026, y las de empresa mucho antes. Usa un proveedor que todavía las acepte — Gmail, QQ, 163 o iCloud — hasta que llegue el inicio de sesión OAuth2.',
+  'error.microsoftSmtpAuth': 'Microsoft ya no acepta contraseñas aquí. Las cuentas Outlook.com, Hotmail y Live perdieron las contraseñas de aplicación el 30 de abril de 2026, y las de empresa mucho antes. Abre esta cuenta, cambia su método de inicio de sesión a OAuth2 y conéctala.',
   'error.microsoftEndpoint': 'Para Microsoft: smtp-mail.outlook.com puerto 587 con STARTTLS para enviar, outlook.office365.com puerto 993 con SSL/TLS para recibir. Aun así, puede que una contraseña sola ya no baste.',
   'toast.sentDetail': 'Entregado a {n} destinatario(s) en {ms} ms',
   'toast.quietHours': 'Retenido hasta que acaben las horas de silencio',
@@ -545,6 +618,7 @@ export const es: Translations = {
   'inbox.push': 'Correo nuevo al instante',
   'inbox.pushHint': 'Mantiene una conexión abierta para que el correo aparezca en cuanto llega. La comprobación periódica sigue activa como respaldo.',
   'inbox.testConnection': 'Probar la recepción',
+  'inbox.testBlockedReason': 'Rellena {fields} para poder probar la recepción.',
   'inbox.diagMailbox': 'Bandeja de entrada',
   'inbox.diagCounts': '{total} mensajes, {unseen} sin leer',
   'inbox.syncEvery': 'Buscar correo nuevo',
@@ -599,6 +673,7 @@ export const es: Translations = {
   'inbox.revealAttachment': 'Mostrar en la carpeta',
   'inbox.openAttachmentFailed': 'No se pudo abrir {name}',
   'inbox.allAccounts': 'Todas las cuentas',
+  'inbox.unknownAccount': 'Cuenta desconocida',
   'inbox.searchScope': 'Buscar en',
   'inbox.scope.all': 'Todo',
   'inbox.scope.from': 'Remitente',
@@ -691,6 +766,7 @@ export const es: Translations = {
 
   // --- health board ---
   "health.orphanedAccount": "{n} recordatorio(s) apuntan a una cuenta eliminada: fallarán",
+  "health.orphanedInboxAccount": "{n} mensaje(s) de una cuenta eliminada: se borrarán automáticamente al reiniciar",
   "boot.failedTitle": "Aevistle no ha podido iniciarse",
   "boot.failedHint": "Tus datos no se han modificado. Si sigue ocurriendo, reinstalar la aplicación suele bastar.",
   "health.schedulerUnreachable": "Los recordatorios no están activos: este dispositivo no aceptó la programación y no se enviará nada",
@@ -786,6 +862,10 @@ export const es: Translations = {
   'account.group': 'Grupo',
   'account.groupPlaceholder': 'Trabajo, personal, un cliente…',
   'account.ungrouped': 'Sin grupo',
+  'account.reorderHint':
+    'Arrastra el asa para poner tus cuentas en el orden que quieras. En una pantalla táctil, mantén pulsado primero. Con el teclado, ponla en foco y pulsa Ctrl o Alt con las flechas.',
+  'account.reorderHandle': 'Reordenar {name}',
+  'account.reorderMoved': '{name} es ahora {n} de {total}',
   'preflight.title': 'Antes de enviar',
   'preflight.sendsExact': '{n} envío(s) en los próximos {days} días',
   'preflight.sendsAtLeast': 'Al menos {n} envíos en los próximos {days} días',
@@ -850,6 +930,7 @@ export const es: Translations = {
   'outbox.attempts': '{n} intento(s)',
   'outbox.editInstead': 'Volver al editor',
   'outbox.discard': 'Descartar',
+  'outbox.andMore': 'y {n} más en espera',
   'condition.title': 'Enviar solo si…',
   'condition.hint': 'Se comprueba al dispararse. Si falla, omite el envío y lo registra.',
   'condition.unavailable': 'no verificable aquí',
@@ -1523,6 +1604,7 @@ export const es: Translations = {
   'sync.scope.accounts': 'Cuentas',
   'sync.scope.accountsHint':
     '{n} cuenta(s). La contraseña de cada una que tenga una guardada viaja sellada por este enlace cifrado y entra directamente en el llavero del otro dispositivo, así no vuelves a escribirla. Nunca se escribe en un archivo sin cifrar en ninguno de los dos lados.',
+  'sync.scope.signInAgain': 'inicia sesión de nuevo en el otro dispositivo',
   'sync.scope.schedule': 'Programación',
   'sync.scope.scheduleHint': '{n} recordatorio(s), más tu calendario laboral.',
   'sync.scope.contacts': 'Contactos',

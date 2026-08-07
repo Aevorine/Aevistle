@@ -35,6 +35,7 @@ import type {
 import type { DownloadProgress, UpdateAsset, UpdateInfo } from './update'
 import type { ControlEndpoint, ControlRequest, ControlResponse } from './control'
 import type { FeedResponse } from './feeds'
+import type { OAuthAccountStatus, OAuthConsentResult } from './oauth'
 import type { PairingEvent, PairingPayload, PairMode } from './pairing'
 import type { PairingEnvelope } from './pairingCrypto'
 import type {
@@ -89,6 +90,30 @@ export interface DesktopApi {
   setSecret(accountId: string, secret: string, kind?: SecretKind): Promise<void>
   hasSecret(accountId: string, kind?: SecretKind): Promise<boolean>
   deleteSecret(accountId: string, kind?: SecretKind): Promise<void>
+
+  // --- OAuth2 sign-in ------------------------------------------------------
+  // Deliberately three narrow methods rather than a general "get me a token".
+  // The refresh token is written to the keystore by the main process and read
+  // back only by the transports; nothing here can return one, which is what
+  // keeps an XSS in the renderer from becoming a permanent mailbox credential.
+  /**
+   * Open the provider's consent page in the OS browser, catch the loopback
+   * redirect, exchange the code, and store the refresh token.
+   *
+   * Resolves when the user is done — this can sit for minutes, and that is
+   * correct rather than a hang. `loginHint` pre-fills the account picker and
+   * nothing more; the address in the result is the one actually signed in as,
+   * which may differ.
+   */
+  oauthConsent(
+    accountId: string,
+    providerId: string,
+    loginHint: string,
+  ): Promise<OAuthConsentResult>
+  /** Whether this account is connected, never connected, or needs re-consent. */
+  oauthStatus(accountId: string, providerId: string): Promise<OAuthAccountStatus>
+  /** Delete the stored grant. Does not revoke it at the provider — only the user can do that. */
+  oauthDisconnect(accountId: string): Promise<void>
 
   sendNow(draft: MessageDraft, account: MailAccount): Promise<SendResult>
   testConnection(account: MailAccount, secret?: string): Promise<SendResult>
@@ -309,6 +334,9 @@ export const IPC = {
   setSecret: 'aevistle:set-secret',
   hasSecret: 'aevistle:has-secret',
   deleteSecret: 'aevistle:delete-secret',
+  oauthConsent: 'aevistle:oauth-consent',
+  oauthStatus: 'aevistle:oauth-status',
+  oauthDisconnect: 'aevistle:oauth-disconnect',
   sendNow: 'aevistle:send-now',
   testConnection: 'aevistle:test-connection',
   prewarm: 'aevistle:prewarm',

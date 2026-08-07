@@ -226,6 +226,14 @@ function shiftOffWeekend(t: number, cal: WorkCalendar): number {
  * that changes is that "weekend" now means what the calendar says.
  */
 export function migrateSkipWeekends(rec: Recurrence): Recurrence {
+  // Runs on every stored job at boot, before anything has checked the record's
+  // shape — so it is the first thing a malformed job reaches, and for a while
+  // it was also the thing that took the whole app down with it: reading
+  // `.skipWeekends` off an undefined `recurrence` threw, boot never finished,
+  // and every screen stayed on its loading skeleton with no error shown. A
+  // missing recurrence is a damaged record, not a crash; the caller disables
+  // the job and reports it. See the hydrate guard in `state/AppState.tsx`.
+  if (!rec) return rec
   if (!rec.skipWeekends) return rec
   // The flag was never applied to one-off sends (`rec.kind !== 'once'` below),
   // so carrying it into a policy would change behaviour rather than preserve it.

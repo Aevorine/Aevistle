@@ -17,6 +17,10 @@ export function createDesktopBridge(): PlatformBridge {
     hasSecret: (id, kind) => api.hasSecret(id, kind),
     deleteSecret: (id, kind) => api.deleteSecret(id, kind),
 
+    oauthConsent: (id, providerId, loginHint) => api.oauthConsent(id, providerId, loginHint),
+    oauthStatus: (id, providerId) => api.oauthStatus(id, providerId),
+    oauthDisconnect: (id) => api.oauthDisconnect(id),
+
     sendNow: (draft, account) => api.sendNow(draft, account),
     testConnection: (account, secret) => api.testConnection(account, secret),
     prewarm: (account) => api.prewarm(account),

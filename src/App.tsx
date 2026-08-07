@@ -27,6 +27,7 @@ import { CodeCheckProvider } from './state/CodeCheck'
 import { claimStartupUpdateCheck, runUpdateCheck } from './core/update'
 import brandMark from './assets/brand.png'
 import { Skeleton } from './components/Skeleton'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { actionableHits } from './core/codeHistory'
 
 /**
@@ -490,6 +491,32 @@ function Shell() {
         </nav>
 
         <div className="sidebar__footer">
+          {/*
+            The desktop door to Home — see `core/nav.ts`'s `HomeFeatureId`/
+            `HOME_FEATURES` for what is behind it, and that same file's `ViewId`
+            comment for why Home itself is not a member of `NAV` above.
+
+            Not a numbered tab. `NAV_SHORTCUTS` in `components/Shortcuts.tsx`
+            gives every entry in `NAV` a `Ctrl+N`, and `check-shortcuts.mjs`
+            asserts the two never drift apart in length — so a tenth entry
+            there would need a `Ctrl+0` (the browser's own zoom reset, already
+            ruled out by the comment on `MAX_NAV_SHORTCUT`) or would leave one
+            of the nine numbered keys silently pointing at nothing. A footer
+            button asks for neither: Home is a doorway to four features that
+            had no door of their own before this button existed, not a
+            destination competing for a shortcut the other nine already share
+            out completely.
+          */}
+          <IconButton
+            label={t('nav.home')}
+            aria-current={view === 'home' ? 'page' : undefined}
+            onClick={() => {
+              setOpenAccountOnMount(false)
+              setView('home')
+            }}
+          >
+            <IconHome size={17} />
+          </IconButton>
           <IconButton
             label={collapsed ? t('nav.expand') : t('nav.collapse')}
             onClick={() => setCollapsed((v) => !v)}
@@ -499,6 +526,10 @@ function Shell() {
         </div>
       </aside>
 
+      {/* Keyed on `view` so switching screens clears a failure rather than
+          stranding the user on it: the boundary remounts, and a screen that
+          threw on data the user has since fixed elsewhere renders again. */}
+      <ErrorBoundary key={view} label={view}>
       <main className="main">
         {bridge?.platform === 'web' ? (
           <div style={{ padding: 'var(--sp-4) var(--sp-5) 0' }}>
@@ -570,24 +601,29 @@ function Shell() {
           </Suspense>
         ) : null}
 
-        {/* The phone hub. Guarded on `narrow` as well as on `view`, because a
-            window dragged wide while Home is open would otherwise leave the
-            user on a screen with no tab on the sidebar — Home is not one of
-            the nine. Falling back to Compose is the same landing the app
-            starts on. */}
+        {/* The hub — a phone's only door to five screens, and every platform's
+            door to the four `HOME_FEATURES` tiles (see the sidebar footer
+            button above, and `HomeView`'s own module doc for the split
+            between the two kinds of tile). This used to fall back to
+            `ComposeView` whenever `view` was `'home'` but the window was not
+            narrow, because Home had no desktop entry point and the only way
+            to land here on a wide window was a phone resized mid-visit — a
+            case worth a graceful landing, not a screen worth building. Now
+            that the footer button can request Home on a desktop on purpose,
+            that fallback would render the wrong screen for a deliberate
+            click, so `HomeView` renders unconditionally and decides for
+            itself, via `narrow`, which tiles to draw. */}
         {view === 'home' ? (
-          narrow ? (
-            <Suspense fallback={<Skeleton shape="list" rows={5} />}>
-              <HomeView onCompose={() => setView('compose')} armedCount={armedCount} />
-            </Suspense>
-          ) : (
-            <ComposeView
-              onGoToAccounts={goToAccounts}
-              onNavigate={(where) => (where === 'settings' ? goToAccounts() : setView(where))}
+          <Suspense fallback={<Skeleton shape="list" rows={5} />}>
+            <HomeView
+              onCompose={() => setView('compose')}
+              armedCount={armedCount}
+              narrow={narrow}
             />
-          )
+          </Suspense>
         ) : null}
       </main>
+      </ErrorBoundary>
 
       <CommandPalette
         open={paletteOpen}
@@ -614,9 +650,15 @@ export default function App() {
         <ToastProvider>
           {/* Above the shell, so extraction and the "check now" state outlive
               every screen switch — see the header comment in `CodeCheck`. */}
-          <CodeCheckProvider>
-            <Shell />
-          </CodeCheckProvider>
+          {/* The backstop. Per-view boundaries cover the screens; this one
+              covers the frame around them — the sidebar, the palette, the
+              toasts — so a throw there is still a message rather than a
+              white window. */}
+          <ErrorBoundary label="application">
+            <CodeCheckProvider>
+              <Shell />
+            </CodeCheckProvider>
+          </ErrorBoundary>
         </ToastProvider>
       </I18nBridge>
     </AppProvider>

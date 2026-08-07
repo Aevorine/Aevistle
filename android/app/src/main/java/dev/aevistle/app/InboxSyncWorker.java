@@ -1,6 +1,7 @@
 package dev.aevistle.app;
 
 import android.content.Context;
+import android.util.Log;
 
 import androidx.annotation.NonNull;
 import androidx.work.Worker;
@@ -21,6 +22,7 @@ import java.util.List;
  */
 public class InboxSyncWorker extends Worker {
 
+    private static final String TAG = "InboxSyncWorker";
     static final String UNIQUE_NAME = "aevistle-inbox-sync";
 
     public InboxSyncWorker(@NonNull Context context, @NonNull WorkerParameters params) {
@@ -49,7 +51,24 @@ public class InboxSyncWorker extends Worker {
                 try {
                     config.put("lastSyncError", e.getMessage() == null ? e.toString() : e.getMessage());
                     cache.upsert(config);
-                } catch (Exception ignored) {
+                } catch (Exception recordError) {
+                    // The sync itself already failed (`e`) — this block exists
+                    // only to tell the Inbox screen why, by writing
+                    // `lastSyncError` onto the cached account. If that write
+                    // throws too, the account is left exactly as it was before
+                    // this run: no new messages and no error, which the Inbox
+                    // screen cannot tell apart from "nothing new". Log it so the
+                    // failure is at least diagnosable, and try once more against
+                    // a fresh copy of the account rather than repeating the
+                    // mutation that may itself have caused this to throw.
+                    Log.e(TAG, "doWork: could not record sync failure for account " + accountId, recordError);
+                    try {
+                        JSONObject retry = new JSONObject(config.toString());
+                        retry.put("lastSyncError", e.getMessage() == null ? e.toString() : e.getMessage());
+                        cache.upsert(retry);
+                    } catch (Exception fallbackError) {
+                        Log.e(TAG, "doWork: fallback sync-error record also failed for account " + accountId, fallbackError);
+                    }
                 }
             }
         }

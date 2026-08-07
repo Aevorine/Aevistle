@@ -448,3 +448,19 @@ export const IconKeyNode = (p: IconProps) => (
     <path d="M18 4v5" />
   </Svg>
 )
+
+/** Six dots in two columns — the grip on a row that can be dragged into a new
+    position. Dots rather than the more common three stacked lines: the lines
+    read as "menu" everywhere else in this app's own toolbars, and a control
+    whose whole job is to say "hold me and move me" cannot afford to be read as
+    the one that opens something. */
+export const IconGrip = (p: IconProps) => (
+  <Svg {...p}>
+    <circle cx="9" cy="6" r="1.1" fill="currentColor" stroke="none" />
+    <circle cx="15" cy="6" r="1.1" fill="currentColor" stroke="none" />
+    <circle cx="9" cy="12" r="1.1" fill="currentColor" stroke="none" />
+    <circle cx="15" cy="12" r="1.1" fill="currentColor" stroke="none" />
+    <circle cx="9" cy="18" r="1.1" fill="currentColor" stroke="none" />
+    <circle cx="15" cy="18" r="1.1" fill="currentColor" stroke="none" />
+  </Svg>
+)

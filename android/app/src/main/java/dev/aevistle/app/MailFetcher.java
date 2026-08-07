@@ -1,6 +1,8 @@
 package dev.aevistle.app;
 
+import android.content.Context;
 import android.text.TextUtils;
+import android.util.Log;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -40,6 +42,7 @@ import javax.mail.internet.MimeUtility;
  */
 final class MailFetcher {
 
+    private static final String TAG = "MailFetcher";
     private static final int LIST_LIMIT = 50;
     private static final int BODY_PREFETCH_LIMIT = 15;
     private static final long PREFETCH_MAX_BYTES = 2L * 1024 * 1024;
@@ -52,7 +55,8 @@ final class MailFetcher {
     // Session
     // -----------------------------------------------------------------------
 
-    private static Session buildSession(JSONObject config, MailSender.Endpoint endpoint) {
+    private static Session buildSession(JSONObject config, MailSender.Endpoint endpoint,
+                                        String accessToken) {
         int timeout = 15000;
         Properties props = new Properties();
         props.put("mail.imap.host", config.optString("imapHost", ""));
@@ -77,6 +81,24 @@ final class MailFetcher {
             props.put("mail.imap.ssl.checkserveridentity", "true");
         }
 
+        if (!TextUtils.isEmpty(accessToken)) {
+            /*
+             * XOAUTH2, and only XOAUTH2 — see the matching block in
+             * {@link MailSender}. JavaMail sends
+             * `AUTHENTICATE XOAUTH2 <base64 of "user=…\1auth=Bearer …\1\1">`,
+             * which is the same payload the SMTP side sends and is what both
+             * vendors document for IMAP.
+             *
+             * Naming the mechanism explicitly also removes the fallback that
+             * would otherwise be the worst outcome here: LOGIN with a bearer
+             * token in the password field, which sends a live credential in
+             * plaintext form to a server that is going to reject it, and
+             * reports the result as a wrong password on an account that has
+             * none.
+             */
+            props.put("mail.imap.auth.mechanisms", "XOAUTH2");
+        }
+
         return Session.getInstance(props);
     }
 
@@ -92,12 +114,35 @@ final class MailFetcher {
     }
 
     /** Walk the same port/security ladder `MailSender` uses, open INBOX, run, close. */
-    private static <T> T withInbox(JSONObject config, String secret, int folderMode, WithStore<T> body)
-            throws Exception {
+    private static <T> T withInbox(Context context, JSONObject config, String secret, int folderMode,
+                                   WithStore<T> body) throws Exception {
         String host = config.optString("imapHost", "");
         String username = config.optString("imapUsername", "");
         if (TextUtils.isEmpty(host)) throw new IllegalArgumentException("Invalid IMAP host");
-        if (TextUtils.isEmpty(secret)) throw new IllegalArgumentException("No IMAP password stored for this account");
+
+        /*
+         * A bearer token, when this account has a grant.
+         *
+         * Resolved from the account id alone, exactly as `electron/imap.ts`
+         * does it, because the inbox config carries no `authMethod` and no
+         * `providerId` — it never needed either while a password was the only
+         * mechanism, and widening `InboxAccountState` to add them would be a
+         * cross-platform type change for something the keystore can already
+         * answer. `accessToken` returns null for every account that has never
+         * completed a consent, which is what keeps this a no-op on the password
+         * path rather than a branch that path has to survive.
+         */
+        String accessToken = OAuthTokens.accessToken(context, config.optString("accountId", ""));
+
+        // The check that used to read `if (!secret)`. That was exactly right
+        // while a password was the only answer and is exactly wrong now: an
+        // account that signed in with OAuth2 has no password by design, and
+        // refusing it here would be the app describing its own feature as the
+        // user's missing credential.
+        if (TextUtils.isEmpty(secret) && TextUtils.isEmpty(accessToken)) {
+            throw new IllegalArgumentException("No IMAP password stored for this account");
+        }
+        String credential = TextUtils.isEmpty(accessToken) ? secret : accessToken;
 
         List<MailSender.Endpoint> rungs = ladderFor(config);
         Exception last = null;
@@ -106,9 +151,9 @@ final class MailFetcher {
             Store store = null;
             Folder inbox = null;
             try {
-                Session session = buildSession(config, endpoint);
+                Session session = buildSession(config, endpoint, accessToken);
                 store = session.getStore("imap");
-                store.connect(host, endpoint.port, username, secret);
+                store.connect(host, endpoint.port, username, credential);
 
                 inbox = store.getFolder("INBOX");
                 inbox.open(folderMode);
@@ -117,15 +162,25 @@ final class MailFetcher {
             } catch (Exception e) {
                 last = e;
                 String message = e.getMessage() == null ? e.toString() : e.getMessage();
+                // A refused bearer token must not be re-offered on the next
+                // rung or the next sync — same reasoning as the SMTP ladder's.
+                if ("auth".equals(MailSender.classify(message)) && !TextUtils.isEmpty(accessToken)) {
+                    OAuthTokens.invalidate(config.optString("accountId", ""));
+                }
                 if (!MailSender.negotiable(MailSender.classify(message))) break;
             } finally {
                 try {
                     if (inbox != null && inbox.isOpen()) inbox.close(false);
                 } catch (Exception ignored) {
+                    // Best-effort close of a connection this method is done
+                    // with either way — the ladder above already has the
+                    // real outcome, and there is nothing left to do with a
+                    // close failure but move on.
                 }
                 try {
                     if (store != null) store.close();
                 } catch (Exception ignored) {
+                    // Same as above.
                 }
             }
         }
@@ -146,7 +201,7 @@ final class MailFetcher {
      * different problem from one that will not open at all, and on screen the
      * two are otherwise indistinguishable.
      */
-    static MailSender.Result test(JSONObject config, String secret) {
+    static MailSender.Result test(Context context, JSONObject config, String secret) {
         long started = System.currentTimeMillis();
         MailSender.Result result = new MailSender.Result();
 
@@ -156,7 +211,13 @@ final class MailFetcher {
             result.errorKind = "config";
             return result;
         }
-        if (TextUtils.isEmpty(secret)) {
+        // A grant counts as a credential. Asking the keystore whether one
+        // exists is cheap and local — unlike {@link OAuthTokens#accessToken},
+        // which would go to the network — and it is the difference between
+        // "connect and find out" and refusing an OAuth2 mailbox up front with
+        // a message about a password it will never have.
+        if (TextUtils.isEmpty(secret)
+                && !OAuthTokens.hasGrant(context, config.optString("accountId", ""))) {
             result.ok = false;
             result.error = "No password stored for receiving";
             result.errorKind = "auth";
@@ -164,7 +225,7 @@ final class MailFetcher {
         }
 
         try {
-            JSONObject counts = withInbox(config, secret, Folder.READ_ONLY, (store, inbox) -> {
+            JSONObject counts = withInbox(context, config, secret, Folder.READ_ONLY, (store, inbox) -> {
                 JSONObject o = new JSONObject();
                 o.put("total", inbox.getMessageCount());
                 o.put("unseen", inbox.getUnreadMessageCount());
@@ -209,7 +270,7 @@ final class MailFetcher {
         JSONArray previousMessagesRaw = config.optJSONArray("messages");
         final JSONArray previousMessages = previousMessagesRaw == null ? new JSONArray() : previousMessagesRaw;
 
-        return withInbox(config, secret, Folder.READ_ONLY, (store, inbox) -> {
+        return withInbox(context, config, secret, Folder.READ_ONLY, (store, inbox) -> {
             UIDFolder uidFolder = (UIDFolder) inbox;
             long uidValidity = uidFolder.getUIDValidity();
 
@@ -324,7 +385,7 @@ final class MailFetcher {
         JSONObject cached = InboxBodyStore.readBody(context, config.optString("accountId", ""), folderPath, uid);
         if (cached != null) return cached;
 
-        return withInbox(config, secret, Folder.READ_ONLY, (store, inbox) -> {
+        return withInbox(context, config, secret, Folder.READ_ONLY, (store, inbox) -> {
             UIDFolder uidFolder = (UIDFolder) inbox;
             Message m = uidFolder.getMessageByUID(uid);
             if (m == null) throw new IllegalStateException("Message not found");
@@ -335,9 +396,9 @@ final class MailFetcher {
         });
     }
 
-    static void setSeen(JSONObject config, String secret, String folderPath, long uid, boolean seen)
-            throws Exception {
-        withInbox(config, secret, Folder.READ_WRITE, (store, inbox) -> {
+    static void setSeen(Context context, JSONObject config, String secret, String folderPath,
+                        long uid, boolean seen) throws Exception {
+        withInbox(context, config, secret, Folder.READ_WRITE, (store, inbox) -> {
             UIDFolder uidFolder = (UIDFolder) inbox;
             Message m = uidFolder.getMessageByUID(uid);
             if (m != null) inbox.setFlags(new Message[]{m}, new Flags(Flags.Flag.SEEN), seen);
@@ -360,9 +421,10 @@ final class MailFetcher {
      * for" reported as success is how the app would end up claiming a mailbox
      * had been cleared while every message was still in it.
      */
-    static void purge(JSONObject config, String secret, JSONArray items) throws Exception {
+    static void purge(Context context, JSONObject config, String secret, JSONArray items)
+            throws Exception {
         if (items == null || items.length() == 0) return;
-        withInbox(config, secret, Folder.READ_WRITE, (store, inbox) -> {
+        withInbox(context, config, secret, Folder.READ_WRITE, (store, inbox) -> {
             UIDFolder uidFolder = (UIDFolder) inbox;
             List<Message> found = new ArrayList<>();
             for (int i = 0; i < items.length(); i++) {
@@ -478,7 +540,14 @@ final class MailFetcher {
             // would carry an id that names nothing on the server.
             a.put("partIndex", attachments.size());
             attachments.add(a);
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            // A single malformed part must not fail the whole message parse —
+            // the rest of the body is still worth showing. But dropping it
+            // silently means the attachment simply never existed as far as
+            // the JS layer can tell, with nothing anywhere to explain why a
+            // message the user knows had a file attached shows none. Log it
+            // so that's at least diagnosable from logcat.
+            Log.e(TAG, "addAttachment: could not parse an attachment part", e);
         }
     }
 
@@ -513,7 +582,7 @@ final class MailFetcher {
         File existing = findExisting(dir, partIndex);
         if (existing != null) return describe(existing, fallbackName);
 
-        return withInbox(config, secret, Folder.READ_ONLY, (store, inbox) -> {
+        return withInbox(context, config, secret, Folder.READ_ONLY, (store, inbox) -> {
             UIDFolder uidFolder = (UIDFolder) inbox;
             Message m = uidFolder.getMessageByUID(uid);
             if (m == null) throw new IllegalStateException("Message not found");

@@ -11,6 +11,7 @@
  * caller's job.
  */
 
+import { needsStoredPassword } from '../core/accounts'
 import { Switch } from './ui'
 import { useI18n } from '../i18n'
 import type { MailAccount } from '../core/types'
@@ -59,7 +60,23 @@ export function SyncScopePicker({
           {accounts
             .map((a: MailAccount) => {
               const label = a.label || a.fromAddress
-              return a.hasSecret ? label : `${label} (${t('common.none')})`
+              /*
+               * Three states, not two. An OAuth2 account is not an account with
+               * no credential — it has one, and it is deliberately *not* being
+               * sent: `sealAccountSecrets` carries the `smtp` and `imap` kinds
+               * only. That is the right call and would be even if it were not,
+               * because a Google refresh token is bound to the client id that
+               * minted it and Android's client is not the desktop's, so a
+               * transferred grant would be refused by the provider.
+               *
+               * What was wrong was saying "(none)" about it. The user reads
+               * that as "this account has no password", pairs, and finds a
+               * mailbox on the new device that cannot send and never said why.
+               * Naming it as a sign-in that has to be done again turns a silent
+               * surprise into a one-line instruction.
+               */
+              if (a.authMethod === 'oauth2') return `${label} (${t('sync.scope.signInAgain')})`
+              return needsStoredPassword(a) ? `${label} (${t('common.none')})` : label
             })
             .join(' · ')}
         </div>

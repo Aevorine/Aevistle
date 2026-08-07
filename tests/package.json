@@ -1,0 +1,13 @@
+{
+  "name": "aevistle-e2e",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Isolated dependency island for the Playwright regression suite. Kept out of the root package.json on purpose - see tests/README-ish notes in playwright.config.ts.",
+  "scripts": {
+    "test": "playwright test",
+    "test:ui": "playwright test --ui"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.1"
+  }
+}

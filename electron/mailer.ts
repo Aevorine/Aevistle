@@ -32,6 +32,7 @@ import type {
   TransportSecurity,
 } from '../src/core/types'
 import { classifyError } from '../src/core/bridge'
+import { accessTokenForAccount, noteOAuthAuthFailure } from './oauth'
 import {
   endpointLadder,
   formatAttempts,
@@ -87,9 +88,48 @@ async function resolveHost(host: string, timeoutMs: number): Promise<string> {
   }
 }
 
-function buildTransport(
+/**
+ * The credential an attempt authenticates with, resolved once per operation.
+ *
+ * Two fields rather than one string because the two mechanisms are not
+ * interchangeable at the point of use: a password is a stored constant, while an
+ * access token is minted on demand, expires within the hour, and must not be
+ * fetched again per rung of the endpoint ladder. Resolving both up front means
+ * the ladder, the warm pool and the fingerprint all see one settled value.
+ *
+ * Exactly one of the two is ever set. `authMethod: 'none'` leaves both null,
+ * which is the same "no credential" the transport already handled.
+ */
+interface Credential {
+  /** `authMethod: 'password'` only. */
+  pass: string | null
+  /** `authMethod: 'oauth2'` only — a bearer token, never the refresh token. */
+  accessToken: string | null
+}
+
+/**
+ * Turn the stored secret into something to authenticate with.
+ *
+ * For a password account this is a rename and nothing else. For an OAuth2 one
+ * it is where the refresh token in the keystore becomes an hour-long bearer
+ * token, which is why it is `async` and why it happens before the connection
+ * rather than inside it — a token request in the middle of an SMTP handshake
+ * would be spending the connection's time budget on HTTP.
+ */
+async function resolveCredential(
   account: MailAccount,
   secret: string | null,
+): Promise<Credential> {
+  if (account.authMethod !== 'oauth2') return { pass: secret, accessToken: null }
+  return {
+    pass: null,
+    accessToken: await accessTokenForAccount(account.id, account.providerId),
+  }
+}
+
+function buildTransport(
+  account: MailAccount,
+  credential: Credential,
   endpoint: Endpoint,
   perAttemptMs: number,
   resolvedHost: string,
@@ -100,10 +140,16 @@ function buildTransport(
     port: endpoint.port,
     secure: endpoint.security === 'ssl',
     requireTLS: endpoint.security === 'starttls',
+    // XOAUTH2 first, and only when the account is actually an OAuth2 one. The
+    // password branch below is untouched: nodemailer builds a plain `AUTH LOGIN`
+    // / `AUTH PLAIN` from `{ user, pass }` exactly as it always did, and an
+    // account that never opted into OAuth2 cannot reach the first branch at all.
     auth:
-      account.authMethod === 'password' && secret
-        ? { user: account.username, pass: secret }
-        : undefined,
+      account.authMethod === 'oauth2' && credential.accessToken
+        ? { type: 'OAuth2', user: account.username, accessToken: credential.accessToken }
+        : account.authMethod === 'password' && credential.pass
+          ? { user: account.username, pass: credential.pass }
+          : undefined,
     tls: {
       rejectUnauthorized: !account.allowInvalidCert,
       minVersion: 'TLSv1.2',
@@ -154,7 +200,7 @@ const warmPool = new Map<string, Warm>()
 /** Long enough to cover a working session, short enough not to sit on a socket overnight. */
 const IDLE_MS = 10 * 60_000
 
-function fingerprint(account: MailAccount, secret: string | null): string {
+function fingerprint(account: MailAccount, credential: Credential): string {
   return createHash('sha256')
     .update(
       [
@@ -164,7 +210,13 @@ function fingerprint(account: MailAccount, secret: string | null): string {
         account.username,
         account.authMethod,
         account.allowInvalidCert ? '1' : '0',
-        secret ?? '',
+        credential.pass ?? '',
+        // The access token belongs in here for the same reason the password
+        // does, and it earns its place more often: a pooled connection stays
+        // authenticated under whichever token opened it, so a renewal an hour
+        // in must produce a different fingerprint and force a reconnect rather
+        // than keep sending down a session the server is about to close.
+        credential.accessToken ?? '',
       ].join('\x00'),
     )
     .digest('hex')
@@ -204,10 +256,10 @@ export function closeAllConnections(): void {
  */
 async function warmConnection(
   account: MailAccount,
-  secret: string | null,
+  credential: Credential,
   budgetMs: number,
 ): Promise<{ warm: Warm; attempts: number; opened: boolean }> {
-  const print = fingerprint(account, secret)
+  const print = fingerprint(account, credential)
   const existing = warmPool.get(account.id)
   if (existing && existing.fingerprint === print) {
     touchWarm(account.id)
@@ -219,7 +271,7 @@ async function warmConnection(
 
   const outcome = await overLadder(
     account,
-    secret,
+    credential,
     async (transporter) => {
       await transporter.verify()
       return true
@@ -253,7 +305,8 @@ async function warmConnection(
 export async function prewarm(account: MailAccount, secret: string | null): Promise<boolean> {
   try {
     assertSafeAccount(account)
-    await warmConnection(account, secret, totalBudgetMs(account.timeoutMs / 1000))
+    const credential = await resolveCredential(account, secret)
+    await warmConnection(account, credential, totalBudgetMs(account.timeoutMs / 1000))
     return true
   } catch {
     return false
@@ -379,7 +432,7 @@ export async function resolveHostCached(host: string, timeoutMs: number): Promis
  */
 async function overLadder<T>(
   account: MailAccount,
-  secret: string | null,
+  credential: Credential,
   run: (transporter: Transporter) => Promise<T>,
   totalMs: number,
   keepOpen = false,
@@ -416,7 +469,7 @@ async function overLadder<T>(
     if (remaining < 2_000 && attempts > 1) break
     const budget = Math.min(perRung, remaining)
 
-    const transporter = buildTransport(account, secret, endpoint, budget, resolvedHost, keepOpen)
+    const transporter = buildTransport(account, credential, endpoint, budget, resolvedHost, keepOpen)
     let succeeded = false
     try {
       const value = await withDeadline(() => run(transporter), budget, () => transporter.close())
@@ -425,6 +478,14 @@ async function overLadder<T>(
     } catch (e) {
       last = e instanceof Error ? e : new Error(String(e))
       notes.push({ port: endpoint.port, security: endpoint.security, error: last.message })
+      // A bearer token the server refused is worth throwing away, whatever the
+      // reason. Tokens can be revoked mid-life, and a cached one that is still
+      // minutes from its stated expiry would otherwise be handed to every
+      // attempt until that expiry passed — turning one refused sign-in into an
+      // hour of them. Discarding costs one token request on the next send.
+      if (account.authMethod === 'oauth2' && classifyError(last.message) === 'auth') {
+        noteOAuthAuthFailure(account.id)
+      }
       if (!isNegotiable(classifyError(last.message), last.message)) {
         return { error: last, endpoint, attempts, notes }
       }
@@ -583,7 +644,8 @@ export async function sendMail(
      * turns a confusing failure into a slightly slower success — but only
      * once, so a genuinely broken account still fails fast.
      */
-    let warmed = await warmConnection(account, secret, budget)
+    const credential = await resolveCredential(account, secret)
+    let warmed = await warmConnection(account, credential, budget)
     let attempts = warmed.attempts
     let result
 
@@ -601,7 +663,10 @@ export async function sendMail(
         throw first
       }
       invalidateConnection(account.id)
-      warmed = await warmConnection(account, secret, budget)
+      // Re-resolved rather than reused: the reconnect may be happening on the
+      // far side of an access token's expiry, and opening a fresh connection
+      // with the token that just died would spend the retry on a certainty.
+      warmed = await warmConnection(account, await resolveCredential(account, secret), budget)
       attempts += warmed.attempts
       result = await withDeadline(
         () => deliver(warmed.warm.transporter),
@@ -655,7 +720,7 @@ export async function testConnection(
 
     const outcome = await overLadder(
       account,
-      secret,
+      await resolveCredential(account, secret),
       async (transporter) => {
         await transporter.verify()
         return true

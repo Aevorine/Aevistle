@@ -54,7 +54,7 @@ public class SendWorker extends Worker {
         }
 
         String secret = new SecretStore(context).get(account.optString("id", ""), "smtp");
-        MailSender.Result result = MailSender.send(draft, account, secret);
+        MailSender.Result result = MailSender.send(context, draft, account, secret);
 
         store.recordRun(jobId, System.currentTimeMillis(), result.ok, result.error);
 
