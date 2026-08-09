@@ -175,11 +175,31 @@ Aevistle 没有服务器。不用注册账号，不采集任何统计数据，�
 
 ## 上手四步
 
-1. **添加邮箱**：设置 → 添加账号。选服务商，服务器地址、端口、加密方式会自动填好。
+1. **添加邮箱**：设置 → 添加账号，然后填邮箱地址。有域名就够了：服务商、收发两个
+   服务器、两个端口、加密方式和用户名都会自动填好，填好的结果就印在输入框下面。
+   遇到没有预设的域名也照样给值 —— 按 `smtp.`/`imap.` 的通行约定猜的，面板会明说
+   那是猜的，不会让猜测冒充确定。
 2. **拿一个授权码**：Gmail、Outlook、Yahoo、iCloud、QQ 邮箱、163 都不接受第三方应用用
    登录密码，必须用授权码 / 应用专用密码。账号对话框里直接给了申请页面的链接。
 3. **测试连接**：一个按钮。只做认证不发信，问题现在就暴露，而不是凌晨三点。
 4. **写提醒内容**，挂上附件，点**定时发送**。
+
+> **看到「Aevistle has not completed the Google verification process」、
+> Error 403: access_denied 怎么办？** 改用第 2 步的授权码，Gmail 的授权码通道
+> 不受影响，照常能用。
+>
+> 这不是你这份安装包坏了，重装、重试都不会有变化，它是**本项目**那个 Google Cloud
+> 注册当前的状态。用 Google 账号登录要 `https://mail.google.com/` 这个权限 ——
+> IMAP 和 SMTP 只认这一个 —— 而 Google 把它划为**受限权限**。用了受限权限的应用
+> 在通过[受限权限审核](https://developers.google.com/identity/protocols/oauth2/production-readiness/restricted-scope-verification)
+> 之前一直停在「测试中」，而那道审核除了常规复审，还要一份独立的 **CASA Tier 2**
+> 安全评估，每年重做一次。只要还在测试中，Google 就只放行被手工加进测试用户名单的
+> 账号，其余一律回这个 403。
+>
+> 所以账号对话框里那个 Google 登录按钮，目前只有名单内的测试用户能用。想在自己的
+> 账号上用，可靠的办法是自己注册一个 OAuth 客户端（client id 是公开标识不是密钥，
+> 控制台怎么操作在 `src/core/oauth.ts` 里写着），然后自行编译。否则就用授权码 ——
+> 不需要审核，也不牵扯第三方。
 
 <div align="center">
 <img src="assets/screenshot-settings.zh.png" alt="Aevistle 设置界面：邮箱账号与数据文件夹" width="880">

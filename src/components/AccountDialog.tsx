@@ -1,11 +1,35 @@
 /**
  * Add / edit a mail account.
  *
- * Picking a provider fills host, port and encryption, so the common path is
- * "choose Gmail, type your address, paste an app password". The manual fields
- * stay visible rather than hidden behind an "advanced" toggle, because a
- * wrong port is the single most common reason a send fails and people need to
- * see it to fix it.
+ * The address is the form. Typing it re-derives the provider, both servers,
+ * both ports, the encryption and the username on every keystroke (`applyAuto`),
+ * so the common path is two fields: type your address, paste an app password.
+ * Picking a provider from the dropdown does the same thing from the other
+ * direction, for the mailboxes that live on a company's own domain and cannot
+ * be recognised from what comes after the `@`.
+ *
+ * The screen is laid out as that story: three numbered steps —
+ *
+ *   1. the address, in the largest control in the dialog, with a panel under it
+ *      printing what it just decided (`AutoSummary`);
+ *   2. the credential, which is the only thing on screen the user has to go and
+ *      fetch from somewhere else;
+ *   3. the server, already filled in and left visible so it can be corrected,
+ *
+ * then two optional blocks (more settings, receive mail). Step 3 stays expanded
+ * on every screen size rather than folding into an "advanced" disclosure: a
+ * wrong port is the single most common reason a send fails, and a port you
+ * cannot see is one you cannot fix. `tests/e2e/account-test-buttons-phone.spec.ts`
+ * holds that invariant, along with the structural selectors it reaches the
+ * fields by — see the comments at each one before moving anything.
+ *
+ * One thing this file cannot fix from inside, recorded here because the symptom
+ * looks exactly like a bug in it: with `android.captureInput` on, Capacitor
+ * hands the Android IME a non-editor input connection and delivers typed text
+ * by assigning to `document.activeElement.value`, which fires no `input` event.
+ * React never sees a keystroke, `applyAuto` never runs, and the next render
+ * reconciles every box back to empty. See `capacitor.config.ts`, where it is
+ * off and documented.
  */
 
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
@@ -286,6 +310,17 @@ export function AccountDialog({
   const narrow = useNarrow()
   const [account, setAccount] = useState<MailAccount>(initial ?? blankAccount())
   const [secret, setSecret] = useState('')
+  /**
+   * Whether the password is shown as text.
+   *
+   * A phone is where this earns its place. The string being typed is an app
+   * password — sixteen characters of provider-generated noise, usually pasted
+   * but often re-typed off another screen — and a soft keyboard gives no
+   * feedback beyond one briefly-visible character. Getting it wrong costs a
+   * full connection test to find out. Reset on every open, next to `secret`
+   * itself, so a dialog reopened later never starts with a password on show.
+   */
+  const [showSecret, setShowSecret] = useState(false)
   const [testing, setTesting] = useState(false)
   const [elapsed, setElapsed] = useState(0)
   const [testResult, setTestResult] = useState<SendResult | null>(null)
@@ -385,6 +420,7 @@ export function AccountDialog({
       const a = initial ?? blankAccount()
       setAccount(a)
       setSecret('')
+      setShowSecret(false)
       setTestResult(null)
       setTesting(false)
       setElapsed(0)
@@ -1012,25 +1048,51 @@ export function AccountDialog({
       }
     >
       {/*
-        Section 1 of 4: the address. First on screen and self-explanatory —
-        no title of its own — so it gets only the vertical rhythm the other
-        sections share, plus (mobile only, see `.account-hero` in app.css) a
-        bigger box for the one field a phone user reaches for first.
+        Step 1 of 3: who this account is.
+
+        The address goes first and gets the largest control in the dialog
+        (`.input--lg`, sized up again on the phone shell) because it is both the
+        first thing anyone types and the field the whole rest of the form is
+        derived from — every keystroke here re-runs `applyAuto`, which fills the
+        provider, both servers, both ports, the encryption and the username.
+        Making it look like one field among nine understated what it does.
       */}
-      <div className="account-section account-hero">
+      <div className="account-section">
+        <div className="account-section__title">
+          <span className="account-step">1</span>
+          {t('account.sectionAddress')}
+        </div>
         <div className="field__row">
           <Field label={t('account.fromAddress')}>
             <input
-              className="input"
+              className="input input--lg"
               type="email"
+              /*
+               * The four attributes a phone needs and a desktop ignores.
+               *
+               * An Android keyboard capitalises the first letter of a text
+               * field by default and offers to "correct" the domain, so
+               * `Me@Gmail.con` is what a careful person actually ends up with —
+               * and since the domain drives auto-configuration, a corrected one
+               * silently means no provider was matched. `inputMode` is what puts
+               * `@` and `.` on the primary layer of the keyboard rather than two
+               * taps in.
+               */
+              inputMode="email"
               autoComplete="off"
+              autoCapitalize="none"
+              autoCorrect="off"
               spellCheck={false}
               placeholder="you@example.com"
               value={account.fromAddress}
               onChange={(e) => onAddressChange(e.target.value)}
             />
           </Field>
-          <Field label={t('account.fromName')}>
+          {/* Marked optional because it is: `validateAccount` only ever
+              objects to this field's *contents* (a newline would be header
+              injection), never to its absence. Unmarked, it read as a second
+              thing you had to think of before the form would work. */}
+          <Field label={t('account.fromName')} optional={t('common.optional')}>
             <input
               className="input"
               value={account.fromName}
@@ -1040,81 +1102,57 @@ export function AccountDialog({
         </div>
 
         {/*
-          Says what the address just did, and offers the way back.
+          What the address worked out, shown as a result rather than described
+          as one.
 
-          Auto-fill that silently refuses to touch a field the user once edited is
-          indistinguishable from auto-fill that is broken — the address changes,
-          the server does not, and there is nothing on screen to explain why. This
-          banner is that explanation, and the button beside it is the one-click
-          undo for the hand edits it is respecting.
+          This replaced a sentence in a banner ("Filled in from Gmail"), which
+          was true and unconvincing: the user's question at this moment is not
+          whether something happened but *what it decided*, and the answer —
+          Gmail, smtp.gmail.com:465, imap.gmail.com:993 — was only readable by
+          scrolling down to four separate boxes and reading them back. Printing
+          it here is also the only honest way to present a guess: a domain no
+          preset knows still gets values, and this is where that is said out
+          loud instead of being discovered when the connection test fails.
+
+          It carries the hand-edit report and its undo for the same reason the
+          banner did: auto-fill that silently declines to touch a field someone
+          once corrected is indistinguishable from auto-fill that is broken.
         */}
         {auto ? (
-          <Banner
-            tone={auto.guessed ? 'warning' : 'info'}
-            /*
-             * Kept on a phone only while it has something to report.
-             *
-             * "Filled in from Gmail" under a form that visibly filled itself in is
-             * the sort of note a phone is right to drop. "3 fields you edited by
-             * hand were left alone" is not — it is the only thing on screen that
-             * explains why changing the address moved some boxes and not others,
-             * and it comes with the button that undoes them. Dropping *that* is
-             * the failure the banner was written to prevent, reintroduced by a
-             * width. The guessed variant is a warning and was never culled.
-             */
-            keep={autoOverrides.length > 0}
-            action={
-              autoOverrides.length > 0 ? (
-                <Button variant="ghost" onClick={restoreAuto}>
-                  {t('account.autoRestore')}
-                </Button>
-              ) : undefined
-            }
-          >
-            <div>
-              {auto.guessed
-                ? t('account.autoGuessed', { domain: auto.domain })
-                : t('account.autoApplied', { provider: auto.preset.name })}
-            </div>
-            {autoOverrides.length > 0 ? (
-              <div className="banner__note">
-                {t('account.autoKept', { n: autoOverrides.length })}
-              </div>
-            ) : null}
-          </Banner>
+          <AutoSummary
+            auto={auto}
+            host={account.host}
+            port={account.port}
+            imapHost={inbox.imapHost}
+            imapPort={inbox.imapPort}
+            overrides={autoOverrides.length}
+            onRestore={restoreAuto}
+          />
         ) : null}
       </div>
 
       {/*
-        Section 2 of 4: the send server. Every field here stays visible and
-        fillable on every screen size — `tests/e2e/account-test-buttons-phone.spec.ts`
-        fills the address, this host and the username without expanding
-        anything, and this section must never fold any of them away.
+        Step 2 of 3: the credential.
+
+        Ahead of the servers now, and that is the substantive reordering. These
+        two boxes are the only ones on the screen holding something the user has
+        to go and find — an app password from the provider's own site, or a
+        consent round trip through the browser — while everything in step 3 is
+        already filled in from the address. Putting the machine's work above the
+        person's work meant scrolling past four correct fields to reach the one
+        empty one.
       */}
       <div className="account-section">
-        <div className="account-section__title">{t('account.sectionServer')}</div>
-
-        <Field label={t('account.provider')}>
-          <select
-            className="select"
-            value={account.providerId ?? ''}
-            onChange={(e) => applyProvider(e.target.value)}
-          >
-            <option value="">—</option>
-            {PROVIDERS.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-        </Field>
+        <div className="account-section__title">
+          <span className="account-step">2</span>
+          {t('account.sectionCredentials')}
+        </div>
 
         {preset ? (
           /*
-           * Kept on a phone, for the same reason the auto-fill banner below is
-           * and with more at stake.
+           * Kept on a phone, and it belongs beside the box it is about.
            *
-           * This is the one that says the password box does not want the
+           * This is the one that says the password field does not want the
            * password they log in with, and carries the link to the page that
            * mints the one it does want. The phone's blanket cull of
            * `banner--info` took it, and the shape of the resulting bug is why
@@ -1141,48 +1179,6 @@ export function AccountDialog({
           </Banner>
         ) : null}
 
-        <div className="field__row">
-          <Field label={t('account.host')}>
-            <input
-              className="input"
-              spellCheck={false}
-              placeholder="smtp.example.com"
-              value={account.host}
-              onChange={(e) => {
-                markTouched('host')
-                patch({ host: e.target.value.trim() })
-              }}
-            />
-          </Field>
-          <Field label={t('account.port')}>
-            <input
-              className="input"
-              type="number"
-              min={1}
-              max={65535}
-              value={account.port}
-              onChange={(e) => {
-                markTouched('port')
-                patch({ port: Number(e.target.value) })
-              }}
-            />
-          </Field>
-          <Field label={t('account.security')}>
-            <select
-              className="select"
-              value={account.security}
-              onChange={(e) => {
-                markTouched('security')
-                patch({ security: e.target.value as TransportSecurity })
-              }}
-            >
-              <option value="ssl">{t('account.securitySsl')}</option>
-              <option value="starttls">{t('account.securityStarttls')}</option>
-              <option value="none">{t('account.securityNone')}</option>
-            </select>
-          </Field>
-        </div>
-
         {/*
           The mechanism picker, shown only where there is a genuine choice.
 
@@ -1207,11 +1203,22 @@ export function AccountDialog({
           </div>
         ) : null}
 
+        {/*
+          Username and password stay in one `.field__row`.
+
+          Not a layout preference: `tests/e2e/account-test-buttons-phone.spec.ts`
+          finds the username box as "the first `.input` in the `.field__row` that
+          also holds `input[autocomplete=new-password]`", and identifies the
+          receive half's username the same way by index. Splitting them into two
+          rows makes both selectors match nothing.
+        */}
         <div className="field__row">
           <Field label={t('account.username')}>
             <input
               className="input"
               autoComplete="off"
+              autoCapitalize="none"
+              autoCorrect="off"
               spellCheck={false}
               value={account.username}
               onChange={(e) => {
@@ -1230,11 +1237,36 @@ export function AccountDialog({
             <Field
               label={t('account.password')}
               hint={account.hasSecret && !secret ? t('account.passwordSet') : undefined}
+              /*
+               * On the label's own line, where it costs no height — the same
+               * reasoning `Field`'s `action` prop was added for. Rendered only
+               * when there is something to reveal, so an empty box does not
+               * offer to show you nothing.
+               */
+              action={
+                secret ? (
+                  <button
+                    type="button"
+                    className="linkbtn"
+                    onClick={() => setShowSecret((v) => !v)}
+                  >
+                    {t(showSecret ? 'account.hidePassword' : 'account.showPassword')}
+                  </button>
+                ) : undefined
+              }
             >
               <input
-                className="input"
-                type="password"
+                className="input input--lg"
+                type={showSecret ? 'text' : 'password'}
+                /*
+                 * Stays `new-password` even when shown as text: it is what the
+                 * e2e selectors key on, and it is what stops a browser password
+                 * manager treating an app password as a login to remember.
+                 */
                 autoComplete="new-password"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
                 placeholder={account.hasSecret ? '••••••••••' : ''}
                 value={secret}
                 onChange={(e) => {
@@ -1264,12 +1296,94 @@ export function AccountDialog({
       </div>
 
       {/*
-        Section 3 of 4: more settings — label, group, reply-to, and the two
-        switches. Collapsed by default on a phone (`moreOpen`, wide open on
-        desktop); everything inside is optional or warning-only per
-        `validateAccount`, except a malformed reply-to, which the effect above
-        forces this open for. Controlled `<details>` so a manual click and the
-        automatic open-on-error never fight each other.
+        Step 3 of 3: the send server — already filled in, and left visible so it
+        can be corrected.
+
+        Every field here stays visible and fillable on every screen size.
+        `tests/e2e/account-test-buttons-phone.spec.ts` fills the address, this
+        host and the username without expanding anything, and this section must
+        never fold any of them away — which is also the right behaviour on its
+        own terms: a wrong port is the commonest reason a send fails, and a port
+        you cannot see is one you cannot fix.
+      */}
+      <div className="account-section">
+        <div className="account-section__title">
+          <span className="account-step">3</span>
+          {t('account.sectionServer')}
+        </div>
+
+        <Field label={t('account.provider')}>
+          <select
+            className="select"
+            value={account.providerId ?? ''}
+            onChange={(e) => applyProvider(e.target.value)}
+          >
+            <option value="">—</option>
+            {PROVIDERS.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+
+        <div className="field__row">
+          <Field label={t('account.host')}>
+            <input
+              className="input"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              placeholder="smtp.example.com"
+              value={account.host}
+              onChange={(e) => {
+                markTouched('host')
+                patch({ host: e.target.value.trim() })
+              }}
+            />
+          </Field>
+          <Field label={t('account.port')}>
+            <input
+              className="input"
+              type="number"
+              inputMode="numeric"
+              min={1}
+              max={65535}
+              value={account.port}
+              onChange={(e) => {
+                markTouched('port')
+                patch({ port: Number(e.target.value) })
+              }}
+            />
+          </Field>
+          <Field label={t('account.security')}>
+            <select
+              className="select"
+              value={account.security}
+              onChange={(e) => {
+                markTouched('security')
+                patch({ security: e.target.value as TransportSecurity })
+              }}
+            >
+              <option value="ssl">{t('account.securitySsl')}</option>
+              <option value="starttls">{t('account.securityStarttls')}</option>
+              <option value="none">{t('account.securityNone')}</option>
+            </select>
+          </Field>
+        </div>
+      </div>
+
+      {/*
+        Then the two optional blocks, marked as optional rather than numbered:
+        the three steps above are what a working account needs, and numbering
+        five things implies five obligations.
+
+        More settings — label, group, reply-to, and the two switches. Collapsed
+        by default on a phone (`moreOpen`, wide open on desktop); everything
+        inside is optional or warning-only per `validateAccount`, except a
+        malformed reply-to, which the effect above forces this open for.
+        Controlled `<details>` so a manual click and the automatic open-on-error
+        never fight each other.
       */}
       <details
         ref={moreDetailsRef}
@@ -1277,7 +1391,10 @@ export function AccountDialog({
         open={moreOpen}
         onToggle={(e) => setMoreOpen(e.currentTarget.open)}
       >
-        <summary>{t('account.moreOptions')}</summary>
+        <summary>
+          {t('account.moreOptions')}
+          <span className="account-optional">{t('common.optional')}</span>
+        </summary>
         <div className="account-more__body">
           <div className="field__row">
             <Field label={t('account.label')}>
@@ -1348,7 +1465,10 @@ export function AccountDialog({
         The fields the switch reveals still get the same titled-card chrome
         as the sections above, just applied to that block once it renders.
       */}
-      <div className="section-label">{t('inbox.sectionTitle')}</div>
+      <div className="section-label">
+        {t('inbox.sectionTitle')}
+        <span className="account-optional">{t('common.optional')}</span>
+      </div>
 
       <Switch
         checked={inbox.enabled}
@@ -1509,6 +1629,117 @@ export function AccountDialog({
         </div>
       ) : null}
     </Modal>
+  )
+}
+
+/**
+ * What the email address decided, as a result rather than as a sentence about
+ * one.
+ *
+ * Two things are being answered here and they are not the same question. The
+ * first is "did it recognise my provider" — `guessed` — and it has to be
+ * unmissable, because a guessed host looks exactly like a known-good one right
+ * up until the connection test fails, and the difference is the difference
+ * between "you are done" and "check these before you press test". The second is
+ * "what did it actually put in the boxes", which used to be answerable only by
+ * scrolling down and reading four inputs back.
+ *
+ * The values printed are the *live form values*, not the preset's. That is the
+ * whole point of printing them next to the hand-edit line below: if someone
+ * corrected the port to 587, this says 587 and then says one field was kept,
+ * and the two statements agree. Reading them out of the preset would have
+ * produced a summary that quietly disagreed with the form it summarises.
+ */
+function AutoSummary({
+  auto,
+  host,
+  port,
+  imapHost,
+  imapPort,
+  overrides,
+  onRestore,
+}: {
+  auto: AutoConfig
+  host: string
+  port: number
+  imapHost: string
+  imapPort: number
+  /** How many auto-fillable fields the user has moved away from the preset. */
+  overrides: number
+  onRestore: () => void
+}) {
+  const { t } = useI18n()
+  const name = auto.guessed ? auto.domain : auto.preset.name
+
+  return (
+    <div className={`autoconf${auto.guessed ? ' autoconf--guessed' : ''}`}>
+      <div className="autoconf__head">
+        {/*
+          A letter, not an icon. Sixteen presets would need sixteen logos to do
+          this properly, every one of them a trademark this project has no
+          licence to ship — and a single generic mail glyph would say nothing
+          the name beside it does not. `aria-hidden` because it is the name
+          restated as a shape, and a screen reader announcing "G, Gmail" is
+          reading the decoration out loud.
+        */}
+        <div className="autoconf__glyph" aria-hidden="true">
+          {auto.guessed ? '?' : (name.trim()[0] ?? '@').toUpperCase()}
+        </div>
+        <div className="autoconf__id">
+          <div className="autoconf__name">{name}</div>
+          <div className="autoconf__note">
+            {auto.guessed
+              ? t('account.autoGuessed', { domain: auto.domain })
+              : t('account.autoApplied', { provider: auto.preset.name })}
+          </div>
+        </div>
+      </div>
+
+      {/*
+        Host and port only. The encryption belongs to this pair as much as the
+        port does, and it was printed here at first — but `smtp.gmail.com:465 ·
+        SSL/TLS` is 28 monospace characters against roughly 230px of value
+        column on a 390px screen, so both rows wrapped onto a second line and
+        the panel went from four tidy lines to six ragged ones. It is not lost:
+        step 3's encryption dropdown is the field it actually lives in, three
+        inches further down, and repeating it here bought a wrap.
+
+        Label and value are inline in one flow rather than two grid columns,
+        and that is the difference between `outlook.office365.com:993` moving
+        to a line of its own and being sawn in half. A grid column is a box:
+        a token wider than the box has nowhere else to go, so
+        `overflow-wrap: anywhere` breaks it mid-hostname — measured at 360px,
+        where the value column is ~188px and that host needs ~210px. In one
+        inline flow the browser tries a fresh line first, and the full 256px
+        of panel width is enough. `anywhere` stays on the value as the last
+        resort for a host too long even for that.
+      */}
+      <div className="autoconf__rows">
+        <div className="autoconf__row">
+          <span className="autoconf__proto">SMTP</span>
+          <span className="mono autoconf__value">
+            {host || '—'}:{port}
+          </span>
+        </div>
+        {imapHost ? (
+          <div className="autoconf__row">
+            <span className="autoconf__proto">IMAP</span>
+            <span className="mono autoconf__value">
+              {imapHost}:{imapPort}
+            </span>
+          </div>
+        ) : null}
+      </div>
+
+      {overrides > 0 ? (
+        <div className="autoconf__kept">
+          <span>{t('account.autoKept', { n: overrides })}</span>
+          <Button variant="ghost" onClick={onRestore}>
+            {t('account.autoRestore')}
+          </Button>
+        </div>
+      ) : null}
+    </div>
   )
 }
 

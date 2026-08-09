@@ -257,6 +257,8 @@ export const en = {
   'account.title': 'Mail accounts',
   'account.add': 'Add account',
   'account.edit': 'Edit account',
+  'account.sectionAddress': 'Your mailbox',
+  'account.sectionCredentials': 'Sign-in',
   'account.sectionServer': 'Send server',
   'account.moreOptions': 'More settings',
   'account.provider': 'Provider',
@@ -274,6 +276,8 @@ export const en = {
   'account.username': 'Username',
   'account.password': 'Password',
   'account.passwordSet': 'Saved in your device keystore',
+  'account.showPassword': 'Show',
+  'account.hidePassword': 'Hide',
   'account.passwordChange': 'Change',
   'account.allowInvalidCert': 'Accept invalid certificates',
   'account.allowInvalidCertWarn': 'Anyone on your network could read this password. Only for a server you control.',
@@ -1522,7 +1526,12 @@ export const en = {
   'deliver.faultUnknownZone': 'This device does not know the time zone “{zone}”.',
   'deliver.faultMalformed': 'These hours cannot be read as HH:MM.',
   'deliver.faultNeverOpens': 'This window never opens: tick at least one day, and give it an end time different from its start.',
-  'deliver.faultIgnored': 'While it stays like this the window is ignored and the mail still goes out on time.',
+  // "goes out at the time you set" is load-bearing, not a phrasing preference:
+  // `scripts/check-delivery-ui.mjs` matches on it, because the one thing this
+  // sentence must never leave ambiguous is whether a misconfigured window holds
+  // mail back. 0.1.23's pass over long-winded copy shortened it to "still goes
+  // out on time", which dropped the phrase and left `npm run check` red.
+  'deliver.faultIgnored': 'While it stays like this the window is ignored and the mail goes out at the time you set.',
   'deliver.previewMoved': 'A reminder set for {planned} would actually go out at {actual} — {theirDay} {theirTime} for {name}.',
   'deliver.previewInside': 'A reminder set for {planned} is already inside this window — {theirDay} {theirTime} for {name} — so it goes out unchanged.',
   'deliver.previewIgnored': 'The window above is ignored until it is fixed, so a reminder set for {planned} goes out at exactly that time.',

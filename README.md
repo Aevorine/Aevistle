@@ -268,14 +268,40 @@ place. Deliberately not written out here, so this table cannot go stale.
 
 ## Getting started
 
-1. **Add your mailbox.** Settings → Add account. Pick your provider and Aevistle
-   fills in the server, port and encryption for you.
+1. **Add your mailbox.** Settings → Add account, then type your email address.
+   The domain is enough: Aevistle fills in the provider, both servers, both
+   ports, the encryption and the username, and prints what it decided directly
+   under the box. A domain no preset knows still gets values, guessed from the
+   `smtp.`/`imap.` convention — the panel says so rather than letting a guess
+   pass for a certainty.
 2. **Get an app password.** Gmail, Outlook, Yahoo, iCloud, QQ and 163 all refuse
    your normal login password from a third-party app. The account dialog links
    straight to the page where you create one.
 3. **Test the connection.** One button. It authenticates without sending
    anything, so you find out now rather than at 03:00.
 4. **Write your reminder**, attach what you need, and choose **Schedule**.
+
+> **"Aevistle has not completed the Google verification process" — Error 403:
+> access_denied.** Use an app password instead; step 2 is the supported path for
+> Gmail and it is unaffected.
+>
+> This is not a fault in your install, and retrying or reinstalling will not
+> change it. It is the state of *this project's* Google Cloud registration.
+> Signing in with Google needs the `https://mail.google.com/` scope — the only
+> scope Google offers that IMAP and SMTP actually accept — and Google classes
+> that as a **restricted** scope. A restricted-scope app stays in *Testing*
+> until it passes
+> [restricted-scope verification](https://developers.google.com/identity/protocols/oauth2/production-readiness/restricted-scope-verification),
+> which on top of the usual review requires an independent **CASA Tier 2**
+> security assessment, renewed annually. While the registration is in Testing,
+> Google admits only accounts that have been added to it by hand as test users
+> and refuses everyone else with exactly that 403.
+>
+> So the OAuth button in the account dialog works only for approved testers
+> today. If you want it for your own account, the reliable route is to register
+> your own OAuth client — the client id is a public identifier, not a secret,
+> and `src/core/oauth.ts` documents the console steps — and build from source.
+> Otherwise use an app password, which needs no verification and no third party.
 
 <div align="center">
 <img src="docs/assets/screenshot-settings.png" alt="Aevistle settings, showing the mail account and data folder cards" width="880">

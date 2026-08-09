@@ -507,10 +507,200 @@ textarea {
   border-radius: var(--r-lg);
 }
 .account-section__title {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
   font-size: var(--text-lg);
   font-weight: 700;
   line-height: var(--leading-tight);
   color: var(--text-1);
+}
+
+/*
+ * The step numeral on the three sections a working account actually needs:
+ * address, credential, server.
+ *
+ * Only three of the five blocks carry one. "More settings" and "Receive mail"
+ * are genuinely optional — everything in them is optional or warning-only per
+ * `validateAccount` — and numbering all five would have turned two things you
+ * may ignore into two more things you appear to owe the form. They get
+ * `.account-optional` instead, which says the opposite.
+ *
+ * `flex: 0 0 auto` because the title beside it wraps on a 360px screen and a
+ * shrinkable circle becomes an ellipse when it does.
+ */
+.account-step {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: var(--text-sm);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+.account-optional {
+  display: inline-flex;
+  align-items: center;
+  margin-inline-start: var(--sp-3);
+  padding: 2px var(--sp-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-sm);
+  font-size: var(--text-sm);
+  font-weight: 400;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+/* `.section-label` is already a flex row with its own `gap`, so the margin
+   above would be spacing applied twice. */
+.section-label > .account-optional {
+  margin-inline-start: 0;
+}
+
+/*
+ * What the email address worked out — see `AutoSummary` in `AccountDialog.tsx`.
+ *
+ * A panel rather than a banner because it is a *result*, not a notice: the
+ * provider it matched and the four values it wrote, printed where they were
+ * decided instead of four boxes further down. `--guessed` is the same panel in
+ * the warning palette, and it is the one distinction on this screen worth
+ * shouting: a host guessed from `smtp.<domain>` looks exactly like one out of
+ * the preset table until the connection test fails.
+ */
+.autoconf {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  background: var(--surface-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-md);
+}
+.autoconf--guessed {
+  background: var(--warning-bg);
+  border-color: color-mix(in srgb, var(--warning) 26%, transparent);
+}
+/* Top-aligned, not centred: the note under the provider name runs to three
+   lines on a 360px screen, and centring against the pair left the glyph
+   floating opposite the middle of a sentence instead of beside the name it
+   stands for. */
+.autoconf__head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+}
+.autoconf__glyph {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--r-md);
+  background: var(--accent);
+  /* Correct for the warning fill too: `--accent-text` is white in the light
+     theme and near-black in the dark one, which is exactly the polarity both
+     `--accent` and `--warning` need in each. */
+  color: var(--accent-text);
+  font-size: var(--text-lg);
+  font-weight: 700;
+  line-height: 1;
+}
+.autoconf--guessed .autoconf__glyph {
+  background: var(--warning);
+}
+/* `min-width: 0` so a long provider name or domain wraps inside the column
+   instead of pushing the panel wider than the dialog. */
+.autoconf__id {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.autoconf__name {
+  font-size: var(--text-lg);
+  font-weight: 700;
+  line-height: var(--leading-tight);
+  color: var(--text-1);
+  overflow-wrap: anywhere;
+}
+/*
+ * `anywhere` for the same reason `.autoconf__name` carries it, and it is the
+ * guessed panel that needs it: `account.autoGuessed` interpolates the domain
+ * into the middle of a sentence, and a domain is one unbreakable token. A
+ * corporate host — `mail.verylongcorporatedomain.example.co.uk` — needs ~295px
+ * against the ~182px this column gets at 360px, and with nothing to break at
+ * the text simply ran out of the panel: measured there, the overflow reached
+ * `.modal__body` and gave the whole dialog a horizontal scrollbar (405px of
+ * content in 350px). Breaking mid-domain is the ugly option; a form you have
+ * to scroll sideways to read is the worse one, and this is the only string on
+ * the screen that can contain an arbitrary-length token inside a sentence.
+ */
+.autoconf__note {
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+  color: var(--text-3);
+  overflow-wrap: anywhere;
+}
+.autoconf--guessed .autoconf__note {
+  color: var(--warning);
+}
+/*
+ * Deliberately *not* the `.diag` grid, and this is the one place in the app
+ * where that difference matters.
+ *
+ * `.diag` puts the label and the value in two grid columns, which is right for
+ * a diagnostics block inside a full-width banner and wrong here. A grid column
+ * is a box, and a hostname is a single token with nothing to break at: measured
+ * at 360px, the value column comes out at ~188px and `outlook.office365.com:993`
+ * needs ~210px, so `overflow-wrap` had nowhere to put it but through the middle
+ * of the word — `outlook.office365.c` / `om:993`.
+ *
+ * One inline flow instead. The browser moves an over-long token to a fresh line
+ * before it breaks it, and a fresh line here is the full 256px of panel, which
+ * fits. `min-width` on the label keeps the values aligned as a column whenever
+ * they do sit on one line, which is every screen wider than a small phone.
+ */
+.autoconf__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--text-sm);
+}
+.autoconf__row {
+  color: var(--text-2);
+  line-height: var(--leading-tight);
+}
+.autoconf__proto {
+  display: inline-block;
+  min-width: 3.6em;
+  font-weight: 700;
+  color: var(--text-3);
+}
+/* The last resort, for a host too long even for a line of its own. */
+.autoconf__value {
+  overflow-wrap: anywhere;
+}
+.autoconf__kept {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+  padding-block-start: var(--sp-3);
+  border-block-start: 1px solid var(--border-subtle);
+  font-size: var(--text-sm);
+  color: var(--text-2);
+}
+/* The sentence takes the row and the undo button sits beside it until there is
+   no room, then wraps under it whole rather than being squeezed to two words. */
+.autoconf__kept > span {
+  flex: 1 1 200px;
+  min-width: 0;
 }
 /*
  * `.modal__body` is a flex column, and every direct child defaults to
@@ -2862,9 +3052,17 @@ textarea {
 }
 
 /*
- * The address box is the first thing a thumb reaches for on `AccountDialog`'s
- * phone layout, so it gets a bigger target than the rest of the form's
- * inputs — taller and larger type, on the phone shell only.
+ * The two boxes a thumb reaches for on `AccountDialog`'s phone layout — the
+ * email address and the password — get a bigger target than the rest of the
+ * form's inputs: taller and larger type, on the phone shell only.
+ *
+ * A class on those two inputs rather than "every input inside the first
+ * section", which is what this was. That selector also caught the display-name
+ * box sitting beside the address and, more to the point, could not reach the
+ * password at all once the credential moved into a section of its own. These
+ * are the two fields a person types by hand — one drives the whole rest of the
+ * form, the other is sixteen characters of provider-generated noise — and they
+ * are the two worth the extra 12px.
  *
  * Scoped to `data-shell="mobile"` rather than a `@media` width query, for the
  * same reason as the block above: that attribute is the one place "narrow
@@ -2873,7 +3071,7 @@ textarea {
  * catch — a floating desktop-sized card would end up with a phone-sized
  * address box glued to the top of it.
  */
-[data-shell="mobile"] .account-hero .input {
+[data-shell="mobile"] .input--lg {
   min-height: 56px;
   padding-block: 14px;
   font-size: var(--text-lg);
