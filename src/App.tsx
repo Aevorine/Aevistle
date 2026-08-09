@@ -358,6 +358,27 @@ function Shell() {
     setView('settings')
   }
 
+  /**
+   * A new-mail notification was clicked: go to the Inbox and open that message.
+   *
+   * Held here rather than inside `InboxView` because the screen may not be
+   * mounted when the click lands — it is lazy, and the click routinely arrives
+   * while the user is on Compose or while the window was closed entirely. So
+   * the id is stored, the view switches, and `InboxView` picks it up when it
+   * mounts and clears it through `onFocusHandled`.
+   */
+  const [focusMessageId, setFocusMessageId] = useState<string | null>(null)
+  const clearFocusMessage = useCallback(() => setFocusMessageId(null), [])
+
+  useEffect(() => {
+    if (!bridge?.onOpenMessage) return
+    return bridge.onOpenMessage((messageId) => {
+      setOpenAccountOnMount(false)
+      setFocusMessageId(messageId)
+      setView('inbox')
+    })
+  }, [bridge])
+
   /*
    * The palette's three props are `useCallback`s and not inline arrows.
    *
@@ -578,7 +599,11 @@ function Shell() {
         ) : null}
         {view === 'inbox' ? (
           <Suspense fallback={<Skeleton shape="list" rows={8} />}>
-            <InboxView onGoToAccounts={goToAccounts} />
+            <InboxView
+              onGoToAccounts={goToAccounts}
+              focusMessageId={focusMessageId}
+              onFocusHandled={clearFocusMessage}
+            />
           </Suspense>
         ) : null}
         {view === 'schedule' ? (

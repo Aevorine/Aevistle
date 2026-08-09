@@ -48,6 +48,7 @@ import { useApp } from '../state/AppState'
 import { useCodeCheck, WAIT_PRESETS, type CheckOutcome } from '../state/CodeCheck'
 import { useI18n } from '../i18n'
 import { CODE_FRESH_MS, freshHits } from '../core/codeHistory'
+import { copyText } from '../core/clipboard'
 import { encodeQr, qrPath } from '../core/qr'
 import { accountLabel as labelOfAccount } from '../core/accounts'
 import type { LinkPurpose } from '../core/linkPurpose'
@@ -188,12 +189,22 @@ export function CodesView({ onGoToInbox }: { onGoToInbox?: () => void }) {
    */
   const copy = async (hit: CodeHit, value = hit.value) => {
     dispatch({ type: 'markCodeRead', id: hit.id })
-    try {
-      await navigator.clipboard.writeText(value)
+    /*
+     * `copyText`, not `navigator.clipboard.writeText`.
+     *
+     * The bare web call is what made this button report "copy failed" on every
+     * Android device while working everywhere else: inside a WebView the async
+     * clipboard write is refused by a permission layer that has nobody to ask.
+     * `core/clipboard.ts` tries the native clipboard first and only then the
+     * web ones, and answers with a boolean rather than a rejection — so this
+     * `else` is now a genuine failure on every platform, not a platform gap
+     * wearing a failure's clothes.
+     */
+    if (await copyText(value)) {
       dispatch({ type: 'markCodeCopied', id: hit.id })
       setJustCopied(hit.id)
       window.setTimeout(() => setJustCopied((id) => (id === hit.id ? null : id)), 2000)
-    } catch {
+    } else {
       toast.push({ tone: 'error', title: t('inbox.copyFailed') })
     }
   }

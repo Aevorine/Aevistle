@@ -2,6 +2,7 @@ package dev.aevistle.app;
 
 import android.app.Activity;
 import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Intent;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
@@ -1932,12 +1933,101 @@ public class AevistleNativePlugin extends Plugin {
         String title = call.getString("title", "Aevistle");
         String body = call.getString("body", "");
         boolean isCode = Boolean.TRUE.equals(call.getBoolean("code", false));
+        /*
+         * The code itself and the button's label both come from the caller
+         * rather than being derived here.
+         *
+         * The value, because the title is a worded sentence ("Verification
+         * code: 482 913") and a Copy button that pasted that sentence into a
+         * verification field would be worse than no button at all. The label,
+         * because this is the one notification with a control on it and the
+         * JavaScript side is where all six translations live — a hardcoded
+         * "Copy" would be the only untranslated word in the app.
+         */
+        String codeValue = call.getString("value", "");
+        String copyLabel = call.getString("copyLabel", "Copy");
+        /*
+         * `messageId` makes the notification open the mail it is about.
+         * Present for the new-mail notifications the renderer raises while the
+         * app is in the foreground; absent for a send result, which is not
+         * about a message that can be opened.
+         */
+        String messageId = call.getString("messageId", "");
         try {
-            if (isCode) Notifier.code(getContext(), title, title, body);
-            else Notifier.status(getContext(), title + body, title, body);
+            if (isCode) {
+                Notifier.code(getContext(), title, title, body, codeValue, copyLabel);
+            } else if (!messageId.isEmpty()) {
+                Notifier.mail(getContext(), messageId, title, body, messageId);
+            } else {
+                Notifier.status(getContext(), title + body, title, body);
+            }
         } catch (Exception ignored) {
             // A refused or unavailable notification must not fail the caller:
             // the code is already on the codes screen either way.
+        }
+        call.resolve();
+    }
+
+    /**
+     * The inbox message a tapped notification asked for, if one is waiting.
+     *
+     * Polled by the web layer at startup rather than delivered as an event,
+     * because the tap is routinely what *starts* the app: fifteen minutes after
+     * a background sync, with the process long dead and no bridge to fire an
+     * event at. {@link MainActivity} parks the id from the intent — on a cold
+     * start in {@code onCreate}, on a warm one in {@code onNewIntent} — and
+     * this hands it over exactly once.
+     *
+     * Resolves with an absent `messageId` rather than rejecting when there is
+     * nothing waiting, which is the overwhelmingly common case: it is called on
+     * every launch.
+     */
+    @PluginMethod
+    public void takePendingOpen(PluginCall call) {
+        JSObject result = new JSObject();
+        String id = MainActivity.takePendingOpenMessageId();
+        if (id != null && !id.isEmpty()) result.put("messageId", id);
+        call.resolve(result);
+    }
+
+    /**
+     * Put text on the clipboard, because the web API cannot do it here.
+     *
+     * `navigator.clipboard.writeText()` rejects inside an Android WebView with
+     * a permission error, from a real tap, in a genuine secure context. The
+     * async clipboard write goes through Chromium's permission service, and
+     * WebView has no delegate for `clipboard-write` — `onPermissionRequest`
+     * covers audio, video, MIDI and protected media and nothing else. Every
+     * copy button in the app therefore reported failure on Android while
+     * working on Windows and in the browser preview, and the verification-code
+     * screen — whose entire purpose is one tap that copies a code — was the
+     * place it hurt.
+     *
+     * {@code ClipboardManager} has no such gate: it is the API the platform
+     * intends for this, and it needs no permission at all to write.
+     *
+     * The label is what Android shows in its own "copied" toast on 12 and
+     * below, so it is the app's name rather than the value — a clipboard
+     * preview reading out a verification code on the screen of a phone someone
+     * else can see is not a feature.
+     */
+    @PluginMethod
+    public void clipboardWrite(PluginCall call) {
+        String text = call.getString("text", "");
+        ClipboardManager clipboard = getContext().getSystemService(ClipboardManager.class);
+        if (clipboard == null) {
+            // No clipboard service at all — a stripped OEM build or a test
+            // harness. Said out loud rather than resolved, so `core/clipboard`
+            // falls through to its web paths instead of reporting a success
+            // that put nothing anywhere.
+            call.reject("No clipboard service on this device");
+            return;
+        }
+        try {
+            clipboard.setPrimaryClip(ClipData.newPlainText("Aevistle", text));
+        } catch (Exception e) {
+            call.reject(e.getMessage() == null ? e.toString() : e.getMessage());
+            return;
         }
         call.resolve();
     }

@@ -101,6 +101,23 @@
             </intent-filter>
         </receiver>
 
+        <!--
+            The "Copy" button on a verification-code notification.
+
+            Not exported, for the same reason `AlarmReceiver` is not: an
+            exported receiver would let any app on the device broadcast an
+            intent and drive this app's clipboard with a string of its
+            choosing. Only the PendingIntent this app builds for its own
+            notification can reach it.
+        -->
+        <receiver
+            android:name=".CopyCodeReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="dev.aevistle.app.COPY_CODE" />
+            </intent-filter>
+        </receiver>
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

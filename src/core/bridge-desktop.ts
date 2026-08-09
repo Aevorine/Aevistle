@@ -86,7 +86,8 @@ export function createDesktopBridge(): PlatformBridge {
     installUpdate: (filePath) => api.installUpdate(filePath),
     onUpdateProgress: (handler) => api.onUpdateProgress(handler),
 
-    notify: (title, body) => api.notify(title, body),
+    notify: (title, body, opts) => api.notify(title, body, opts?.messageId),
+    onOpenMessage: (handler) => api.onOpenMessage(handler),
     openExternal: (url) => api.openExternal(url),
     appInfo: () => api.appInfo(),
   }

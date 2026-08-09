@@ -59,10 +59,12 @@ import { pruneLogs } from '../core/logRetention'
 import {
   applyQuietHours,
   computeOccurrences,
+  isQuiet,
   migrateSkipWeekends,
   rearm,
   type QuietHours,
 } from '../core/schedule'
+import { announcementFor, newArrivals, previewLine, senderName } from '../core/newMail'
 import {
   applyWorkCalendarDetailed,
   calendarWarning,
@@ -2492,6 +2494,78 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [bridge, state.jobs, state.accounts, addLog],
   )
 
+  /**
+   * The message ids each account was known to hold before the sync now
+   * running, and whether that baseline is trustworthy yet.
+   *
+   * A ref rather than state on purpose. This is read and written inside
+   * `syncInboxAccount`, which already captures `state` as of when it was
+   * *created*; comparing against a closed-over message list would compare the
+   * new mail against whatever the account looked like several syncs ago and
+   * announce the same arrivals repeatedly.
+   *
+   * `primed` starts false per account and is set by that account's first
+   * completed sync. Without it, opening the app announces the whole mailbox:
+   * every message is new to a process that has just started. See
+   * `core/newMail.ts`, which owns the rule and is where the other two live.
+   */
+  const seenInboxIds = useRef(new Map<string, { ids: Set<string>; primed: boolean }>())
+
+  /**
+   * Tell the user that mail arrived, if it did and if they want to know.
+   *
+   * Reads `liveRef` rather than `state` for the settings, for the same reason
+   * the delete-race guard below does: this runs when a sync *lands*, and the
+   * only settings that matter are the ones in force then.
+   */
+  const announceNewMail = useCallback(
+    (accountId: string, messages: readonly InboxMessage[]) => {
+      const previous = seenInboxIds.current.get(accountId)
+      const ids = new Set(messages.map((m) => m.id))
+      seenInboxIds.current.set(accountId, { ids, primed: true })
+
+      const settings = liveRef.current.settings
+      if (settings.notifyOnNewMail === false) return
+      /*
+       * Quiet hours hold this back, unlike a verification code. Someone
+       * waiting for a code at 02:00 is waiting on purpose; a newsletter at
+       * 02:00 is precisely what a nightly window exists to keep off the
+       * screen. Both remain on the Inbox screen either way — nothing is lost,
+       * only deferred to when it is looked at.
+       */
+      if (isQuiet(Date.now(), quietFrom(settings))) return
+
+      const arrivals = newArrivals({
+        before: previous?.ids ?? new Set<string>(),
+        after: messages,
+        now: Date.now(),
+        primed: previous?.primed ?? false,
+      })
+      const announcement = announcementFor(arrivals)
+      if (!announcement) return
+
+      const { count, newest } = announcement
+      const from = senderName(newest.from)
+      const subject = newest.subject || i18n.t('inbox.noSubject')
+      const preview = previewLine(newest)
+      void bridge
+        ?.notify(
+          count > 1
+            ? i18n.t('notify.newMailMany', { n: count, from })
+            : i18n.t('notify.newMailOne', { from }),
+          // The subject is the line that decides whether this is worth
+          // interrupting for, so it leads; the snippet follows only when
+          // there is one, rather than leaving a trailing separator.
+          preview ? `${subject} — ${preview}` : subject,
+          { messageId: newest.id },
+        )
+        .catch(() => {
+          /* A refused notification must not take the sync down with it. */
+        })
+    },
+    [bridge, i18n],
+  )
+
   const syncInboxAccount = useCallback(
     async (accountId: string, override?: InboxAccountState) => {
       if (!bridge?.syncInbox) return
@@ -2535,6 +2609,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
           return { ok: !result.lastSyncError, error: result.lastSyncError, inbox: result }
         }
         dispatch({ type: 'upsertInboxAccount', inbox: result, origin: 'sync' })
+        /*
+         * After the dispatch, and only on the path where the account still
+         * exists. Every inbox refresh in the app funnels through here — the
+         * push watcher, the timer, the Check now button and the receive test —
+         * so this is the one place that sees both what was known before and
+         * what came back, which is exactly what deciding "is this new" needs.
+         * Announcing from the individual callers instead would have meant four
+         * copies of the rule and four chances for a message to be announced
+         * twice.
+         */
+        if (!result.lastSyncError) announceNewMail(accountId, result.messages ?? [])
         /*
          * Handed back as well as dispatched. A caller that pressed a button and
          * is waiting to say what happened cannot read the answer out of `state`

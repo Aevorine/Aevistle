@@ -40,6 +40,7 @@ import { buildIcs, calendarToEvents } from '../core/ics'
 import { statutoryNames } from '../core/cnHolidays'
 import { holidayNameFor } from '../core/holidayPresets'
 import { saveGeneratedFile } from '../core/download'
+import { copyText } from '../core/clipboard'
 import { DEFAULT_WORK_CALENDAR } from '../core/workCalendar'
 
 export function CalendarSubscribeCard() {
@@ -175,8 +176,13 @@ export function CalendarSubscribeCard() {
                   variant="ghost"
                   icon={<IconCalendar size={15} />}
                   onClick={() => {
-                    void navigator.clipboard.writeText(url)
-                    toast.push({ tone: 'success', title: t('control.copied') })
+                    void copyText(url).then((ok) => {
+                      toast.push(
+                        ok
+                          ? { tone: 'success', title: t('control.copied') }
+                          : { tone: 'error', title: t('inbox.copyFailed') },
+                      )
+                    })
                   }}
                 >
                   {t('common.copy')}

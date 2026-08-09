@@ -229,8 +229,24 @@ export interface DesktopApi {
   /** Drop the on-disk remote-image cache. Part of "reset everything". */
   clearImageCache(): Promise<void>
   onInboxEvent(handler: (event: InboxEvent) => void): () => void
+  /**
+   * A notification naming a message was clicked. Carries that message's id.
+   *
+   * The click lands in the main process — it is an Electron `Notification`, not
+   * a DOM one — so the id has to come back across the boundary for the renderer
+   * to act on it. Same replay treatment as `onTrayCommand`: a notification
+   * clicked while the window was closed opens one, and the page it opens has
+   * not mounted React yet, so the preload holds the id until someone asks.
+   */
+  onOpenMessage(handler: (messageId: string) => void): () => void
 
-  notify(title: string, body: string): Promise<void>
+  /**
+   * `messageId` is what makes the notification clickable-through: the main
+   * process attaches a click handler that raises the window and sends the id
+   * back down `onOpenMessage`. Omitted for notifications about nothing in
+   * particular (a send result), where the click just raises the window.
+   */
+  notify(title: string, body: string, messageId?: string): Promise<void>
   openExternal(url: string): Promise<void>
   appInfo(): Promise<AppInfo>
 
@@ -367,6 +383,7 @@ export const IPC = {
   fetchFeed: 'aevistle:fetch-feed',
   clearImageCache: 'aevistle:clear-image-cache',
   inboxEvent: 'aevistle:inbox-event',
+  openMessage: 'aevistle:open-message',
   notify: 'aevistle:notify',
   openExternal: 'aevistle:open-external',
   appInfo: 'aevistle:app-info',

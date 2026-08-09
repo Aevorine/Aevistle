@@ -47,6 +47,7 @@ import {
   type AutoField,
 } from '../core/providers'
 import { advisoryKey } from '../core/transport'
+import { accountLabel } from '../core/accounts'
 import { hasErrors, validateAccount } from '../core/validate'
 import { getBridge } from '../core/bridge'
 import { requiresOAuth, supportsOAuth, type OAuthAccountStatus } from '../core/oauth'
@@ -634,6 +635,25 @@ export function AccountDialog({
   const blocked = hasErrors(issues)
 
   /**
+   * The two names as they will actually be rendered, for the preview line
+   * under them.
+   *
+   * `fromPreview` is written the way a mail client shows a From header, because
+   * that is precisely where the value lands and precisely what the recipient
+   * will see; with no name typed it is the bare address, which is also the
+   * truth. `labelPreview` goes through `accountLabel`, the same helper the
+   * account list, the sync scope picker and the self-check all use, so the
+   * preview cannot drift from what those screens print.
+   *
+   * `em` quotes on neither: a phone renders this at 13px and the extra
+   * punctuation cost a line wrap on a 360px screen.
+   */
+  const fromPreview = account.fromName.trim()
+    ? `${account.fromName.trim()} <${account.fromAddress || 'you@example.com'}>`
+    : account.fromAddress || 'you@example.com'
+  const labelPreview = accountLabel({ ...account, fromAddress: account.fromAddress || 'you@example.com' })
+
+  /**
    * A blocking reply-to error must never be hidden behind a closed
    * disclosure. Desktop is already open (`moreOpen` starts `!narrow`, i.e.
    * `true`), so this is a no-op there; on a phone it forces the section open
@@ -1088,17 +1108,80 @@ export function AccountDialog({
               onChange={(e) => onAddressChange(e.target.value)}
             />
           </Field>
+        </div>
+
+        {/*
+          The two names, side by side, because apart they were the same word
+          twice.
+
+          These are the app's only two "name" fields and they mean opposite
+          things: `fromName` goes into the From header and is the name the
+          person receiving the mail reads, `label` never leaves this device and
+          is what the account list here calls this mailbox. Written as "你的名字"
+          and "账号备注" — "Your name" and "Display name" in English — that
+          distinction is invisible, and it was made worse by geography: one sat
+          in step 1 and the other was folded away inside "More settings", so the
+          two were never on screen together to be compared.
+
+          Three things fix it and all three are needed. They share a row, so the
+          comparison is spatial rather than remembered. Each carries a
+          `labelHint` naming *where the value shows up* — and `labelHint`
+          specifically, not `hint`, because the phone media query culls
+          `.field__hint` and a phone is where a cramped form needs the
+          distinction most (see the `--keep` discussion in app.css). And the
+          line below prints both, filled in, so the answer to "which one is
+          which" is on screen as a fact rather than as a description.
+
+          The address moved to a row of its own to make room, which it had
+          earned anyway: it is `input--lg`, it drives `applyAuto`, and it is the
+          one field the rest of the dialog is derived from.
+        */}
+        <div className="field__row">
           {/* Marked optional because it is: `validateAccount` only ever
               objects to this field's *contents* (a newline would be header
               injection), never to its absence. Unmarked, it read as a second
               thing you had to think of before the form would work. */}
-          <Field label={t('account.fromName')} optional={t('common.optional')}>
+          <Field
+            label={t('account.fromName')}
+            optional={t('common.optional')}
+            labelHint={t('account.fromNameWhere')}
+          >
             <input
               className="input"
+              placeholder={t('account.fromNamePlaceholder')}
               value={account.fromName}
               onChange={(e) => patch({ fromName: e.target.value })}
             />
           </Field>
+          {/* Not marked optional, unlike the group box it used to sit beside:
+              `validateAccount` warns when this is blank, and auto-fill keeps it
+              filled from the provider name, so calling it optional would
+              contradict both. */}
+          <Field label={t('account.label')} labelHint={t('account.labelWhere')}>
+            <input
+              className="input"
+              placeholder={t('account.labelPlaceholder')}
+              value={account.label}
+              onChange={(e) => {
+                markTouched('label')
+                patch({ label: e.target.value })
+              }}
+            />
+          </Field>
+        </div>
+
+        {/*
+          Both names as they will actually appear, which is the part that
+          settles the question.
+
+          `field__hint--keep` so it survives the phone's cull — this is evidence
+          about what the form is about to do, not an explanation of a control
+          the reader can already see, which is the line that escape hatch draws.
+        */}
+        <div className="field__hint field__hint--keep">
+          {t('account.namePreviewOut', { value: fromPreview })}
+          {' · '}
+          {t('account.namePreviewIn', { value: labelPreview })}
         </div>
 
         {/*
@@ -1396,18 +1479,10 @@ export function AccountDialog({
           <span className="account-optional">{t('common.optional')}</span>
         </summary>
         <div className="account-more__body">
+          {/* The account alias used to share this row. It is in step 1 now,
+              beside the sender name it was being confused with — see the long
+              comment there. */}
           <div className="field__row">
-            <Field label={t('account.label')}>
-              <input
-                className="input"
-                placeholder={t('account.labelPlaceholder')}
-                value={account.label}
-                onChange={(e) => {
-                  markTouched('label')
-                  patch({ label: e.target.value })
-                }}
-              />
-            </Field>
             {/* Free text with suggestions rather than a managed list of groups.
                 Groups here are a filing device, and a filing device that makes you
                 create the folder first is one people stop using. */}

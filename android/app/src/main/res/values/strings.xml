@@ -4,4 +4,20 @@
     <string name="title_activity_main">Aevistle</string>
     <string name="package_name">dev.aevistle.app</string>
     <string name="custom_url_scheme">dev.aevistle.app</string>
+
+    <!--
+        The only user-facing text the native side ever writes on its own.
+
+        Everything else in this app is translated in `src/i18n/*.ts` and reaches
+        Android as an already-worded string in the `notify` bridge call. These
+        four cannot be: they are used by `InboxSyncWorker`, which runs on
+        WorkManager's schedule with no WebView in the process and therefore no
+        access to the app's own locale machinery at all. Android's own resource
+        qualifiers do the same job — see `values-zh-rCN` and its siblings, which
+        `check-android-strings.mjs` holds to the same key set as this file.
+    -->
+    <string name="notify_new_mail_one">Mail from %1$s</string>
+    <string name="notify_new_mail_many">%1$d new messages · latest from %2$s</string>
+    <string name="notify_new_mail_summary">%1$d new messages</string>
+    <string name="notify_no_subject">(no subject)</string>
 </resources>

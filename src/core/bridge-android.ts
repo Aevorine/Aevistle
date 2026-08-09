@@ -223,7 +223,34 @@ interface AevistleNativePlugin extends AndroidPermissionApi {
 
   syncJobs(opts: { jobs: ScheduledJob[]; accounts: MailAccount[] }): Promise<void>
   pullJobRuns(): Promise<{ runs: Array<JobRun & { jobId: string }> }>
-  notify(opts: { title: string; body: string; code?: boolean }): Promise<void>
+  notify(opts: {
+    title: string
+    body: string
+    code?: boolean
+    /** The bare code, for the notification's Copy action to put on the clipboard. */
+    value?: string
+    /** That action's label, translated here — the native side has no i18n. */
+    copyLabel?: string
+    /** The inbox message to open when the notification is tapped. */
+    messageId?: string
+  }): Promise<void>
+  /**
+   * The message a tapped notification asked for, if one is waiting.
+   *
+   * Polled rather than pushed. The tap is routinely what starts the app —
+   * fifteen minutes after a background sync, with no WebView in the process to
+   * fire an event at — so `MainActivity` parks the id and this collects it.
+   */
+  takePendingOpen(): Promise<{ messageId?: string }>
+  /**
+   * `ClipboardManager.setPrimaryClip`, because the web API cannot do this here.
+   *
+   * `navigator.clipboard.writeText` rejects inside an Android WebView — the
+   * permission layer in front of it has no delegate to ask — so every copy
+   * button in the app reported failure on this platform while working
+   * everywhere else. See `core/clipboard.ts` for the full account.
+   */
+  clipboardWrite(opts: { text: string }): Promise<void>
   appInfo(): Promise<AppInfo>
 
   dataFolder(): Promise<DataFolder>
@@ -826,7 +853,40 @@ export function createAndroidBridge(): PlatformBridge & AndroidPermissionApi {
       }
     },
 
-    notify: (title, body, opts) => Native.notify({ title, body, code: opts?.code }),
+    notify: (title, body, opts) =>
+      Native.notify({
+        title,
+        body,
+        code: opts?.code,
+        value: opts?.value,
+        copyLabel: opts?.copyLabel,
+        messageId: opts?.messageId,
+      }),
+
+    /**
+     * One shot, at subscribe time, and then nothing.
+     *
+     * Android has no live channel for this — see `takePendingOpen`. The handler
+     * is called at most once, with whatever the tapped notification left
+     * behind; the returned unsubscribe exists to satisfy the shared signature
+     * and cancels a reply still in flight rather than detaching a listener
+     * there is none of.
+     */
+    onOpenMessage(handler) {
+      let cancelled = false
+      void Native.takePendingOpen()
+        .then(({ messageId }) => {
+          if (!cancelled && messageId) handler(messageId)
+        })
+        .catch(() => {
+          /* An older APK with no such method. Nothing was waiting either way. */
+        })
+      return () => {
+        cancelled = true
+      }
+    },
+
+    copyText: (text) => Native.clipboardWrite({ text }),
 
     async openExternal(url) {
       window.open(url, '_blank', 'noopener')

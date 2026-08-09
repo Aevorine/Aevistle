@@ -588,9 +588,61 @@ export interface PlatformBridge {
    * readable without switching apps. Platforms with a single notification
    * surface ignore it.
    */
-  notify(title: string, body: string, opts?: { code?: boolean }): Promise<void>
+  notify(
+    title: string,
+    body: string,
+    opts?: {
+      code?: boolean
+      /**
+       * The bare code, when `code` is set.
+       *
+       * Android puts a Copy button on the notification and this is what it
+       * writes to the clipboard. It has to arrive separately because the title
+       * is a worded sentence — a button that pasted "Verification code:
+       * 482 913" into a verification field would be worse than no button.
+       */
+      value?: string
+      /**
+       * That button's label, already translated.
+       *
+       * The native layer has no access to `src/i18n`, and this is the only
+       * control the app ever puts on a notification; passing the word down is
+       * what stops it being the single untranslated string in the product.
+       */
+      copyLabel?: string
+      /**
+       * The inbox message this notification is about, if any.
+       *
+       * A notification that raises the window and leaves the reader to go and
+       * find the mail themselves is only half of one. Where a platform can
+       * carry it, this id comes back through `onOpenMessage` when the
+       * notification is tapped, and the app opens that message.
+       */
+      messageId?: string
+    },
+  ): Promise<void>
+  /**
+   * The user tapped a notification that named a message. Opens it.
+   *
+   * Desktop delivers this as an event, because the click happens in the main
+   * process while the window is already alive. Android cannot: the tap may be
+   * what starts the app, hours after any WebView existed, so it stores the id
+   * and this handler is called once at startup with whatever was waiting. Both
+   * shapes are the same to the caller — subscribe, get told, unsubscribe.
+   */
+  onOpenMessage?(handler: (messageId: string) => void): () => void
   openExternal(url: string): Promise<void>
   appInfo(): Promise<AppInfo>
+  /**
+   * Put text on the system clipboard, natively.
+   *
+   * Android only, and it is not an optimisation there — it is the only path
+   * that works. See `core/clipboard.ts`, which owns the fallback ladder and is
+   * what every caller in the app should actually be using; this method exists
+   * to be the first rung of it. Platforms whose WebView honours
+   * `navigator.clipboard` leave it undefined rather than reimplementing it.
+   */
+  copyText?(text: string): Promise<void>
 }
 
 // ---------------------------------------------------------------------------
@@ -664,6 +716,21 @@ export async function getBridge(): Promise<PlatformBridge> {
     cached = mod.createWebBridge()
   }
 
+  return cached
+}
+
+/**
+ * The bridge, if one has already been resolved, without awaiting anything.
+ *
+ * For the handful of callers that run inside a user gesture and cannot afford
+ * to yield first — `core/clipboard.ts` is the one that made this necessary. A
+ * clipboard write is only honoured while the gesture is still live on some
+ * engines, and `await getBridge()` inside a click handler is enough of a pause
+ * to lose it. Answers `null` before the first `getBridge()` has resolved,
+ * which every caller must treat as "use the web path", never as an error: by
+ * the time any of them can be pressed, `AppState` has long since resolved it.
+ */
+export function getBridgeSync(): PlatformBridge | null {
   return cached
 }
 

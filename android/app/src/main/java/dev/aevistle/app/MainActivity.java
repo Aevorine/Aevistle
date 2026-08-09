@@ -1,5 +1,6 @@
 package dev.aevistle.app;
 
+import android.content.Intent;
 import android.os.Bundle;
 import android.view.View;
 import android.webkit.WebView;
@@ -12,6 +13,31 @@ import com.getcapacitor.BridgeActivity;
 
 public class MainActivity extends BridgeActivity {
 
+    /**
+     * The inbox message a tapped notification asked for, waiting to be
+     * collected.
+     *
+     * Static because it has to outlive this activity's relationship with the
+     * WebView in both directions. On a cold start the intent arrives in
+     * {@code onCreate}, long before the page has loaded a line of JavaScript;
+     * the page asks for it later through
+     * {@code AevistleNativePlugin.takePendingOpen}. Deliberately *not* pushed
+     * to the WebView as an event: the tap is frequently what starts the
+     * process, and an event fired at a bridge that does not exist yet is the
+     * silent no-op this codebase keeps finding.
+     *
+     * Only the newest is kept. Two taps before the page is ready still means
+     * one message to open, and it is the one tapped last.
+     */
+    private static volatile String pendingOpenMessageId = null;
+
+    /** Read and clear — the id is a one-shot request, not a state to poll. */
+    static String takePendingOpenMessageId() {
+        String id = pendingOpenMessageId;
+        pendingOpenMessageId = null;
+        return id;
+    }
+
     @Override
     public void onCreate(Bundle savedInstanceState) {
         // Must happen before super.onCreate() — the bridge builds its plugin
@@ -19,7 +45,29 @@ public class MainActivity extends BridgeActivity {
         // the WebView.
         registerPlugin(AevistleNativePlugin.class);
         super.onCreate(savedInstanceState);
+        recordPendingOpen(getIntent());
         applyWindowInsets();
+    }
+
+    /**
+     * The warm path.
+     *
+     * `launchMode="singleTask"` (see the manifest) means a notification tap on
+     * an already-running app arrives here rather than as a second
+     * {@code onCreate}. Without this override the extra would be dropped and
+     * the notification would merely raise the app — which is what it did
+     * before, and is what "tapping it doesn't take me to the mail" meant.
+     */
+    @Override
+    public void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        recordPendingOpen(intent);
+    }
+
+    private static void recordPendingOpen(Intent intent) {
+        if (intent == null) return;
+        String id = intent.getStringExtra(Notifier.EXTRA_MESSAGE_ID);
+        if (id != null && !id.isEmpty()) pendingOpenMessageId = id;
     }
 
     /**

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The one colour the system draws on the app's behalf.
+
+    Android tints a notification's small icon and its app-name line with
+    `NotificationCompat.Builder.setColor`, and with nothing supplied it picks a
+    neutral grey — so every Aevistle notification looked like a system message
+    rather than like this app. `#0B6BD8` is the `accent-azure-l` token from
+    `src/styles/theme.css`, which is the app's own default accent in light
+    mode, so the shade and the running app agree without a second value to keep
+    in step by hand.
+
+    (Written without the token's leading dashes on purpose: an XML comment may
+    not contain a double hyphen, and the build fails on it rather than warning.)
+
+    Deliberately the light-mode azure rather than the dark one: the shade
+    renders this against both backgrounds and the darker of the two is the one
+    that stays legible on white.
+-->
+<resources>
+    <color name="notification_accent">#0B6BD8</color>
+</resources>

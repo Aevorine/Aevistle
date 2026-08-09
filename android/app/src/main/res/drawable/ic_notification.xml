@@ -1,0 +1,36 @@
+<!--
+    The small icon every Aevistle notification carries.
+
+    It replaced `android.R.drawable.stat_notify_sync`, which is the platform's
+    generic two-arrow sync glyph: correct-looking, free, and belonging to no
+    app in particular. A notification that arrives wearing the same mark as
+    every background sync on the device does not read as coming from this one,
+    which is a real part of "the new-mail notification is not good enough".
+
+    Flat white on transparent, and that is a requirement rather than a style
+    choice: from Android 5 the system takes only the alpha channel of a small
+    icon and tints it with the notification's own colour (`setColor` in
+    Notifier.java). Any colour drawn here is discarded, and any non-transparent
+    background becomes a solid white square — which is exactly how a launcher
+    PNG dropped in this slot ends up looking like a bug.
+
+    24dp with the glyph inside the inner 18dp, per the status-bar icon metrics:
+    the system scales this to the status bar's height, and artwork drawn to the
+    edges is clipped there while looking fine in the shade.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="#FFFFFFFF">
+    <!--
+        An open envelope: the outline, then the flap as a separate stroked
+        path. Drawn as strokes rather than as a filled silhouette because a
+        solid 18dp block reduces to an unreadable smudge at status-bar size,
+        where these are seen most.
+    -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M4,5h16c1.1,0 2,0.9 2,2v10c0,1.1 -0.9,2 -2,2H4c-1.1,0 -2,-0.9 -2,-2V7c0,-1.1 0.9,-2 2,-2zM4,7v0.4l8,5.1 8,-5.1V7H4zM4,17h16V9.8l-7.5,4.8c-0.3,0.2 -0.7,0.2 -1,0L4,9.8V17z" />
+</vector>

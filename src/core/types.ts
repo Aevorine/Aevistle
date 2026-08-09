@@ -718,6 +718,23 @@ export interface Settings {
    */
   notifyOnCode?: boolean
   /**
+   * Raise a system notification when ordinary mail arrives.
+   *
+   * Optional and defaults to on. Until this setting existed there was nothing
+   * to switch: a mailbox the app was actively watching could take delivery of
+   * anything that was not a verification code in complete silence, on both
+   * platforms, which is the whole of what "the new-mail notification is not
+   * good enough" turned out to mean.
+   *
+   * What qualifies is decided by `core/newMail.ts`, not here — unseen, newer
+   * than half an hour, and not part of the first sync after launch. Quiet
+   * hours suppress it too, which is a deliberate asymmetry with
+   * `notifyOnCode`: a code is time-critical by nature and someone waiting for
+   * one at 02:00 is waiting on purpose, whereas a newsletter at 02:00 is the
+   * exact thing a nightly window exists to hold back.
+   */
+  notifyOnNewMail?: boolean
+  /**
    * Put a freshly found code straight on the clipboard.
    *
    * Only ever fires while "waiting for a code" is switched on, and only for the
@@ -834,6 +851,7 @@ export const DEFAULT_SETTINGS: Settings = {
   inboxSyncMinutes: 5,
   inboxPush: true,
   notifyOnCode: true,
+  notifyOnNewMail: true,
   autoCopyCode: true,
   codeRules: [],
   listDensity: 'standard',

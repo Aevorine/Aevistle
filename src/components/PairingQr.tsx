@@ -17,6 +17,7 @@ import { IconRefresh } from './icons'
 import { DeviceLinkAnimation, type DeviceLinkStatus } from './DeviceLinkAnimation'
 import { useI18n } from '../i18n'
 import { encodeQr, qrPath } from '../core/qr'
+import { copyText } from '../core/clipboard'
 import {
   encodePairingText,
   isExpired,
@@ -187,8 +188,17 @@ export function PairingQr({
               <div className="btn-row">
                 <Button
                   onClick={() => {
-                    void navigator.clipboard?.writeText(codeText)
-                    toast.push({ tone: 'success', title: t('toast.copied') })
+                    void copyText(codeText).then((ok) => {
+                      // Reporting the outcome rather than announcing success
+                      // unconditionally: this used to say "copied" whether or
+                      // not anything reached the clipboard, which on Android
+                      // was every single time.
+                      toast.push(
+                        ok
+                          ? { tone: 'success', title: t('toast.copied') }
+                          : { tone: 'error', title: t('inbox.copyFailed') },
+                      )
+                    })
                   }}
                 >
                   {t('common.copy')}

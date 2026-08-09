@@ -994,6 +994,74 @@ function fallbackTrayIcon(): Electron.NativeImage {
   return nativeImage.createFromBuffer(pixels, { width: size, height: size })
 }
 
+/**
+ * The window icon, loaded once and reused for every notification.
+ *
+ * Windows draws a toast with whatever icon it can find, and for an
+ * unsigned-shortcut development run that is frequently nothing at all — a
+ * notification that arrives with a blank square beside it does not read as
+ * coming from this app, which is half of "the notifications are not good
+ * enough". `build/icon.png` is the same 512px asset electron-builder installs
+ * as the app icon, so the toast matches the Start-menu entry by construction.
+ *
+ * Resolved lazily and cached, including the empty result: `createFromPath`
+ * costs a synchronous file read, and a notification about newly arrived mail is
+ * raised on a timer that may fire every five minutes for the life of the
+ * process.
+ */
+let notificationIcon: Electron.NativeImage | null = null
+
+function iconForNotification(): Electron.NativeImage | undefined {
+  if (!notificationIcon) {
+    const candidates = [
+      path.join(DIRNAME, '..', 'build', 'icon.png'),
+      path.join(process.resourcesPath ?? '', 'build', 'icon.png'),
+    ]
+    notificationIcon = nativeImage.createEmpty()
+    for (const candidate of candidates) {
+      const loaded = nativeImage.createFromPath(candidate)
+      if (!loaded.isEmpty()) {
+        notificationIcon = loaded
+        break
+      }
+    }
+  }
+  return notificationIcon.isEmpty() ? undefined : notificationIcon
+}
+
+/**
+ * Every notification this process raises, in one place.
+ *
+ * It exists because there were two — the scheduler's failure toast and the
+ * renderer's IPC handler — and they had already drifted: one carried an icon
+ * and a click handler, the other carried neither, so half the app's
+ * notifications appeared as an anonymous grey box that did nothing when
+ * pressed.
+ *
+ * A click always raises the window, because a notification whose click is a
+ * no-op teaches people not to click them. When `messageId` is present it also
+ * sends the id to the renderer, which opens that message — the difference
+ * between being told mail arrived and being shown it.
+ */
+function showNotification(title: string, body: string, messageId?: string): void {
+  if (!Notification.isSupported()) return
+  const notification = new Notification({ title, body, icon: iconForNotification() })
+  notification.on('click', () => {
+    revealWindow()
+    if (!messageId) return
+    /*
+     * After `revealWindow`, and tolerant of the window having just been
+     * created by it: a click with the app closed to the tray builds a fresh
+     * BrowserWindow whose page has not loaded, so the send would go nowhere.
+     * The preload holds the id for whoever subscribes first — see
+     * `onOpenMessage` there — which makes this safe to fire immediately in
+     * both cases rather than needing to wait for `did-finish-load`.
+     */
+    mainWindow?.webContents.send(IPC.openMessage, messageId)
+  })
+  notification.show()
+}
+
 async function openExternalSafely(url: string): Promise<void> {
   try {
     const parsed = new URL(url)
@@ -1625,9 +1693,9 @@ function registerIpc(): void {
   ipcMain.handle(IPC.fetchFeed, (_e, url: string) => fetchFeed(url))
   ipcMain.handle(IPC.clearImageCache, () => clearImageCache())
 
-  ipcMain.handle(IPC.notify, (_e, title: string, body: string) => {
-    if (Notification.isSupported()) new Notification({ title, body }).show()
-  })
+  ipcMain.handle(IPC.notify, (_e, title: string, body: string, messageId?: string) =>
+    showNotification(title, body, messageId),
+  )
 
   ipcMain.handle(IPC.openExternal, (_e, url: string) => openExternalSafely(url))
 
@@ -1908,11 +1976,14 @@ void app.whenReady().then(() => {
 
   scheduler.on('jobEvent', (payload) => {
     mainWindow?.webContents.send(IPC.jobEvent, payload)
-    if (!payload.result.ok && Notification.isSupported()) {
-      new Notification({
-        title: 'Aevistle — scheduled send failed',
-        body: payload.result.error ?? 'Unknown error',
-      }).show()
+    if (!payload.result.ok) {
+      // Through `showNotification` like everything else, so this one finally
+      // gets the app icon and a click that opens the window rather than being
+      // the one notification in the app that does neither.
+      showNotification(
+        'Aevistle — scheduled send failed',
+        payload.result.error ?? 'Unknown error',
+      )
     }
   })
   scheduler.start()

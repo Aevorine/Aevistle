@@ -55,6 +55,7 @@ import { IconFolder, IconShield } from '../components/icons'
 import { useApp } from '../state/AppState'
 import { useI18n } from '../i18n'
 import type { ControlEndpoint } from '../core/control'
+import { copyText } from '../core/clipboard'
 
 export function ControlCard() {
   const { state, bridge, dispatch } = useApp()
@@ -173,8 +174,13 @@ export function ControlCard() {
             <Button
               disabled={!setupCommand}
               onClick={() => {
-                void navigator.clipboard.writeText(setupCommand)
-                toast.push({ tone: 'success', title: t('control.copied') })
+                void copyText(setupCommand).then((ok) => {
+                  toast.push(
+                    ok
+                      ? { tone: 'success', title: t('control.copied') }
+                      : { tone: 'error', title: t('inbox.copyFailed') },
+                  )
+                })
               }}
             >
               {t('control.copyConfig')}

@@ -31,6 +31,7 @@ import {
 } from 'react'
 import { useApp } from './AppState'
 import { getCachedBody, putCachedBody } from '../core/bodyMemo'
+import { copyText } from '../core/clipboard'
 import { extractFromMessage, learnRule, linksFromSanitizedHtml } from '../core/codeExtract'
 import type { Extracted } from '../core/codeExtract'
 import type { NewHit } from '../core/codeHistory'
@@ -262,7 +263,14 @@ export function CodeCheckProvider({ children }: { children: ReactNode }) {
       const newest = worth.reduce((a, b) => (b.date > a.date ? b : a))
       if (primed.current && state.settings.notifyOnCode !== false) {
         void bridge
-          ?.notify(i18n.t('codes.notifyTitle', { code: newest.value }), newest.from, { code: true })
+          ?.notify(i18n.t('codes.notifyTitle', { code: newest.value }), newest.from, {
+            code: true,
+            /* The bare digits and the button's word, for the Copy action
+               Android puts on this notification. Both are ignored on platforms
+               whose notifications carry no controls. */
+            value: newest.value,
+            copyLabel: i18n.t('common.copy'),
+          })
           .catch(() => {
             /* A refused notification must not take the watcher down. */
           })
@@ -348,11 +356,11 @@ export function CodeCheckProvider({ children }: { children: ReactNode }) {
          * that the next code is the thing they want.
          */
         if (newest && autoCopyRef.current && waitingUntil !== undefined) {
-          try {
-            await navigator.clipboard.writeText(newest.value)
-          } catch {
-            /* No clipboard permission: the card is still there to press. */
-          }
+          /* Via `core/clipboard`, which reaches the native clipboard on
+             Android — the web call this used to make was refused there, so
+             auto-copy has never once worked on a phone. Its answer is still
+             ignored: the card is right there to press either way. */
+          await copyText(newest.value)
         }
         if (waitingUntil !== undefined) setWaitingUntil(undefined)
       } else if (failures.length > 0 && !anySuccess) {

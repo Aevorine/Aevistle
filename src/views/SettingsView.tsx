@@ -994,6 +994,17 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
               title={t('settings.notifyOnCode')}
               description={t('settings.notifyOnCodeHint')}
             />
+            {/* Also default on, and the switch that was missing entirely: until
+                it existed, ordinary mail arriving in a watched mailbox raised
+                nothing at all on either platform. Directly under the code
+                switch because the two answer the same question about the same
+                mailbox, and the pair reads as one decision. */}
+            <Switch
+              checked={s.notifyOnNewMail !== false}
+              onChange={(v) => patch({ notifyOnNewMail: v })}
+              title={t('settings.notifyOnNewMail')}
+              description={t('settings.notifyOnNewMailHint')}
+            />
 
             {/*
               Android only, and only worth showing at all because both of these

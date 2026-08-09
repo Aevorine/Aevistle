@@ -189,7 +189,21 @@ function hhmm(at: number): string {
   return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`
 }
 
-export function InboxView({ onGoToAccounts }: { onGoToAccounts?: () => void }) {
+export function InboxView({
+  onGoToAccounts,
+  focusMessageId,
+  onFocusHandled,
+}: {
+  onGoToAccounts?: () => void
+  /**
+   * A message the user asked for from outside this screen — by clicking a
+   * new-mail notification. Opened once, then handed back via
+   * `onFocusHandled` so the same id cannot re-open the reader every time this
+   * component re-renders.
+   */
+  focusMessageId?: string | null
+  onFocusHandled?: () => void
+}) {
   const {
     state,
     bridge,
@@ -915,6 +929,27 @@ export function InboxView({ onGoToAccounts }: { onGoToAccounts?: () => void }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [getInboxMessageBody, markInboxMessagesRead, t],
   )
+
+  /**
+   * Open the message a notification click asked for.
+   *
+   * Against `allMessages` rather than `filteredMessages`: the notification
+   * names a specific message, and whatever account filter or search text
+   * happens to be on screen has nothing to do with whether the user meant it.
+   * Filtering here is how "I clicked the notification and nothing happened"
+   * would have been reintroduced one layer further in.
+   *
+   * `onFocusHandled` fires whether or not the message was found. An id that no
+   * longer matches anything — the mail was deleted, or the account was removed
+   * between the notification and the click — must still be cleared, or the
+   * effect retries on every render for the life of the screen.
+   */
+  useEffect(() => {
+    if (!focusMessageId) return
+    const target = allMessages.find((m) => m.id === focusMessageId)
+    if (target) void openDetail(target)
+    onFocusHandled?.()
+  }, [focusMessageId, allMessages, openDetail, onFocusHandled])
 
   /** Move to the message before/after this one in the list currently on screen. */
   const step = useCallback(

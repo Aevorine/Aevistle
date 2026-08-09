@@ -34,6 +34,24 @@ ipcRenderer.on(IPC.trayCommand, (_event, command: TrayCommand) => {
   pendingTrayCommands.push(command)
 })
 
+/**
+ * The same treatment for a notification click, and for the same reason.
+ *
+ * Clicking "new mail from X" while the window is closed asks the main process
+ * to open one. The page it opens has not mounted React yet, so an id sent
+ * straight through would be dropped and the app would come up on whatever
+ * screen it was last on — which reads as a notification that does nothing,
+ * exactly the shape of bug this feature was added to remove. Only the newest
+ * is kept: two clicks before the page is alive still means one message to open,
+ * and it is the one clicked last.
+ */
+let pendingOpenMessage: string | null = null
+let openMessageDelivered = false
+ipcRenderer.on(IPC.openMessage, (_event, messageId: string) => {
+  if (openMessageDelivered) return
+  pendingOpenMessage = messageId
+})
+
 const api: DesktopApi = {
   loadState: () => ipcRenderer.invoke(IPC.loadState),
   saveState: (state) => ipcRenderer.invoke(IPC.saveState, state),
@@ -125,7 +143,17 @@ const api: DesktopApi = {
     return () => ipcRenderer.removeListener(IPC.downloadDone, listener)
   },
 
-  notify: (title, body) => ipcRenderer.invoke(IPC.notify, title, body),
+  onOpenMessage: (handler) => {
+    openMessageDelivered = true
+    const queued = pendingOpenMessage
+    pendingOpenMessage = null
+    const listener = (_event: unknown, messageId: string) => handler(messageId)
+    ipcRenderer.on(IPC.openMessage, listener)
+    if (queued) handler(queued)
+    return () => ipcRenderer.removeListener(IPC.openMessage, listener)
+  },
+
+  notify: (title, body, messageId) => ipcRenderer.invoke(IPC.notify, title, body, messageId),
   openExternal: (url) => ipcRenderer.invoke(IPC.openExternal, url),
   appInfo: () => ipcRenderer.invoke(IPC.appInfo),
 

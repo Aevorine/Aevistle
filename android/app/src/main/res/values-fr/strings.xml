@@ -1,0 +1,8 @@
+<?xml version='1.0' encoding='utf-8'?>
+<!-- See `values/strings.xml`: only what the background sync worker words itself. -->
+<resources>
+    <string name="notify_new_mail_one">Message de %1$s</string>
+    <string name="notify_new_mail_many">%1$d nouveaux messages · le dernier de %2$s</string>
+    <string name="notify_new_mail_summary">%1$d nouveaux messages</string>
+    <string name="notify_no_subject">(sans objet)</string>
+</resources>
