@@ -146,7 +146,12 @@ let uiLocale: LocaleId = 'en'
  * booted is the behaviour the settings screen will claim. The renderer pushes
  * the real values through `IPC.setDesktopPrefs`.
  */
-let desktopPrefs: DesktopPrefs = { minimiseToTray: true, launchAtLogin: false }
+let desktopPrefs: DesktopPrefs = {
+  minimiseToTray: true,
+  launchAtLogin: false,
+  notifyOnSuccess: true,
+  notifyOnFailure: true,
+}
 /**
  * Started by the OS at login, so the first window should stay out of the way.
  * Consumed once — see `ready-to-show`.
@@ -1247,6 +1252,11 @@ function registerIpc(): void {
     const next = {
       minimiseToTray: prefs?.minimiseToTray !== false,
       launchAtLogin: prefs?.launchAtLogin === true,
+      // `!== false` rather than `=== true`, so a build of the renderer that
+      // predates these two fields keeps the default (announce) instead of
+      // silently going quiet on every scheduled send.
+      notifyOnSuccess: prefs?.notifyOnSuccess !== false,
+      notifyOnFailure: prefs?.notifyOnFailure !== false,
     }
     const loginChanged = next.launchAtLogin !== desktopPrefs.launchAtLogin
     desktopPrefs = next
@@ -1976,15 +1986,39 @@ void app.whenReady().then(() => {
 
   scheduler.on('jobEvent', (payload) => {
     mainWindow?.webContents.send(IPC.jobEvent, payload)
+    /*
+     * Both outcomes, both gated on the switch that claims to control them.
+     *
+     * What was here notified on failure unconditionally and on success never.
+     * Both halves were wrong in the same way and for the same reason: the two
+     * settings live in the renderer and the scheduler runs out here, so
+     * `notifyOnFailure` was read by nothing anywhere in the codebase and
+     * `notifyOnSuccess` was read only by the compose screen's own send button.
+     * The result was a pair of switches that could not affect the thing they
+     * are named after — a scheduled send. They arrive through
+     * `IPC.setDesktopPrefs` now, alongside the two that had the same problem
+     * before them.
+     *
+     * The job's name rather than its id: `snapshot()` is the scheduler's own
+     * working set, so this is the name the user typed on the schedule screen,
+     * and a notification saying `job_1a2b3c` names nothing anyone chose.
+     */
+    const name = scheduler.snapshot().find((j) => j.id === payload.jobId)?.name
     if (!payload.result.ok) {
+      if (!desktopPrefs.notifyOnFailure) return
       // Through `showNotification` like everything else, so this one finally
       // gets the app icon and a click that opens the window rather than being
       // the one notification in the app that does neither.
       showNotification(
-        'Aevistle — scheduled send failed',
-        payload.result.error ?? 'Unknown error',
+        tr(uiLocale, 'notify.scheduledFailed'),
+        [name, payload.result.error ?? tr(uiLocale, 'result.unknownError')]
+          .filter(Boolean)
+          .join(' — '),
       )
+      return
     }
+    if (!desktopPrefs.notifyOnSuccess) return
+    showNotification(tr(uiLocale, 'notify.scheduledSent'), name ?? '')
   })
   scheduler.start()
 

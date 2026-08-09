@@ -49,14 +49,30 @@ public class SendWorker extends Worker {
         if (account == null) {
             store.recordRun(jobId, System.currentTimeMillis(), false,
                     "The account this schedule uses no longer exists");
-            notify(context, jobId, "Aevistle", "Scheduled send failed: no such account");
+            // The run is recorded either way — the schedule screen shows it on
+            // next open. Only the interruption is optional.
+            if (store.notifyOnFailure()) {
+                notify(context, jobId, "Aevistle", "Scheduled send failed: no such account");
+            }
             return Result.failure();
         }
 
         String secret = new SecretStore(context).get(account.optString("id", ""), "smtp");
         MailSender.Result result = MailSender.send(context, draft, account, secret);
 
-        store.recordRun(jobId, System.currentTimeMillis(), result.ok, result.error);
+        long ranAt = System.currentTimeMillis();
+        JSONObject run = store.recordRun(jobId, ranAt, result.ok, result.error);
+        /*
+         * Tell an app that is open right now, as well as queueing the report.
+         *
+         * Most scheduled sends on Android happen with nothing open, which is
+         * why the queue exists — but the case where the user is *looking at the
+         * schedule screen* when their 07:00 reminder goes out was the one where
+         * nothing happened at all: the row kept saying "waiting to send" until
+         * they switched apps and came back, because `onJobEvent` was subscribed
+         * to an event name no code path emitted. A no-op when nothing is open.
+         */
+        AevistleNativePlugin.emitJobEvent(jobId, ranAt, result.toJson(), run);
 
         // Re-arm from whatever occurrences remain. The list is refilled by the
         // JavaScript layer next time the app opens; until then the job keeps
@@ -69,8 +85,13 @@ public class SendWorker extends Worker {
 
         if (!result.ok) {
             String title = job.optString("name", "Aevistle");
-            notify(context, jobId, "Scheduled send failed — " + title,
-                    result.error == null ? "Unknown error" : result.error);
+            // Gated on the switch that names it. This fired unconditionally
+            // before, so turning "announce failures" off in the settings screen
+            // changed nothing at all on this platform.
+            if (store.notifyOnFailure()) {
+                notify(context, jobId, "Scheduled send failed — " + title,
+                        result.error == null ? "Unknown error" : result.error);
+            }
 
             // Retryable classes get WorkManager's own backoff; a wrong password
             // would fail identically forever, so it is reported and dropped.
@@ -84,8 +105,17 @@ public class SendWorker extends Worker {
             return Result.failure();
         }
 
-        boolean announceSuccess = job.optBoolean("notifyOnSuccess", false);
-        if (announceSuccess) {
+        /*
+         * From the store, not from the job.
+         *
+         * This read `job.optBoolean("notifyOnSuccess", false)`, and no job has
+         * ever carried that key — `ScheduledJob` in `src/core/types.ts` does
+         * not define it and nothing has ever written it. So the expression was
+         * a constant `false`: a scheduled send that succeeded has never raised
+         * a notification on Android, whatever the settings screen showed. It is
+         * an application setting and now arrives as one, through `syncJobs`.
+         */
+        if (store.notifyOnSuccess()) {
             notify(context, jobId, "Aevistle", "Sent: " + draft.optString("subject", ""));
         }
         return Result.success();

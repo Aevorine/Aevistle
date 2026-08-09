@@ -1359,10 +1359,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
    * depends on the two booleans rather than on `state.settings`, which changes
    * on almost every keystroke somewhere in the app.
    */
-  const { minimiseToTray, launchAtLogin } = state.settings
+  const { minimiseToTray, launchAtLogin, notifyOnSuccess, notifyOnFailure } = state.settings
   useEffect(() => {
-    void bridge?.setDesktopPrefs?.({ minimiseToTray, launchAtLogin })
-  }, [bridge, minimiseToTray, launchAtLogin])
+    void bridge?.setDesktopPrefs?.({
+      minimiseToTray,
+      launchAtLogin,
+      // The same story as the two above, found later. `notifyOnSuccess` was
+      // read only by the compose screen's own send button, and
+      // `notifyOnFailure` was read by nothing anywhere — so a *scheduled*
+      // send, which is what this application exists to do, notified on
+      // failure whatever the switch said and never notified on success at all.
+      // The scheduler lives in the main process, so this is the only route
+      // those two settings have to it.
+      notifyOnSuccess,
+      notifyOnFailure,
+    })
+  }, [bridge, minimiseToTray, launchAtLogin, notifyOnSuccess, notifyOnFailure])
 
   // --- boot ---------------------------------------------------------------
   useEffect(() => {
@@ -1743,6 +1755,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
             .map((j) => (j.id === DIGEST_JOB_ID ? withDigestBody(j, liveRef.current, i18n) : j))
             .map((j) => ({ ...j, draft: forTransport(j.draft) })),
           state.accounts,
+          // Android's background worker has no other route to these two, and
+          // read them off the job before — a field jobs do not have. See
+          // `syncJobs` in `core/bridge.ts`.
+          {
+            notifyOnSuccess: liveRef.current.settings.notifyOnSuccess,
+            notifyOnFailure: liveRef.current.settings.notifyOnFailure,
+          },
         )
         if (!cancelled) setSchedulerUnreachable(false)
       } catch (err) {
@@ -2477,7 +2496,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
           },
         }))
       try {
-        await bridge?.syncJobs(repaired, state.accounts)
+        await bridge?.syncJobs(repaired, state.accounts, {
+          notifyOnSuccess: state.settings.notifyOnSuccess,
+          notifyOnFailure: state.settings.notifyOnFailure,
+        })
       } catch (e) {
         // The files did move, so the caller reports success and nothing else in
         // this flow would ever mention that the scheduler is still holding

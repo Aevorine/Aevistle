@@ -275,7 +275,30 @@ export function InboxView({
 
   const accountsById = useMemo(() => new Map(state.accounts.map((a) => [a.id, a])), [state.accounts])
   const enabledInboxes = useMemo(() => state.inboxAccounts.filter((i) => i.enabled), [state.inboxAccounts])
-  const canUseInbox = Boolean(bridge?.syncInbox) || true /*TEMP-VERIFY*/
+  /**
+   * Whether this platform can receive mail at all.
+   *
+   * `|| true /*TEMP-VERIFY*\/` was left on the end of this line, which made it
+   * unconditionally true and had two consequences, both silent. The browser
+   * preview — whose bridge has no `syncInbox` at all (see `bridge-web.ts`) —
+   * drew the full Inbox screen, its sync button, its account filter and its
+   * bulk actions, none of which could ever do anything. And the `unavailable`
+   * empty state below became unreachable code: the one thing on the screen
+   * that would have said why.
+   *
+   * Two separate questions, though, and collapsing them into one is what made
+   * the override look necessary in the first place:
+   *
+   *   `canSyncInbox` — can this platform *fetch*? Only the sync control cares.
+   *   `canUseInbox`  — is there anything here worth drawing? Mail already in
+   *                    the store is real mail, and hiding it because this
+   *                    platform cannot fetch *more* would be its own silent
+   *                    failure — the messages exist, the screen would say the
+   *                    feature is unavailable, and both statements would be
+   *                    true of different things.
+   */
+  const canSyncInbox = Boolean(bridge?.syncInbox)
+  const canUseInbox = canSyncInbox || enabledInboxes.length > 0
 
   const allMessages = useMemo(() => enabledInboxes.flatMap((i) => i.messages), [enabledInboxes])
 
@@ -1296,7 +1319,10 @@ export function InboxView({
           icon={<IconRefresh size={16} />}
           loading={syncingIds.size > 0}
           onClick={syncAll}
-          disabled={enabledInboxes.length === 0}
+          // Grey where the platform has no way to fetch, rather than offering a
+          // button that resolves having done nothing — the browser preview is
+          // the case, and it can still show mail that is already stored.
+          disabled={enabledInboxes.length === 0 || !canSyncInbox}
         >
           {syncingIds.size > 0 ? t('inbox.checking') : t('inbox.checkNow')}
         </Button>

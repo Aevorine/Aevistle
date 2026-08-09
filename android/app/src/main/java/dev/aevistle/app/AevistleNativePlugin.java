@@ -94,6 +94,88 @@ public class AevistleNativePlugin extends Plugin {
     private final ExecutorService io = Executors.newFixedThreadPool(4);
 
     // -----------------------------------------------------------------------
+    // The live event bridge
+    //
+    // `bridge-android.ts` declares `onJobEvent` and `onInboxEvent`, and both
+    // subscribed to event names nothing in this file ever emitted:
+    // `notifyListeners` was called for `lanRequest` and `updateProgress` and
+    // for nothing else. So a scheduled send that completed while the app was
+    // open in front of the user left its row saying "waiting to send", and
+    // mail found by the background sync did not appear until the web layer's
+    // own timer came round. Neither logged anything, because from the web
+    // side nothing had happened: it had subscribed successfully to an event
+    // that did not exist.
+    //
+    // The workers cannot reach a plugin instance on their own — they run from
+    // WorkManager, frequently with no Activity at all — so the instance
+    // publishes itself here while it is alive. Everything below is
+    // null-tolerant on purpose: with the app closed there is no instance, the
+    // emit is a no-op, and `pullJobRuns` still delivers the same report on the
+    // next open. This makes the open-app case live; it does not make the
+    // closed-app case depend on it.
+    // -----------------------------------------------------------------------
+
+    /** The instance currently attached to a WebView, if any. */
+    private static volatile AevistleNativePlugin live;
+
+    @Override
+    public void load() {
+        super.load();
+        live = this;
+    }
+
+    /**
+     * A scheduled send finished. Tell the open app, if one is open.
+     *
+     * The payload matches `JobEvent` in `src/core/bridge.ts` exactly, `result`
+     * included — `MailSender.Result.toJson()` already produces the same shape
+     * as a desktop `SendResult`, so the log line this raises carries the real
+     * recipient count and duration rather than a plausible-looking zero.
+     *
+     * Delivered *in addition to* the queued report that {@code pullJobRuns}
+     * drains, not instead of it. Applying the same run twice is harmless by
+     * construction: `jobRan` writes absolute state, never a delta.
+     */
+    static void emitJobEvent(String jobId, long at, JSONObject result, JSONObject run) {
+        AevistleNativePlugin plugin = live;
+        if (plugin == null) return;
+        try {
+            JSObject event = new JSObject();
+            event.put("jobId", jobId);
+            event.put("at", at);
+            event.put("result", result);
+            if (run != null) event.put("run", run);
+            plugin.notifyListeners("jobEvent", event);
+        } catch (Exception e) {
+            // A UI that cannot be told is the state this replaced, and the
+            // queued report still covers it. Never at the cost of the send.
+            Log.w(TAG, "emitJobEvent: could not deliver the run report", e);
+        }
+    }
+
+    /**
+     * A background inbox sync changed an account's cached mail.
+     *
+     * Same shape as the desktop's `InboxEvent`: the web layer treats it as
+     * "something changed, re-read", not as the change itself, so an empty
+     * `newMessageIds` is correct rather than lazy — see `watchInboxes` in
+     * `electron/main.ts`, which sends exactly the same thing.
+     */
+    static void emitInboxEvent(String accountId) {
+        AevistleNativePlugin plugin = live;
+        if (plugin == null) return;
+        try {
+            JSObject event = new JSObject();
+            event.put("accountId", accountId);
+            event.put("folderPath", "INBOX");
+            event.put("newMessageIds", new JSArray());
+            plugin.notifyListeners("inboxEvent", event);
+        } catch (Exception e) {
+            Log.w(TAG, "emitInboxEvent: could not deliver the sync notice", e);
+        }
+    }
+
+    // -----------------------------------------------------------------------
     // Secrets
     // -----------------------------------------------------------------------
 
@@ -1427,7 +1509,7 @@ public class AevistleNativePlugin extends Plugin {
     }
 
     /**
-     * Both listeners go down with the Activity.
+     * Both listeners go down with the Activity, and so does the event bridge.
      *
      * Without this, a configuration change that recreates the Activity would
      * leave the old accept threads holding the ports, and the new instance's
@@ -1437,6 +1519,12 @@ public class AevistleNativePlugin extends Plugin {
     protected void handleOnDestroy() {
         pairingServer.close();
         syncServer.close();
+        // Cleared by identity, not unconditionally: an Activity recreated on
+        // rotation runs the new instance's `load()` *before* destroying the old
+        // one, so `live = null` here would throw away the reference to the
+        // instance that is now the live one — and the events this exists to
+        // deliver would go nowhere for the rest of the session, silently.
+        if (live == this) live = null;
         super.handleOnDestroy();
     }
 
@@ -1870,7 +1958,25 @@ public class AevistleNativePlugin extends Plugin {
         JSONArray incoming = jobs == null ? new JSONArray() : jobs;
         Permissions.noteNewlyArmed(getContext(), before, jobIds(incoming));
 
-        store.save(incoming, accounts == null ? new JSONArray() : accounts);
+        /*
+         * The two notification switches travel with the jobs.
+         *
+         * `SendWorker` used to read `notifyOnSuccess` off each individual job,
+         * which no job has ever carried — see `ScheduledJob` in
+         * `src/core/types.ts` — so the answer was always the `false` default
+         * and a scheduled send that worked has never notified on Android. They
+         * are application settings, so they are stored once, beside the jobs
+         * the worker already reads from.
+         *
+         * `!= Boolean.FALSE` rather than `== Boolean.TRUE`: an older web layer
+         * that does not send these keys must keep the documented default
+         * (announce), not go silent.
+         */
+        store.save(
+                incoming,
+                accounts == null ? new JSONArray() : accounts,
+                !Boolean.FALSE.equals(call.getBoolean("notifyOnSuccess", true)),
+                !Boolean.FALSE.equals(call.getBoolean("notifyOnFailure", true)));
 
         AevistleScheduler.rearmAll(getContext());
         call.resolve();

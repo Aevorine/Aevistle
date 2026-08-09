@@ -60,6 +60,11 @@ public class InboxSyncWorker extends Worker {
                  * notification, not the mail.
                  */
                 announce(context, config, updated);
+                // And tell an app that is open, which `onInboxEvent` promised
+                // and nothing delivered: the web layer treats this as "re-read
+                // that account", so mail this pass found shows up at once
+                // instead of waiting for the web timer's next turn.
+                AevistleNativePlugin.emitInboxEvent(accountId);
             } catch (Exception e) {
                 anyFailure = true;
                 try {

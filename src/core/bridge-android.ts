@@ -13,6 +13,7 @@ import type {
   AppInfo,
   DataFolder,
   DataFolderChange,
+  InboxEvent,
   InboxMessageBody,
   JobEvent,
   JobRun,
@@ -221,7 +222,23 @@ interface AevistleNativePlugin extends AndroidPermissionApi {
     jobId: string
   }): Promise<{ files: Attachment[] }>
 
-  syncJobs(opts: { jobs: ScheduledJob[]; accounts: MailAccount[] }): Promise<void>
+  /**
+   * The working set the background scheduler fires from, plus the two
+   * notification switches it has to honour.
+   *
+   * Those two travel here rather than being read off each job because they are
+   * application settings, not per-job ones — and because reading them off the
+   * job is exactly what was broken: `SendWorker` asked each job for
+   * `notifyOnSuccess`, a field `ScheduledJob` has never had, so the answer was
+   * always the `false` default and a scheduled send that worked has never once
+   * notified on Android.
+   */
+  syncJobs(opts: {
+    jobs: ScheduledJob[]
+    accounts: MailAccount[]
+    notifyOnSuccess: boolean
+    notifyOnFailure: boolean
+  }): Promise<void>
   pullJobRuns(): Promise<{ runs: Array<JobRun & { jobId: string }> }>
   notify(opts: {
     title: string
@@ -361,6 +378,17 @@ interface AevistleNativePlugin extends AndroidPermissionApi {
   addListener(
     eventName: 'lanRequest',
     handler: (request: { id: string; kind: 'pair' | 'sync'; body: string }) => void,
+  ): Promise<{ remove: () => Promise<void> }>
+  /**
+   * The background inbox sync changed an account's cached mail.
+   *
+   * "Something changed, re-read it" rather than the change itself, which is
+   * why `newMessageIds` arrives empty — the same contract the desktop's
+   * `watchInboxes` uses, so the web layer has one code path for both.
+   */
+  addListener(
+    eventName: 'inboxEvent',
+    handler: (event: InboxEvent) => void,
   ): Promise<{ remove: () => Promise<void> }>
 }
 
@@ -634,8 +662,17 @@ export function createAndroidBridge(): PlatformBridge & AndroidPermissionApi {
      * arming, fire the question after it, and never let the answer to the
      * question affect whether arming succeeded.
      */
-    async syncJobs(jobs, accounts) {
-      await Native.syncJobs({ jobs, accounts })
+    async syncJobs(jobs, accounts, notify) {
+      await Native.syncJobs({
+        jobs,
+        accounts,
+        // `!== false` so a caller that has not been updated to pass these keeps
+        // the documented default (announce) rather than silently muting every
+        // scheduled send — which is the failure this whole change exists to
+        // remove, and it would be a shame to reintroduce it here.
+        notifyOnSuccess: notify?.notifyOnSuccess !== false,
+        notifyOnFailure: notify?.notifyOnFailure !== false,
+      })
       void Native.ensureNotificationPermission().catch(() => {})
     },
 
@@ -764,14 +801,23 @@ export function createAndroidBridge(): PlatformBridge & AndroidPermissionApi {
         body: JSON.stringify(response),
       })
     },
-    // No native push exists yet — WorkManager's periodic sync updates its own
-    // cache silently and the UI catches up on the next manual or app-open
-    // sync, the same way `onJobEvent` is declared here but never actually
-    // fires natively either (see AlarmReceiver/SendWorker: nothing calls
-    // notifyListeners for it). A real event bridge is a legitimate follow-up,
-    // not a gap unique to inbox.
-    onInboxEvent() {
-      return () => {}
+    /**
+     * The background sync found something. Re-read that account.
+     *
+     * This returned `() => {}` — it subscribed to nothing and could never fire,
+     * as `onJobEvent` above could not either: `notifyListeners` was called in
+     * the Java plugin for `lanRequest` and `updateProgress` and for no other
+     * name. So WorkManager's periodic pass updated its own cache in silence and
+     * an open app showed the new mail only when its own timer next came round,
+     * up to five minutes later, with nothing anywhere reporting a gap. Both
+     * ends are wired now — see the event bridge at the top of
+     * `AevistleNativePlugin.java`, which is a no-op when nothing is open.
+     */
+    onInboxEvent(handler) {
+      const pending = Native.addListener('inboxEvent', handler)
+      return () => {
+        void pending.then((h) => h.remove())
+      }
     },
 
     dataFolder: () => Native.dataFolder(),

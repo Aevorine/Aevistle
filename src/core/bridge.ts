@@ -446,7 +446,21 @@ export interface PlatformBridge {
    * after the WebView is gone and cannot ask the UI for the SMTP settings —
    * it only looks the *password* up separately, from the keystore.
    */
-  syncJobs(jobs: ScheduledJob[], accounts: MailAccount[]): Promise<void>
+  syncJobs(
+    jobs: ScheduledJob[],
+    accounts: MailAccount[],
+    /**
+     * The two notification switches, for platforms whose scheduler runs with
+     * no UI attached.
+     *
+     * Android's worker used to ask each *job* whether to announce a success —
+     * a field `ScheduledJob` has never carried, so the answer was always the
+     * default `false` and a scheduled send that worked notified on nothing,
+     * ever. Optional so the desktop, which receives the same two through
+     * `setDesktopPrefs`, is not obliged to send them twice.
+     */
+    notify?: { notifyOnSuccess: boolean; notifyOnFailure: boolean },
+  ): Promise<void>
   /** Fires when the platform completed a scheduled send while we were open. */
   onJobEvent(handler: (event: JobEvent) => void): () => void
   /**

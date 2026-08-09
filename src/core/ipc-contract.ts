@@ -68,6 +68,26 @@ export interface DesktopPrefs {
   minimiseToTray: boolean
   /** Register (or clear) the OS login item. */
   launchAtLogin: boolean
+  /**
+   * Announce a scheduled send that worked.
+   *
+   * Here for the same reason the two above are, and it arrived late for a worse
+   * reason: the switch existed in the settings screen and the *only* thing that
+   * ever read it was the manual "send now" button in the compose screen. A
+   * scheduled send — the thing this application is for — notified on neither
+   * outcome, because the scheduler runs in the main process and the main
+   * process had never been told the setting existed.
+   */
+  notifyOnSuccess: boolean
+  /**
+   * Announce a scheduled send that failed.
+   *
+   * This one was read by nothing at all, anywhere. The failure notification
+   * fired unconditionally, so turning the switch off changed nothing — a
+   * toggle that flips and does nothing, which is precisely what the note above
+   * says must not happen.
+   */
+  notifyOnFailure: boolean
 }
 
 /** The result of a `<a download>` the main process took responsibility for. */

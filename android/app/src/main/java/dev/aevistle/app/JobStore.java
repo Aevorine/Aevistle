@@ -24,6 +24,19 @@ final class JobStore {
     private static final String KEY_ACCOUNTS = "accounts";
     /** Run reports waiting for a WebView to exist. See {@link #recordRun}. */
     private static final String KEY_PENDING_RUNS = "pendingRuns";
+    /**
+     * The two notification switches, mirrored from the settings screen.
+     *
+     * They live here rather than on each job because that is what they are —
+     * application settings — and because reading them off the job is the exact
+     * bug this replaced: {@link SendWorker} asked each job for
+     * {@code notifyOnSuccess}, a field `ScheduledJob` in `src/core/types.ts`
+     * has never had, so the answer was always the {@code false} default and a
+     * scheduled send that succeeded notified nobody, on any device, whatever
+     * the switch said.
+     */
+    private static final String KEY_NOTIFY_SUCCESS = "notifyOnSuccess";
+    private static final String KEY_NOTIFY_FAILURE = "notifyOnFailure";
 
     private final SharedPreferences prefs;
 
@@ -32,11 +45,26 @@ final class JobStore {
                 .getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }
 
-    void save(JSONArray jobs, JSONArray accounts) {
+    void save(JSONArray jobs, JSONArray accounts, boolean notifyOnSuccess, boolean notifyOnFailure) {
         prefs.edit()
                 .putString(KEY_JOBS, jobs.toString())
                 .putString(KEY_ACCOUNTS, accounts.toString())
+                .putBoolean(KEY_NOTIFY_SUCCESS, notifyOnSuccess)
+                .putBoolean(KEY_NOTIFY_FAILURE, notifyOnFailure)
                 .apply();
+    }
+
+    /**
+     * Both default to true — matching `DEFAULT_SETTINGS` — so an install whose
+     * stored jobs predate these keys announces rather than falling silent. A
+     * missing preference must never be read as "the user turned this off".
+     */
+    boolean notifyOnSuccess() {
+        return prefs.getBoolean(KEY_NOTIFY_SUCCESS, true);
+    }
+
+    boolean notifyOnFailure() {
+        return prefs.getBoolean(KEY_NOTIFY_FAILURE, true);
     }
 
     JSONArray jobs() {
@@ -87,8 +115,16 @@ final class JobStore {
      * the schedule row would still read "waiting to send" the next time the app
      * was opened. The queue is what closes that gap — `drainRuns` hands it over
      * on the next launch or resume.
+     *
+     * @return the run report that was queued, so the caller can also hand it
+     *         straight to an app that happens to be open right now
+     *         ({@link AevistleNativePlugin#emitJobEvent}). Null when the job
+     *         was not found — deleted between the alarm and the work running.
+     *         Returning it rather than having the caller reconstruct it is what
+     *         keeps the live event and the queued one identical by
+     *         construction.
      */
-    void recordRun(String jobId, long ranAt, boolean ok, String error) {
+    JSONObject recordRun(String jobId, long ranAt, boolean ok, String error) {
         JSONArray all = jobs();
         JSONObject run = null;
         for (int i = 0; i < all.length(); i++) {
@@ -145,6 +181,7 @@ final class JobStore {
         }
         prefs.edit().putString(KEY_JOBS, all.toString()).apply();
         if (run != null) queueRun(run);
+        return run;
     }
 
     /**
