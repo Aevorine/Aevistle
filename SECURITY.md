@@ -253,6 +253,28 @@ stops without publishing rather than leaving an unsigned release behind for
 someone to notice later. `npm run check:signing` is the backstop, and it runs
 as part of `npm run check`.
 
+### The desktop updater checks a second signature itself
+
+The GPG signature above is for anyone verifying a download by hand. The
+in-app updater (Windows) cannot use it directly — parsing an OpenPGP-armored
+signature would mean shipping a full OpenPGP implementation just for this —
+so `SHA256SUMS.txt` is also signed with a second, separate Ed25519 key whose
+public half is baked into the app (`electron/updateSigningKey.ts`) and
+checked with nothing heavier than Node's built-in `crypto` module. This
+closes the same gap the GPG signature closes — a compromised release
+credential can replace the manifest and the installer together, but cannot
+produce a signature either key accepts, because neither private key is ever
+uploaded anywhere.
+
+A release with no `SHA256SUMS.txt.ed25519` yet (every release before this
+existed) is still installable on the checksum alone, exactly as a release
+with no `SHA256SUMS.txt` at all always has been. A release that publishes one
+which does *not* verify is refused outright — the updater will not install it
+and says why. Maintainers: the key is created once with
+`node scripts/setup-update-signing-key.mjs`; after that, `npm run release`
+signs and verifies it the same way it already does for the GPG signature.
+`npm run check:update-signing` is the backstop.
+
 ### The Android package
 
 > **Signer changed at v0.1.19 (2026-08-06).** The original signing keystore

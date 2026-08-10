@@ -177,6 +177,19 @@ if (signed.status !== 0) {
   )
 }
 
+// A second, independent signature the desktop updater checks itself — see
+// electron/updateSigningKey.ts for why this is not the same key as above.
+const signedForUpdate = spawnSync('node', ['scripts/sign-update-manifest.mjs'], {
+  stdio: 'inherit',
+  shell: process.platform === 'win32',
+})
+if (signedForUpdate.status !== 0) {
+  fail(
+    'Could not sign the update manifest.',
+    'Run scripts/setup-update-signing-key.mjs once if there is no key yet.',
+  )
+}
+
 // --- 3. publish --------------------------------------------------------------
 
 step(3, `Publishing ${TAG}`)
@@ -184,6 +197,7 @@ const assets = [
   ...ARTIFACTS.map((n) => path.join('release', n)),
   path.join('release', 'SHA256SUMS.txt'),
   path.join('release', 'SHA256SUMS.txt.asc'),
+  path.join('release', 'SHA256SUMS.txt.ed25519'),
   path.join(process.env.USERPROFILE ?? process.env.HOME ?? '', '.aevistle', 'aevistle-public-key.asc'),
 ].filter((p) => existsSync(p))
 
@@ -217,6 +231,7 @@ try {
   }
   must('node', ['scripts/release-hashes.mjs', '--verify', dir], 'Published artifacts do not match.')
   must('node', ['scripts/check-signing.mjs'], 'The published signature does not verify.')
+  must('node', ['scripts/check-update-signing.mjs'], 'The published update signature does not verify.')
 } finally {
   rmSync(dir, { recursive: true, force: true })
 }

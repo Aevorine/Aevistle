@@ -23,13 +23,20 @@
  * selective failure is refused outright rather than downgraded to a warning.
  */
 
-import { createHash } from 'node:crypto'
+import { createHash, createPublicKey, verify as verifySignature } from 'node:crypto'
 import { createWriteStream, promises as fs } from 'node:fs'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import path from 'node:path'
 import type { ReadableStream as WebReadableStream } from 'node:stream/web'
 import type { UpdateAsset, DownloadProgress } from '../src/core/update'
+import { UPDATE_SIGNING_PUBLIC_KEY_SPKI_BASE64 } from './updateSigningKey'
+
+const UPDATE_SIGNING_PUBLIC_KEY = createPublicKey({
+  key: Buffer.from(UPDATE_SIGNING_PUBLIC_KEY_SPKI_BASE64, 'base64'),
+  format: 'der',
+  type: 'spki',
+})
 
 /**
  * Both spellings are tried because the checksum file has shipped under each,
@@ -75,40 +82,95 @@ function assertTrustedUrl(url: string): URL {
   return parsed
 }
 
-type ChecksumLookup =
-  | { status: 'matched'; hash: string }
-  /** A checksum file was fetched successfully but had no line for this asset. */
-  | { status: 'not-listed' }
-  /** Neither spelling of the checksum file could be fetched at all. */
-  | { status: 'unreachable' }
+type ManifestFetch = { status: 'reached'; text: string } | { status: 'unreachable' }
 
 /**
- * Look up the published hash for `fileName`, distinguishing "the release
- * genuinely has no checksum for this file" from "the checksum file itself
- * could not be reached" — those two used to collapse into the same `null`,
- * which is exactly the kind of silent weakening that never shows up in
- * testing: a stripped-out checksum file looked identical to a release that
- * simply never published one.
+ * Fetch the checksum manifest's exact text, tried under both spellings it
+ * has shipped under. Returned as one string rather than pre-parsed: the
+ * signature below has to cover the exact bytes that were signed, and parsing
+ * first would mean re-serializing to get them back — an unnecessary place
+ * for the two to quietly drift apart.
  */
-async function lookupChecksum(fileName: string): Promise<ChecksumLookup> {
-  let reached = false
+async function fetchManifestText(): Promise<ManifestFetch> {
   for (const url of SUMS_URLS) {
     try {
       const response = await fetch(url, { redirect: 'follow' })
       if (!response.ok) continue
-      reached = true
-      const text = await response.text()
-      for (const line of text.split(/\r?\n/)) {
-        const match = line.trim().match(/^([a-fA-F0-9]{64})\s+\*?(.+)$/)
-        if (match && path.basename(match[2].trim()) === fileName) {
-          return { status: 'matched', hash: match[1].toLowerCase() }
-        }
-      }
+      return { status: 'reached', text: await response.text() }
     } catch {
       /* try the next spelling */
     }
   }
-  return reached ? { status: 'not-listed' } : { status: 'unreachable' }
+  return { status: 'unreachable' }
+}
+
+/**
+ * The published hash for `fileName`, or `null` if the manifest has no line
+ * for it — kept distinct from "the manifest itself could not be fetched" one
+ * level up, which is exactly the kind of silent weakening that never shows
+ * up in testing: a stripped-out checksum line looked identical to a release
+ * that simply never published one.
+ */
+function findManifestHash(manifestText: string, fileName: string): string | null {
+  for (const line of manifestText.split(/\r?\n/)) {
+    const match = line.trim().match(/^([a-fA-F0-9]{64})\s+\*?(.+)$/)
+    if (match && path.basename(match[2].trim()) === fileName) return match[1].toLowerCase()
+  }
+  return null
+}
+
+const SIG_URL = 'https://github.com/Aevorine/Aevistle/releases/latest/download/SHA256SUMS.txt.ed25519'
+
+type SignatureCheck =
+  /** The manifest's signature verified against the key embedded in this build. */
+  | { status: 'verified' }
+  /**
+   * A signature was published but does not verify. Never downgrade this to
+   * "unverified" — a manifest and its signature that disagree is exactly the
+   * shape a forged release takes: an attacker who can write to the release
+   * can replace `SHA256SUMS.txt` and the installer together (the checksum
+   * would still "match"), but cannot produce a signature this key accepts
+   * without the private half, which never leaves the maintainer's machine.
+   */
+  | { status: 'invalid' }
+  /** This release predates the feature, or hasn't been signed yet — not a failure. */
+  | { status: 'missing' }
+  /** Could not be checked this run — a network problem, not a verdict. */
+  | { status: 'unreachable' }
+
+/**
+ * Verify `manifestText` (the exact bytes `fetchManifestText` returned)
+ * against the update-signing key baked into this build.
+ *
+ * `missing` and `unreachable` are both treated as soft everywhere this is
+ * called — a manifest that fetched and hashed fine is still installable
+ * without a signature, exactly like a release with no SHA256SUMS.txt at all
+ * always has been. That is a deliberate rollout choice, not an oversight:
+ * this is a second, additive check on top of the checksum this file already
+ * enforces, and older releases will never retroactively grow a signature.
+ * `invalid` is the only outcome this function's caller must never soften.
+ */
+async function verifyManifestSignature(manifestText: string): Promise<SignatureCheck> {
+  let response: Response
+  try {
+    response = await fetch(SIG_URL, { redirect: 'follow' })
+  } catch {
+    return { status: 'unreachable' }
+  }
+  if (response.status === 404) return { status: 'missing' }
+  if (!response.ok) return { status: 'unreachable' }
+
+  const sigText = (await response.text()).trim()
+  let signature: Buffer
+  try {
+    signature = Buffer.from(sigText, 'base64')
+  } catch {
+    return { status: 'invalid' }
+  }
+  if (signature.length === 0) return { status: 'invalid' }
+
+  const ok = verifySignature(null, Buffer.from(manifestText, 'utf8'), UPDATE_SIGNING_PUBLIC_KEY, signature)
+  return { status: ok ? 'verified' : 'invalid' }
 }
 
 /**
@@ -165,17 +227,35 @@ export async function downloadUpdate(
   }
 
   const digest = hash.digest('hex')
-  const checksum = await lookupChecksum(safeName)
+  const manifest = await fetchManifestText()
 
-  if (checksum.status === 'unreachable') {
+  if (manifest.status === 'unreachable') {
     await fs.rm(partPath, { force: true })
     throw new Error(
       'Could not verify the download: the checksum file could not be fetched',
     )
   }
-  if (checksum.status === 'matched' && checksum.hash !== digest) {
+  const expectedHash = findManifestHash(manifest.text, safeName)
+  if (expectedHash !== null && expectedHash !== digest) {
     await fs.rm(partPath, { force: true })
     throw new Error('The downloaded file did not match the published checksum')
+  }
+
+  /*
+   * A checksum proves the download matches what SHA256SUMS.txt says — not
+   * who published either of them, since both come from the same release the
+   * same credential writes to. The signature is what proves that: it is
+   * checked against a key baked into this build rather than fetched
+   * alongside the thing it verifies, so replacing the manifest and the
+   * installer together (which a compromised release credential *can* do) is
+   * no longer enough on its own.
+   */
+  const signature = await verifyManifestSignature(manifest.text)
+  if (signature.status === 'invalid') {
+    await fs.rm(partPath, { force: true })
+    throw new Error(
+      'The checksum file is signed, but the signature does not match — refusing to install',
+    )
   }
 
   await fs.rm(finalPath, { force: true })
@@ -186,9 +266,12 @@ export async function downloadUpdate(
     totalBytes: totalBytes || receivedBytes,
     done: true,
     path: finalPath,
-    // Only 'matched' counts as verified — 'not-listed' means this release
-    // simply did not publish a checksum, which is installable but unverified.
-    checksumVerified: checksum.status === 'matched',
+    // `expectedHash === null` means this release simply did not publish a
+    // checksum for this file, which is installable but unverified.
+    checksumVerified: expectedHash !== null,
+    // `missing`/`unreachable` both read as "not verified this way" here,
+    // same tolerance as checksumVerified above — see verifyManifestSignature.
+    signatureVerified: signature.status === 'verified',
   }
   onProgress(result)
   return result

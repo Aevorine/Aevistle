@@ -625,7 +625,7 @@ check('UPD-02', 'A checksum fetch failure blocks the install rather than skippin
     problems.push('no branch distinguishes "checksum file unreachable" from "this build not listed in it"')
   } else {
     const unreachableBlock = updater.match(
-      /checksum\.status\s*===\s*['"]unreachable['"][\s\S]{0,200}/,
+      /manifest\.status\s*===\s*['"]unreachable['"][\s\S]{0,200}/,
     )
     if (!unreachableBlock || !/throw/.test(unreachableBlock[0])) {
       problems.push('the unreachable case does not throw — a network blip on SHA256SUMS would silently install an unverified build')

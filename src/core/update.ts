@@ -337,4 +337,14 @@ export interface DownloadProgress {
    * hard failure that throws before a result ever reaches this shape.
    */
   checksumVerified?: boolean
+  /**
+   * Set once `done`, desktop only. `false` covers two different things the
+   * same way: the release hasn't published a manifest signature yet
+   * (expected for a while after this field was added), or fetching it
+   * failed — neither blocks install, both mean this download's authenticity
+   * rests on the checksum alone. A signature that was published but did not
+   * verify is never surfaced here: `downloadUpdate` throws before a result
+   * reaches this shape, the same as a checksum mismatch does.
+   */
+  signatureVerified?: boolean
 }
