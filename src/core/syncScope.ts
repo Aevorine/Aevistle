@@ -42,7 +42,7 @@
 
 import { accountFields, appearanceSettings, type AppearanceSettings } from './backup'
 import type { PairingEnvelope } from './pairingCrypto'
-import type { AppState, Contact, MailAccount, ScheduledJob, Template } from './types'
+import type { AppState, Contact, JobTombstone, MailAccount, ScheduledJob, Template } from './types'
 import type { WorkCalendar } from './workCalendar'
 
 export type SyncScopeKey = 'accounts' | 'schedule' | 'contacts' | 'templates' | 'appearance'
@@ -64,6 +64,13 @@ export interface SchedulePayload {
   workCalendar: WorkCalendar
   /** See `Settings.workCalendarUpdatedAt` — carried alongside so the receiver can tell whether to adopt it. */
   workCalendarUpdatedAt?: number
+  /**
+   * Jobs deleted on the sending device since the peer's last sync — see
+   * `AppState.deletedJobs`. An ordinary merge only ever adds or updates by
+   * id; without this, a job cancelled on one device keeps firing on the
+   * other forever, because nothing ever tells the other side it is gone.
+   */
+  deletedJobs?: JobTombstone[]
 }
 
 /** An account as it may travel inside a *live* pairing session only — see the module doc for why. */

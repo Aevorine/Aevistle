@@ -23,6 +23,7 @@ import {
   ATMOSPHERE_MOTION_MIN,
   DEFAULT_RETRY,
   DEFAULT_SETTINGS,
+  JOB_TOMBSTONE_MAX_AGE_MS,
   SCHEMA_VERSION,
   defaultInboxAccountState,
   defaultRecurrence,
@@ -34,6 +35,7 @@ import {
   type InboxAccountState,
   type InboxMessage,
   type InboxTag,
+  type JobTombstone,
   type LogEntry,
   type MailAccount,
   type MessageDraft,
@@ -422,6 +424,19 @@ function droppedLog(job: ScheduledJob, warning: CalendarWarning): LogEntry | nul
   }
 }
 
+/**
+ * Record that a job was deleted, so device sync can tell a peer "this was
+ * cancelled" — see `AppState.deletedJobs` and `core/syncLoop.ts`'s handling
+ * of `SchedulePayload.deletedJobs`. One entry per id: a job deleted twice
+ * (rare, but re-adding via undo and deleting again is exactly that) only
+ * needs its cancellation known once, at the latest time it happened.
+ */
+function addJobTombstone(existing: JobTombstone[], id: string, deletedAt: number): JobTombstone[] {
+  const cutoff = deletedAt - JOB_TOMBSTONE_MAX_AGE_MS
+  const kept = existing.filter((t) => t.id !== id && t.deletedAt >= cutoff)
+  return [...kept, { id, deletedAt }]
+}
+
 /** The `Settings` keys `core/backup.ts`'s `AppearanceSettings` picks — kept as a runtime list so `patchSettings` can tell "did this touch appearance" without re-typing the field list. */
 const APPEARANCE_KEYS: readonly (keyof Settings)[] = [
   'themeMode',
@@ -523,6 +538,7 @@ function initialState(): AppState {
     recentRecipients: [],
     pairedDevices: [],
     syncConflicts: [],
+    deletedJobs: [],
     schemaVersion: SCHEMA_VERSION,
   }
 }
@@ -819,7 +835,15 @@ export function reducer(state: AppState, action: Action): AppState {
       }
 
     case 'removeJob':
-      return { ...state, jobs: state.jobs.filter((j) => j.id !== action.id) }
+      return {
+        ...state,
+        jobs: state.jobs.filter((j) => j.id !== action.id),
+        // Recorded even if `action.id` did not actually match a job — the
+        // caller (e.g. `deleteJob`) already resolved a real one before
+        // dispatching, and a no-op tombstone for an id that never synced
+        // anywhere is harmless.
+        deletedJobs: addJobTombstone(state.deletedJobs, action.id, Date.now()),
+      }
 
     case 'upsertContact': {
       const exists = state.contacts.some((c) => c.id === action.contact.id)
@@ -1186,6 +1210,10 @@ export function reducer(state: AppState, action: Action): AppState {
         settings,
         pairedDevices: touchSynced(state.pairedDevices, deviceId, syncedAt),
         syncConflicts: pushConflictSnapshots(state.syncConflicts, conflicts),
+        // The full updated tombstone set, not a merge — `syncLoop.ts` already
+        // computed the union of what this device knew plus what the peer
+        // just sent before handing it back.
+        deletedJobs: patch.deletedJobs ?? state.deletedJobs,
       }
     }
 
@@ -1554,6 +1582,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           recentRecipients: stored.recentRecipients ?? [],
           pairedDevices: stored.pairedDevices ?? [],
           syncConflicts: stored.syncConflicts ?? [],
+          deletedJobs: stored.deletedJobs ?? [],
           schemaVersion: SCHEMA_VERSION,
         }
 

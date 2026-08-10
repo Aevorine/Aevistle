@@ -326,6 +326,18 @@ export type JobStatus = 'idle' | 'armed' | 'running' | 'done' | 'failed' | 'paus
 export const MAX_BURST_COUNT = 500
 
 /**
+ * How long a `JobTombstone` is kept before it is pruned.
+ *
+ * Sync only happens while both devices are open at once (see
+ * `core/syncLoop.ts`'s module doc), so two paired devices can easily go a
+ * couple of weeks between exchanges. 90 days matches the longest existing
+ * retention default (`inboxCacheRetentionDays`) — long enough that a phone
+ * left in a drawer over a long trip still gets the cancellation, short enough
+ * that the list does not grow forever for a job deleted years ago.
+ */
+export const JOB_TOMBSTONE_MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000
+
+/**
  * Send the same message more than once when a job fires, paced rather than
  * all at once. Attached to the job (not the recurrence) because it is a
  * property of "what happens at fire time", independent of how often the fire
@@ -1219,7 +1231,21 @@ export interface AppState {
   pairedDevices: PairedDevice[]
   /** Losing records from an automatic newer-wins sync resolution, kept for one-click "keep mine instead". See `core/syncConflict.ts`. */
   syncConflicts: ConflictSnapshot[]
+  /**
+   * One entry per `ScheduledJob` deleted on this device, kept so device sync
+   * can tell a peer "this was cancelled" instead of the peer's copy simply
+   * sitting there forever — see `core/syncLoop.ts`'s module doc on why an
+   * ordinary additive merge cannot express a delete. Pruned by age, not by
+   * confirmation that every peer has caught up: see `JOB_TOMBSTONE_MAX_AGE_MS`.
+   */
+  deletedJobs: JobTombstone[]
   schemaVersion: number
+}
+
+/** A `ScheduledJob` id that no longer exists, and when it stopped — see `AppState.deletedJobs`. */
+export interface JobTombstone {
+  id: string
+  deletedAt: number
 }
 
 /**

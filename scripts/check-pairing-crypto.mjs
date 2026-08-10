@@ -483,6 +483,7 @@ const sampleState = {
   contacts: [{ id: 'con-1', name: 'Ada', address: 'ada@example.com', updatedAt: 10 }],
   templates: [{ id: 'tpl-1', name: 'Weekly', subject: 's', body: 'b', updatedAt: 10 }],
   settings: {},
+  deletedJobs: [],
 }
 const calendar = { workdays: [1, 2, 3, 4, 5], holidays: [], extraWorkdays: [] }
 
@@ -550,7 +551,7 @@ const calendar = { workdays: [1, 2, 3, 4, 5], holidays: [], extraWorkdays: [] }
       return opened.map((s) => s.accountId)
     },
   }
-  const blank = { accounts: [], jobs: [], contacts: [], templates: [], settings: {} }
+  const blank = { accounts: [], jobs: [], contacts: [], templates: [], settings: {}, deletedJobs: [] }
   const applied = await applyExchange(blank, payload, 0, 'session-1', 0, receiver)
   ok('the receiving side writes the password to its own keystore', emptyVault['acc-1']?.smtp === 'hunter2')
   ok(

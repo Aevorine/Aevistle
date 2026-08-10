@@ -52,7 +52,7 @@ import {
   type ConflictSnapshot,
 } from './syncConflict'
 import { SYNC_SCOPE_KEYS, type HashableKind, type ScopePayload, type SyncScopeKey } from './syncScope'
-import type { AppState, Contact, MailAccount, ScheduledJob, Template } from './types'
+import type { AppState, Contact, JobTombstone, MailAccount, ScheduledJob, Template } from './types'
 import type { WorkCalendar } from './workCalendar'
 
 export { _conflictSummary as conflictSummary }
@@ -207,11 +207,21 @@ export function buildChangedPayload(
   if (want.has('schedule')) {
     const jobs = changedSince(state.jobs, sinceLocal)
     const calendarChanged = (state.settings.workCalendarUpdatedAt ?? 0) > sinceLocal
+    // Deletions since the peer's last sync — see `AppState.deletedJobs`.
+    // Without this a job cancelled here keeps firing on the peer forever,
+    // since an ordinary merge never removes anything it was not told to.
+    const deletedJobs = state.deletedJobs.filter((t) => t.deletedAt > sinceLocal)
     // A calendar-only edit (no job touched since) must still travel — it used
     // to ride along only when `jobs` was non-empty, so "moved a holiday, sent
-    // nothing else" never reached the peer at all.
-    if (jobs.length > 0 || calendarChanged) {
-      payload.schedule = { jobs, workCalendar: calendar, workCalendarUpdatedAt: state.settings.workCalendarUpdatedAt }
+    // nothing else" never reached the peer at all. Same reasoning extends a
+    // deletion-only cycle: no job record changed, but one must still travel.
+    if (jobs.length > 0 || calendarChanged || deletedJobs.length > 0) {
+      payload.schedule = {
+        jobs,
+        workCalendar: calendar,
+        workCalendarUpdatedAt: state.settings.workCalendarUpdatedAt,
+        ...(deletedJobs.length > 0 ? { deletedJobs } : {}),
+      }
     }
   }
   if (want.has('contacts')) {
@@ -301,6 +311,8 @@ export interface SyncApplyPatch {
   appearance?: AppearanceSettings
   /** Set whenever `appearance` is, so the reducer can record what it adopted — see `Settings.appearanceUpdatedAt`. */
   appearanceUpdatedAt?: number
+  /** The full updated tombstone set (local ∪ incoming), replacing `AppState.deletedJobs` wholesale — see the `incoming.schedule` handling in `applyExchange`. */
+  deletedJobs?: JobTombstone[]
 }
 
 export interface ExchangeOutcome {
@@ -390,7 +402,35 @@ export async function applyExchange(
       sessionId,
       clockOffsetMs,
     )
-    if (result.merged) patch.jobs = result.merged
+
+    // Tombstones: the union of what this device already knew plus whatever
+    // the peer just sent, deduped by id keeping the later `deletedAt`. A job
+    // cancelled on either device must stay cancelled regardless of which one
+    // is telling this device about it right now.
+    const incomingTombstones = incoming.schedule.deletedJobs ?? []
+    const tombstoneAt = new Map(state.deletedJobs.map((t) => [t.id, t.deletedAt]))
+    for (const t of incomingTombstones) {
+      tombstoneAt.set(t.id, Math.max(tombstoneAt.get(t.id) ?? 0, t.deletedAt))
+    }
+
+    // A tombstone beats a job record whose own `updatedAt` is not newer —
+    // whether that record just arrived in this exchange or was already
+    // sitting here untouched. Without this a job cancelled on one device
+    // keeps firing on the other forever, since an ordinary merge only ever
+    // adds or updates by id and never removes anything.
+    let jobs = result.merged ?? state.jobs
+    if (tombstoneAt.size > 0) {
+      const survivors = jobs.filter((job) => {
+        const deletedAt = tombstoneAt.get(job.id)
+        return deletedAt === undefined || (job.updatedAt ?? 0) > deletedAt
+      })
+      if (survivors.length !== jobs.length) jobs = survivors
+    }
+    if (jobs !== state.jobs) patch.jobs = jobs
+    if (incomingTombstones.length > 0) {
+      patch.deletedJobs = Array.from(tombstoneAt, ([id, deletedAt]) => ({ id, deletedAt }))
+    }
+
     // Last-write-wins on the timestamp, not "whoever's payload we saw last":
     // without this, two devices with a different calendar hand each other's
     // old value back and forth forever instead of converging on the newer one.
