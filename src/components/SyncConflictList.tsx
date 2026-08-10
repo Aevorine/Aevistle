@@ -17,7 +17,7 @@
  */
 
 import { useState } from 'react'
-import { Button, Card, CardHeader, EmptyState, useToast } from './ui'
+import { Button, Card, CardHeader, useToast } from './ui'
 import { IconAlert, IconRefresh } from './icons'
 import { useApp } from '../state/AppState'
 import { useI18n } from '../i18n'
@@ -68,10 +68,4 @@ export function SyncConflictList() {
       </div>
     </Card>
   )
-}
-
-/** Rendered instead when there is nothing to review — used only where the caller wants the empty state spelled out rather than the card vanishing outright (see `DevicesCard.tsx`). */
-export function SyncConflictEmpty() {
-  const { t } = useI18n()
-  return <EmptyState icon={<IconAlert size={20} />} title={t('sync.conflict.none')} />
 }

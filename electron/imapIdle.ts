@@ -21,6 +21,7 @@
  * mail arrives.
  */
 
+import { createHash } from 'node:crypto'
 import { ImapFlow } from 'imapflow'
 import type { InboxAccountState } from '../src/core/types'
 import { endpointLadder, rungBudgetMs, totalBudgetMs, withDeadline } from '../src/core/transport'
@@ -50,8 +51,18 @@ const RECYCLE_MS = 20 * 60_000
 
 type MailHandler = (accountId: string) => void
 
-/** Identity of a watcher's *connection settings* — a change means reconnect. */
-function connectionKey(config: InboxAccountState): string {
+/**
+ * Identity of a watcher's *connection settings* — a change means reconnect.
+ *
+ * Includes a hash of the secret itself, not just which account it belongs to:
+ * without this, editing a password left the key unchanged, so `watchInboxes`
+ * saw an account it already had a watcher for and kept the old connection
+ * running — authenticated with the password that was just replaced — until it
+ * happened to drop and reconnect on its own. Push silently kept working off a
+ * credential the user believed they had rotated out. Hashed rather than
+ * embedded plainly so the password itself never sits in a Map key in memory.
+ */
+function connectionKey(config: InboxAccountState, secret: string): string {
   return [
     config.accountId,
     config.imapHost,
@@ -59,6 +70,7 @@ function connectionKey(config: InboxAccountState): string {
     config.imapSecurity,
     config.imapUsername,
     config.imapAllowInvalidCert ? '1' : '0',
+    createHash('sha256').update(secret).digest('hex'),
   ].join('|')
 }
 
@@ -241,7 +253,7 @@ export function watchInboxes(
   const wanted = new Map<string, { config: InboxAccountState; secret: string }>()
   for (const { config, secret } of configs) {
     if (!config.enabled || !secret || !config.imapHost || !config.imapUsername) continue
-    wanted.set(connectionKey(config), { config, secret })
+    wanted.set(connectionKey(config, secret), { config, secret })
   }
 
   for (const [key, watcher] of watchers) {

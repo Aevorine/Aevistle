@@ -50,6 +50,16 @@ const LIST_FETCH_LIMIT = 50
 const BODY_PREFETCH_LIMIT = 15
 /** Skip eager prefetch above this size; the message is still listed, its body just loads on demand. */
 const PREFETCH_MAX_BYTES = 5 * 1024 * 1024
+/**
+ * How much of a prefetched body becomes the list-row `snippet`.
+ *
+ * Generous on purpose: `reportMatches` (core/receipts.ts) looks for a bounced
+ * send's quoted Message-ID inside this text, and a DSN quotes the original
+ * headers well past where a 120-char notification preview would have cut it
+ * off. `previewLine` truncates further for on-screen display; this constant
+ * only bounds what search and receipt-matching have to work with.
+ */
+const SNIPPET_MAX_CHARS = 2000
 
 /**
  * True when imapflow rejected the credentials, as opposed to failing to reach
@@ -432,6 +442,7 @@ async function runSync(client: ImapFlow, config: InboxAccountState): Promise<Inb
       let bodyCached = existing?.bodyCached ?? false
       let hasAttachments = hasAttachmentPart(row.bodyStructure)
       let tag: InboxTag = existing?.tag ?? 'none'
+      let snippet = existing?.snippet ?? ''
 
       if (prefetchUids.has(uid) && !bodyCached) {
         try {
@@ -440,6 +451,7 @@ async function runSync(client: ImapFlow, config: InboxAccountState): Promise<Inb
             const cached = await parseCacheAndReturn(config.accountId, INBOX_PATH, uid, full.source)
             bodyCached = true
             hasAttachments = cached.hasAttachments
+            snippet = (cached.text ?? '').slice(0, SNIPPET_MAX_CHARS)
           }
         } catch {
           // The message just loads on demand instead — never worth failing
@@ -458,7 +470,7 @@ async function runSync(client: ImapFlow, config: InboxAccountState): Promise<Inb
         to: formatAddress(row.envelope?.to?.[0]),
         subject: row.envelope?.subject ?? '',
         date: internalDateMs(row.internalDate),
-        snippet: '',
+        snippet,
         sizeBytes: row.size ?? 0,
         hasAttachments,
         seen,

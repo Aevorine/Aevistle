@@ -340,10 +340,14 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
             up factory-fresh because its state file would not parse is
             indistinguishable, from the inside, from one that lost everything.
             It used to rename the file and say nothing at all. */}
-        {info?.recoveredFrom ? (
+        {info?.recoveredFrom?.length ? (
           <Banner tone="warning">
             {t('data.recovered')}
-            <code className="mono">{info.recoveredFrom}</code>
+            {info.recoveredFrom.map((path) => (
+              <code key={path} className="mono" style={{ display: 'block' }}>
+                {path}
+              </code>
+            ))}
           </Banner>
         ) : null}
 

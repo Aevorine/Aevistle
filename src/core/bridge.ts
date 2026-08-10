@@ -42,13 +42,16 @@ export interface AppInfo {
   /** Human-readable location of the state file / preferences store. */
   dataLocation: string
   /**
-   * Where an unreadable state file was moved to at startup, if that happened.
+   * Where each unreadable file (state, secrets) was moved to at startup, if
+   * that happened.
    *
    * Present so the app can say "your data could not be read, here is where it
    * went" instead of simply opening empty. An app that comes up factory-fresh
-   * with no message looks exactly like one that lost everything.
+   * with no message looks exactly like one that lost everything. An array
+   * because a single crash can corrupt more than one file, and each has to be
+   * named — not just whichever failed last.
    */
-  recoveredFrom?: string
+  recoveredFrom?: string[]
   /**
    * Absolute path of the bundled MCP server, so the Settings card can print a
    * command that works on this machine. Desktop only.

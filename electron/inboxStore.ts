@@ -71,8 +71,17 @@ function attachmentDir(accountId: string, folderPath: string, uid: number): stri
   return path.join(accountRoot(accountId), ATTACHMENTS_DIR, folderSlug(folderPath), String(uid))
 }
 
+/** Unique per call, not just per process — two concurrent writes to the same target inside one process both take this path. */
+let writeCounter = 0
+
 async function writeAtomicFile(target: string, contents: string): Promise<void> {
-  const temp = `${target}.tmp`
+  // A fixed `${target}.tmp` let two concurrent writes to the same message
+  // (an eager prefetch and an on-demand open racing each other) share one
+  // temp file: the second write's content, or worse a half-written buffer,
+  // could land under the first write's `rename`, so the cache read back
+  // afterwards was decided by scheduling luck rather than by which write
+  // actually finished.
+  const temp = `${target}.${process.pid}-${++writeCounter}.tmp`
   await fs.mkdir(path.dirname(target), { recursive: true })
   await fs.writeFile(temp, contents, { encoding: 'utf8', mode: 0o600 })
   await fs.rename(temp, target)
@@ -97,8 +106,15 @@ async function readCachedAttachments(
   let names: string[]
   try {
     names = await fs.readdir(dir)
-  } catch {
-    return []
+  } catch (e) {
+    // ENOENT — no attachments were ever cached for this message — is the only
+    // case that means "none". A permission error or a directory locked by
+    // antivirus scanning was being treated the same as "none" before this,
+    // which is indistinguishable in the UI from a message that really has no
+    // attachments; the user just sees them missing, not why.
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return []
+    console.error(`[aevistle] could not list attachments in ${dir}:`, e)
+    throw e
   }
   const out: Attachment[] = []
   for (const name of names) {

@@ -22,7 +22,6 @@ import {
   ENDPOINT_FILE,
   HOME_CONTROL_DIR,
   SENDING_OPS,
-  WRITING_OPS,
   type ControlEndpoint,
   type ControlOp,
   type ControlRequest,
@@ -361,19 +360,46 @@ export class ControlServer {
 
   private async runDropped(claimed: string, name: string): Promise<void> {
     const finish = async (response: ControlResponse) => {
-      const target = response.ok
-        ? path.join(this.dropDir(), 'done', `${Date.now()}-${name}`)
-        : claimed
+      // Move first, report after — and report what actually happened, not
+      // what the op reported before the move was attempted. This used to
+      // write `<done path>.result.json` with `ok:true`, then attempt the
+      // rename into `done/` and swallow a failure there with `.catch(() =>
+      // {})` — an external script watching `done/*.result.json` would read
+      // success while the source file it names was still sitting wherever
+      // it had been claimed to, never actually in `done/`.
+      let target = claimed
+      let effective = response
+      if (response.ok) {
+        const donePath = path.join(this.dropDir(), 'done', `${Date.now()}-${name}`)
+        try {
+          await fs.mkdir(path.dirname(donePath), { recursive: true })
+          await fs.rename(claimed, donePath)
+          target = donePath
+        } catch (moveError) {
+          effective = {
+            ...response,
+            ok: false,
+            error: `succeeded but could not move into done/: ${
+              moveError instanceof Error ? moveError.message : String(moveError)
+            }`,
+          }
+        }
+      }
       await fs.writeFile(
         `${target}.result.json`,
-        JSON.stringify(response, null, 2),
+        JSON.stringify(effective, null, 2),
         'utf8',
-      ).catch(() => {})
-      if (response.ok) await fs.rename(claimed, target).catch(() => {})
+      ).catch((writeError) => {
+        this.hooks.log(
+          'warn',
+          'control.drop.result-write-failed',
+          `${name}: ${writeError instanceof Error ? writeError.message : String(writeError)}`,
+        )
+      })
       this.hooks.log(
-        response.ok ? 'info' : 'warn',
-        response.ok ? 'control.drop.ok' : 'control.drop.failed',
-        `${name}${response.error ? `: ${response.error}` : ''}`,
+        effective.ok ? 'info' : 'warn',
+        effective.ok ? 'control.drop.ok' : 'control.drop.failed',
+        `${name}${effective.error ? `: ${effective.error}` : ''}`,
       )
     }
 
@@ -429,6 +455,3 @@ function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
     req.on('error', reject)
   })
 }
-
-/** Exported for the settings screen, which shows what a caller has to do. */
-export { WRITING_OPS }

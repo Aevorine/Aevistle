@@ -115,16 +115,23 @@ export function initDataRoot(): { root: string; fellBack: boolean } {
 }
 
 /**
- * Where an unreadable file was moved to, if that happened this session.
+ * Where each unreadable file was moved to, if that happened this session.
  *
  * Module state rather than a return value because the read that discovers it
  * has to keep returning `null` — the app must still start. Reported through
  * `appInfo` so the window can say what happened instead of opening empty.
+ *
+ * An array, not a single slot: `readJson` recovers both the state file and
+ * the secrets file through this same path, and a crash can corrupt more than
+ * one of them. A single shared variable let a second corruption silently
+ * overwrite the first — the settings banner would name only the file that
+ * broke *last*, so a secrets file full of account passwords could be moved
+ * aside and never mentioned at all if the state file happened to fail too.
  */
-let recoveredPath: string | null = null
+const recoveredPaths: string[] = []
 
-export function recoveredFrom(): string | undefined {
-  return recoveredPath ?? undefined
+export function recoveredFrom(): string[] | undefined {
+  return recoveredPaths.length > 0 ? recoveredPaths : undefined
 }
 
 export function dataLocation(): string {
@@ -401,10 +408,10 @@ async function readJson<T>(file: string): Promise<T | null> {
       const moved = dataPath(`${file}.corrupt-${Date.now()}`)
       try {
         await fs.rename(dataPath(file), moved)
-        recoveredPath = moved
+        recoveredPaths.push(moved)
       } catch {
         // Could not even move it. Still worth reporting that it was unreadable.
-        recoveredPath = dataPath(file)
+        recoveredPaths.push(dataPath(file))
       }
       return null
     }
