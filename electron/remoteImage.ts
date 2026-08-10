@@ -39,7 +39,7 @@ const MAX_BYTES = 5 * 1024 * 1024
 function isDisallowedAddress(ip: string): boolean {
   if (net.isIPv4(ip)) {
     const parts = ip.split('.').map(Number)
-    const [a, b] = parts
+    const [a, b, c] = parts
     if (parts.length !== 4 || parts.some((n) => Number.isNaN(n))) return true // malformed — fail closed
     if (a === 127) return true // loopback
     if (a === 10) return true // RFC1918
@@ -47,6 +47,11 @@ function isDisallowedAddress(ip: string): boolean {
     if (a === 192 && b === 168) return true // RFC1918
     if (a === 169 && b === 254) return true // link-local, incl. cloud metadata endpoints
     if (a === 0) return true
+    if (a === 100 && b >= 64 && b <= 127) return true // RFC6598 carrier-grade NAT
+    if (a === 192 && b === 0 && c === 0) return true // RFC6890 IETF protocol assignments
+    if (a === 198 && (b === 18 || b === 19)) return true // RFC2544 benchmarking
+    if (a >= 224 && a <= 239) return true // multicast
+    if (a >= 240) return true // reserved, incl. 255.255.255.255 broadcast
     return false
   }
   if (net.isIPv6(ip)) {
@@ -163,8 +168,22 @@ async function fetchOverNetwork(url: string): Promise<string> {
           reject(new Error(`HTTP ${status}`))
           return
         }
-        const contentType = res.headers['content-type'] ?? ''
-        if (!contentType.startsWith('image/')) {
+        /**
+         * The server's `Content-Type` header is attacker-controlled — it is
+         * whatever the URL the message pointed at chose to answer with, not
+         * anything this app asserted. Trusting it verbatim into a `data:` URI
+         * that later gets spliced back into already-sanitized HTML (see
+         * `resolveRemoteImages`) means a hostile response header can smuggle
+         * near-arbitrary characters past the point sanitization already ran.
+         * A strict allowlist — MIME-token subtype only, params dropped —
+         * makes the value that reaches the data URI provably just that.
+         */
+        const rawContentType = res.headers['content-type']
+        const mime = String(Array.isArray(rawContentType) ? rawContentType[0] : (rawContentType ?? ''))
+          .split(';')[0]
+          .trim()
+          .toLowerCase()
+        if (!/^image\/[a-z0-9][a-z0-9.+-]{0,127}$/.test(mime)) {
           res.resume()
           reject(new Error('Not an image'))
           return
@@ -189,7 +208,7 @@ async function fetchOverNetwork(url: string): Promise<string> {
         })
         res.on('end', () => {
           const buffer = Buffer.concat(chunks)
-          resolve(`data:${contentType};base64,${buffer.toString('base64')}`)
+          resolve(`data:${mime};base64,${buffer.toString('base64')}`)
         })
         res.on('error', reject)
       },

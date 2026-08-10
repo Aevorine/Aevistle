@@ -35,14 +35,28 @@ export const BROKEN_IMAGE =
   )
 
 /**
+ * A fetched image's value, checked again here rather than trusted from
+ * `downloadRemoteImage`. That function already validates the server's
+ * `Content-Type` before building this string, but this splice is the last
+ * point before an attacker-influenced value re-enters already-sanitized
+ * HTML — a second, independent gate here means a bug in the fetch path
+ * can never turn into HTML injection on its own, only into a broken-image
+ * fallback.
+ */
+const DATA_IMAGE_URI = /^data:image\/[a-z0-9][a-z0-9.+-]{0,127};base64,[A-Za-z0-9+/=]+$/
+
+/**
  * Splice previously-fetched remote images back into a sanitized body, once
  * the caller has decided (via account/sender policy or an explicit "load
  * images" click) that this message's remote content should load.
  *
- * `resolved[i]` may be `null` for a URL that failed to fetch. `fallback` is
- * what goes in its place — pass `BROKEN_IMAGE` once the fetch has actually
- * been attempted and failed, and leave it out while some images are still
- * pending, so an image in flight is not accused of being broken.
+ * `resolved[i]` may be `null` for a URL that failed to fetch, or for one that
+ * "fetched" something that does not look like an image data URI — treated
+ * the same way on purpose, since from here the two are indistinguishable in
+ * the way that matters. `fallback` is what goes in its place — pass
+ * `BROKEN_IMAGE` once the fetch has actually been attempted and failed, and
+ * leave it out while some images are still pending, so an image in flight is
+ * not accused of being broken.
  */
 export function resolveRemoteImages(
   html: string,
@@ -51,7 +65,8 @@ export function resolveRemoteImages(
 ): string {
   let out = html
   resolved.forEach((dataUri, index) => {
-    const replacement = dataUri ?? fallback
+    const safe = dataUri && DATA_IMAGE_URI.test(dataUri) ? dataUri : null
+    const replacement = safe ?? fallback
     if (!replacement) return
     out = out.split(`${BLANK_PIXEL}#${index}`).join(replacement)
   })

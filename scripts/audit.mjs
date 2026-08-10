@@ -495,6 +495,57 @@ check('INBOX-05', 'Remote-image fetch blocks private addresses given as literal 
   return null
 })
 
+check('INBOX-06', 'Remote-image private-address filter covers CGNAT, benchmarking, multicast and reserved ranges', () => {
+  const remote = read('electron/remoteImage.ts')
+  if (!remote) return { severity: 'info', detail: 'No inbox pipeline yet.', fix: '' }
+  const problems = []
+  if (!/a === 100 && b >= 64 && b <= 127/.test(remote)) problems.push('100.64.0.0/10 (CGNAT) is not blocked')
+  if (!/a === 198 && \(b === 18/.test(remote)) problems.push('198.18.0.0/15 (benchmarking) is not blocked')
+  if (!/a >= 224 && a <= 239/.test(remote)) problems.push('224.0.0.0/4 (multicast) is not blocked')
+  if (!/a >= 240/.test(remote)) problems.push('240.0.0.0/4 (reserved) is not blocked')
+  if (problems.length === 0) return null
+  return {
+    severity: 'medium',
+    detail: problems.join('; '),
+    fix: 'Add the missing range(s) to isDisallowedAddress() in electron/remoteImage.ts.',
+  }
+})
+
+check('INBOX-07', "Remote-image fetch validates the server's Content-Type against a strict allowlist", () => {
+  const remote = read('electron/remoteImage.ts')
+  if (!remote) return { severity: 'info', detail: 'No inbox pipeline yet.', fix: '' }
+  if (/contentType\.startsWith\('image\/'\)/.test(remote)) {
+    return {
+      severity: 'high',
+      detail:
+        'the raw Content-Type header is trusted with a prefix check and embedded verbatim in the data: URI — a hostile server can put arbitrary characters after "image/"',
+      fix: 'Strip parameters, lowercase, and test against /^image\\/[a-z0-9][a-z0-9.+-]{0,127}$/ before using the value.',
+    }
+  }
+  if (!/\^image\\\/\[a-z0-9\]/.test(remote)) {
+    return {
+      severity: 'high',
+      detail: 'no strict MIME-type allowlist regex found guarding the fetched Content-Type.',
+      fix: 'Validate the Content-Type against a strict image/<token> regex before building the data: URI.',
+    }
+  }
+  return null
+})
+
+check('INBOX-08', 'resolveRemoteImages re-validates the data URI before splicing into sanitized HTML', () => {
+  const placeholder = read('src/core/remoteImagePlaceholder.ts')
+  if (!placeholder) return { severity: 'info', detail: 'No inbox pipeline yet.', fix: '' }
+  if (!/DATA_IMAGE_URI/.test(placeholder) || !/dataUri &&.*test\(dataUri\)/.test(placeholder)) {
+    return {
+      severity: 'high',
+      detail:
+        'resolveRemoteImages() splices a fetched value straight back into already-sanitized HTML with no format check of its own — a bug anywhere upstream (or a future change to the fetch path) becomes HTML injection with no second gate to catch it.',
+      fix: 'Validate each resolved[i] against /^data:image\\/[a-z0-9][a-z0-9.+-]{0,127};base64,[A-Za-z0-9+/=]+$/ and fall back otherwise.',
+    }
+  }
+  return null
+})
+
 // ---------------------------------------------------------------------------
 // 4. Android
 // ---------------------------------------------------------------------------
