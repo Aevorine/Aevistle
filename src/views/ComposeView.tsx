@@ -250,14 +250,23 @@ export function ComposeView({
   /**
    * Whether the addressing block is showing, on a narrow screen.
    *
-   * Open on a fresh draft — a reminder with no recipient is not a reminder, so
-   * the first thing the screen asks for is still the first thing on it — and it
-   * folds down to one summary line the moment the message box takes focus,
-   * because from then on the recipient is decided and the screen is being used
-   * to write. Tapping the summary brings it back; nothing about the collapsed
-   * state is a place to get stuck in.
+   * Folded from the first paint on a narrow screen, open everywhere else.
+   *
+   * It used to start open and fold only once the message box took focus, and
+   * that one word — "once" — was the whole of the 85% failure. Measured at
+   * 360x800: open, the message box is 66% of the compose view, and 52% with a
+   * second mail account configured, because that adds a 79px account `<select>`
+   * to the block being held open. The 86% recorded in `app.css` was real but it
+   * was the *post-focus* number, i.e. the state you reach after tapping into a
+   * box that was a fifth of the screen at the moment you had to find it.
+   *
+   * So the fold is the initial state and `scripts/layout-probe.mjs` now asserts
+   * the share on first paint rather than after a focus event. The summary bar is
+   * styled as the input it stands for (`.composesummary`, and see the note there)
+   * because a folded state that reads as a *missing* recipient field would be a
+   * worse screen than a small message box, not a better one.
    */
-  const [headerOpen, setHeaderOpen] = useState(true)
+  const [headerOpen, setHeaderOpen] = useState(() => !narrow)
   /**
    * Which of the three narrow-screen sheets is up, if any.
    *
@@ -473,19 +482,23 @@ export function ComposeView({
   const rawBytes = totalAttachmentBytes(draft.attachments)
 
   /**
-   * An empty draft always shows its addressing block again.
+   * An empty draft goes back to whatever the initial state for this width is.
    *
    * A send, a queue or a scheduled job all end in `resetDraft`, and the next
-   * reminder has to open on "who is this for?" rather than on a summary line
-   * reading "no recipients" that has to be tapped before anything can be typed.
+   * reminder must not inherit a summary line describing the last one.
+   *
+   * `!narrow`, not `true`: on a phone the folded bar *is* the initial state (see
+   * `headerOpen`), and forcing it open here would undo that on the very first
+   * render — this effect runs on mount, where `started` is already false. That
+   * is what defeated the previous attempt at a folded first paint.
    *
    * Guarded on `!started`, which is what makes it fire on the true→false edge
    * only. The false→true edge — the first character of a new draft — must *not*
    * re-open the block the user just folded away by tapping into the message.
    */
   useEffect(() => {
-    if (!started) setHeaderOpen(true)
-  }, [started])
+    if (!started) setHeaderOpen(!narrow)
+  }, [started, narrow])
 
   const patch = (p: Partial<MessageDraft>) => dispatch({ type: 'setDraft', patch: p })
 
@@ -892,17 +905,22 @@ export function ComposeView({
   /**
    * Who this is for and what it is about, on one line.
    *
-   * The narrow layout folds the account, To, Cc, Bcc and subject fields away
-   * once the message box has focus, and something has to stay behind saying
-   * what was folded — a bar that reads only "tap to expand" is a bar nobody can
-   * check their own draft against. Addresses first because that is what gets
-   * checked; the subject is the second half of the same line and gives way
-   * first when there is no room for both.
+   * The narrow layout folds the account, To, Cc, Bcc and subject fields away —
+   * from the first paint now, not only once the message box has focus — and
+   * something has to stay behind saying what was folded. A bar that reads only
+   * "tap to expand" is a bar nobody can check their own draft against.
+   *
+   * Empty is returned as empty rather than as `validate.noRecipients`. On a fresh
+   * draft, which is now the state this bar is *first seen* in, "No recipients"
+   * reads as a verdict on a form that has not been filled in yet, and a verdict
+   * is not an invitation to type. The bar renders the recipient field's own
+   * placeholder instead and is styled as that field (see `.composesummary`), so
+   * the folded state reads as the empty input it stands in for.
    */
-  const headerSummary = useMemo(() => {
-    const to = draft.to.length > 0 ? draft.to.join(', ') : t('validate.noRecipients')
-    return { to, subject: draft.subject.trim() }
-  }, [draft.to, draft.subject, t])
+  const headerSummary = useMemo(
+    () => ({ to: draft.to.join(', '), subject: draft.subject.trim() }),
+    [draft.to, draft.subject],
+  )
 
   /**
    * The send time, as one line for the action bar.
@@ -1227,10 +1245,25 @@ export function ComposeView({
                   onClick={() => setHeaderOpen(true)}
                   aria-expanded={false}
                   aria-controls={headId}
+                  aria-label={t('compose.editHeader')}
                   title={t('compose.editHeader')}
                 >
-                  <span className="composesummary__to">{headerSummary.to}</span>
-                  <span className="composesummary__subject">
+                  {/* `data-empty` is what makes this read as an input rather
+                      than as a missing field: the placeholder tone, and the
+                      dashed border in `app.css`, both hang off it. A user who
+                      cannot find where to type the recipient is a worse outcome
+                      than a small message box, so the empty state of this bar
+                      gets more design attention than the filled one. */}
+                  <span
+                    className="composesummary__to"
+                    data-empty={headerSummary.to ? undefined : 'true'}
+                  >
+                    {headerSummary.to || t('compose.recipientPlaceholder')}
+                  </span>
+                  <span
+                    className="composesummary__subject"
+                    data-empty={headerSummary.subject ? undefined : 'true'}
+                  >
                     {headerSummary.subject || t('compose.subjectPlaceholder')}
                   </span>
                   <IconChevronDown size={16} className="composesummary__chev" />
@@ -1767,9 +1800,13 @@ export function ComposeView({
         </div>
       </div>
 
-      {/* The answer to "did it actually send?", kept until dismissed. */}
+      {/* The answer to "did it actually send?", kept until dismissed.
+
+          `data-narrow` from the same flag the action bar reads: the banner sticks
+          to the top of that bar, and the height it sticks at has to be the height
+          the bar actually has. See `.sendresult[data-narrow]`. */}
       {outcome ? (
-        <div className="sendresult" data-ok={outcome.ok}>
+        <div className="sendresult" data-ok={outcome.ok} data-narrow={narrow || undefined}>
           <Banner
             tone={outcome.ok ? 'success' : 'danger'}
             title={outcome.ok ? t('result.sentTitle') : t(errorTitleKey(outcome))}

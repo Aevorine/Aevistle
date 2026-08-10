@@ -123,7 +123,7 @@
 :root {
   /* ---- typography ----
 
-     Chinese text is set in 宋体 at the two sizes the brief calls for, chosen
+     Chinese text is set in 宋体, and which size a piece of text gets is decided
      by *what the text is* rather than by user preference:
 
        小四 (12 pt) = 16px  — body copy, labels, buttons, inputs
@@ -131,23 +131,58 @@
        小二 (18 pt) = 24px  — the name of the screen you are on
        二号 (22 pt) = 29.33px — the one hero line
 
-     Everything below 小四 is reserved for numbers and timestamps that sit
-     beside a label rather than being read as prose. */
+     Three roles, three sizes, and they are the whole ladder:
+
+       body       16px  the sentence you are reading, and every form control
+       secondary  14px  metadata, senders, hints, notes, descriptions
+       auxiliary  12.5px timestamps, chips, counts, small all-caps labels
+
+     This replaces a scale where `--text-sm`, `--text-base` and `--text-md`
+     were all `1rem`. Three names for one number is not a scale: "secondary"
+     text came out the same size as the sentence beside it on every screen in
+     the app, so nothing had a second rank and the whole interface read as one
+     wall of 16px — reported as 字体太大，显示的范围太小 on the two list screens,
+     where a row that says four things at one size says none of them first.
+
+     16px stays the floor for anything read as a sentence and for every input:
+     iOS and Android zoom the page when a focused field is under 16px, so the
+     body step is an interaction requirement as well as a reading one. What
+     comes down is only the two ranks *below* prose. */
   --font-sans:
     "Aevistle Text", "Times New Roman", "SimSun", "Songti SC",
     "Noto Serif CJK SC", "Noto Sans Arabic", "Segoe UI Emoji", serif;
   --font-mono:
     "JetBrains Mono", "Cascadia Code", "SF Mono", "Consolas", ui-monospace, monospace;
 
-  /* 12px 小五 — badge digits and file-type tags only. Never prose: it is
-     below the size Songti stays legible at, which is why it is fenced off
-     here instead of being typed as a bare `10px` wherever it was needed. */
-  --text-2xs: 0.75rem;
-  --text-xs: 0.875rem;      /* 14px  五号 — counters, timestamps, chips */
-  --text-sm: 1rem;          /* 16px  小四 — secondary UI text */
-  --text-base: 1rem;        /* 16px  小四 — the workhorse */
-  --text-md: 1rem;          /* 16px  小四 — inputs, body copy */
+  /* 12.5px — the auxiliary rank: a timestamp, a chip, a count, a file-type
+     tag. Never a sentence. Fenced off behind a name instead of being typed as
+     a bare `12px` wherever it was wanted, which is how ten sites each picked
+     their own number the last time. */
+  --text-xs: 0.78125rem;
+  /* Was 12px, one notch below `--text-xs`'s old 14px. Now that the auxiliary
+     rank *is* 12.5px there is nothing for a second step half a pixel under it
+     to express — a difference nobody can see is a difference nobody can
+     maintain — so it is an alias, and the five badge sites that name it stay
+     spelled the way they read. */
+  --text-2xs: var(--text-xs);
+  --text-sm: 0.875rem;      /* 14px  五号 — the secondary rank */
+  --text-base: 1rem;        /* 16px  小四 — body copy, the workhorse */
+  /* Inputs and the body textarea. Same 16px as `--text-base` — deliberately
+     the same rank, not a fourth number — kept as its own name because the
+     reason it may never drop is different: under 16px a focused field makes
+     mobile browsers zoom the whole page. */
+  --text-md: var(--text-base);
   --text-lg: 1.1667rem;     /* 18.67px 四号 — function and section names */
+  /* 20px 小三 — the one value a card exists to show, which today is exactly one
+     thing: the verification code on the Codes screen. It was 小二 (24px, the
+     step below), and 小二 is the size of a *screen title* — a code inside a list
+     row was therefore competing with the name of the screen it was in, and a
+     `min-width: 1500px` rule pushed it to 28px on a desktop, larger than any
+     heading in the app. It has to be the most prominent thing on its card and
+     nothing more than that, and on a card whose other three ranks are
+     16/14/12.5 this is comfortably it — the weight, the accent, the tabular
+     figures and the 3+3 grouping all still carry it. */
+  --text-value: 1.25rem;
   --text-xl: 1.5rem;        /* 24px  小二 — screen titles */
   --text-2xl: 1.8333rem;    /* 29.33px 二号 — hero */
 

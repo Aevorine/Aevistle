@@ -1252,7 +1252,10 @@ export function InboxView({
 
   if (!canUseInbox) {
     return (
-      <div className="view view--list">
+      // `data-screen` on this branch too. Without it a probe that navigated here
+      // could not tell it had arrived, and this is the branch a machine with no
+      // mail bridge — every automated run — actually lands on.
+      <div className="view view--list" data-screen="inbox">
         <div className="view__inner">
           <PageHead title={t('inbox.title')} />
           <div className="list-pane">
@@ -1332,7 +1335,7 @@ export function InboxView({
   const attachments = openBody?.attachments ?? []
 
   return (
-    <div className="view view--list">
+    <div className="view view--list" data-screen="inbox">
       <div className="view__inner">
         {/* No subtitle. It said either "{n} unread" — which the nav badge
             already shows — or a sentence describing what an inbox is, on the
@@ -1595,8 +1598,18 @@ export function InboxView({
                 rtl={dir === 'rtl'}
                 onRemove={() => void deleteInboxMessages(m.accountId, [m.id])}
                 onToggleRead={() => markSet(new Set([m.id]), !m.seen)}
+                onLongPress={() => toggleSelect(m.id)}
               >
-              <div className="job" data-disabled={m.seen ? 'true' : undefined} onClick={() => openDetail(m)}>
+              <div
+                className="job"
+                data-disabled={m.seen ? 'true' : undefined}
+                /* Read by the phone block in `app.css`: while a selection is
+                   live every row shows its checkbox, and while there is none no
+                   row spends 18px plus a gap advertising a mode nobody is in.
+                   A long press is what starts one — see `SwipeableRow`. */
+                data-selecting={selected.size > 0 ? 'true' : undefined}
+                onClick={() => openDetail(m)}
+              >
                 <input
                   type="checkbox"
                   className="job__select"
@@ -1609,13 +1622,29 @@ export function InboxView({
                 <div className="job__body">
                   <div className="job__name">{m.subject || t('inbox.noSubject')}</div>
                   <div className="job__meta">
-                    {filter === 'all' ? <span className="chip">{accountLabel(m.accountId)}</span> : null}
+                    {/* Every one of these wraps its text in `.chip__text`.
+                        `text-overflow` does not apply to the anonymous text of a
+                        flex container, so a `.chip` with bare text inside was cut
+                        with no ellipsis at all — a long account label simply
+                        ended mid-character. The nowrap child is what the ellipsis
+                        needs; the recipe is at `.chip__text` in `app.css`. */}
+                    {filter === 'all' ? (
+                      <span className="chip">
+                        <span className="chip__text">{accountLabel(m.accountId)}</span>
+                      </span>
+                    ) : null}
                     <span className="job__from">{m.from}</span>
                     <span>{formatAgo(m.date)}</span>
-                    {m.hasAttachments ? <span className="chip chip--quiet">@</span> : null}
+                    {m.hasAttachments ? (
+                      <span className="chip chip--quiet">
+                        <span className="chip__text">@</span>
+                      </span>
+                    ) : null}
                     {m.tag !== 'none' ? (
                       <span className={`chip chip--${m.tag === 'important' ? 'danger' : 'warning'}`}>
-                        {t(m.tag === 'important' ? 'inbox.tagImportant' : 'inbox.tagFlagged')}
+                        <span className="chip__text">
+                          {t(m.tag === 'important' ? 'inbox.tagImportant' : 'inbox.tagFlagged')}
+                        </span>
                       </span>
                     ) : null}
                   </div>
@@ -1646,6 +1675,34 @@ export function InboxView({
         closeLabel={t('common.close')}
         headerExtra={
           <div className="btn-row">
+            {/*
+              Tag and delete, on the open message.
+
+              These are the two buttons the phone list row used to carry, and
+              this is where they went — not into a gesture and nowhere else. The
+              swipe (mark read / remove) is the fast path for someone who already
+              knows it is there; a control you can see is what makes it
+              discoverable at all, and "open the message, then act on it" is the
+              path anyone finds without being told. On a desktop the row keeps
+              its own two buttons as well, so nothing was taken away there.
+            */}
+            {openMessage ? (
+              <IconButton label={t('inbox.tagAs')} onClick={() => cycleTag(openMessage)}>
+                <IconFlag size={16} />
+              </IconButton>
+            ) : null}
+            {openMessage ? (
+              <IconButton
+                label={t('common.delete')}
+                onClick={() => {
+                  const id = openMessage.id
+                  setOpenMessage(null)
+                  void deleteIdSet(new Set([id]))
+                }}
+              >
+                <IconTrash size={16} />
+              </IconButton>
+            ) : null}
             <IconButton label={t('inbox.find')} onClick={() => setFindOpen((v) => !v)}>
               <IconSearch size={16} />
             </IconButton>
@@ -1665,7 +1722,9 @@ export function InboxView({
                 <strong>{t('inbox.from')}</strong> {openMessage.from}
               </span>
               <span>{formatDateTime(openMessage.date)}</span>
-              <span className="chip">{accountLabel(openMessage.accountId)}</span>
+              <span className="chip">
+                <span className="chip__text">{accountLabel(openMessage.accountId)}</span>
+              </span>
               {/* The keyboard map used to be printed here in grey on every
                   message ever opened. The shortcuts are unchanged; the sentence
                   about them is not something anyone reads twice. */}
@@ -2127,17 +2186,24 @@ function PreviewFrame({
  * what is being revealed is visible from the first few pixels of movement and
  * the gesture can be abandoned by anyone who did not mean it.
  */
+/** How long a finger has to stay put before it counts as "select this one". */
+const LONG_PRESS_MS = 450
+/** And how far it may drift while it waits. Beyond this it was a scroll. */
+const LONG_PRESS_SLOP = 10
+
 function SwipeableRow({
   message,
   rtl,
   onRemove,
   onToggleRead,
+  onLongPress,
   children,
 }: {
   message: InboxMessage
   rtl: boolean
   onRemove: () => void
   onToggleRead: () => void
+  onLongPress: () => void
   children: React.ReactNode
 }) {
   const { t } = useI18n()
@@ -2146,8 +2212,88 @@ function SwipeableRow({
     onSwipe: (direction) => (direction === 'trailing' ? onRemove() : onToggleRead()),
   })
 
+  /*
+   * Long press enters multi-select, so the checkbox does not have to be on
+   * screen for the ninety-nine per cent of the time nobody is selecting
+   * anything. Measured at 360px: the box and its gap were 34px of a 360px row,
+   * on every row, permanently.
+   *
+   * Composed around `useSwipe`'s handlers rather than added to that hook: the
+   * hook is shared and knows only about gesture arithmetic, and a timer that
+   * fires an action belongs to the row that has an action to fire.
+   *
+   * Three things have to be true for this not to be infuriating:
+   *   · a press that moves is a scroll or a swipe, never a selection — hence
+   *     the slop check, and `useSwipe`'s own axis lock still runs untouched;
+   *   · the finger lifting cancels the timer, so a fast tap cannot select;
+   *   · and the click that the lift produces has to be swallowed, or long
+   *     press would select the message *and* open it. `onClickCapture` on this
+   *     wrapper runs before the row's own `onClick` in the capture phase, so
+   *     stopping propagation there is what keeps the reader shut.
+   */
+  const timer = useRef<number | null>(null)
+  const from = useRef<{ x: number; y: number } | null>(null)
+  const fired = useRef(false)
+
+  const cancel = () => {
+    if (timer.current !== null) {
+      window.clearTimeout(timer.current)
+      timer.current = null
+    }
+    from.current = null
+  }
+
   return (
-    <div className="swipe" {...handlers}>
+    <div
+      className="swipe"
+      {...handlers}
+      onPointerDown={(e) => {
+        handlers.onPointerDown(e)
+        cancel()
+        fired.current = false
+        // Mouse excluded for the same reason `useSwipe` excludes it: on a
+        // desktop the row still has its two buttons, and a held click becoming
+        // a selection would be a surprise.
+        if (e.pointerType === 'mouse') return
+        from.current = { x: e.clientX, y: e.clientY }
+        timer.current = window.setTimeout(() => {
+          timer.current = null
+          fired.current = true
+          onLongPress()
+        }, LONG_PRESS_MS)
+      }}
+      onPointerMove={(e) => {
+        handlers.onPointerMove(e)
+        const start = from.current
+        if (
+          start &&
+          (Math.abs(e.clientX - start.x) > LONG_PRESS_SLOP ||
+            Math.abs(e.clientY - start.y) > LONG_PRESS_SLOP)
+        ) {
+          cancel()
+        }
+      }}
+      onPointerUp={(e) => {
+        cancel()
+        handlers.onPointerUp(e)
+      }}
+      onPointerCancel={(e) => {
+        cancel()
+        handlers.onPointerCancel(e)
+      }}
+      onClickCapture={(e) => {
+        if (!fired.current) return
+        fired.current = false
+        e.stopPropagation()
+        e.preventDefault()
+      }}
+      onContextMenu={(e) => {
+        // Android fires a context menu at roughly the same moment the timer
+        // does. Without this the selection lands *and* a native callout opens
+        // over the row it landed on.
+        if (fired.current) e.preventDefault()
+      }}
+    >
       <div className="swipe__behind" aria-hidden="true">
         <span className="swipe__action swipe__action--lead">
           {message.seen ? t('inbox.markUnread') : t('inbox.markRead')}

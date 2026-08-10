@@ -250,7 +250,11 @@ export function CodesView({ onGoToInbox }: { onGoToInbox?: () => void }) {
   const waitLeft = check.waitingUntil ? check.waitingUntil - now : 0
 
   return (
-    <div className="view view--list">
+    /* `data-screen` names this screen for `scripts/layout-probe.mjs`: Inbox and
+       Codes both render `.view.view--list` and are indistinguishable from
+       outside, so a probe navigating between them could not tell it had arrived.
+       Same reason `.nav__item` carries `data-view`. */
+    <div className="view view--list" data-screen="codes">
       <div className="view__inner">
         {/* No subtitle. It ranked unread over fresh over a sentence describing
             the screen — three grey lines of prose for one number the nav badge
@@ -448,20 +452,32 @@ export function CodesView({ onGoToInbox }: { onGoToInbox?: () => void }) {
                                 host: hit.link?.domain ?? hostOf(hit.value),
                               })}
                           </div>
-                          <div className="codecard__purpose">
-                            {hit.link?.anchorText ? (
-                              <span className="chip chip--strong">
-                                {t(purposeKey(hit.link?.purpose), {
-                                  host: hit.link?.domain ?? hostOf(hit.value),
-                                })}
-                              </span>
-                            ) : null}
-                            <span className="codecard__host" title={hit.value}>
-                              {hit.link?.host ?? hostOf(hit.value)}
-                            </span>
-                            {hit.link?.purposeConfidence === 'low' ? (
-                              <span className="chip chip--quiet">{t('codes.purposeUnsure')}</span>
-                            ) : null}
+                          {hit.link?.anchorText || hit.link?.purposeConfidence === 'low' ? (
+                            <div className="codecard__purpose">
+                              {hit.link?.anchorText ? (
+                                <span className="chip chip--strong">
+                                  {t(purposeKey(hit.link?.purpose), {
+                                    host: hit.link?.domain ?? hostOf(hit.value),
+                                  })}
+                                </span>
+                              ) : null}
+                              {hit.link?.purposeConfidence === 'low' ? (
+                                <span className="chip chip--quiet">{t('codes.purposeUnsure')}</span>
+                              ) : null}
+                            </div>
+                          ) : null}
+                          {/* Where it goes, in full and on the card.
+                              This line used to be the host name alone, with the
+                              rest of the URL reachable only through the `title`
+                              below — so on a phone, which has no hover, the path
+                              and query were not rendered anywhere at all. That is
+                              what "the link content is cut off" was about. The
+                              stylesheet breaks it `anywhere` and clamps it to two
+                              lines, so a four-hundred-character tracking URL
+                              cannot grow the card without bound; the host is at
+                              the front, where the clamp can never reach it. */}
+                          <div className="codecard__url" title={hit.value}>
+                            {hit.value}
                           </div>
                         </>
                       ) : (
@@ -518,12 +534,18 @@ export function CodesView({ onGoToInbox }: { onGoToInbox?: () => void }) {
                       </div>
                     </div>
 
+                    {/* `title` on every one of these, matching the label.
+                        Below 760px the stylesheet clips `.btn__label` so four
+                        labelled buttons fit a 286px card — the accessible name
+                        survives the clip, but a hovering pointer on a small
+                        window has nothing to read without this. */}
                     <div className="codecard__actions" onClick={(e) => e.stopPropagation()}>
                       {isLink ? (
                         <>
                           <Button
                             variant="primary"
                             icon={<IconExternal size={15} />}
+                            title={t('inbox.open')}
                             onClick={() => void openLink(hit)}
                           >
                             {t('inbox.open')}
@@ -531,6 +553,7 @@ export function CodesView({ onGoToInbox }: { onGoToInbox?: () => void }) {
                           <Button
                             variant="secondary"
                             icon={copied ? <IconCheck size={15} /> : <IconCopy size={15} />}
+                            title={copied ? t('common.copied') : t('codes.copyLink')}
                             onClick={() => void copy(hit)}
                           >
                             {copied ? t('common.copied') : t('codes.copyLink')}
@@ -540,6 +563,7 @@ export function CodesView({ onGoToInbox }: { onGoToInbox?: () => void }) {
                           <Button
                             variant="ghost"
                             icon={<IconQr size={15} />}
+                            title={t('codes.showQr')}
                             onClick={() => setShowingQr(hit)}
                           >
                             {t('codes.showQr')}
@@ -549,6 +573,7 @@ export function CodesView({ onGoToInbox }: { onGoToInbox?: () => void }) {
                         <Button
                           variant={copied ? 'primary' : 'secondary'}
                           icon={copied ? <IconCheck size={15} /> : <IconCopy size={15} />}
+                          title={copied ? t('common.copied') : t('common.copy')}
                           onClick={() => void copy(hit)}
                         >
                           {copied ? t('common.copied') : t('common.copy')}
@@ -560,6 +585,7 @@ export function CodesView({ onGoToInbox }: { onGoToInbox?: () => void }) {
                         <Button
                           variant="ghost"
                           icon={<IconHelp size={15} />}
+                          title={open ? t('codes.whyHide') : t('codes.why')}
                           onClick={() => setExplaining(open ? null : hit.id)}
                           aria-expanded={open}
                         >

@@ -398,7 +398,18 @@ textarea {
 .page-head::after {
   content: "";
   position: absolute;
-  inset-inline: calc(-1 * var(--sp-5));
+  /* `--page-pad-x`, not `--sp-5`. This bleeds outward by exactly one page gutter
+     so the rule reaches the edges of the scroll area, and the gutter has been
+     `--page-pad-x` since the content cap was removed — `--sp-5` was the value it
+     used to be. The 4px difference is not cosmetic: an absolutely positioned
+     child reaching past the padding box counts toward its scroller's
+     `scrollWidth`, so at every width where the two disagreed `.view--list`
+     reported 4px of horizontal overflow with nothing to scroll to. Measured on
+     the Codes screen at 820x1180: `.page-head` scrollWidth 623 against
+     clientWidth 603, propagating to a 639/635 on the view. Found by
+     `scripts/layout-probe.mjs`, which is the whole reason it walks every
+     scroller instead of one. */
+  inset-inline: calc(-1 * var(--page-pad-x));
   bottom: 0;
   height: 1px;
   background: var(--border-subtle);
@@ -1316,6 +1327,13 @@ textarea {
   color: var(--warning);
 }
 .chip__text {
+  /* The other half of the fix, and the half that was missing. `.chip` is a flex
+     container, so this child's automatic minimum size is the whole string: with
+     no `min-width` it refused to shrink at all, the chip could not get narrower
+     than its text, and what the user saw was the chip's own `overflow: hidden`
+     cutting the label with no ellipsis on it — the reported "the account name is
+     cut off". `text-overflow` cannot fire on a box that never gets narrow. */
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1942,7 +1960,13 @@ textarea {
   display: flex;
   align-items: center;
   gap: var(--sp-4);
-  padding: var(--sp-4);
+  /* Reads `--row-pad-y` like every other row-shaped thing, which it had never
+     done: it was a flat `--sp-4` on both axes, so the list-density control in
+     Settings moved `.log`, `.dayrow` and `.bin-row` and left the mail list —
+     the longest list in the app, and the one the control exists for —
+     unchanged. At the default that is 12px instead of 16px, so the change also
+     gives four pixels a row back to the rows themselves. */
+  padding: var(--row-pad-y) var(--sp-4);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   background: var(--surface-1);
@@ -1997,13 +2021,26 @@ textarea {
   /* 小四, not 四号. A mail subject is the row's headline, but it is one line of
      truncated text in a list of fifty — bold is what marks it, not size. */
   font-size: var(--text-base);
-  /* Single line by construction (nowrap + ellipsis below), so paragraph leading
-     buys nothing and costs 5px on every row. */
+  /* Tight, not paragraph leading: two lines at most (see the clamp below), and
+     `--leading-normal` would spend 10px a row on air inside a headline. */
   line-height: var(--leading-tight);
   font-weight: 700;
+  /* Two lines, then the ellipsis — not one.
+     Measured at 360px before this: the row spent 150px on furniture (an 18px
+     checkbox, an 8px dot, two 38px buttons, three 16px gaps) and left the
+     subject 146px, which `white-space: nowrap` then cut at about nine Chinese
+     characters. Nine characters is not a subject, it is a prefix. The narrow
+     block below is what pays for the second line: with the buttons in the
+     swipe gesture and the checkbox behind a long press the furniture is 8px,
+     so the subject gets the row.
+     `-webkit-line-clamp` and the standard `line-clamp` both, because the
+     unprefixed property is the one that will still be honoured and the
+     prefixed one is what Chromium actually reads today. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .job__meta {
   display: flex;
@@ -2703,9 +2740,14 @@ textarea {
   cursor: default;
   opacity: 0.62;
 }
+/* Body rank, not secondary. This is the headline of a row the same way
+   `.job__name` and `.log__title` are, and those are both `--text-base`; at
+   `--text-sm` it came out the same 14px as the `.option__path` and
+   `.option__meta` underneath it, so the row had a bold line and two plain ones
+   and no first line. Bold plus a size step, like every other row title. */
 .option__title {
   font-weight: 700;
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
 }
 .option__path {
   font-family: var(--font-mono);
@@ -4279,7 +4321,11 @@ textarea {
   min-width: 0;
 }
 
-.job__name,
+/* `.job__name` used to be on this list and is not any more: a mail subject is
+   clamped to two lines at its own rule above, and `white-space: nowrap` here
+   silently won over that clamp (same specificity, later in the file) — which is
+   exactly the failure mode `scripts/check-css-tokens.mjs` was written for, and
+   the reason two earlier attempts at a wrapping subject "did nothing". */
 .job__from,
 .log__title,
 .codecard__subject {
@@ -4474,12 +4520,15 @@ textarea {
  * you read it is a code you check twice. Wide tracking because six digits read
  * as one long number otherwise; the display groups them 3+3 as well.
  *
- * 小二 (24px), down from 32px. Still the largest thing on the screen and still
- * readable across a desk, but 32px made a single card 134px tall — three of
- * them filled a laptop window, and this is a list you scan.
+ * 小三 (20px), down from 小二 (24px), which was itself down from 32px. Each step
+ * was taken for the same reason and the reason has not changed: this is a list
+ * you scan, and a card that is mostly one number is a card you fit three of on
+ * a phone. See `--text-value` for why 24px was the wrong step specifically —
+ * it is the size of a screen title — and `.codecard__value[data-kind="link"]`
+ * below for the link case, where the value is a URL and is not the headline.
  */
 .codecard__value {
-  font-size: var(--text-xl);
+  font-size: var(--text-value);
   font-weight: 700;
   line-height: 1.15;
   font-variant-numeric: var(--numeric);
@@ -4531,10 +4580,31 @@ textarea {
 .codecard__subject {
   min-width: 0;
 }
+/**
+ * The buttons, and the reported "the sign-in link runs outside the display
+ * area" — which was never the URL text.
+ *
+ * The URL is ellipsised and always was. What overflowed is this row. It had no
+ * `flex-wrap`, it is `flex: none`, and a link card renders three or four `.btn`s
+ * that are each `white-space: nowrap`: measured at 360px, the card's content
+ * width is 286px and "Open" + "Copy link" + "Show QR" + "Why" need 460-470px of
+ * it. ~180px of horizontal overflow on a `flex: none` item does not clip and
+ * does not scroll inside the card — it makes the whole list scroll sideways,
+ * which is what the report was describing.
+ *
+ * Two fixes, because one is not enough. `wrap` stops the overflow at any width.
+ * Icons-only below 760px stops the wrap from costing a second row on the screen
+ * where a second row is a third of a card: 4 × (15px icon + 32px padding) + 3
+ * gaps = 212px, inside 286px, so the row holds. `.btn__label` is *clipped*, not
+ * `display: none` — the words stay in the accessible tree, so every button keeps
+ * the name it had, with no `aria-label` to keep in step with the visible text.
+ */
 .codecard__actions {
   flex: none;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: var(--sp-2);
 }
 
@@ -4554,7 +4624,26 @@ textarea {
   }
   .codecard__actions {
     width: 100%;
-    justify-content: flex-end;
+  }
+}
+
+/* Icons only, so wrapping never costs the card a second row. See the note on
+   `.codecard__actions`. The clip is the standard visually-hidden recipe rather
+   than `display: none`, which would take the button's accessible name with it. */
+@media (max-width: 760px) {
+  .codecard__actions .btn {
+    padding-inline: var(--sp-3);
+  }
+  .codecard__actions .btn__label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
   }
 }
 
@@ -4628,18 +4717,39 @@ textarea {
   flex-wrap: wrap;
   min-width: 0;
 }
-.codecard__host {
+/**
+ * Where it actually goes, in full, on the card.
+ *
+ * This was `.codecard__host`: the host name and nothing else, with the whole URL
+ * available only in a `title` — i.e. only on a device with a pointer, only on
+ * hover, and never on the phone. "The link content is cut off" was a correct
+ * report about a real omission; the path, the query and whatever the query
+ * carries were simply not rendered anywhere.
+ *
+ * So the card reads as two lines: what the link is for, then where it goes. The
+ * URL is the second because that is the order the question comes in, and it is
+ * mono and one rank quieter because it is a machine string being offered for
+ * checking rather than prose being read.
+ *
+ * `anywhere`, not `break-word`: a URL is one unbreakable token, and only
+ * `anywhere` lets the box shrink below it instead of overflowing. Clamped at two
+ * lines because a tracking URL can be four hundred characters and would
+ * otherwise make one card taller than the window — the tail that the clamp cuts
+ * is the part that identifies nothing, and the host, which is the part worth
+ * checking, is at the front where it cannot be cut.
+ */
+.codecard__url {
   font-family: var(--font-mono);
   font-size: var(--text-xs);
+  line-height: var(--leading-tight);
   color: var(--text-3);
-  /* A host name is one unbreakable token and this is a nowrap flex item, so
-     its automatic minimum size is the whole name. This is the declaration that
-     lets the ellipsis below do anything — it is the reported "the sign-in link
-     runs outside the card". */
   min-width: 0;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 /* Tinted from the live accent rather than a second stored colour, so it tracks
    whichever of the five accents is selected without five more variables. */
@@ -5041,6 +5151,18 @@ textarea {
   font-size: var(--text-sm);
   color: var(--text-2);
   min-width: 0;
+}
+/* The sender line is a flex item holding a string this app did not write.
+   `first.last+tag@some-very-long-subdomain.example.coop` is one unbreakable
+   token, so the item's automatic minimum size was the whole address: it could
+   not shrink, it did not truncate, and `.modal__body` only scrolls vertically —
+   so the tail was painted outside the modal with no way to reach it. `min-width`
+   lets the item shrink and `anywhere` lets the address break; nothing is hidden,
+   because on a reader the address is the thing you check before you trust the
+   message and an ellipsis would remove exactly the half that matters. */
+.reader__meta > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 /* `.reader__hint` used to print the keyboard map ("J / K next · U unread · …")
    in grey beside the sender. It was explanation rather than information, it
@@ -5844,7 +5966,7 @@ textarea {
 /*
  * The rule under the heading goes too.
  *
- * It is drawn with `inset-inline: calc(-1 * var(--sp-5))` so that it spans the
+ * It is drawn with `inset-inline: calc(-1 * var(--page-pad-x))` so that it spans the
  * whole scroll area rather than the content column — right on a page, and
  * visibly wrong in a dialog, where it ran past the panel's rounded edge and was
  * clipped mid-line. There is already a border under the dialog's own header
@@ -6346,34 +6468,29 @@ textarea {
   line-height: var(--leading-tight);
 }
 
-/* --- one type size on this screen ----------------------------------------- */
+/* --- the type ranks on this screen ---------------------------------------- */
 
 /**
- * Everything readable here is 小四 (16px) or 四号 (18.67px), in 宋体 for the
- * Chinese and Times New Roman for the Latin and the punctuation — the split is
- * done per codepoint by the `@font-face` pair in `theme.css`, so a mixed
- * sentence gets both without markup.
+ * This screen used to raise `--text-xs` to 16px for its whole subtree —
+ * `.view--compose`, `.actionbar` and `.sendresult` — on the reasoning that
+ * nothing readable here should be under 小四.
  *
- * Done by moving the token rather than by listing selectors. `--text-xs` (14px,
- * 五号) is the shared default for hints, switch descriptions, quick-pick
- * addresses, outbox timestamps and the send-result ladder — sensible on a dense
- * list screen, and below the size 宋体 stays comfortable at on the screen that
- * gets used most. Overriding the variable for this subtree raises every one of
- * them at once, including the ones added later, which a hand-written list would
- * silently miss.
+ * Removed, and it is the single biggest reason this was the worst screen in the
+ * app for 字体太大. It did not raise one rank, it *deleted* two: every hint,
+ * every switch description, every quick-pick address, every timestamp and every
+ * rung of the send-result ladder came out at exactly the size of the sentence
+ * beside it, so a form with twenty pieces of text on it had no first thing to
+ * read. And the height it cost was taken from the one box the screen exists for
+ * — measured on this change alone at 360x800, the label row and the addressing
+ * hints gave back 44px, all of which lands in the message because the textarea
+ * is the only thing on the card with `flex-grow`.
  *
- * `--text-2xs` is deliberately left alone: it is fenced off for numeric badges
- * and file-type tags ("PDF", "3"), which are not prose and do not read as small.
- *
- * The action bar and the send-result banner are siblings of the view rather than
- * children of it — they sit outside the scrolling area on purpose — so they are
- * named here too.
+ * What replaces it is the global ladder in `theme.css`: prose and every input
+ * stay 16px, secondary text is 14px, auxiliary text is 12.5px. The floor that
+ * matters — 16px on anything focusable, so mobile browsers do not zoom — is
+ * carried by `--text-md` on the controls themselves, not by a subtree override.
+ * `scripts/layout-probe.mjs` asserts all three ranks separately.
  */
-.view--compose,
-.actionbar,
-.sendresult {
-  --text-xs: 1rem;
-}
 
 /* The name of a field is the name of a function — 四号, one step above the
    value it labels. Applies to every label on the screen, so the addressing row,
@@ -6428,38 +6545,66 @@ textarea {
   padding: 0;
 }
 
-/* Who it is for and what it is about, on one line, in place of the block that
-   holds five fields. A `<button>` because the whole bar is the tap target that
-   brings them back — an affordance that is only a chevron is an affordance
-   most people never find. */
+/**
+ * Who it is for and what it is about, on one line, in place of the block that
+ * holds five fields.
+ *
+ * A `<button>` because the whole bar is the tap target that brings them back —
+ * an affordance that is only a chevron is an affordance most people never find.
+ *
+ * Drawn as the input it stands for, which it was not before: it was a bare row
+ * with a hairline under it, and that was survivable while it only ever appeared
+ * *after* someone had typed a recipient. It is now the first thing on the screen
+ * on a phone (see `headerOpen` in `ComposeView`), so it is the only recipient
+ * field a new user sees, and a row of grey text is not a field. Same border, same
+ * radius, same 46px `--control-h` and the same 16px text as `.input`, so it reads
+ * as the thing it opens.
+ *
+ * `--tap-min` (44px), not the old 40px, which was under the floor everything
+ * tappable in this app is held to — and not `--control-h` (46px) either. That
+ * token exists so two controls *sharing a row* land on the same baseline, which
+ * is the one thing this bar never does: it is the full width of the card with
+ * nothing beside it. Measured at 360x800, those 2px are 0.3% of the message box.
+ */
 .composesummary {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
   width: 100%;
-  min-height: 40px;
-  padding: var(--sp-1) var(--sp-2);
-  border: 0;
-  border-bottom: 1px solid var(--border-subtle);
+  min-height: var(--tap-min);
+  padding: var(--sp-1) var(--sp-3);
+  border: 1px solid var(--border);
   border-radius: var(--r-sm);
-  background: none;
+  background: var(--surface-1);
   color: var(--text-1);
   font: inherit;
+  font-size: var(--text-md);
   text-align: start;
   cursor: pointer;
 }
 .composesummary:hover {
+  border-color: var(--border-strong);
   background: var(--surface-2);
 }
 .composesummary:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
+/* Nothing typed yet. Dashed, because a dashed box is the one border convention
+   that reads as "this is waiting for you" rather than as "this is a value" —
+   the same reason `.dropzone` uses one. */
+.composesummary:has(.composesummary__to[data-empty]) {
+  border-style: dashed;
+}
 /* Both halves truncate on their own rather than the row scrolling: a bar that
    moves sideways under a thumb is a bar that gets dragged by accident, on a
-   screen where the thumb is also how you scroll the message. */
+   screen where the thumb is also how you scroll the message.
+   Weighted 3:2 rather than 1:1. At `flex: 1 1 auto` on both, a 300px bar gave
+   each half 150px and cut both mid-word — the address, which is what gets
+   checked and is the longer string, no more room than the subject, which is
+   already on screen in the message the user just wrote. */
 .composesummary__to {
-  flex: 1 1 auto;
+  flex: 3 1 0;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -6467,12 +6612,20 @@ textarea {
   font-weight: 700;
 }
 .composesummary__subject {
-  flex: 1 1 auto;
+  flex: 2 1 0;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--text-2);
+}
+/* Placeholder tone, and the weight comes off: a placeholder set in bold reads as
+   an address someone entered. `--text-3` is the tone `.input::placeholder` uses,
+   named once here rather than guessed at. */
+.composesummary__to[data-empty],
+.composesummary__subject[data-empty] {
+  color: var(--text-3);
+  font-weight: 400;
 }
 .composesummary__chev {
   flex: 0 0 auto;
@@ -6553,16 +6706,54 @@ textarea {
   flex: 0 0 auto;
   white-space: nowrap;
 }
-/* `min-width: 0` is the whole fix: without it a nowrap flex item refuses to
-   shrink below its content, so the row would push the count off the side of
-   the window instead of scrolling the strip. The scrollbar is hidden because
-   a horizontal bar here would take back part of the row it is buying. */
+/**
+ * `min-width: 0` is the whole fix for the overflow: without it a nowrap flex
+ * item refuses to shrink below its content, so the row would push the count off
+ * the side of the window instead of scrolling the strip.
+ *
+ * What it did not fix is that the strip gave no sign of being a strip. Seven
+ * 44px buttons and six 3px gaps are 326px; the row is ~320px wide at 360px, so
+ * the seventh button (quote) was off the end, the scrollbar was hidden — for a
+ * good reason, a horizontal bar here takes back part of the row this block was
+ * bought to save — and the comment two hundred lines above simply conceded that
+ * "six of the seven are visible at 360px". A control nobody can see and nobody
+ * is told to scroll to is a control that is not there.
+ *
+ * The affordance is the two-layer scroll shadow, which costs no height at all:
+ * `background-attachment: local` paints the page colour over each edge and
+ * scrolls *with the content*, `scroll` pins the shadow to the box. Where there
+ * is more strip in that direction the cover has slid away and the shadow shows;
+ * at either end the cover is back over it and the edge is clean. So the hint is
+ * present exactly when it is true, on both edges, which also makes it correct
+ * in Arabic without a second rule — a `mask` fade or an `::after` would each
+ * have needed a direction, and one of the two would have been wrong.
+ *
+ * `--bg` and not `--surface-1`: the narrow compose card is transparent (top of
+ * this block), so what is behind the strip is the page.
+ */
 .view--compose[data-narrow] .compose-layout > .field:has(.textarea--body) .markup {
   flex: 0 1 auto;
   min-width: 0;
   flex-wrap: nowrap;
   overflow-x: auto;
   scrollbar-width: none;
+  background-image:
+    linear-gradient(to right, var(--bg) 60%, transparent),
+    linear-gradient(to left, var(--bg) 60%, transparent),
+    linear-gradient(to right, color-mix(in srgb, var(--text-1) 26%, transparent), transparent),
+    linear-gradient(to left, color-mix(in srgb, var(--text-1) 26%, transparent), transparent);
+  background-position:
+    left center,
+    right center,
+    left center,
+    right center;
+  background-repeat: no-repeat;
+  background-size:
+    28px 100%,
+    28px 100%,
+    12px 100%,
+    12px 100%;
+  background-attachment: local, local, scroll, scroll;
 }
 .view--compose[data-narrow]
   .compose-layout
@@ -6573,6 +6764,18 @@ textarea {
 /* 4px between the summary, the message and nothing else. At `--sp-2` the two
    gaps were 16px of the 86 this block had to find. */
 .view--compose[data-narrow] .compose-layout {
+  gap: var(--sp-1);
+}
+/* And the same 4px *inside* the message field, between the toolbar row and the
+   box. `.field` is `gap: var(--sp-2)`, so this one gap was twice the card's own
+   rhythm — the toolbar is meant to read as the top edge of the box it acts on
+   ("sharing its left edge so the two read as one control", at `.markup`), and
+   8px of air is what stopped it doing that.
+   Measured at 360x800 with the health strip suppressed: the card's height budget
+   was 46 + 4 + 44 + 8 = 102px of chrome around a 560px box, i.e. 84.6% — 0.4%
+   under a floor this screen exists to clear. The 44px summary bar above and this
+   gap are the 6px: 96px of chrome, 566px of box, 85.5%. */
+.view--compose[data-narrow] .compose-layout > .field:has(.textarea--body) {
   gap: var(--sp-1);
 }
 
@@ -6586,6 +6789,26 @@ textarea {
   flex-wrap: nowrap;
   gap: var(--sp-1);
   padding: var(--sp-1) var(--sp-2);
+}
+/**
+ * The send-result banner sticks to the top of the action bar, and on a narrow
+ * screen it was sticking to where a *wide* action bar would have been.
+ *
+ * `.sendresult` is `bottom: var(--actionbar-h)`, and that token is 68px — what
+ * the wide bar measures with its two-line summary and its large buttons. The
+ * narrow bar is one row of 44px targets in 4px of padding. So the confirmation
+ * for the send you just made floated well clear of the bar it is meant to sit
+ * on, with the page showing through the gap.
+ *
+ * Fixed by re-pointing the token on the two elements that are the narrow pair,
+ * rather than by writing a second `bottom` somewhere else: `.sendresult` keeps
+ * its one `bottom` declaration and resolves it to whichever number is true for
+ * the bar actually on screen. `data-narrow` is written by `ComposeView` from the
+ * same `narrow` flag that decides the bar's layout, so the two cannot disagree.
+ */
+.actionbar[data-narrow],
+.sendresult[data-narrow] {
+  --actionbar-h: 53px;
 }
 .composeacts {
   flex: 1 1 auto;
@@ -6730,9 +6953,11 @@ textarea {
     gap: var(--sp-4);
     padding-inline: var(--sp-4);
   }
-  .codecard__value {
-    font-size: 1.75rem;
-  }
+  /* The 28px `.codecard__value` that used to be here is gone. A wide window is
+     a reason for the card to lay out in two columns; it is not a reason for one
+     piece of text to be a size it is nowhere else, and 28px was larger than
+     every heading in the app including the screen titles. One code, one size,
+     at every width — see `--text-value`. */
 }
 
 /* --- start-up gave up ------------------------------------------------------
@@ -7042,8 +7267,12 @@ textarea {
 .lightbox__bar--bottom {
   justify-content: center;
 }
+/* The file name is this bar's title, and the counter and zoom beside it are its
+   metadata — so body rank here and auxiliary there, which is the same pairing
+   `.job__name` / `.job__meta` uses two screens away. The viewer is opened from a
+   message, so it is the Inbox's own type ladder it has to agree with. */
 .lightbox__title {
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -7292,8 +7521,12 @@ textarea {
 .bin-row__subject {
   font-weight: 600;
 }
+/* Auxiliary, to match `.job__meta`. The recycle bin is a list of mail rows on
+   the Inbox screen and it sits four inches from the mail rows themselves: a
+   sender-and-timestamp line one rank larger there than here is the exact kind of
+   drift that reads as 界面不统一 without anyone being able to point at it. */
 .bin-row__meta {
-  font-size: var(--text-sm);
+  font-size: var(--text-xs);
   color: var(--text-3);
 }
 
@@ -7492,6 +7725,202 @@ textarea {
     transition: none;
   }
 }
+
+/* ==========================================================================
+   The phone mail row — the text gets the row, the actions get the gesture
+
+   Measured at 360px before this block, on one `.job` inside `.swipe`:
+
+     .job__select   18px   an always-visible checkbox
+     .job__pulse     8px   the unread dot
+     .job__actions  76px   two 38px `.icon-btn`s at `flex: none`
+     three gaps     48px   `--sp-4` between all four children
+     -------------------
+     furniture     150px   of a 360px window
+     subject       146px   ≈ nine Chinese characters before the ellipsis
+
+   None of the 150px is text. Two of the four pieces are controls that a phone
+   already has a better gesture for, and one is a checkbox for a mode nobody is
+   in: multi-select is used on a handful of messages occasionally, and it was
+   charging every row on every screen 18px plus a gap to say so.
+
+   So on a touch-width window:
+
+     · the two row buttons go into the swipe that already existed (leading =
+       mark read/unread, trailing = remove), and stay *visible* controls in two
+       places a tap reaches — the header of the opened message, and the bulk bar
+       once anything is selected. A gesture nobody can find is a regression, so
+       nothing here is only a gesture.
+     · the checkbox appears once a selection exists, and a long press is what
+       starts one (`InboxView`'s `SwipeableRow`). While a selection is live every
+       row shows its box, which is what makes "select the next four" work.
+
+   Scoped through `.swipe`, which only `InboxView` renders — Scheduled and
+   Activity use bare `.job`/`.log` rows and keep their buttons, because neither
+   has a swipe handler to move them into.
+   ========================================================================== */
+
+@media (max-width: 760px) {
+  .swipe .job {
+    /* 8px of furniture instead of 150: the unread dot, and nothing else. */
+    gap: var(--sp-3);
+    /* The wrap the band below gives every other row is wrong here: with the
+       actions gone there is nothing to wrap *to*, and `flex: 1 1 100%` would
+       put the unread dot on a line of its own above the subject. */
+    flex-wrap: nowrap;
+    /* A long press is a press, so the browser must not decide it was a text
+       selection or a callout instead. `pan-y` on `.swipe` already keeps the
+       horizontal axis; this keeps the press. */
+    -webkit-touch-callout: none;
+    user-select: none;
+  }
+  .swipe .job > .job__select {
+    display: none;
+  }
+  .swipe .job[data-selecting='true'] > .job__select {
+    display: block;
+  }
+  .swipe .job > .job__actions {
+    display: none;
+  }
+  .swipe .job > .job__body {
+    flex: 1 1 auto;
+  }
+  /**
+   * The metadata is one line, truncated — never three.
+   *
+   * `.job__meta` is `flex-wrap: wrap`, which was harmless while the subject
+   * above it was a single 146px line and the row was ~76px. It is not harmless
+   * now: measured with the two-line subject in place, an account chip plus
+   * "Zhang Wei <zhang.wei@example.com>" plus a timestamp wrapped to three lines
+   * and the row came to 124.7px — taller than the row was *before* any of this
+   * work, and four rows to a 637px pane instead of six.
+   *
+   * A wrapped metadata line is also the thing the user asked not to happen:
+   * 压行 is exactly a row of secondary detail folding onto itself under the
+   * headline it belongs to. So the line holds, and the sender — which is the one
+   * item on it that is arbitrarily long, and which already carries `min-width: 0`
+   * and an ellipsis — is what gives way.
+   *
+   * The chip is capped rather than pinned: at `flex: none` a long account label
+   * would push the timestamp off the end, and at no cap it would take the line.
+   */
+  .swipe .job .job__meta {
+    flex-wrap: nowrap;
+    overflow: hidden;
+  }
+  /* Nothing on the line wraps *within itself* either. Measured before this: the
+     bare timestamp span is the one item on the row with no `white-space` of its
+     own, so in a nowrap container it shrank below its content and broke "2 min"
+     into "2" / "min" — 41.3px for a two-word timestamp, which made the metadata
+     line taller than the two-line subject above it. Exactly the 压行 the wrap was
+     removed to prevent, one level further down. */
+  .swipe .job .job__meta > * {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+  /* The sender is the item that gives way, because it is the only one whose
+     length is arbitrary — and it already carries an ellipsis. */
+  .swipe .job .job__meta > .job__from {
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+  /* The chip is capped rather than pinned: at `flex: none` a long account label
+     would push the timestamp off the end, and with no cap it would take the
+     line. */
+  .swipe .job .job__meta > .chip {
+    flex: 0 1 auto;
+    max-width: 38%;
+  }
+  /* 4px between rows, not 8. Each row is a bordered card with its own shadow, so
+     the border is already doing the separating that the gap was added for, and at
+     eight rows to a screen the gaps alone were 64px of the list. */
+  .joblist {
+    gap: var(--sp-1);
+  }
+}
+
+/* --- rows that wrap, 561-760px included ----------------------------------
+
+   `.job`/`.log` have wrapped their actions onto a second line since the
+   360px work, in a `max-width: 560px` block. Between 561px and 760px — a large
+   phone in landscape, a 7" tablet, the two shapes this app is most often held
+   in after a phone — they did not, so the band that had *less* room than a
+   desktop got the desktop's rigid single row: four `flex: none` buttons pinned
+   at the end and the task's name squeezed into whatever was left. Widening the
+   query is the whole fix; the rules are the ones that were already there.
+   -------------------------------------------------------------------------- */
+
+@media (max-width: 760px) {
+  .job {
+    flex-wrap: wrap;
+  }
+  .job__body {
+    flex: 1 1 100%;
+  }
+  .job__actions {
+    width: 100%;
+    justify-content: flex-end;
+    gap: var(--sp-2);
+  }
+  .log {
+    flex-wrap: wrap;
+  }
+  .log__actions {
+    flex: 1 1 100%;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+  }
+  /* A 32px select is under the 44px floor, and this one is on the inbox — the
+     "check every N minutes" control, which is reached for on a phone the moment
+     mail seems late. Height only: the compact width is what keeps it on the
+     same line as its label. */
+  .select--compact {
+    min-height: var(--tap-min);
+    height: auto;
+  }
+}
+
+/* --- the tap floor is about fingers, not about width ----------------------
+
+   The measured 44px floor lives in a `max-width: 560px` block, which is right
+   for a phone and blind to the case `useMobileShell` was written for: an 820px
+   Android tablet held in two hands, outside every width query in this file and
+   with no pointer anywhere near it. Measured there with
+   `scripts/layout-probe.mjs`: `.markup__btn` 28x26, and `.icon-btn` 38x38 — the
+   format buttons on the compose screen and the row actions on every list.
+
+   So the same floor, keyed on the shell instead. `main.tsx` and `useMobileShell`
+   write `data-shell="mobile"` on the root for narrow *or* a native mobile
+   platform, so this reaches the tablet and costs a desktop window nothing. Only
+   the size rules are repeated — the wrapping and layout rules in that block are
+   genuinely about width and stay there.
+   ------------------------------------------------------------------------- */
+
+:root[data-shell="mobile"] .tagfield__open,
+:root[data-shell="mobile"] .markup__btn,
+:root[data-shell="mobile"] .icon-btn,
+:root[data-shell="mobile"] .icon-btn--sm,
+:root[data-shell="mobile"] .chip__remove,
+:root[data-shell="mobile"] .select--compact {
+  min-width: var(--tap-min);
+  min-height: var(--tap-min);
+}
+/* `.chip__remove` is a 16px cross inside a pill and `.select--compact` is a
+   32px select; both set an explicit `width`/`height` that a `min-*` cannot beat
+   on its own, so the fixed dimension has to give way too. */
+:root[data-shell="mobile"] .chip__remove,
+:root[data-shell="mobile"] .icon-btn,
+:root[data-shell="mobile"] .icon-btn--sm {
+  width: var(--tap-min);
+  height: var(--tap-min);
+}
+:root[data-shell="mobile"] .select--compact {
+  height: auto;
+}
+/* The row those seven 44px buttons sit in has to give somewhere, and it gives by
+   scrolling — see the `.markup` scroll-shadow rules in the narrow compose block,
+   which is where the 44px buttons and the 320px row are reconciled. */
 
 /* -------------------------------------------------------------------------
    2. ADD immediately after the existing `.monthgrid__day[data-today='true']`
@@ -7995,48 +8424,18 @@ textarea {
   /* Four 38px icon buttons pinned at `flex: none` were taking 164px of a
      294px row, leaving the task its name in 90px — under five characters of
      Chinese. Wrapping them onto their own line gives the name the full width
-     and the buttons a real target size.
+     and the buttons a real target size. `.log` needs it for the same reason:
+     `.btn` is `white-space: nowrap`, so "Garder la mienne à la place" is ~270px
+     that cannot shrink, `.log__body` is the only flexible thing on the row, and
+     it collapsed to nothing.
 
      Still one card per row: `VirtualList` positions rows by a prefix sum over
-     measured heights, so a taller row is fine and a second column is not. */
-  .job {
-    flex-wrap: wrap;
-  }
-  .job__body {
-    flex: 1 1 100%;
-  }
-  .job__actions {
-    width: 100%;
-    justify-content: flex-end;
-    gap: var(--sp-2);
-  }
-  /* `.log` needs the same treatment for the same reason, and did not get it
-     until a `.log` row grew a full-label button. `.btn` is `white-space:
-     nowrap`, so "Garder la mienne à la place" is ~270px that cannot shrink;
-     `.log__body` is the only flexible thing on the row, so it collapsed to
-     nothing and `.log__title` — which is `text-overflow: ellipsis` — clipped
-     the one sentence saying what the row was about to zero width.
+     measured heights, so a taller row is fine and a second column is not.
 
-     Only the rows that grew an action wrap: `.log__actions` is what claims
-     the second line, and the plain dot/body/time rows in Activity have none,
-     so they are untouched. */
-  .log {
-    flex-wrap: wrap;
-  }
-  .log__actions {
-    flex: 1 1 100%;
-    justify-content: flex-end;
-    /* And wrap *within* that second line too. Giving the actions a line of
-       their own is only half the problem: `.btn` is `white-space: nowrap`, so
-       a row carrying three of them lays them out single-file however narrow
-       the screen is. A paired device grew a third button ("change what syncs",
-       next to "regenerate" and "revoke") and the row measured 381px of buttons
-       on a 360px viewport — "revoke" started at x=327 and ended at x=417,
-       i.e. off the edge entirely, on the one control whose whole job is to be
-       findable. Wrapping costs a line on the narrowest screens and nothing at
-       all where the three already fit. */
-    flex-wrap: wrap;
-  }
+     Those five rules now live in the `max-width: 760px` band beside the swipe
+     section — they were here, at 560, which left 561-760px (a large phone in
+     landscape, a small tablet) with the desktop's rigid row and less width than
+     the desktop to lay it out in. Nothing about them changed except the query. */
   .icon-btn {
     width: var(--tap-min);
     height: var(--tap-min);
@@ -8087,7 +8486,10 @@ textarea {
   /* --- everything you tap, measured ---------------------------------------
      The list below is not a guess: it is what a probe walking all nine screens
      at 360, 390 and 412 reported as under 44px. Two entries are deliberately
-     not on it and are called out at the end. */
+     not on it and are called out at the end.
+
+     Repeated outside this block for `[data-shell="mobile"]` — see below the
+     media query. The floor is about fingers, and a width query cannot see one. */
   .tagfield__open,
   .markup__btn,
   .icon-btn--sm,
@@ -8440,14 +8842,20 @@ textarea {
    width of that token instead of overflowing it. */
 .dayrow__who,
 .dayrow__subject {
-  font-size: var(--text-xs);
   overflow-wrap: anywhere;
 }
+/* Split apart when the auxiliary rank came down to 12.5px. Who it goes to is
+   metadata and reads fine there; the subject is the sentence this panel exists
+   to show at full length — the comment above says so — and 12.5px is the rank
+   for a timestamp, not for prose. Secondary is the floor for something being
+   read rather than glanced at. */
 .dayrow__who {
   color: var(--text-2);
+  font-size: var(--text-xs);
 }
 .dayrow__subject {
   color: var(--text-1);
+  font-size: var(--text-sm);
 }
 
 /* --- narrow ---------------------------------------------------------------

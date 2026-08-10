@@ -95,7 +95,7 @@ import {
   queueItem,
   type OutboxItem,
 } from '../core/outbox'
-import { evaluateConditions } from '../core/conditions'
+import { evaluateConditions, inboundKey, latestInboundIndex } from '../core/conditions'
 import { applyRun } from '../core/jobRun'
 import { forTransport } from '../core/markdown'
 import { mergeRemoved, rememberRemoved, restoreRemoved, withoutRemoved } from '../core/inboxRemoval'
@@ -1798,6 +1798,36 @@ export function AppProvider({ children }: { children: ReactNode }) {
     () => JSON.stringify(state.accounts.map((a) => [a.id, a.updatedAt])),
     [state.accounts],
   )
+  /**
+   * Does any armed job actually ask about replies?
+   *
+   * Only then does newly-arrived mail change what the scheduler would decide,
+   * and only then is it worth re-arming for. Everyone else pays nothing for
+   * this — which matters because re-arming on Android rewrites the job store
+   * and every alarm on the device, and mail arrives far more often than a
+   * schedule changes.
+   */
+  const watchesReplies = useMemo(
+    () => state.jobs.some((j) => j.enabled && j.conditions?.some((c) => c.kind === 'noReplySince')),
+    [state.jobs],
+  )
+  /**
+   * Enough of the mailbox to notice a reply landing.
+   *
+   * Not the messages themselves: this only has to change when the answer to
+   * "has anyone written since" might have changed, and a sync that brought
+   * nothing new must not re-arm anything. Constant when no job asks, so the
+   * effect below does not re-run at all in that case.
+   */
+  const replyWatchSignature = useMemo(
+    () =>
+      watchesReplies
+        ? JSON.stringify(
+            state.inboxAccounts.map((i) => [i.accountId, i.enabled, i.lastSyncAt ?? 0, i.messages.length]),
+          )
+        : '',
+    [watchesReplies, state.inboxAccounts],
+  )
 
   useEffect(() => {
     if (!bridge || !ready) return
@@ -1832,12 +1862,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
             .map((j) => (j.id === DIGEST_JOB_ID ? withDigestBody(j, liveRef.current, i18n) : j))
             .map((j) => ({ ...j, draft: forTransport(j.draft) })),
           state.accounts,
-          // Android's background worker has no other route to these two, and
-          // read them off the job before — a field jobs do not have. See
-          // `syncJobs` in `core/bridge.ts`.
+          // What a scheduler with no UI attached cannot ask for itself: the two
+          // notification switches, which Android's worker read off the job
+          // before — a field jobs do not have — and the inbox index, which is
+          // the only way `noReplySince` means anything away from this process.
+          // See `syncJobs` in `core/bridge.ts`.
           {
             notifyOnSuccess: liveRef.current.settings.notifyOnSuccess,
             notifyOnFailure: liveRef.current.settings.notifyOnFailure,
+            inboxKnown: liveRef.current.inboxAccounts.some(
+              (i) => i.enabled && i.lastSyncAt !== undefined,
+            ),
+            latestInbound: latestInboundIndex(liveRef.current.inboxAccounts),
           },
         )
         if (!cancelled) setSchedulerUnreachable(false)
@@ -1858,7 +1894,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     // Signatures, not the arrays themselves — otherwise every keystroke in a
     // draft would re-arm every alarm on the device.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bridge, ready, jobSignature, accountSignature, i18n])
+  }, [bridge, ready, jobSignature, accountSignature, replyWatchSignature, i18n])
 
   /**
    * Keep the digest reminder in step with its switch.
