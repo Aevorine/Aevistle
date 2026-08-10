@@ -16,7 +16,7 @@ import { MAX_BURST_COUNT } from '../src/core/types'
 import type { MailAccount, ScheduledJob, SendResult } from '../src/core/types'
 import type { JobRun } from '../src/core/bridge'
 import { sendMail } from './mailer'
-import { getSecret } from './store'
+import { claimOccurrence, getSecret, loadFiredClaims } from './store'
 
 const TICK_MS = 15_000
 /**
@@ -74,8 +74,23 @@ export class Scheduler extends EventEmitter {
    * back to it, would resurrect the same catch-up on the next `sync()` and
    * send it twice. Pruned in `tick()` so a long-running process does not carry
    * every send it has ever made.
+   *
+   * In-memory only — this guards *this* process against sending the same
+   * occurrence twice. `store.ts`'s `claimOccurrence` is the durable half that
+   * guards the *next* process, after a crash, against the same thing; see
+   * `restoreFiredClaims` for how the two meet at startup.
    */
   private fired = new Set<string>()
+
+  /**
+   * Seed `fired` from the durable claims `store.ts` wrote before previous
+   * sends, so a crash between "SMTP accepted" and "state.json caught up" does
+   * not look like a missed occurrence on restart. Must be called — and
+   * awaited — before `start()`; `main.ts` does this once, at launch.
+   */
+  async restoreFiredClaims(): Promise<void> {
+    for (const key of await loadFiredClaims()) this.fired.add(key)
+  }
 
   start(): void {
     if (this.timer) return
@@ -203,9 +218,10 @@ export class Scheduler extends EventEmitter {
 
       // Claimed before the send starts, so a `sync()` arriving mid-run cannot
       // put this instant back and have it paid a second time.
-      this.fired.add(`${job.id}:${fireAt}`)
+      const claimKey = `${job.id}:${fireAt}`
+      this.fired.add(claimKey)
       this.running.add(job.id)
-      void this.run(job, remaining).finally(() => this.running.delete(job.id))
+      void this.claimThenRun(job, remaining, claimKey).finally(() => this.running.delete(job.id))
     }
 
     // A claim older than a day can no longer be resurrected by any `sync()` —
@@ -268,6 +284,25 @@ export class Scheduler extends EventEmitter {
         count: 24 - remaining.length,
       }),
     ]
+  }
+
+  /**
+   * The durable half of the claim, awaited before `run()` can reach the SMTP
+   * call inside it. `this.fired.add` in `tick()` already guards this process
+   * against firing the same occurrence twice; this guards the *next*
+   * process, after a crash between "SMTP accepted" and "state.json caught
+   * up", against the same thing.
+   */
+  private async claimThenRun(job: ScheduledJob, remaining: number[], claimKey: string): Promise<void> {
+    try {
+      await claimOccurrence(claimKey)
+    } catch (e) {
+      // A claim that failed to reach disk is a reason the crash-safety net
+      // has a hole this one time, not a reason to skip a reminder the user is
+      // waiting on — same trade `writeAtomic`'s best-effort fsync makes.
+      console.error('[aevistle] could not durably claim occurrence before sending:', claimKey, e)
+    }
+    await this.run(job, remaining)
   }
 
   private async run(job: ScheduledJob, remaining: number[]): Promise<void> {

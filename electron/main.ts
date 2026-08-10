@@ -2242,7 +2242,7 @@ function clearDevLoginItem(): void {
   }
 }
 
-void app.whenReady().then(() => {
+void app.whenReady().then(async () => {
   // Before anything reads or writes: the user may have pointed the data folder
   // somewhere else, and loading state from the default folder first would show
   // them an empty app.
@@ -2297,6 +2297,10 @@ void app.whenReady().then(() => {
     if (!desktopPrefs.notifyOnSuccess) return
     showNotification(tr(uiLocale, 'notify.scheduledSent'), name ?? '')
   })
+  // Before the first tick can fire anything: without this, a crash between
+  // an SMTP accept and state.json catching up looks like a missed occurrence
+  // on restart and gets resent. See `store.ts`'s durable-claims section.
+  await scheduler.restoreFiredClaims()
   scheduler.start()
 
   // The drop folder is served whether or not the port is open: a request left

@@ -33,6 +33,8 @@ import type { SecretKind } from '../src/core/types'
 const STATE_FILE = 'state.json'
 const SECRET_FILE = 'secrets.json'
 const POINTER_FILE = 'location.json'
+/** Durable occurrence claims — see `claimOccurrence` below. Follows the data folder like everything else the jobs it describes move with. */
+const FIRED_FILE = 'fired-occurrences.json'
 const ATTACHMENTS_DIR = 'attachments'
 /** Images pasted from the clipboard straight into a compose body. */
 const PASTED_DIR = 'pasted'
@@ -40,7 +42,7 @@ const PASTED_DIR = 'pasted'
 const PATH_HINT_FILE = 'datapath.txt'
 
 /** What follows the user when the data folder moves. */
-const MOVABLE = [STATE_FILE, SECRET_FILE, ATTACHMENTS_DIR, PASTED_DIR] as const
+const MOVABLE = [STATE_FILE, SECRET_FILE, FIRED_FILE, ATTACHMENTS_DIR, PASTED_DIR] as const
 
 /**
  * Rebuildable on demand, so it is discarded at the old location rather than
@@ -759,6 +761,74 @@ export async function flushState(): Promise<void> {
   while (writeLoop) {
     await writeLoop.catch(() => {})
   }
+}
+
+// ---------------------------------------------------------------------------
+// Durable occurrence claims
+// ---------------------------------------------------------------------------
+//
+// `electron/scheduler.ts` keeps an in-memory `fired` set so the same
+// occurrence is never paid twice by this process — but "this process" is the
+// gap. SMTP can accept a send and the process can die before that in-memory
+// fact ever reaches `state.json`, which is written on a debounce several
+// steps downstream of the send. On restart `job.occurrences` (still holding
+// the just-sent instant) looks exactly like a missed occurrence, and
+// `rearm()`'s catch-up logic resends it.
+//
+// This file is the fix: one key per occurrence, written *before* the SMTP
+// call, not after. It mirrors `JobStore.claimOccurrence` on the Android side,
+// down to writing before the send rather than after — the same reasoning
+// applies to a process `kill` as to a worker OS-killed mid-send.
+
+/** How old a claim can be before `rearm()` could no longer resurrect the occurrence it names — see `pruneClaims`. */
+const CLAIM_MAX_AGE_MS = 24 * 60 * 60 * 1000
+
+async function readFiredClaims(): Promise<string[]> {
+  return (await readJson<string[]>(FIRED_FILE)) ?? []
+}
+
+/** Drop claims old enough that no `rearm()` could still resurrect the occurrence — keeps the file from growing for the life of the install. */
+function pruneClaims(claims: string[]): string[] {
+  const cutoff = Date.now() - CLAIM_MAX_AGE_MS
+  return claims.filter((key) => {
+    const at = Number(key.slice(key.lastIndexOf(':') + 1))
+    return !Number.isFinite(at) || at >= cutoff
+  })
+}
+
+/**
+ * Every claim on disk, as `${jobId}:${occurrenceMs}` keys — read once at
+ * startup to seed `Scheduler`'s in-memory `fired` set before the first
+ * `sync()`/`tick()` runs, so a crash between "SMTP accepted" and "state.json
+ * caught up" cannot resend on the next launch.
+ */
+export async function loadFiredClaims(): Promise<string[]> {
+  return readFiredClaims()
+}
+
+/**
+ * One claim at a time — two jobs due in the same 15-second tick would
+ * otherwise both read-modify-write this file concurrently, and the loser's
+ * claim is exactly the one this function exists to not lose. Nothing else in
+ * this module needs the same treatment: `state.json` already serializes
+ * through `enqueueStateWrite`/`writeLoop`, and secrets are read-then-written
+ * only from user-triggered, non-concurrent calls.
+ */
+let claimQueue: Promise<unknown> = Promise.resolve()
+
+/**
+ * Durably record that this occurrence is about to be sent. Callers must
+ * `await` this *before* the SMTP call, not after — writing it after would
+ * reopen exactly the crash window this exists to close.
+ */
+export function claimOccurrence(key: string): Promise<void> {
+  const next = claimQueue.catch(() => {}).then(async () => {
+    const claims = await readFiredClaims()
+    if (claims.includes(key)) return
+    await writeAtomic(FIRED_FILE, JSON.stringify(pruneClaims([...claims, key])))
+  })
+  claimQueue = next
+  return next
 }
 
 // ---------------------------------------------------------------------------
