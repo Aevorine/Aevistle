@@ -3272,15 +3272,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [bridge],
   )
 
-  const applyExchangeOutcome = useCallback(
-    (deviceLabel: string, deviceId: string, result: PerformExchangeResult, at: number) => {
-      dispatch({
-        type: 'applySyncResult',
-        deviceId,
-        patch: result.patch,
-        conflicts: result.conflicts,
-        syncedAt: at,
-      })
+  /** The secret-write and activity-log side effects common to both directions of an exchange — split out so the responder path below can run them around its own save/ACK ordering instead of `applyExchangeOutcome`'s. */
+  const logExchangeOutcome = useCallback(
+    (deviceLabel: string, result: Pick<PerformExchangeResult, 'patch' | 'conflicts' | 'accountSecrets'>) => {
       for (const s of result.accountSecrets) void bridge?.setSecret(s.accountId, s.secret, 'smtp')
       const changedCount =
         (result.patch.accounts?.length ?? 0) +
@@ -3301,6 +3295,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [bridge, addLog],
+  )
+
+  const applyExchangeOutcome = useCallback(
+    (deviceLabel: string, deviceId: string, result: PerformExchangeResult, at: number) => {
+      dispatch({
+        type: 'applySyncResult',
+        deviceId,
+        patch: result.patch,
+        conflicts: result.conflicts,
+        syncedAt: at,
+      })
+      logExchangeOutcome(deviceLabel, result)
+    },
+    [logExchangeOutcome],
   )
 
   // The listener is not opened by the main process on launch — see
@@ -3360,8 +3368,38 @@ export function AppProvider({ children }: { children: ReactNode }) {
         void b.respondToSyncServer({ id: request.id, ok: false, error: outcome.error })
         return
       }
-      applyExchangeOutcome(outcome.outcome.device.label, outcome.outcome.device.id, outcome.outcome, Date.now())
-      void b.respondToSyncServer({ id: request.id, ok: true, envelope: outcome.envelope })
+
+      const { device, patch, conflicts } = outcome.outcome
+      const action = {
+        type: 'applySyncResult' as const,
+        deviceId: device.id,
+        patch,
+        conflicts,
+        syncedAt: Date.now(),
+      }
+      // Computed synchronously against the same snapshot `respondToSyncRequest`
+      // itself read, so what reaches disk below and what `dispatch` renders
+      // agree — see `reducer`'s export note for why calling it directly here
+      // is sanctioned rather than reimplementing the merge.
+      const nextState = reducer(liveRef.current, action)
+      dispatch(action)
+      logExchangeOutcome(device.label, outcome.outcome)
+
+      // Only ACK success once the patch this device is about to tell the peer
+      // it has is actually durable — not merely applied in memory and due to
+      // be written on the next debounced save. Before this, a crash between
+      // the ACK below and that debounce tick left the peer believing this
+      // device had the data when state.json was never touched.
+      try {
+        await b.saveState(nextState)
+        void b.respondToSyncServer({ id: request.id, ok: true, envelope: outcome.envelope })
+      } catch (err) {
+        void b.respondToSyncServer({
+          id: request.id,
+          ok: false,
+          error: err instanceof Error ? err.message : 'could not save',
+        })
+      }
     })()
   }
 
