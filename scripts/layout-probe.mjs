@@ -10,12 +10,30 @@
  * It checks the two properties the layout is *required* to have and that are
  * invisible in a picture:
  *
- *   1. The form fits one screen with the options disclosure closed. That is a
- *      hard requirement, not a preference — a compose form that scrolls before
- *      a character is typed is the complaint this layout exists to answer.
+ *   1. The form gives the message box what it is owed, and which promise that
+ *      is depends on the width:
+ *
+ *        wide (>900px)   the form fits one screen with the options disclosure
+ *                        closed. A compose form that scrolls before a
+ *                        character is typed is the complaint this layout was
+ *                        built to answer.
+ *        narrow (≤900px) the message box is at least 85% of the compose view,
+ *                        with the body focused — which is the state someone is
+ *                        in while writing, and the state the narrow layout
+ *                        folds the addressing block away for.
+ *
+ *      Those two are not the same requirement stated twice, and the narrow one
+ *      deliberately replaces "must not scroll" rather than joining it. 85% of
+ *      the view leaves ~100px for everything else on it; the attachment picker
+ *      and the send-time bar do not fit in 100px and are not meant to — they
+ *      are behind buttons in the action bar, in sheets that scroll. Requiring
+ *      no scroll anywhere would forbid the arrangement that makes 85%
+ *      reachable at all.
+ *
  *   2. Nothing readable on the screen is below 16px (小四). The shared
  *      components default several hints and descriptions to 14px, which is
- *      right on a dense list screen and wrong here.
+ *      right on a dense list screen and wrong here. This is unchanged and not
+ *      negotiable: height may not be bought by shrinking type.
  *
  * Launch the packaged app first with `--remote-debugging-port` and a scratch
  * `--user-data-dir`; this only reads, and never touches the real data folder.

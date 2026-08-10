@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ComposeView } from './views/ComposeView'
 import { AppProvider, useApp } from './state/AppState'
 import { I18nContext, useI18n } from './i18n'
@@ -29,6 +29,7 @@ import brandMark from './assets/brand.png'
 import { Skeleton } from './components/Skeleton'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { actionableHits } from './core/codeHistory'
+import type { MessageDraft } from './core/types'
 
 /**
  * One chunk per screen.
@@ -378,6 +379,62 @@ function Shell() {
       setView('inbox')
     })
   }, [bridge])
+
+  /**
+   * The draft's attachments as of the last render, for the share handler below.
+   *
+   * Through a ref rather than a dependency on purpose. Naming `state.draft` in
+   * the effect's dependency list would tear the subscription down and build it
+   * back up on every keystroke into the compose form — and on Android the
+   * subscription is a one-shot poll that *consumes* the pending share, so it
+   * would be collected by the first run and the resubscribe would find nothing.
+   */
+  const draftAttachmentsRef = useRef(state.draft.attachments)
+  draftAttachmentsRef.current = state.draft.attachments
+
+  /**
+   * Another application handed us something to send.
+   *
+   * The share sheet on Android, a `mailto:` link or Send To on Windows. Same
+   * placement and the same reasoning as `onOpenMessage` above: Compose may not
+   * be the screen that is mounted, and on a cold share nothing is mounted at
+   * all, so the payload is applied to the draft here and the view follows.
+   *
+   * Only the fields the payload actually carries are written. A `mailto:` with
+   * nothing but an address must not blank out a subject the user had already
+   * typed, and `setDraft` is a shallow merge — an explicit `subject: ''` would
+   * do exactly that. Attachments are appended for the same reason: replacing
+   * the array would silently drop files that were already on the draft.
+   */
+  useEffect(() => {
+    if (!bridge?.onShare) return
+    return bridge.onShare((share) => {
+      const patch: Partial<MessageDraft> = {}
+      if (share.to?.length) patch.to = share.to
+      if (share.cc?.length) patch.cc = share.cc
+      if (share.bcc?.length) patch.bcc = share.bcc
+      if (share.subject) patch.subject = share.subject
+      if (share.body) patch.body = share.body
+      if (share.attachments?.length) {
+        const merged = [...draftAttachmentsRef.current, ...share.attachments]
+        /*
+         * Written back into the ref, not just into the patch.
+         *
+         * The ref is otherwise only refreshed on render, and two shares can
+         * land before React has rendered once: Explorer splits a large Send To
+         * selection across several launches of the exe, and each one arrives as
+         * its own `second-instance`. Reading a stale ref for the second would
+         * throw away the first one's files — silently, which is the whole class
+         * of bug this feature was written to avoid.
+         */
+        draftAttachmentsRef.current = merged
+        patch.attachments = merged
+      }
+      if (Object.keys(patch).length > 0) dispatch({ type: 'setDraft', patch })
+      setOpenAccountOnMount(false)
+      setView('compose')
+    })
+  }, [bridge, dispatch])
 
   /*
    * The palette's three props are `useCallback`s and not inline arrows.

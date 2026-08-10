@@ -7,7 +7,14 @@
  * allowed to push them below the fold.
  */
 
-import { useEffect, useMemo, useRef, useState, type ClipboardEvent } from 'react'
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ClipboardEvent,
+  type ReactNode,
+} from 'react'
 import {
   Banner,
   Button,
@@ -52,7 +59,19 @@ import { OutboxStrip } from '../components/OutboxStrip'
 import { MarkupToolbar } from '../components/MarkupToolbar'
 import { PreflightDialog, useFilePresence, usePreflight } from '../components/PreflightDialog'
 import { SendResultDetails } from '../components/SendDetails'
-import { IconClock, IconFileText, IconMail, IconSearch, IconSend } from '../components/icons'
+import {
+  IconChevronDown,
+  IconClock,
+  IconFileText,
+  IconMail,
+  IconMaximize,
+  IconMinimize,
+  IconPaperclip,
+  IconSearch,
+  IconSend,
+  IconSliders,
+} from '../components/icons'
+import { useNarrow } from '../components/useNarrow'
 import type { SendCondition } from '../core/conditions'
 import { hasVars, usedVars } from '../core/mergeVars'
 import { isQueueable } from '../core/outbox'
@@ -113,6 +132,84 @@ function errorTitleKey(result: SendResult): TranslationKey {
 const BODY_HEIGHT_KEY = 'aevistle.compose.bodyHeight'
 
 /**
+ * "Is this screen too narrow for the desktop compose form?"
+ *
+ * Wider than the app's shared `useNarrow` (760px), and the gap is the point: a
+ * 768x1024 tablet held in two hands falls *outside* 760, so it was being given
+ * the desktop form — a stacked addressing block, a dropzone and a send-time
+ * row — with the message box left about a quarter of the screen. 900px is not
+ * a new number: `app.css` has stacked `.compose-head` below 900 ever since the
+ * three-across addressing row was introduced, for exactly the same reason.
+ *
+ * Never *narrower* than the shell's own answer. `useNarrow()` is OR-ed in so
+ * that if `NARROW_QUERY` is ever widened past this, the compose screen follows
+ * the shell rather than becoming the one place that quietly disagrees with it.
+ */
+const BODY_FIRST_QUERY = '(max-width: 900px)'
+
+function useBodyFirst(): boolean {
+  const narrow = useNarrow()
+  const [belowNine, setBelowNine] = useState(() =>
+    // Guarded exactly as `useNarrow` is, and wide is the safer default for the
+    // same reason: it renders every field rather than a summary line that
+    // needs JavaScript to open anything.
+    typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+      ? window.matchMedia(BODY_FIRST_QUERY).matches
+      : false,
+  )
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return
+    const query = window.matchMedia(BODY_FIRST_QUERY)
+    const onChange = (event: MediaQueryListEvent) => setBelowNine(event.matches)
+    // Re-read on mount as well as on change — see `useNarrow` for the rotated
+    // phone this is here for.
+    setBelowNine(query.matches)
+    query.addEventListener('change', onChange)
+    return () => query.removeEventListener('change', onChange)
+  }, [])
+
+  return narrow || belowNine
+}
+
+/**
+ * One section of the form: inline in a desktop window, a sheet on a narrow one.
+ *
+ * The markup inside is written once and rendered in both places. Attachments
+ * and the send time are each a whole field's worth of chrome — measured at
+ * 360x800 they were 74px and 100px, a quarter of the screen spent on two
+ * controls nobody touches while writing a sentence. On a narrow screen they go
+ * behind the two buttons in the action bar that open them, and the message box
+ * gets the space back.
+ *
+ * `open` is honoured on the desktop branch too, because one of the three
+ * callers is a disclosure: the options panel must stay closed there until it
+ * is asked for, exactly as it did before this wrapper existed.
+ */
+function ComposeSheet({
+  narrow,
+  open,
+  title,
+  closeLabel,
+  onClose,
+  children,
+}: {
+  narrow: boolean
+  open: boolean
+  title: string
+  closeLabel: string
+  onClose: () => void
+  children: ReactNode
+}) {
+  if (!narrow) return open ? <>{children}</> : null
+  return (
+    <Modal open={open} wide title={title} onClose={onClose} closeLabel={closeLabel}>
+      {children}
+    </Modal>
+  )
+}
+
+/**
  * A new reminder starts at the next whole hour, and the box says so.
  *
  * `defaultRecurrence()` seeds five minutes out, and the compose bar used to
@@ -144,6 +241,31 @@ export function ComposeView({
   const { t, formatBytes, formatDateTime } = useI18n()
   const toast = useToast()
   const { confirm, confirmElement } = useConfirm()
+
+  /**
+   * Below this width the screen is rebuilt around the message rather than
+   * restyled. See `useBodyFirst` for the number and why it is not the shell's.
+   */
+  const narrow = useBodyFirst()
+  /**
+   * Whether the addressing block is showing, on a narrow screen.
+   *
+   * Open on a fresh draft — a reminder with no recipient is not a reminder, so
+   * the first thing the screen asks for is still the first thing on it — and it
+   * folds down to one summary line the moment the message box takes focus,
+   * because from then on the recipient is decided and the screen is being used
+   * to write. Tapping the summary brings it back; nothing about the collapsed
+   * state is a place to get stuck in.
+   */
+  const [headerOpen, setHeaderOpen] = useState(true)
+  /**
+   * Which of the three narrow-screen sheets is up, if any.
+   *
+   * One value rather than three booleans: they are three views of the same
+   * region of the form and only ever one can be on screen, and three
+   * independent flags is how two dialogs end up stacked on each other.
+   */
+  const [sheet, setSheet] = useState<'attachments' | 'when' | 'more' | null>(null)
 
   const [showCcBcc, setShowCcBcc] = useState(false)
   const [sending, setSending] = useState(false)
@@ -179,6 +301,7 @@ export function ComposeView({
   const toId = useFieldId('to')
   const subjectId = useFieldId('subject')
   const bodyId = useFieldId('body')
+  const headId = useFieldId('head')
   const moreId = useFieldId('more')
   const whenId = useFieldId('when')
 
@@ -188,13 +311,26 @@ export function ComposeView({
    * `localStorage` rather than settings: it is a property of this window on
    * this screen, not of the account or the document, and syncing it into
    * `state.json` would mean a laptop and a desktop fighting over one number.
+   *
+   * Not applied on a narrow screen, and actively cleared there. An inline
+   * `height` beats every rule in the stylesheet, so a box once dragged to 220px
+   * on a desktop window followed the same profile onto a phone and pinned the
+   * message to 220px on the layout whose entire purpose is to hand it the
+   * screen. The remembered number is not thrown away — it is still in
+   * `localStorage` for the next wide window — it simply does not apply here.
    */
   const bodyRef = useRef<HTMLTextAreaElement>(null)
   useEffect(() => {
+    if (!bodyRef.current) return
+    if (narrow) {
+      bodyRef.current.style.height = ''
+      return
+    }
     const saved = localStorage.getItem(BODY_HEIGHT_KEY)
-    if (saved && bodyRef.current) bodyRef.current.style.height = saved
-  }, [])
+    if (saved) bodyRef.current.style.height = saved
+  }, [narrow])
   const rememberBodyHeight = () => {
+    if (narrow) return
     const height = bodyRef.current?.style.height
     if (height) localStorage.setItem(BODY_HEIGHT_KEY, height)
   }
@@ -297,7 +433,6 @@ export function ComposeView({
     account?.providerId,
     state.settings.attachmentMaxMb,
   )
-  const limitMb = Math.round(limitBytes / 1048576)
 
   const issues = useMemo(
     () =>
@@ -336,6 +471,21 @@ export function ComposeView({
     draft.body.trim().length > 0 ||
     draft.attachments.length > 0
   const rawBytes = totalAttachmentBytes(draft.attachments)
+
+  /**
+   * An empty draft always shows its addressing block again.
+   *
+   * A send, a queue or a scheduled job all end in `resetDraft`, and the next
+   * reminder has to open on "who is this for?" rather than on a summary line
+   * reading "no recipients" that has to be tapped before anything can be typed.
+   *
+   * Guarded on `!started`, which is what makes it fire on the true→false edge
+   * only. The false→true edge — the first character of a new draft — must *not*
+   * re-open the block the user just folded away by tapping into the message.
+   */
+  useEffect(() => {
+    if (!started) setHeaderOpen(true)
+  }, [started])
 
   const patch = (p: Partial<MessageDraft>) => dispatch({ type: 'setDraft', patch: p })
 
@@ -740,6 +890,44 @@ export function ComposeView({
   }, [delivery, t, formatDateTime])
 
   /**
+   * Who this is for and what it is about, on one line.
+   *
+   * The narrow layout folds the account, To, Cc, Bcc and subject fields away
+   * once the message box has focus, and something has to stay behind saying
+   * what was folded — a bar that reads only "tap to expand" is a bar nobody can
+   * check their own draft against. Addresses first because that is what gets
+   * checked; the subject is the second half of the same line and gives way
+   * first when there is no room for both.
+   */
+  const headerSummary = useMemo(() => {
+    const to = draft.to.length > 0 ? draft.to.join(', ') : t('validate.noRecipients')
+    return { to, subject: draft.subject.trim() }
+  }, [draft.to, draft.subject, t])
+
+  /**
+   * The send time, as one line for the action bar.
+   *
+   * The whole `whenbar` is behind a button on a narrow screen, and "when does
+   * this go out?" is the question this application exists to answer — it may
+   * not be one tap away from being invisible. So the sentence the bar would
+   * have shown is printed next to the button that opens it, delivery-window
+   * marker and all, with the same per-recipient breakdown hanging off `title`.
+   */
+  const whenLine = useMemo(() => {
+    const rule = t(scheduleSummary.key as TranslationKey, scheduleSummary.values)
+    if (!delivery) return rule
+    const marker = delivery.impossible
+      ? t('deliver.composeImpossible')
+      : delivery.moved
+        ? t('deliver.composeMoved', {
+            when: formatDateTime(delivery.at),
+            name: delivery.boundTo?.name ?? delivery.entries[0].name,
+          })
+        : t('deliver.composeSplitShort')
+    return `${rule} · ${marker}`
+  }, [scheduleSummary, delivery, t, formatDateTime])
+
+  /**
    * Rules whose fire time is `timeOfDay`, not `startAt`.
    *
    * `nextFireAfter` reads `timeOfDay` for all four of these and treats
@@ -864,9 +1052,77 @@ export function ComposeView({
     clearSchedule()
   }
 
+  /**
+   * The secondary controls, written once and rendered in two places.
+   *
+   * The top bar on a desktop window; the options sheet on a narrow one, where
+   * there is no top bar left to put them in. They are the same controls either
+   * way — a recovery route, a check, and a posture for the whole screen.
+   *
+   * Every one of them now carries an icon, and that is a bug fix rather than
+   * decoration. The phone rule that drops `.btn__label` to fit four labelled
+   * buttons into 284px has been in the stylesheet since this bar was built, and
+   * `Button` renders its children *inside* that label — so the two buttons that
+   * had never been given an `icon` rendered as blank 44x44 squares on exactly
+   * the screens the rule exists for. One of them was the focus toggle, which is
+   * this app's only full-height writing mode: its way in was invisible on every
+   * screen that most needed it.
+   */
+  const draftTools = (
+    <>
+      <Button
+        variant="ghost"
+        icon={<IconFileText size={16} />}
+        onClick={() => setHistoryOpen(true)}
+        title={t('history.title')}
+      >
+        {t('history.title')}
+        {state.draftSnapshots.length > 0 ? ` (${state.draftSnapshots.length})` : ''}
+      </Button>
+      <Button
+        variant="ghost"
+        icon={<IconSearch size={16} />}
+        disabled={!started}
+        onClick={() => setPreflightOpen(true)}
+        title={t('preflight.button')}
+      >
+        {t('preflight.button')}
+      </Button>
+    </>
+  )
+  /* Not folded in with the other three: on a narrow screen this button opens
+     the sheet that the other three are *inside*, so it belongs to the action
+     bar rather than to the set it opens. */
+  const moreOptionsButton = (
+    <Button
+      variant="ghost"
+      icon={<IconSliders size={16} />}
+      onClick={() => setMoreOpen((v) => !v)}
+      aria-expanded={moreOpen}
+      aria-controls={moreId}
+      title={t('compose.moreOptions')}
+    >
+      {t('compose.moreOptions')}
+    </Button>
+  )
+  /* Up here with the rest of the secondary controls rather than on the body's
+     own label line: it is a posture for the whole screen, not a property of the
+     field, and the label line is down to the two things that are about the text
+     itself — the markup buttons and the count. */
+  const focusToggle = (
+    <Button
+      variant="ghost"
+      icon={focusMode ? <IconMinimize size={16} /> : <IconMaximize size={16} />}
+      onClick={() => setFocusMode((v) => !v)}
+      title={t('compose.focusHint')}
+    >
+      {focusMode ? t('compose.focusExit') : t('compose.focusEnter')}
+    </Button>
+  )
+
   return (
     <>
-      <div className="view view--compose" data-focus={focusMode}>
+      <div className="view view--compose" data-focus={focusMode} data-narrow={narrow || undefined}>
         <div className="view__inner">
           {/*
             Hidden in focus mode along with everything else that is not the
@@ -888,51 +1144,23 @@ export function ComposeView({
                 could not be shortened further without shrinking type, because
                 a heading is mostly the space around the heading. A bar sized
                 by its buttons has no such floor.
+
+                Absent entirely on a narrow screen. 36px is 5% of a 360x800
+                phone spent on a title that repeats the tab already highlighted
+                at the bottom of the window, plus four controls that are not
+                what anybody opened this screen to do; the four move into the
+                options sheet, which the action bar has a button for.
               */}
-              <div className="composetop">
-                <span className="composetop__title">{t('compose.title')}</span>
-                <div className="composebar">
-                  <Button
-                    variant="ghost"
-                    icon={<IconFileText size={16} />}
-                    onClick={() => setHistoryOpen(true)}
-                    title={t('history.title')}
-                  >
-                    {t('history.title')}
-                    {state.draftSnapshots.length > 0
-                      ? ` (${state.draftSnapshots.length})`
-                      : ''}
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    icon={<IconSearch size={16} />}
-                    disabled={!started}
-                    onClick={() => setPreflightOpen(true)}
-                  >
-                    {t('preflight.button')}
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    onClick={() => setMoreOpen((v) => !v)}
-                    aria-expanded={moreOpen}
-                    aria-controls={moreId}
-                  >
-                    {t('compose.moreOptions')}
-                  </Button>
-                  {/* Up here with the rest of the secondary controls rather
-                      than on the body's own label line: it is a posture for
-                      the whole screen, not a property of the field, and the
-                      label line is now down to the two things that are about
-                      the text itself — the markup buttons and the count. */}
-                  <Button
-                    variant="ghost"
-                    onClick={() => setFocusMode((v) => !v)}
-                    title={t('compose.focusHint')}
-                  >
-                    {focusMode ? t('compose.focusExit') : t('compose.focusEnter')}
-                  </Button>
+              {narrow ? null : (
+                <div className="composetop">
+                  <span className="composetop__title">{t('compose.title')}</span>
+                  <div className="composebar">
+                    {draftTools}
+                    {moreOptionsButton}
+                    {focusToggle}
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* Whatever is quietly wrong, on the screen that gets opened most.
                   Absent entirely when there is nothing to report. */}
@@ -976,97 +1204,136 @@ export function ComposeView({
           <Card className="compose-card">
             <div className="card__body compose-layout">
               {/* --- band 1: who ------------------------------------------ */}
-              <div className="compose-head">
-                {state.accounts.length > 1 ? (
-                  <Field label={t('compose.account')}>
-                    {/* Grouped once there is more than one group to show —
-                        a single `<optgroup>` wrapping everything is visual
-                        noise that says nothing. */}
-                    <select
-                      className="select"
-                      value={draft.accountId}
-                      onChange={(e) => patch({ accountId: e.target.value })}
-                    >
-                      {accountGroups.length > 1
-                        ? accountGroups.map((group) => (
-                            <optgroup
-                              key={group.name ?? '_'}
-                              label={group.name ?? t('account.ungrouped')}
-                            >
-                              {group.accounts.map((a) => (
+              {/*
+                On a narrow screen this band is one line, once the message has
+                been tapped into.
+
+                Stacked, the account select, the recipient chips, the Cc/Bcc
+                pair and the subject measure 150-228px of a 360x800 phone —
+                between a fifth and a third of the screen, held open for fields
+                that are each answered once and then not looked at again. The
+                summary line is 40px and says what they hold, so nothing is
+                hidden, only folded; tapping it puts them all back.
+
+                Rendered rather than hidden. A `display: none` block still owns
+                its ids and its tab stops, and a form whose invisible half can
+                take focus is the kind of thing that is only ever found by the
+                person it happens to.
+              */}
+              {narrow && !headerOpen ? (
+                <button
+                  type="button"
+                  className="composesummary"
+                  onClick={() => setHeaderOpen(true)}
+                  aria-expanded={false}
+                  aria-controls={headId}
+                  title={t('compose.editHeader')}
+                >
+                  <span className="composesummary__to">{headerSummary.to}</span>
+                  <span className="composesummary__subject">
+                    {headerSummary.subject || t('compose.subjectPlaceholder')}
+                  </span>
+                  <IconChevronDown size={16} className="composesummary__chev" />
+                </button>
+              ) : (
+                <>
+                  <div className="compose-head" id={headId}>
+                    {state.accounts.length > 1 ? (
+                      <Field label={t('compose.account')}>
+                        {/* Grouped once there is more than one group to show —
+                            a single `<optgroup>` wrapping everything is visual
+                            noise that says nothing. */}
+                        <select
+                          className="select"
+                          value={draft.accountId}
+                          onChange={(e) => patch({ accountId: e.target.value })}
+                        >
+                          {accountGroups.length > 1
+                            ? accountGroups.map((group) => (
+                                <optgroup
+                                  key={group.name ?? '_'}
+                                  label={group.name ?? t('account.ungrouped')}
+                                >
+                                  {group.accounts.map((a) => (
+                                    <option key={a.id} value={a.id}>
+                                      {accountLabel(a)} — {a.fromAddress}
+                                    </option>
+                                  ))}
+                                </optgroup>
+                              ))
+                            : state.accounts.map((a) => (
                                 <option key={a.id} value={a.id}>
                                   {accountLabel(a)} — {a.fromAddress}
                                 </option>
                               ))}
-                            </optgroup>
-                          ))
-                        : state.accounts.map((a) => (
-                            <option key={a.id} value={a.id}>
-                              {accountLabel(a)} — {a.fromAddress}
-                            </option>
-                          ))}
-                    </select>
-                  </Field>
-                ) : null}
+                        </select>
+                      </Field>
+                    ) : null}
 
-                {/* Cc/Bcc rides on the label line rather than buying a hint
-                    row underneath: this row sets the height of everything
-                    below it, and a 32px row to hold one link is 32px taken
-                    off the message. */}
-                <Field
-                  label={t('compose.to')}
-                  htmlFor={toId}
-                  labelHint={
-                    <button type="button" className="link" onClick={() => setShowCcBcc((v) => !v)}>
-                      {t('compose.showCcBcc')}
-                    </button>
-                  }
-                >
-                  <TagField
-                    id={toId}
-                    values={draft.to}
-                    onChange={(v) => patch({ to: v })}
-                    placeholder={t('compose.recipientPlaceholder')}
-                    suggestions={state.contacts}
-                    recents={state.recentRecipients}
-                    pickerLabel={t('compose.to')}
-                  />
-                </Field>
+                    {/* Cc/Bcc rides on the label line rather than buying a hint
+                        row underneath: this row sets the height of everything
+                        below it, and a 32px row to hold one link is 32px taken
+                        off the message. */}
+                    <Field
+                      label={t('compose.to')}
+                      htmlFor={toId}
+                      labelHint={
+                        <button
+                          type="button"
+                          className="link"
+                          onClick={() => setShowCcBcc((v) => !v)}
+                        >
+                          {t('compose.showCcBcc')}
+                        </button>
+                      }
+                    >
+                      <TagField
+                        id={toId}
+                        values={draft.to}
+                        onChange={(v) => patch({ to: v })}
+                        placeholder={t('compose.recipientPlaceholder')}
+                        suggestions={state.contacts}
+                        recents={state.recentRecipients}
+                        pickerLabel={t('compose.to')}
+                      />
+                    </Field>
 
-                <Field label={t('compose.subject')} htmlFor={subjectId}>
-                  <input
-                    id={subjectId}
-                    className="input"
-                    value={draft.subject}
-                    maxLength={998}
-                    placeholder={t('compose.subjectPlaceholder')}
-                    onChange={(e) => patch({ subject: e.target.value })}
-                  />
-                </Field>
-              </div>
+                    <Field label={t('compose.subject')} htmlFor={subjectId}>
+                      <input
+                        id={subjectId}
+                        className="input"
+                        value={draft.subject}
+                        maxLength={998}
+                        placeholder={t('compose.subjectPlaceholder')}
+                        onChange={(e) => patch({ subject: e.target.value })}
+                      />
+                    </Field>
+                  </div>
 
-              {showCcBcc ? (
-                <div className="compose-head compose-head--extra">
-                  <Field label={t('compose.cc')}>
-                    <TagField
-                      values={draft.cc}
-                      onChange={(v) => patch({ cc: v })}
-                      suggestions={state.contacts}
-                      recents={state.recentRecipients}
-                      pickerLabel={t('compose.cc')}
-                    />
-                  </Field>
-                  <Field label={t('compose.bcc')}>
-                    <TagField
-                      values={draft.bcc}
-                      onChange={(v) => patch({ bcc: v })}
-                      suggestions={state.contacts}
-                      recents={state.recentRecipients}
-                      pickerLabel={t('compose.bcc')}
-                    />
-                  </Field>
-                </div>
-              ) : null}
+                  {showCcBcc ? (
+                    <div className="compose-head compose-head--extra">
+                      <Field label={t('compose.cc')}>
+                        <TagField
+                          values={draft.cc}
+                          onChange={(v) => patch({ cc: v })}
+                          suggestions={state.contacts}
+                          recents={state.recentRecipients}
+                          pickerLabel={t('compose.cc')}
+                        />
+                      </Field>
+                      <Field label={t('compose.bcc')}>
+                        <TagField
+                          values={draft.bcc}
+                          onChange={(v) => patch({ bcc: v })}
+                          suggestions={state.contacts}
+                          recents={state.recentRecipients}
+                          pickerLabel={t('compose.bcc')}
+                        />
+                      </Field>
+                    </div>
+                  ) : null}
+                </>
+              )}
 
               {/* --- band 2: what ----------------------------------------- */}
               {/* The body is the one thing this whole screen exists to
@@ -1155,6 +1422,15 @@ export function ComposeView({
                   onPaste={handleBodyPaste}
                   onChange={(e) => patch({ body: e.target.value })}
                   onMouseUp={rememberBodyHeight}
+                  /* Tapping into the message is the moment the addressing
+                     block stops being what the screen is for, so that is the
+                     moment it folds away — no third control to learn, and no
+                     state the user has to think about maintaining. Nothing
+                     happens on a wide window, where the block costs the
+                     message nothing it cannot spare. */
+                  onFocus={() => {
+                    if (narrow) setHeaderOpen(false)
+                  }}
                 />
               </Field>
 
@@ -1163,12 +1439,7 @@ export function ComposeView({
                   nothing on the ordinary text-only draft — and when there are
                   some, seeing them is the whole point of having added them.
                   One click opens the full-screen viewer. */}
-              <ImageStrip
-                images={gallery}
-                onOpen={setLightboxAt}
-                label={t('image.inBody')}
-                hint={t('image.openHint')}
-              />
+              <ImageStrip images={gallery} onOpen={setLightboxAt} label={t('image.inBody')} />
 
               {/* Mail merge. Offered only once there is a `{{token}}` to merge:
                   a switch that does nothing until you learn an undocumented
@@ -1178,13 +1449,15 @@ export function ComposeView({
                   checked={draft.mergeEnabled === true}
                   onChange={(v) => patch({ mergeEnabled: v })}
                   title={t('merge.title')}
-                  description={t('merge.hint', { n: draft.to.length })}
                 />
               ) : null}
 
+              {/* The tokens the draft actually carries, as chips. They used to
+                  be introduced by a grey "Variables in this message:" — a
+                  caption for a row of `{{name}}` chips that is already only
+                  ever one thing. */}
               {hasVars(draft) ? (
                 <div className="mergevars">
-                  <span className="mergevars__label">{t('merge.usedHere')}</span>
                   {[...new Set([...usedVars(draft.subject), ...usedVars(draft.body)])].map((name) => (
                     <span key={name} className="chip">
                       {`{{${name}}}`}
@@ -1193,26 +1466,41 @@ export function ComposeView({
                 </div>
               ) : null}
 
-              {/* --- band 3: when, and what rides along -------------------- */}
+              {/* --- band 3: when, and what rides along --------------------
+
+                  Three sections that are inline on a desktop window and behind
+                  a button on a narrow one — see `ComposeSheet`. The wrapper
+                  goes around the existing markup rather than replacing it: the
+                  attachment picker and the send-time bar are the same controls
+                  in both places, and a second, phone-shaped copy of either is
+                  a second place for them to drift out of step.
+              */}
               <div className="compose-foot">
-                <Field label={t('compose.attachments')}>
-                  <AttachmentPicker
-                    attachments={draft.attachments}
-                    onAdd={addAttachments}
-                    onRemove={(id) =>
-                      patch({ attachments: draft.attachments.filter((a) => a.id !== id) })
-                    }
-                    onToggleInline={toggleInline}
-                    limitMb={limitMb}
-                    presence={attachmentPresence}
-                    onDropPaths={bridge?.pathForFile ? dropAttachments : undefined}
-                    thumbnails={thumbnails}
-                    onPreview={(id) => {
-                      const at = gallery.findIndex((g) => g.id === id)
-                      if (at >= 0) setLightboxAt(at)
-                    }}
-                  />
-                </Field>
+                <ComposeSheet
+                  narrow={narrow}
+                  open={narrow ? sheet === 'attachments' : true}
+                  title={t('compose.attachments')}
+                  closeLabel={t('common.close')}
+                  onClose={() => setSheet(null)}
+                >
+                  <Field label={t('compose.attachments')}>
+                    <AttachmentPicker
+                      attachments={draft.attachments}
+                      onAdd={addAttachments}
+                      onRemove={(id) =>
+                        patch({ attachments: draft.attachments.filter((a) => a.id !== id) })
+                      }
+                      onToggleInline={toggleInline}
+                      presence={attachmentPresence}
+                      onDropPaths={bridge?.pathForFile ? dropAttachments : undefined}
+                      thumbnails={thumbnails}
+                      onPreview={(id) => {
+                        const at = gallery.findIndex((g) => g.id === id)
+                        if (at >= 0) setLightboxAt(at)
+                      }}
+                    />
+                  </Field>
+                </ComposeSheet>
 
                 {/*
                   When it sends, on the screen where it is written.
@@ -1241,154 +1529,180 @@ export function ComposeView({
                   the field that actually fires. `cron` gets no editor at all —
                   the expression is the rule, and it belongs in the dialog.
                 */}
-                <Field label={t('compose.sendsAt')} htmlFor={whenId}>
-                  <div className="whenbar">
-                    {recurrence.kind === 'cron' ? (
-                      <output
-                        id={whenId}
-                        className="input whenbar__time whenbar__cron mono"
-                        title={recurrence.cron || undefined}
-                      >
-                        {recurrence.cron || '—'}
-                      </output>
-                    ) : firesAtTimeOfDay ? (
-                      <input
-                        id={whenId}
-                        className="input whenbar__time"
-                        type="time"
-                        value={recurrence.timeOfDay}
-                        onChange={(e) => {
-                          const value = e.target.value
-                          if (!value) return
-                          setRecurrence((r) => ({
-                            ...r,
-                            timeOfDay: value,
-                            // Keep the anchor on the same clock time. `startAt`
-                            // is a floor for these rules, and leaving it on the
-                            // old minute makes the dialog and this bar disagree
-                            // about a value they share.
-                            startAt: fromLocalInput(
-                              `${toLocalInput(r.startAt).slice(0, 10)}T${value}`,
-                              r.startAt,
-                            ),
-                          }))
-                          setScheduleSet(true)
-                        }}
-                      />
-                    ) : (
-                      <input
-                        id={whenId}
-                        className="input whenbar__time"
-                        type="datetime-local"
-                        /* Seeded, not blank. See `seedRecurrence`. */
-                        value={toLocalInput(recurrence.startAt)}
-                        onChange={(e) => {
-                          setRecurrence((r) => {
-                            const at = fromLocalInput(e.target.value, r.startAt)
-                            return { ...r, startAt: at, timeOfDay: hhmm(at) }
-                          })
-                          setScheduleSet(true)
-                        }}
-                      />
-                    )}
-
-                    {/*
-                      The four times people actually pick, without charging the
-                      message box a row for them.
-
-                      A visible chip row here would be ~40px, and every pixel
-                      spent below the body is taken straight off the body — the
-                      one complaint this screen has collected more than any
-                      other. So they hang in a popover anchored to the field:
-                      open costs nothing above the fold, closed costs nothing
-                      at all.
-                    */}
-                    {recurrence.kind === 'cron' ? null : (
-                      <div className="whenbar__quick">
-                        <button
-                          type="button"
-                          className="btn btn--ghost btn--icon whenbar__quickbtn"
-                          aria-label={t('schedule.quickTimes')}
-                          title={t('schedule.quickTimes')}
-                          aria-expanded={quickOpen}
-                          onClick={() => setQuickOpen((v) => !v)}
+                <ComposeSheet
+                  narrow={narrow}
+                  open={narrow ? sheet === 'when' : true}
+                  title={t('compose.sendsAt')}
+                  closeLabel={t('common.close')}
+                  onClose={() => setSheet(null)}
+                >
+                  <Field label={t('compose.sendsAt')} htmlFor={whenId}>
+                    <div className="whenbar">
+                      {recurrence.kind === 'cron' ? (
+                        <output
+                          id={whenId}
+                          className="input whenbar__time whenbar__cron mono"
+                          title={recurrence.cron || undefined}
                         >
-                          <IconClock size={16} />
-                        </button>
-                        {quickOpen ? (
-                          <div
-                            className="popover whenbar__picks"
-                            role="group"
+                          {recurrence.cron || '—'}
+                        </output>
+                      ) : firesAtTimeOfDay ? (
+                        <input
+                          id={whenId}
+                          className="input whenbar__time"
+                          type="time"
+                          value={recurrence.timeOfDay}
+                          onChange={(e) => {
+                            const value = e.target.value
+                            if (!value) return
+                            setRecurrence((r) => ({
+                              ...r,
+                              timeOfDay: value,
+                              // Keep the anchor on the same clock time. `startAt`
+                              // is a floor for these rules, and leaving it on the
+                              // old minute makes the dialog and this bar disagree
+                              // about a value they share.
+                              startAt: fromLocalInput(
+                                `${toLocalInput(r.startAt).slice(0, 10)}T${value}`,
+                                r.startAt,
+                              ),
+                            }))
+                            setScheduleSet(true)
+                          }}
+                        />
+                      ) : (
+                        <input
+                          id={whenId}
+                          className="input whenbar__time"
+                          type="datetime-local"
+                          /* Seeded, not blank. See `seedRecurrence`. */
+                          value={toLocalInput(recurrence.startAt)}
+                          onChange={(e) => {
+                            setRecurrence((r) => {
+                              const at = fromLocalInput(e.target.value, r.startAt)
+                              return { ...r, startAt: at, timeOfDay: hhmm(at) }
+                            })
+                            setScheduleSet(true)
+                          }}
+                        />
+                      )}
+
+                      {/*
+                        The four times people actually pick, without charging the
+                        message box a row for them.
+
+                        A visible chip row here would be ~40px, and every pixel
+                        spent below the body is taken straight off the body — the
+                        one complaint this screen has collected more than any
+                        other. So they hang in a popover anchored to the field:
+                        open costs nothing above the fold, closed costs nothing
+                        at all.
+                      */}
+                      {recurrence.kind === 'cron' ? null : (
+                        <div className="whenbar__quick">
+                          <button
+                            type="button"
+                            className="btn btn--ghost btn--icon whenbar__quickbtn"
                             aria-label={t('schedule.quickTimes')}
+                            title={t('schedule.quickTimes')}
+                            aria-expanded={quickOpen}
+                            onClick={() => setQuickOpen((v) => !v)}
                           >
-                            {quickTimes(Date.now()).map((o) => (
-                              <button
-                                key={o.key}
-                                type="button"
-                                className="chip chip--toggle"
-                                aria-pressed={Math.abs(recurrence.startAt - o.at) < 60_000}
-                                onClick={() => {
-                                  setRecurrence((r) => ({
-                                    ...r,
-                                    startAt: o.at,
-                                    timeOfDay: hhmm(o.at),
-                                  }))
-                                  setScheduleSet(true)
-                                  setQuickOpen(false)
-                                }}
-                              >
-                                {t(o.key as TranslationKey)}
-                              </button>
-                            ))}
-                          </div>
+                            <IconClock size={16} />
+                          </button>
+                          {quickOpen ? (
+                            <div
+                              className="popover whenbar__picks"
+                              role="group"
+                              aria-label={t('schedule.quickTimes')}
+                            >
+                              {quickTimes(Date.now()).map((o) => (
+                                <button
+                                  key={o.key}
+                                  type="button"
+                                  className="chip chip--toggle"
+                                  aria-pressed={Math.abs(recurrence.startAt - o.at) < 60_000}
+                                  onClick={() => {
+                                    setRecurrence((r) => ({
+                                      ...r,
+                                      startAt: o.at,
+                                      timeOfDay: hhmm(o.at),
+                                    }))
+                                    setScheduleSet(true)
+                                    setQuickOpen(false)
+                                  }}
+                                >
+                                  {t(o.key as TranslationKey)}
+                                </button>
+                              ))}
+                            </div>
+                          ) : null}
+                        </div>
+                      )}
+
+                      <div className="whenbar__text">
+                        <span className="whenbar__rule">
+                          {t(scheduleSummary.key as TranslationKey, scheduleSummary.values)}
+                        </span>
+                        {plannedStages.length > 1 ? (
+                          <span className="whenbar__count">
+                            {t('chain.willCreate', { n: plannedStages.length })}
+                          </span>
+                        ) : null}
+                        {/*
+                          B3 · 送达窗口 — folded into this sentence, not given a
+                          row. `.whenbar__text` already wraps and already carries a
+                          second conditional span beside it (`.whenbar__count`);
+                          this is a third inline sibling on the same line, so the
+                          bar's height stays what its 46px controls make it and
+                          the message box loses nothing. The per-recipient detail
+                          is in `title` for the same reason.
+                        */}
+                        {delivery ? (
+                          <span className="whenbar__window" title={deliveryDetail}>
+                            {delivery.impossible
+                              ? t('deliver.composeImpossible')
+                              : delivery.moved
+                                ? t('deliver.composeMoved', {
+                                    when: formatDateTime(delivery.at),
+                                    name: delivery.boundTo?.name ?? delivery.entries[0].name,
+                                  })
+                                : t('deliver.composeSplitShort')}
+                          </span>
                         ) : null}
                       </div>
-                    )}
-
-                    <div className="whenbar__text">
-                      <span className="whenbar__rule">
-                        {t(scheduleSummary.key as TranslationKey, scheduleSummary.values)}
-                      </span>
-                      {plannedStages.length > 1 ? (
-                        <span className="whenbar__count">
-                          {t('chain.willCreate', { n: plannedStages.length })}
-                        </span>
-                      ) : null}
-                      {/*
-                        B3 · 送达窗口 — folded into this sentence, not given a
-                        row. `.whenbar__text` already wraps and already carries a
-                        second conditional span beside it (`.whenbar__count`);
-                        this is a third inline sibling on the same line, so the
-                        bar's height stays what its 46px controls make it and
-                        the message box loses nothing. The per-recipient detail
-                        is in `title` for the same reason.
-                      */}
-                      {delivery ? (
-                        <span className="whenbar__window" title={deliveryDetail}>
-                          {delivery.impossible
-                            ? t('deliver.composeImpossible')
-                            : delivery.moved
-                              ? t('deliver.composeMoved', {
-                                  when: formatDateTime(delivery.at),
-                                  name: delivery.boundTo?.name ?? delivery.entries[0].name,
-                                })
-                              : t('deliver.composeSplitShort')}
-                        </span>
-                      ) : null}
+                      <Button variant="ghost" onClick={openSchedule}>
+                        {t('schedule.moreRules')}
+                      </Button>
                     </div>
-                    <Button variant="ghost" onClick={openSchedule}>
-                      {t('schedule.moreRules')}
-                    </Button>
-                  </div>
-                </Field>
+                  </Field>
+                </ComposeSheet>
 
                 {/* Closed, this is nothing at all — not a collapsed row.
                     Priority, per-recipient delivery and read receipts are
                     decided once and then left alone for months, and the
                     disclosure that used to hold them charged the message box
                     59px for the privilege of being closed. The control that
-                    opens this now lives in the page head, which was empty. */}
-                {moreOpen ? (
+                    opens this now lives in the page head, which was empty.
+
+                    On a narrow screen there is no page head to open it from, so
+                    it is the third button in the action bar — and the sheet it
+                    opens is also where draft history, the send preview and the
+                    focus toggle go, since the bar that used to hold them is
+                    itself gone. */}
+                <ComposeSheet
+                  narrow={narrow}
+                  open={narrow ? sheet === 'more' : moreOpen}
+                  title={t('compose.moreOptions')}
+                  closeLabel={t('common.close')}
+                  onClose={() => setSheet(null)}
+                >
+                  {narrow ? (
+                    <div className="composebar composebar--sheet">
+                      {draftTools}
+                      {focusToggle}
+                    </div>
+                  ) : null}
                   <div className="moreoptions" id={moreId}>
                     {/* The body-format picker is gone on purpose. It asked people
                       to choose between plain, HTML and Markdown before writing
@@ -1410,11 +1724,15 @@ export function ComposeView({
                           ]}
                         />
                       </Field>
+                      {/* Both of these said the same thing twice: the switch
+                          is called "Send individually to each recipient" and
+                          carried a grey line underneath reading "Recipients
+                          never see each other's addresses", which is what
+                          sending individually *is*. */}
                       <Switch
                         checked={draft.individualDelivery}
                         onChange={(v) => patch({ individualDelivery: v })}
                         title={t('compose.individualDelivery')}
-                        description={t('compose.individualHint')}
                       />
                       <Switch
                         checked={draft.requestReadReceipt}
@@ -1423,7 +1741,7 @@ export function ComposeView({
                       />
                     </div>
                   </div>
-                ) : null}
+                </ComposeSheet>
               </div>
             </div>
           </Card>
@@ -1502,45 +1820,102 @@ export function ComposeView({
       ) : null}
 
       {/* The two buttons that matter, always visible. */}
-      <div className="actionbar">
-        <div className="actionbar__summary">
-          <div className="actionbar__line">
-            {recipientCount > 0
-              ? t('logs.recipients', { n: recipientCount })
-              : t('validate.noRecipients')}
-            {draft.attachments.length > 0
-              ? ` · ${t('compose.attachmentCount', {
-                  n: draft.attachments.length,
-                  size: formatBytes(rawBytes),
-                })}`
-              : ''}
+      <div className="actionbar" data-narrow={narrow || undefined}>
+        {/*
+          Two different bars, because they are answering two different
+          questions.
+
+          Wide: a two-line summary of the draft — who it is going to, how many
+          files, which address it leaves from, what it weighs on the wire — and
+          the two buttons that send it. It wraps to 96px on a phone, and the
+          second line is hidden there already, so most of that height is spent
+          on air around a sentence.
+
+          Narrow: one 52px row that is the form's missing third of the screen.
+          The attachment picker and the send-time bar are behind the first two
+          buttons, the options panel behind the third, and the send-time
+          sentence rides on the button that opens it — that question may not be
+          one tap away from being unanswerable. "Schedule" is not duplicated
+          here: it is the same `openSchedule` the "Repeat, retry, conditions…"
+          button inside the send-time sheet already calls, and a second copy
+          would cost the row the width the sentence needs.
+        */}
+        {narrow ? (
+          <div className="composeacts">
+            <button
+              type="button"
+              className="btn btn--ghost btn--icon composeacts__btn"
+              aria-label={t('compose.attachments')}
+              title={t('compose.attachments')}
+              onClick={() => setSheet('attachments')}
+            >
+              <IconPaperclip size={18} />
+              {draft.attachments.length > 0 ? (
+                <span className="composeacts__badge">{draft.attachments.length}</span>
+              ) : null}
+            </button>
+            <button
+              type="button"
+              className="btn btn--ghost composeacts__when"
+              title={deliveryDetail ?? whenLine}
+              onClick={() => setSheet('when')}
+            >
+              <IconClock size={17} />
+              <span className="composeacts__whentext">{whenLine}</span>
+            </button>
+            <button
+              type="button"
+              className="btn btn--ghost btn--icon composeacts__btn"
+              aria-label={t('compose.moreOptions')}
+              title={t('compose.moreOptions')}
+              aria-expanded={sheet === 'more'}
+              onClick={() => setSheet('more')}
+            >
+              <IconSliders size={18} />
+            </button>
           </div>
-          {account ? (
-            <div className="actionbar__meta">
-              {account.fromAddress}
-              {preset?.dailyLimit
-                ? ` · ${t('compose.dailyLimit', { n: preset.dailyLimit })}`
-                : ''}
-              {rawBytes > 0
-                ? ` · ${t('compose.onTheWire', { size: formatBytes(encodedSize(rawBytes)) })}`
+        ) : (
+          <div className="actionbar__summary">
+            <div className="actionbar__line">
+              {recipientCount > 0
+                ? t('logs.recipients', { n: recipientCount })
+                : t('validate.noRecipients')}
+              {draft.attachments.length > 0
+                ? ` · ${t('compose.attachmentCount', {
+                    n: draft.attachments.length,
+                    size: formatBytes(rawBytes),
+                  })}`
                 : ''}
             </div>
-          ) : null}
-        </div>
+            {account ? (
+              <div className="actionbar__meta">
+                {account.fromAddress}
+                {preset?.dailyLimit
+                  ? ` · ${t('compose.dailyLimit', { n: preset.dailyLimit })}`
+                  : ''}
+                {rawBytes > 0
+                  ? ` · ${t('compose.onTheWire', { size: formatBytes(encodedSize(rawBytes)) })}`
+                  : ''}
+              </div>
+            ) : null}
+          </div>
+        )}
 
         {/* Draft history and the send preview used to sit here. They are a
             recovery route and a check — neither is what this bar is for, and
             both are now in the page head with the rest of the secondary
             controls. What is left is the two buttons that send. */}
-        <Button
-          size="lg"
-          variant="secondary"
-          icon={<IconClock size={17} />}
-          disabled={blocked || sending}
-          onClick={openSchedule}
-        >
-          {t('compose.schedule')}
-        </Button>
+        {narrow ? null : (
+          <Button
+            size="lg"
+            variant="secondary"
+            icon={<IconClock size={17} />}
+            disabled={blocked || sending}
+            onClick={openSchedule}
+          >
+            {t('compose.schedule')}
+          </Button>
+        )}
         <Button
           size="lg"
           variant="primary"
@@ -1617,9 +1992,14 @@ export function ComposeView({
 
         {/* Multi-stage reminders. Offered only for one-offs: "every Monday,
             and also three days before every Monday" is not a sentence anyone
-            means. */}
+            means.
+
+            No hint row on the field. "Creates one reminder per stage, all
+            pointing at the same moment" restated the chips underneath it, and
+            the count of what will really be created is printed below them from
+            the stages that are actually ticked. */}
         {chainable ? (
-          <Field label={t('chain.title')} hint={t('chain.hint')}>
+          <Field label={t('chain.title')}>
             <div className="btn-row" style={{ flexWrap: 'wrap' }}>
               {CHAIN_STAGES.map((stage) => {
                 const on = leadTimes.includes(stage.leadMs)
@@ -1688,10 +2068,12 @@ export function ComposeView({
           inboxAvailable={state.inboxAccounts.some((i) => i.enabled)}
         />
 
+        {/* The title alone. The sentence under it explained what locking a copy
+            buys you, which is a thing to say once in Settings — where the
+            setting itself lives, and where that same line still is — not on
+            every dialog that reports the setting is on. */}
         {state.settings.snapshotAttachments && draft.attachments.length > 0 ? (
-          <Banner tone="info" title={t('schedule.snapshot')}>
-            {t('schedule.snapshotHint')}
-          </Banner>
+          <Banner tone="info" title={t('schedule.snapshot')} />
         ) : null}
       </Modal>
 

@@ -15,6 +15,7 @@ import {
   type TrayCommand,
 } from '../src/core/ipc-contract'
 import type { InboxEvent, JobEvent } from '../src/core/bridge'
+import type { SharePayload } from '../src/core/types'
 import type { DownloadProgress } from '../src/core/update'
 import type { ControlRequest } from '../src/core/control'
 import type { PairingEvent } from '../src/core/pairing'
@@ -50,6 +51,27 @@ let openMessageDelivered = false
 ipcRenderer.on(IPC.openMessage, (_event, messageId: string) => {
   if (openMessageDelivered) return
   pendingOpenMessage = messageId
+})
+
+/**
+ * And again for a share, where the buffer is not a safety net but the whole
+ * mechanism.
+ *
+ * Following a `mailto:` link with Aevistle closed *starts* Aevistle. The main
+ * process parses the command line before a BrowserWindow exists, and the
+ * window it then opens has to load a page and mount React before anything in
+ * the app can listen. Every millisecond of that is time an unbuffered
+ * `webContents.send` would land in a page with no listener and vanish — the
+ * exact silent no-op that makes a feature look implemented and do nothing.
+ *
+ * Only the newest is kept, for the same reason as above: two links followed
+ * before the page is alive still means one message to write.
+ */
+let pendingShare: SharePayload | null = null
+let shareDelivered = false
+ipcRenderer.on(IPC.share, (_event, share: SharePayload) => {
+  if (shareDelivered) return
+  pendingShare = share
 })
 
 const api: DesktopApi = {
@@ -151,6 +173,18 @@ const api: DesktopApi = {
     ipcRenderer.on(IPC.openMessage, listener)
     if (queued) handler(queued)
     return () => ipcRenderer.removeListener(IPC.openMessage, listener)
+  },
+
+  onShare: (handler) => {
+    // Whatever the command line carried is replayed here — see the buffer at
+    // the top of this file for why that is the only thing that can work.
+    shareDelivered = true
+    const queued = pendingShare
+    pendingShare = null
+    const listener = (_event: unknown, share: SharePayload) => handler(share)
+    ipcRenderer.on(IPC.share, listener)
+    if (queued) handler(queued)
+    return () => ipcRenderer.removeListener(IPC.share, listener)
   },
 
   notify: (title, body, messageId) => ipcRenderer.invoke(IPC.notify, title, body, messageId),

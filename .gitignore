@@ -126,6 +126,15 @@ playwright-report/
 blob-report/
 .playwright/
 
+# Ad-hoc layout measurement, and the screenshots it takes. Named for the
+# session that produced them and never part of the project — and the same
+# reasoning as the retained traces above applies to a bare .png: a screenshot
+# of the compose screen is a screenshot of whatever mailbox was loaded when it
+# was taken. Both patterns were staged by a `git add -A` before this existed.
+measure-tmp.mjs
+**/measure-tmp.mjs
+tests/shot-*.png
+
 # --- misc ------------------------------------------------------------------
 coverage/
 .nyc_output/

@@ -315,6 +315,20 @@ export const IconMinimize = (p: IconProps) => (
   </Svg>
 )
 
+/* Three tracks with a knob on each — "the settings that are not on screen".
+   Not the three plain stacked lines: those read as "menu" in every toolbar in
+   this app, and this button opens a panel of *values* (priority, delivery,
+   read receipts) rather than a list of destinations. The knobs are what make
+   the difference readable at 18px. */
+export const IconSliders = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M4 7h6M14 7h6M4 12h10M18 12h2M4 17h3M11 17h9" />
+    <circle cx="12" cy="7" r="2" />
+    <circle cx="16" cy="12" r="2" />
+    <circle cx="9" cy="17" r="2" />
+  </Svg>
+)
+
 export const IconStar = (p: IconProps) => (
   <Svg {...p}>
     <path d="M12 3.6l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8-4.3-4.1 5.9-.9Z" />

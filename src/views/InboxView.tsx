@@ -1254,7 +1254,7 @@ export function InboxView({
     return (
       <div className="view view--list">
         <div className="view__inner">
-          <PageHead title={t('inbox.title')} subtitle={t('inbox.subtitle')} />
+          <PageHead title={t('inbox.title')} />
           <div className="list-pane">
             <EmptyState
               icon={<IconInbox size={24} />}
@@ -1334,11 +1334,11 @@ export function InboxView({
   return (
     <div className="view view--list">
       <div className="view__inner">
-        <PageHead
-          title={t('inbox.title')}
-          subtitle={unreadTotal > 0 ? t('inbox.subtitleUnread', { n: unreadTotal }) : t('inbox.subtitle')}
-          action={bulkAction}
-        />
+        {/* No subtitle. It said either "{n} unread" — which the nav badge
+            already shows — or a sentence describing what an inbox is, on the
+            screen you are looking at. Both were a grey line of prose between
+            the heading and the mail. */}
+        <PageHead title={t('inbox.title')} action={bulkAction} />
 
         {enabledInboxes.length === 0 ? (
           <Banner tone="info">{t('inbox.noAccountsHint')}</Banner>
@@ -1545,10 +1545,13 @@ export function InboxView({
 
         {filteredMessages.length === 0 ? (
           <div className="list-pane">
+            {/* No hint line. With no account the banner above already says the
+                same sentence and the button below it is the answer; with an
+                account, "new mail shows up after the next check" is a
+                description of a mailbox. */}
             <EmptyState
               icon={<IconInbox size={24} />}
               title={enabledInboxes.length === 0 ? t('inbox.noAccountsEmpty') : t('inbox.empty')}
-              hint={enabledInboxes.length > 0 ? t('inbox.emptyHint') : t('inbox.noAccountsHint')}
               action={
                 enabledInboxes.length === 0 && onGoToAccounts ? (
                   <Button variant="primary" onClick={onGoToAccounts}>
@@ -1562,7 +1565,11 @@ export function InboxView({
           <VirtualList
             items={filteredMessages}
             keyOf={(m) => m.id}
-            estimate={96}
+            /* Re-measured after the type came down: a row with an account chip
+               in its meta line is 76.5px at the default density (it was 93.2),
+               and `VirtualList` measures the 8px `.joblist` gap along with the
+               row. The old 96 was already 9px short of the row it described. */
+            estimate={84}
             scrollerClassName="list-pane"
             rowsClassName="joblist"
           >
@@ -1643,7 +1650,9 @@ export function InboxView({
               </span>
               <span>{formatDateTime(openMessage.date)}</span>
               <span className="chip">{accountLabel(openMessage.accountId)}</span>
-              <span className="reader__hint">{t('inbox.readerKeys')}</span>
+              {/* The keyboard map used to be printed here in grey on every
+                  message ever opened. The shortcuts are unchanged; the sentence
+                  about them is not something anyone reads twice. */}
             </div>
 
             {findOpen ? (

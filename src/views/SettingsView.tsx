@@ -334,10 +334,7 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
           summary is the only thing telling you what this screen covers before
           you read sixteen cards.
         */}
-        <PageHead
-          title={t('settings.title')}
-          subtitle={narrow ? undefined : t('settings.subtitle')}
-        />
+        <PageHead title={t('settings.title')} />
 
         {/* Top of the screen, not tucked into the data card: an app that came
             up factory-fresh because its state file would not parse is
@@ -411,7 +408,6 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
             <EmptyState
               icon={<IconMail size={24} />}
               title={t('compose.noAccount')}
-              hint={t('account.emptyHint')}
               action={
                 <Button
                   variant="primary"
@@ -684,7 +680,7 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
 
             {/* Above the accent, and deliberately: the style decides what the
                 seven accent chips will be sitting on. */}
-            <Field label={t('settings.visualStyle')} hint={t('settings.styleHint')}>
+            <Field label={t('settings.visualStyle')}>
               <div className="stylecards">
                 {STYLES.map((style) => (
                   <button
@@ -746,7 +742,7 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
                     ))}
                   </div>
                 </Field>
-                <Field label={t('settings.atmosphereIntensity')} hint={t('settings.atmosphereIntensityHint')}>
+                <Field label={t('settings.atmosphereIntensity')}>
                   <input
                     className="range"
                     type="range"
@@ -900,7 +896,6 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
               checked={s.quietHoursEnabled}
               onChange={(v) => patch({ quietHoursEnabled: v })}
               title={t('settings.quietHoursOn')}
-              description={t('settings.quietHoursHint')}
             />
             {s.quietHoursEnabled ? (
               <div className="field__row">
@@ -992,7 +987,6 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
               checked={s.notifyOnCode !== false}
               onChange={(v) => patch({ notifyOnCode: v })}
               title={t('settings.notifyOnCode')}
-              description={t('settings.notifyOnCodeHint')}
             />
             {/* Also default on, and the switch that was missing entirely: until
                 it existed, ordinary mail arriving in a watched mailbox raised
@@ -1003,7 +997,6 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
               checked={s.notifyOnNewMail !== false}
               onChange={(v) => patch({ notifyOnNewMail: v })}
               title={t('settings.notifyOnNewMail')}
-              description={t('settings.notifyOnNewMailHint')}
             />
 
             {/*
@@ -1025,7 +1018,6 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
                 <div className="field">
                   <div className="switch__text">
                     <span className="switch__title">{t('settings.permNotifications')}</span>
-                    <span className="switch__desc">{t('settings.permNotificationsHint')}</span>
                   </div>
                   <div className="btn-row">
                     <StatusChip
@@ -1061,7 +1053,6 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
                 <div className="field">
                   <div className="switch__text">
                     <span className="switch__title">{t('settings.permExactAlarms')}</span>
-                    <span className="switch__desc">{t('settings.permExactAlarmsHint')}</span>
                   </div>
                   <div className="btn-row">
                     <StatusChip
@@ -1091,7 +1082,6 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
               checked={s.minimiseToTray}
               onChange={(v) => patch({ minimiseToTray: v })}
               title={t('settings.minimiseToTray')}
-              description={t('settings.trayHint')}
             />
             <Switch
               checked={s.launchAtLogin}
@@ -1219,7 +1209,6 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
                         })
                       }
                       title={t('settings.blockRemoteImages', { name })}
-                      description={t('settings.blockRemoteImagesHint')}
                     />
                     {policy !== 'always' && allowed.length > 0 ? (
                       <div className="field__hint settings-allowlist">
@@ -1403,7 +1392,6 @@ export function DigestCard() {
           checked={s.digestEnabled}
           onChange={(v) => patch({ digestEnabled: v })}
           title={t('settings.digestOn')}
-          description={t('settings.digestHint')}
         />
         {s.digestEnabled ? (
           <>
@@ -1571,7 +1559,6 @@ export function GreetingsCard() {
       <Card>
         <div className="card__body">
           <div className="section-label">{t('settings.greetings')}</div>
-          <div className="field__hint">{t('settings.greetHint')}</div>
           {state.accounts.length === 0 ? (
             <Banner tone="warning">{t('settings.greetNoAccount')}</Banner>
           ) : null}
@@ -1579,7 +1566,7 @@ export function GreetingsCard() {
             <Banner tone="info">{t('settings.greetNoContacts')}</Banner>
           ) : null}
 
-          <Field label={t('settings.greetCountry')} hint={t('settings.greetCountryHint')}>
+          <Field label={t('settings.greetCountry')}>
             <select
               className="input"
               value={s.greetingCountry}
@@ -1654,14 +1641,21 @@ export function GreetingsCard() {
             />
           </Field>
 
-          <div className="field__hint">{t('settings.greetMoving')}</div>
 
           <div className="btn-row">
             <Button variant="ghost" icon={<IconRefresh size={16} />} onClick={showGreetPlan}>
               {t('settings.greetPlan')}
             </Button>
             {greetPlan && greetPlan.length > 0 ? (
-              <Button variant="primary" onClick={() => void createGreetings()}>
+              /* Disabled without a sending account rather than left enabled:
+                 `createGreetings` returns immediately in that case, and a
+                 primary button that visibly does nothing is the failure this
+                 app is least willing to ship. The banner above says why. */
+              <Button
+                variant="primary"
+                disabled={!greetAccountId}
+                onClick={() => void createGreetings()}
+              >
                 {t('settings.greetCreate', { n: greetPlan.length })}
               </Button>
             ) : null}
@@ -2026,14 +2020,26 @@ function DataFolderCard() {
   const { confirm, confirmElement } = useConfirm()
 
   const [folder, setFolder] = useState<DataFolder | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
   const refresh = useCallback(async () => {
     if (!bridge) return
     try {
       setFolder(await bridge.dataFolder())
-    } catch {
+      setLoadError(null)
+    } catch (e) {
+      /*
+       * Kept, not swallowed. A rejected `dataFolder()` — a revoked Android SAF
+       * grant is the realistic one — used to leave `folder` null, and the
+       * `return null` below then drew nothing: on a desktop the jump bar
+       * scrolled to an empty anchor, and on a phone the Settings row still
+       * opened a full-height dialog with a title and no content. Same shape as
+       * the `return null` already fixed in ControlCard and
+       * CalendarSubscribeCard.
+       */
       setFolder(null)
+      setLoadError(e instanceof Error ? e.message : String(e))
     }
   }, [bridge])
 
@@ -2041,7 +2047,26 @@ function DataFolderCard() {
     void refresh()
   }, [refresh])
 
-  if (!bridge || !folder) return null
+  if (!bridge) return null
+
+  if (!folder) {
+    return (
+      <Card>
+        <div className="card__body">
+          <div className="section-label">{t('data.title')}</div>
+          <Banner tone="warning">
+            {t('data.failed')}
+            {loadError ? ` — ${loadError}` : ''}
+          </Banner>
+          <div className="btn-row">
+            <Button disabled={busy} onClick={() => void refresh()}>
+              {t('common.retry')}
+            </Button>
+          </div>
+        </div>
+      </Card>
+    )
+  }
 
   const apply = async (run: (move: boolean) => Promise<DataFolderChange>) => {
     if (busy) return
@@ -2087,7 +2112,7 @@ function DataFolderCard() {
           <Banner tone="warning">{t('data.fellBack')}</Banner>
         ) : null}
 
-        <Field label={t('data.current')} hint={t('data.currentHint')}>
+        <Field label={t('data.current')}>
           <div className="path-row">
             <code className="path-row__value">{folder.path}</code>
             <span className="chip">{formatBytes(folder.sizeBytes)}</span>

@@ -49,6 +49,7 @@ import type {
   ScheduledJob,
   SecretKind,
   SendResult,
+  SharePayload,
 } from './types'
 
 const STATE_KEY = 'aevistle.state.v1'
@@ -259,6 +260,20 @@ interface AevistleNativePlugin extends AndroidPermissionApi {
    * fire an event at — so `MainActivity` parks the id and this collects it.
    */
   takePendingOpen(): Promise<{ messageId?: string }>
+  /**
+   * What another app shared with us, if anything is waiting.
+   *
+   * Polled for the same reason `takePendingOpen` is, only more so: a share is
+   * nearly always a cold start — the share sheet is what launched the process,
+   * so there was no WebView in existence when the intent arrived.
+   * `MainActivity` parses it on the way in and the native side copies any
+   * attachments out of their content URIs before answering, because those URIs
+   * stop being readable when the task ends.
+   *
+   * Resolves with an empty object when nothing is waiting, which is every
+   * ordinary launch.
+   */
+  takePendingShare(): Promise<SharePayload>
   /**
    * `ClipboardManager.setPrimaryClip`, because the web API cannot do this here.
    *
@@ -929,6 +944,55 @@ export function createAndroidBridge(): PlatformBridge & AndroidPermissionApi {
         })
       return () => {
         cancelled = true
+      }
+    },
+
+    /**
+     * Polled at subscribe time like `onOpenMessage` above, and again whenever
+     * the app comes back to the foreground.
+     *
+     * The first poll is the cold share, which is the common one: the share
+     * sheet started the process, so by the time React mounts and subscribes the
+     * intent was parsed and parked long ago.
+     *
+     * The second is not belt and braces, it is the other half of the feature. A
+     * share into an app that is *already running* arrives at
+     * `MainActivity.onNewIntent`, which parks it exactly the same way — but the
+     * WebView is not reloaded and React never re-runs this effect, so a
+     * subscribe-once poll would collect nothing and the share would vanish
+     * without a word. `visibilitychange` is what fires in that window: Android
+     * resumes the activity to deliver the intent, the WebView becomes visible,
+     * and by then the payload is already waiting. A plain DOM event rather than
+     * `@capacitor/app`, which this project does not depend on.
+     *
+     * Not `notifyListeners` from the native side, for the reason
+     * `takePendingOpen` documents: an event fired at a bridge that does not
+     * exist yet is a silent no-op, and on the cold path there is no bridge.
+     */
+    onShare(handler) {
+      let cancelled = false
+      const poll = () => {
+        void Native.takePendingShare()
+          .then((share) => {
+            if (cancelled) return
+            // An empty object is what "nothing was waiting" looks like, and it
+            // is the answer on almost every launch and every resume. Yanking
+            // the user onto Compose for it would make the app unusable.
+            if (Object.keys(share).length === 0) return
+            handler(share)
+          })
+          .catch(() => {
+            /* An older APK with no such method. Nothing was waiting either way. */
+          })
+      }
+      poll()
+      const onVisible = () => {
+        if (document.visibilityState === 'visible') poll()
+      }
+      document.addEventListener('visibilitychange', onVisible)
+      return () => {
+        cancelled = true
+        document.removeEventListener('visibilitychange', onVisible)
       }
     },
 

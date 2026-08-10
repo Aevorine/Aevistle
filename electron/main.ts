@@ -24,7 +24,7 @@ import {
   Tray,
 } from 'electron'
 import path from 'node:path'
-import { promises as fs, readFileSync, writeFileSync } from 'node:fs'
+import { promises as fs, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { IPC, type DesktopPrefs, type TrayCommand } from '../src/core/ipc-contract'
 import type {
   Attachment,
@@ -36,6 +36,7 @@ import type {
   ScheduledJob,
   SecretKind,
   SendResult,
+  SharePayload,
 } from '../src/core/types'
 import type { DataFolder, DataFolderChange } from '../src/core/bridge'
 // The translation tables, not the i18n module: that one pulls in React for the
@@ -155,6 +156,10 @@ let desktopPrefs: DesktopPrefs = {
 /**
  * Started by the OS at login, so the first window should stay out of the way.
  * Consumed once — see `ready-to-show`.
+ *
+ * The other thing `process.argv` can carry is a share — a `mailto:` link or a
+ * file from Explorer's Send To menu. That read is down in "Sharing in" rather
+ * than here, because it has to sit after the buffer it fills.
  */
 let launchedHidden = process.argv.includes('--hidden')
 let quitting = false
@@ -503,13 +508,61 @@ process.on('unhandledRejection', reportMainProcessError)
  */
 if (process.platform === 'win32') app.setAppUserModelId('dev.aevistle.app')
 
+/*
+ * Offer this app as a handler for `mailto:` links.
+ *
+ * This is the Windows half of "share to Aevistle": a mail app that cannot be
+ * reached from an address on a web page is a mail app you have to copy and
+ * paste into. The registration is per-user — it writes under
+ * HKCU\Software\Classes, never HKLM — and it is an *offer*, not a seizure:
+ * Windows 10 and 11 protect the actual default-app choice behind a signed
+ * UserChoice hash that no application can write, so what this does is make
+ * Aevistle appear in Settings → Default apps and in the "how do you want to
+ * open this" chooser. The user still picks.
+ *
+ * Windows only, and deliberately. On Linux the equivalent is a .desktop file
+ * the package manager installs, and calling this would write a stray entry
+ * into the user's home directory from a portable AppImage; on macOS it is
+ * declared in the bundle's Info.plist by electron-builder's `protocols`.
+ */
+if (process.platform === 'win32') app.setAsDefaultProtocolClient('mailto')
+
 // A second copy would run the schedule twice and send everything in duplicate.
 if (!app.requestSingleInstanceLock()) {
   app.quit()
 }
 
-app.on('second-instance', () => {
+/*
+ * The second copy's command line, rather than the fact that there was one.
+ *
+ * This handler used to take no arguments at all, which meant a `mailto:` link
+ * followed while Aevistle was already running raised the window and threw the
+ * address away — the single-instance lock had quit the second process, and with
+ * it the only copy of what the user had asked for. `argv` here is that dead
+ * process's command line, handed over for exactly this purpose.
+ *
+ * Reveal first, dispatch second: the parse can produce nothing (a plain
+ * re-launch from the Start menu comes through here too), and in that case
+ * raising the window is the whole of the correct behaviour.
+ */
+app.on('second-instance', (_event, argv) => {
   revealWindow()
+  deliverShare(shareFromArgv(argv))
+})
+
+/*
+ * macOS delivers a protocol launch as an event instead of on the command line.
+ *
+ * There is no mac build being shipped today, and this is four lines rather than
+ * a maintained platform: without them a `mailto:` link on macOS would open the
+ * app to whatever screen it was last on, which is the silent no-op this whole
+ * feature exists to remove. `open-url` must be registered at module scope — it
+ * can fire before `whenReady` resolves.
+ */
+app.on('open-url', (event, url) => {
+  event.preventDefault()
+  revealWindow()
+  deliverShare(shareFromMailto(url))
 })
 
 /**
@@ -527,6 +580,209 @@ function revealWindow(): void {
   if (mainWindow.isMinimized()) mainWindow.restore()
   mainWindow.show()
   mainWindow.focus()
+}
+
+// ---------------------------------------------------------------------------
+// Sharing in
+//
+// Windows has no share sheet for a Win32 application. The real Share charm is
+// MSIX-only and this app ships as an NSIS installer and a portable exe, so the
+// two routes that do exist are the ones wired up here:
+//
+//   mailto:  — a link followed from a browser, a PDF, or another app
+//   Send To  — a shortcut in %APPDATA%\Microsoft\Windows\SendTo, created by
+//              the installer, which Explorer offers on right-click
+//
+// Both arrive the same way: the OS starts the executable with the payload on
+// the command line. With the single-instance lock in place that is either this
+// process's own `process.argv` (cold) or the argv `second-instance` hands over
+// (warm), so one parser serves both.
+// ---------------------------------------------------------------------------
+
+/**
+ * A share that has nowhere to go yet.
+ *
+ * On a cold `mailto:` launch the payload is parsed at module scope, before
+ * `whenReady`, and the window it belongs in does not exist for another second
+ * or so. The preload script buffers across "page loaded, React not mounted";
+ * this buffers across "no page at all", which is the half preload cannot see.
+ */
+let pendingShare: SharePayload | null = null
+/** Whether the current window has finished loading — see `flushShare`. */
+let rendererLoaded = false
+
+function deliverShare(share: SharePayload | null): void {
+  if (!share) return
+  pendingShare = share
+  flushShare()
+}
+
+/**
+ * Hand the payload to the renderer, or hold it until there is one.
+ *
+ * `webContents.send` into a page that has not finished loading is dropped
+ * silently — there is no listener yet, because the preload script's own
+ * `ipcRenderer.on` has not run. So the send waits for `did-finish-load`, which
+ * `createWindow` wires to call back here.
+ */
+function flushShare(): void {
+  if (!pendingShare || !rendererLoaded) return
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  mainWindow.webContents.send(IPC.share, pendingShare)
+  pendingShare = null
+}
+
+/*
+ * The cold path: this process *is* the launch.
+ *
+ * Read once, at module scope, next to the `--hidden` read it sits beside in
+ * `process.argv` — and not again afterwards, for the same reason `--hidden` is
+ * consumed once: the arguments stay in `process.argv` for the life of the
+ * process, so re-reading them would re-open the same shared file every time a
+ * window was created.
+ */
+pendingShare = shareFromArgv(process.argv)
+
+/**
+ * Everything on a command line that means "write a message about this".
+ *
+ * The argument list is not just the payload. `argv[0]` is always the
+ * executable, an unpackaged run adds the script path as `argv[1]`, and both
+ * Chromium and Electron append switches of their own (`--allow-file-access-
+ * from-files`, `--original-process-start-time=…`) that must not be mistaken for
+ * filenames. So: the leading entries are dropped by count, anything beginning
+ * with `-` is skipped wherever it appears, and what is left is judged by what
+ * it looks like.
+ *
+ * Returns null rather than an empty payload when nothing matched, because
+ * "someone double-clicked the Start menu shortcut" and "someone shared a file"
+ * both come through here and only the second should move the user's screen.
+ */
+function shareFromArgv(argv: string[]): SharePayload | null {
+  // Packaged: [exe, ...args]. Unpackaged: [electron, mainScript, ...args].
+  const args = argv.slice(app.isPackaged ? 1 : 2)
+  const merged: SharePayload = {}
+  const attachments: Attachment[] = []
+
+  for (const arg of args) {
+    if (typeof arg !== 'string' || arg.length === 0) continue
+    if (arg.startsWith('-')) continue
+
+    if (/^mailto:/i.test(arg)) {
+      const parsed = shareFromMailto(arg)
+      if (parsed) mergeShare(merged, parsed)
+      continue
+    }
+
+    // Send To hands over real paths, one argument each. A path that is not
+    // there — a stale shortcut, a UNC share that went away — is skipped rather
+    // than reported: the user asked to write a mail, not to be told about
+    // their filesystem, and the compose screen still opens for the rest.
+    const attachment = attachmentAt(arg, attachments.length)
+    if (attachment) attachments.push(attachment)
+  }
+
+  // Explorer caps a Send To selection well below this, but the command line is
+  // not only Explorer's to write. Same limit as `IPC.attachPaths`.
+  if (attachments.length > 0) merged.attachments = attachments.slice(0, 50)
+  return Object.keys(merged).length > 0 ? merged : null
+}
+
+/** One real file on disk, described the way `IPC.attachPaths` describes one. */
+function attachmentAt(filePath: string, index: number): Attachment | null {
+  try {
+    const stat = statSync(filePath)
+    if (!stat.isFile()) return null
+    return {
+      id: `att_${Date.now()}_${index}`,
+      name: path.basename(filePath),
+      size: stat.size,
+      mime: guessMime(filePath),
+      /*
+       * `path`, not `copy`, and the distinction matters later: `copy` claims
+       * this is an app-private snapshot that will still be there next week, and
+       * `snapshotAttachments` skips taking one for anything already marked that
+       * way. This is the user's own file where they keep it — exactly what
+       * `attachPaths` produces for a drag-and-drop, and it goes through the
+       * same snapshot step if the message is scheduled rather than sent now.
+       */
+      source: 'path',
+      path: filePath,
+      addedAt: Date.now(),
+      inline: false,
+    }
+  } catch {
+    // Not a path, or not reachable. Either way there is nothing to attach and
+    // nothing worth saying — a stray command-line argument is not an error.
+    return null
+  }
+}
+
+/**
+ * A `mailto:` URI, per RFC 6068.
+ *
+ * Parsed by hand rather than with `new URL()`. `mailto:` is an opaque scheme:
+ * `URL` will accept it, but it puts the whole of `someone@example.com?subject=x`
+ * into `pathname` and leaves `searchParams` empty, so the query has to be split
+ * off manually anyway.
+ *
+ * `decodeURIComponent`, not `URLSearchParams`. The latter decodes `+` as a
+ * space, which is correct for an HTML form body and wrong here — RFC 6068
+ * requires a space to be written `%20`, and a `+` in an address is a real
+ * character that Gmail and others use for tagged addresses. Decoding it as a
+ * space would rewrite `me+news@example.com` into an address that does not
+ * exist.
+ */
+function shareFromMailto(uri: string): SharePayload | null {
+  if (!/^mailto:/i.test(uri)) return null
+  const share: SharePayload = {}
+  try {
+    const rest = uri.slice('mailto:'.length)
+    const mark = rest.indexOf('?')
+    const recipients = mark < 0 ? rest : rest.slice(0, mark)
+    const query = mark < 0 ? '' : rest.slice(mark + 1)
+
+    const to = splitAddresses(decodeURIComponent(recipients))
+    if (to.length > 0) share.to = to
+
+    for (const pair of query.split('&')) {
+      if (!pair) continue
+      const equals = pair.indexOf('=')
+      if (equals < 0) continue
+      const field = pair.slice(0, equals).toLowerCase()
+      const value = decodeURIComponent(pair.slice(equals + 1))
+      if (field === 'subject' && value) share.subject = value
+      else if (field === 'body' && value) share.body = value
+      // A URI may spell the recipients both ways at once (RFC 6068 §5), so a
+      // `to=` adds to the list in front of the `?` rather than replacing it.
+      else if (field === 'to') share.to = [...(share.to ?? []), ...splitAddresses(value)]
+      else if (field === 'cc') share.cc = [...(share.cc ?? []), ...splitAddresses(value)]
+      else if (field === 'bcc') share.bcc = [...(share.bcc ?? []), ...splitAddresses(value)]
+      // Every other hfield is ignored on purpose. A link on a web page must not
+      // be able to set arbitrary headers on mail this user has not written yet.
+    }
+  } catch {
+    // A malformed percent-escape throws out of `decodeURIComponent`. Whatever
+    // was read before it is kept — half an address list is still a better
+    // compose screen than none — and the rest is dropped.
+  }
+  return Object.keys(share).length > 0 ? share : null
+}
+
+function splitAddresses(list: string): string[] {
+  return list
+    .split(',')
+    .map((one) => one.trim())
+    .filter((one) => one.length > 0)
+}
+
+/** Fold a second payload into the first, concatenating the address lists. */
+function mergeShare(into: SharePayload, from: SharePayload): void {
+  if (from.to) into.to = [...(into.to ?? []), ...from.to]
+  if (from.cc) into.cc = [...(into.cc ?? []), ...from.cc]
+  if (from.bcc) into.bcc = [...(into.bcc ?? []), ...from.bcc]
+  if (from.subject) into.subject = from.subject
+  if (from.body) into.body = from.body
 }
 
 /**
@@ -738,6 +994,22 @@ function createWindow(): void {
   lastBlurAt = 0
   mainWindow.on('blur', () => {
     lastBlurAt = Date.now()
+  })
+
+  /*
+   * A share waiting for a window now has one.
+   *
+   * `did-finish-load` rather than `ready-to-show`, and that is the load-bearing
+   * part: `ready-to-show` fires when there is a frame to paint, which can be
+   * before the preload script's `ipcRenderer.on` has run — and a send with no
+   * listener on the other end is dropped without a word. It also fires again on
+   * every reload, which is what makes this correct in dev with hot reload
+   * rather than only on first paint.
+   */
+  rendererLoaded = false
+  mainWindow.webContents.on('did-finish-load', () => {
+    rendererLoaded = true
+    flushShare()
   })
 
   if (DEV_SERVER) {

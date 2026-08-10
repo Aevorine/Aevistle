@@ -53,6 +53,26 @@ asar: true
 asarUnpack:
   - '**/*.node'
 
+# Claim `mailto:` so an address on a web page can open this app.
+#
+# Read by the macOS and Linux targets ONLY — it becomes CFBundleURLTypes in
+# Info.plist and a MimeType line in the .desktop file. It does NOT do anything
+# on Windows: `NsisTarget` never looks at this key (verified against
+# app-builder-lib 26.15.3 — only electronMac.js, LinuxTargetHelper.js and
+# AppxTarget.js read it). The Windows registration is written by hand in
+# build/installer.nsh, and that is the only reason mailto works there.
+#
+# Leaving this here anyway, because the mac and linux targets are configured
+# below and it is the correct declaration for both.
+#
+# Nothing here makes Aevistle the default mail client — that choice stays the
+# user's. The link is never sent, only opened: `electron/main.ts` parses it
+# into a draft and shows the compose screen.
+protocols:
+  - name: Aevistle
+    schemes:
+      - mailto
+
 # The tray icon is not optional decoration: closing the window hides the app to
 # the tray, and without a tray entry the user has no way back and no visible
 # sign that schedules are still running. `buildResources` is excluded from the

@@ -88,6 +88,7 @@ export function createDesktopBridge(): PlatformBridge {
 
     notify: (title, body, opts) => api.notify(title, body, opts?.messageId),
     onOpenMessage: (handler) => api.onOpenMessage(handler),
+    onShare: (handler) => api.onShare(handler),
     openExternal: (url) => api.openExternal(url),
     appInfo: () => api.appInfo(),
   }

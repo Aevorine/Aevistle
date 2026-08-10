@@ -190,7 +190,7 @@ export function HomeView({
   return (
     <div className="view view--home">
       <div className="view__inner">
-        <PageHead title={t('home.title')} subtitle={t('home.subtitle')} />
+        <PageHead title={t('home.title')} />
 
         <div className="hometiles">
           {narrow

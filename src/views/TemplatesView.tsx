@@ -62,7 +62,6 @@ export function TemplatesView({ onApplied }: { onApplied: () => void }) {
       <div className="view__inner">
         <PageHead
           title={t('templates.title')}
-          subtitle={t('templates.subtitle')}
           action={
             <Button variant="primary" icon={<IconPlus size={16} />} onClick={startNew}>
               {t('templates.add')}
@@ -75,7 +74,6 @@ export function TemplatesView({ onApplied }: { onApplied: () => void }) {
             <EmptyState
               icon={<IconFileText size={24} />}
               title={t('templates.empty')}
-              hint={t('templates.emptyHint')}
             />
           </div>
         ) : (

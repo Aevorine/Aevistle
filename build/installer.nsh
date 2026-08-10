@@ -37,6 +37,73 @@
 !define AEVISTLE_PATH_FILE "${AEVISTLE_USERDATA}\datapath.txt"
 
 ; ---------------------------------------------------------------------------
+; Install — the Send To entry
+; ---------------------------------------------------------------------------
+
+; "Right-click a file → Send to → Aevistle."
+;
+; This is as close as a Win32 application gets to Android's share sheet. The
+; real Windows Share charm (the one the Photos app offers) is only available to
+; MSIX-packaged apps that declare a ShareTarget extension; an NSIS-installed
+; .exe cannot appear there at any price, and pretending otherwise would mean
+; shipping a second, sandboxed packaging of the whole app. Send To is the
+; mechanism Windows actually gives us: a shortcut in a magic folder, which
+; Explorer offers on every file's context menu and invokes with the selected
+; paths as command-line arguments. `electron/main.ts` parses them.
+;
+; SENDTO is per-user by definition — there is no all-users Send To menu that
+; modern Windows reads — so the shell context is forced to `current` for the
+; one line that needs it and put back afterwards. Leaving it switched would
+; silently redirect every $APPDATA and $SMPROGRAMS the rest of the install
+; touches, and `perMachine: false` means the two are normally the same anyway;
+; this is insurance against that changing.
+;
+; customInstall runs at the end of the install section, after the Start menu
+; and desktop links — see app-builder-lib/templates/nsis/installSection.nsh.
+!macro customInstall
+  SetShellVarContext current
+  CreateShortcut "$SENDTO\${PRODUCT_FILENAME}.lnk" "$INSTDIR\${APP_EXECUTABLE_FILENAME}"
+  ${if} $installMode == "all"
+    SetShellVarContext all
+  ${endif}
+
+  ; -------------------------------------------------------------------------
+  ; mailto: — the URL protocol handler, and the Default Apps entry
+  ; -------------------------------------------------------------------------
+  ;
+  ; This is written by hand because electron-builder will not write it. Its
+  ; `protocols:` option looks like it covers Windows and does not: only
+  ; electronMac.js, LinuxTargetHelper.js and AppxTarget.js read that key —
+  ; NsisTarget.js never does (checked against app-builder-lib 26.15.3). Setting
+  ; it and assuming produces an installer that builds cleanly and registers
+  ; nothing, which is the exact failure this project keeps writing gates for.
+  ;
+  ; `app.setAsDefaultProtocolClient('mailto')` in electron/main.ts writes the
+  ; first half of this at runtime, so why both? Because that call only creates
+  ; HKCU\Software\Classes\mailto — the fallback Windows consults when nothing
+  ; else claims the scheme. It does not put Aevistle in the list Settings →
+  ; Default apps offers, so on any machine that already has a mail client (or
+  ; that has ever been asked the question) there is no way for the user to
+  ; choose this one. The Capabilities block below is what puts it on that list.
+  ;
+  ; SHELL_CONTEXT is HKCU here, because perMachine is false. The keys mirror
+  ; what a per-user install is allowed to write; nothing goes to HKLM and
+  ; nothing touches UserChoice, which is hash-protected and not ours to set.
+  ; Windows still asks the user before switching.
+  WriteRegStr SHELL_CONTEXT "Software\Classes\${PRODUCT_FILENAME}.Url.mailto" "" "Aevistle mail link"
+  WriteRegStr SHELL_CONTEXT "Software\Classes\${PRODUCT_FILENAME}.Url.mailto" "URL Protocol" ""
+  WriteRegStr SHELL_CONTEXT "Software\Classes\${PRODUCT_FILENAME}.Url.mailto\DefaultIcon" "" "$INSTDIR\${APP_EXECUTABLE_FILENAME},0"
+  WriteRegStr SHELL_CONTEXT "Software\Classes\${PRODUCT_FILENAME}.Url.mailto\shell\open\command" "" '"$INSTDIR\${APP_EXECUTABLE_FILENAME}" "%1"'
+
+  ; The Default Apps registration. `ApplicationName` is a proper noun and so is
+  ; not translated; no other user-facing string is introduced here.
+  WriteRegStr SHELL_CONTEXT "Software\Clients\Mail\${PRODUCT_FILENAME}" "" "${PRODUCT_FILENAME}"
+  WriteRegStr SHELL_CONTEXT "Software\Clients\Mail\${PRODUCT_FILENAME}\Capabilities" "ApplicationName" "${PRODUCT_FILENAME}"
+  WriteRegStr SHELL_CONTEXT "Software\Clients\Mail\${PRODUCT_FILENAME}\Capabilities\UrlAssociations" "mailto" "${PRODUCT_FILENAME}.Url.mailto"
+  WriteRegStr SHELL_CONTEXT "Software\RegisteredApplications" "${PRODUCT_FILENAME}" "Software\Clients\Mail\${PRODUCT_FILENAME}\Capabilities"
+!macroend
+
+; ---------------------------------------------------------------------------
 ; Uninstall — keep the data, or remove it
 ; ---------------------------------------------------------------------------
 
@@ -152,4 +219,28 @@ Choose No to remove only the program and keep your data for a future install."
     FileWrite $R6 "silent=$R7 lang=$LANGUAGE branch=$R5$\r$\n"
     FileClose $R6
   ${EndIf}
+
+  ; The Send To entry goes with the program, never with the data — it is a
+  ; shortcut to an executable that is about to be deleted.
+  ;
+  ; Removed on an update as well as a real uninstall. customInstall recreates
+  ; it moments later, and a shortcut left pointing at the old install directory
+  ; is worse than no shortcut: it stays on the context menu and does nothing.
+  ;
+  ; Last in the macro, and the context is restored, because everything above
+  ; reads $APPDATA — which resolves to ProgramData under the `all` context and
+  ; would look for the user's data in a folder that has never held any.
+  SetShellVarContext current
+  Delete "$SENDTO\${PRODUCT_FILENAME}.lnk"
+  ${if} $installMode == "all"
+    SetShellVarContext all
+  ${endif}
+
+  ; The mailto registration, in the reverse order it was written. Left behind,
+  ; these would keep Aevistle in Settings → Default apps pointing at an
+  ; executable that no longer exists — and a mailto link would then open
+  ; nothing at all, with no way for the user to see why.
+  DeleteRegValue SHELL_CONTEXT "Software\RegisteredApplications" "${PRODUCT_FILENAME}"
+  DeleteRegKey SHELL_CONTEXT "Software\Clients\Mail\${PRODUCT_FILENAME}"
+  DeleteRegKey SHELL_CONTEXT "Software\Classes\${PRODUCT_FILENAME}.Url.mailto"
 !macroend

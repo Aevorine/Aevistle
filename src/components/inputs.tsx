@@ -225,7 +225,6 @@ export function AttachmentPicker({
   onRemove,
   onToggleInline,
   onDropPaths,
-  limitMb,
   presence,
   thumbnails,
   onPreview,
@@ -252,7 +251,6 @@ export function AttachmentPicker({
    * `webUtils` gave us the path back.
    */
   onDropPaths?: (files: FileList) => void
-  limitMb: number
   /**
    * Path → still on disk. `undefined` for the whole map, or for one path,
    * means "not known" and is shown as nothing at all. Only an explicit `false`
@@ -294,8 +292,12 @@ export function AttachmentPicker({
         }}
       >
         <IconPaperclip size={22} />
+        {/* The affordance, and nothing else. The size cap used to be spelled
+            out on a second line here — grey prose on a screen whose complaint
+            is that there is no room for the message — and it is the one number
+            the app already enforces for you: an oversized file is refused with
+            the limit in the message, at the moment it matters. */}
         <div className="dropzone__title">{t('compose.dropHere')}</div>
-        <div className="dropzone__hint">{t('compose.dropHint', { limit: limitMb })}</div>
       </div>
 
       {attachments.length > 0 ? (

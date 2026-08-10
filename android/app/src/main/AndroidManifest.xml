@@ -66,6 +66,68 @@
                 <data android:scheme="dev.aevistle.app" android:host="oauth" />
             </intent-filter>
 
+            <!--
+                "Share to Aevistle" — the system share sheet.
+
+                `text/plain` and `*/*` are both listed rather than just the
+                wildcard: a filter that only claims `*/*` is matched by the
+                sheet, but Android ranks and labels a share target by the most
+                specific type it declares, and a share of plain text into an
+                app whose only claim is "anything" is the entry that gets
+                sorted to the bottom. Sharing text is the common case here —
+                a link, a paragraph, a code someone sent you.
+
+                `ACTION_SEND_MULTIPLE` is a separate action, not a flag, so
+                selecting three photos and hitting Share reaches nothing
+                without this. It arrives as a `ClipData`; see
+                `MainActivity.recordPendingShare`.
+
+                No new permission goes with this. The sender attaches
+                `FLAG_GRANT_READ_URI_PERMISSION` to the intent, which is a
+                grant on those specific URIs for as long as this task lives —
+                which is why the plugin copies the bytes out immediately
+                rather than storing the URI. Asking for READ_EXTERNAL_STORAGE
+                to read a file someone deliberately handed us would be asking
+                for the whole gallery to read one photo.
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+
+            <!--
+                `mailto:` — an address tapped in a browser, a PDF, or another
+                app's contact card.
+
+                Both actions, because the two are used interchangeably in the
+                wild for the same link: a web page's `<a href="mailto:…">` is
+                delivered as `ACTION_VIEW`, while an app that means "send mail
+                to this person" builds `ACTION_SENDTO`. Claiming only one
+                leaves the other going to whatever else is installed.
+
+                `BROWSABLE` is what lets a browser start it at all — the same
+                reasoning as the OAuth filter above, and the same reason this
+                is not folded into the LAUNCHER filter.
+
+                Nothing is sent on arrival. The address lands in the compose
+                screen with the cursor in it; the user still writes the mail
+                and still presses send.
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.SENDTO" />
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="mailto" />
+            </intent-filter>
+
         </activity>
 
         <!--

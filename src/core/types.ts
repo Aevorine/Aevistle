@@ -193,6 +193,34 @@ export function emptyDraft(accountId = ''): MessageDraft {
   }
 }
 
+/**
+ * What another application handed us to send.
+ *
+ * Three OS mechanisms produce one of these — Android's share sheet, a
+ * `mailto:` link, and Explorer's Send To menu — and they all mean the same
+ * thing: someone was in another app, chose Aevistle, and brought part of a
+ * message with them.
+ *
+ * Every field is optional because every source fills in a different subset. A
+ * bare `mailto:someone@example.com` carries one address and nothing else; a
+ * photo shared from the gallery carries one attachment and nothing else; a
+ * "share this article" carries a subject and a body. Whatever is absent is
+ * simply left as the user already had it.
+ *
+ * Deliberately not `Partial<MessageDraft>`. The sender is describing an
+ * intention, not editing a draft, and these six fields are the whole of what
+ * the platforms can express. Widening it would let another application decide
+ * this app's `accountId`, `priority` or `bodyFormat`.
+ */
+export interface SharePayload {
+  to?: string[]
+  cc?: string[]
+  bcc?: string[]
+  subject?: string
+  body?: string
+  attachments?: Attachment[]
+}
+
 // ---------------------------------------------------------------------------
 // Scheduling
 // ---------------------------------------------------------------------------

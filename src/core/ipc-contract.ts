@@ -23,6 +23,7 @@ import type {
   ScheduledJob,
   SecretKind,
   SendResult,
+  SharePayload,
 } from './types'
 import type {
   AppInfo,
@@ -259,6 +260,20 @@ export interface DesktopApi {
    * not mounted React yet, so the preload holds the id until someone asks.
    */
   onOpenMessage(handler: (messageId: string) => void): () => void
+  /**
+   * Another application handed this one something to send.
+   *
+   * On Windows that is a `mailto:` link followed from a browser or a document,
+   * or a file sent through Explorer's Send To menu. Either way the OS starts —
+   * or, with the single-instance lock, re-enters — this process with the
+   * payload on the command line, so the parse happens in the main process and
+   * the result comes across as an event.
+   *
+   * Same replay treatment as `onTrayCommand` and `onOpenMessage`, and it is
+   * load-bearing rather than defensive here: a `mailto:` link with the app
+   * closed *is* the launch, so the payload always predates the renderer.
+   */
+  onShare(handler: (share: SharePayload) => void): () => void
 
   /**
    * `messageId` is what makes the notification clickable-through: the main
@@ -404,6 +419,7 @@ export const IPC = {
   clearImageCache: 'aevistle:clear-image-cache',
   inboxEvent: 'aevistle:inbox-event',
   openMessage: 'aevistle:open-message',
+  share: 'aevistle:share',
   notify: 'aevistle:notify',
   openExternal: 'aevistle:open-external',
   appInfo: 'aevistle:app-info',

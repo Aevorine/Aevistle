@@ -835,6 +835,19 @@ export function AccountDialog({
         if (requiresOAuth(next.providerId) && next.authMethod !== 'none') {
           next.authMethod = 'oauth2'
         }
+        /*
+         * And the way back out, which was missing.
+         *
+         * Retyping an @outlook.com account's address as a custom domain left
+         * `authMethod: 'oauth2'` behind on a provider that has no OAuth. The
+         * mechanism picker hides itself when `supportsOAuth` is false, and the
+         * password box hides itself when the method is oauth2 — so the form
+         * kept an error the user had no control left to clear, and Cancel was
+         * the only escape. The rewrite has to run in both directions.
+         */
+        if (next.authMethod === 'oauth2' && !supportsOAuth(next.providerId)) {
+          next.authMethod = 'password'
+        }
       }
       if (may('label')) next.label = cfg.guessed ? cfg.domain : p.name
       if (may('host')) next.host = p.host

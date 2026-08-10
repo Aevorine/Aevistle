@@ -30,6 +30,7 @@ import type {
   ScheduledJob,
   SecretKind,
   SendResult,
+  SharePayload,
 } from './types'
 import type { DownloadProgress, UpdateAsset, UpdateInfo } from './update'
 import type { DesktopPrefs, DownloadOutcome, TrayCommand } from './ipc-contract'
@@ -645,6 +646,19 @@ export interface PlatformBridge {
    * shapes are the same to the caller — subscribe, get told, unsubscribe.
    */
   onOpenMessage?(handler: (messageId: string) => void): () => void
+  /**
+   * Another application handed us something to send. Opens Compose with it.
+   *
+   * Android's share sheet, a `mailto:` link and Explorer's Send To all arrive
+   * here. Same two delivery shapes as `onOpenMessage` and for the same reason:
+   * the desktop can push it as an event because the window is already alive,
+   * Android cannot because the share is what started the process. Both look
+   * identical to the caller — subscribe, get told at most once per share,
+   * unsubscribe.
+   *
+   * Optional: the web build has no OS to be shared to.
+   */
+  onShare?(handler: (share: SharePayload) => void): () => void
   openExternal(url: string): Promise<void>
   appInfo(): Promise<AppInfo>
   /**

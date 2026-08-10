@@ -47,7 +47,7 @@ import { VirtualList } from '../components/VirtualList'
 import { useApp } from '../state/AppState'
 import { useCodeCheck, WAIT_PRESETS, type CheckOutcome } from '../state/CodeCheck'
 import { useI18n } from '../i18n'
-import { CODE_FRESH_MS, freshHits } from '../core/codeHistory'
+import { CODE_FRESH_MS } from '../core/codeHistory'
 import { copyText } from '../core/clipboard'
 import { encodeQr, qrPath } from '../core/qr'
 import { accountLabel as labelOfAccount } from '../core/accounts'
@@ -160,13 +160,12 @@ export function CodesView({ onGoToInbox }: { onGoToInbox?: () => void }) {
      wait timer all used to call `Date.now()` separately, which meant a card
      could be judged stale a hair before or after the timer under it agreed. */
   const now = Date.now()
-  /* `freshHits` rather than a hand-rolled `h.date >= cutoff`, so the window
-     this screen draws and the one the nav badge counts are the same window —
-     see `core/codeHistory`, where both now live. `cutoff` stays because the
-     per-card `data-fresh` mark below is a predicate over one hit, not a
-     filter over a list. */
+  /* `CODE_FRESH_MS` rather than a number typed here, so the window this screen
+     draws its `data-fresh` mark from and the one the nav badge counts are the
+     same window — see `core/codeHistory`, where it lives. The mark is a
+     predicate over one hit, not a filter over a list, so it is a cutoff rather
+     than a call to `freshHits`. */
   const cutoff = now - CODE_FRESH_MS
-  const fresh = freshHits(matching, now)
   const visible = matching
   const unread = state.codeHits.filter((h) => !h.readAt).length
 
@@ -253,26 +252,13 @@ export function CodesView({ onGoToInbox }: { onGoToInbox?: () => void }) {
   return (
     <div className="view view--list">
       <div className="view__inner">
+        {/* No subtitle. It ranked unread over fresh over a sentence describing
+            the screen — three grey lines of prose for one number the nav badge
+            already carries, above the codes themselves. "Still to deal with" is
+            now said by the unread dot on each card and by the "mark all read"
+            button appearing at all. */}
         <PageHead
           title={t('codes.title')}
-          subtitle={
-            /* Unread outranks fresh: "still to deal with" is the question this
-               screen exists to answer, and an unread code from an hour ago
-               matters more than a read one from a minute ago.
-
-               Deliberately *not* collapsed into `actionableHits` (recent and
-               unread), which is what the nav badge counts. The badge has one
-               number to spend and must not point at history; the subtitle has
-               a whole sentence and falls back, so it can still say "3 just
-               arrived" once everything has been read. Same underlying rule,
-               two ranks of it — which is why both ranks are spelled out here
-               and the shared half is imported rather than re-derived. */
-            unread > 0
-              ? t('codes.subtitleUnread', { n: unread })
-              : fresh.length > 0
-                ? t('codes.subtitleFresh', { n: fresh.length })
-                : t('codes.subtitle')
-          }
           action={
             <>
               {/* The reason anyone opens this screen while waiting. First
@@ -325,9 +311,12 @@ export function CodesView({ onGoToInbox }: { onGoToInbox?: () => void }) {
             <span className="checkbar__icon">
               {check.lastOutcome === 'found' ? <IconCheck size={15} /> : <IconAlert size={15} />}
             </span>
+            {/* The outcome sentence and nothing else. Each one used to be
+                followed by a grey second sentence explaining it; the six
+                outcomes already say what happened in their own words, and the
+                server's own message still follows when there is one. */}
             <span className="checkbar__text">
-              <strong>{t(`codes.outcome.${check.lastOutcome}`)}</strong>{' '}
-              <span className="checkbar__hint">{t(`codes.outcome.${check.lastOutcome}Hint`)}</span>
+              <strong>{t(`codes.outcome.${check.lastOutcome}`)}</strong>
               {check.lastError && check.lastOutcome === 'failed' ? (
                 <span className="checkbar__raw"> {check.lastError}</span>
               ) : null}
@@ -363,16 +352,13 @@ export function CodesView({ onGoToInbox }: { onGoToInbox?: () => void }) {
 
         {visible.length === 0 ? (
           <div className="list-pane">
+            {/* No hint line. All three variants described what the screen does
+                rather than telling anyone anything they could act on — and in
+                the one case where there *is* something to do, the button below
+                is it. */}
             <EmptyState
               icon={<IconKey size={24} />}
               title={state.codeHits.length === 0 ? t('codes.empty') : t('common.empty')}
-              hint={
-                state.codeHits.length > 0
-                  ? t('common.noMatchHint')
-                  : hasAnyInbox
-                    ? t('codes.emptyHint')
-                    : t('codes.emptyNoInboxHint')
-              }
               action={
                 !hasAnyInbox && onGoToInbox ? (
                   <Button variant="primary" onClick={onGoToInbox}>
@@ -386,7 +372,14 @@ export function CodesView({ onGoToInbox }: { onGoToInbox?: () => void }) {
           <VirtualList
             items={visible}
             keyOf={(hit) => hit.id}
-            estimate={148}
+            /* Re-measured after the type came down, not scaled from the old
+               number: a code card is 105.6px and a link card 123.3px at the
+               default density (they were 133.6 and 149.6), and `VirtualList`
+               measures the 12px `--row-gap` along with the row. 118 is the code
+               card plus its gap — the same convention the old 148 followed,
+               since a screen called Codes is mostly codes and the link cards
+               that are taller get measured as they scroll in. */
+            estimate={118}
             scrollerClassName="list-pane"
             rowsClassName="codelist"
           >

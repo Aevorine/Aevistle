@@ -109,7 +109,6 @@ export function ContactsView() {
       <div className="view__inner">
         <PageHead
           title={t('contacts.title')}
-          subtitle={t('contacts.subtitle')}
           action={
             <Button variant="primary" icon={<IconPlus size={16} />} onClick={startNew}>
               {t('contacts.add')}
@@ -127,7 +126,6 @@ export function ContactsView() {
             <EmptyState
               icon={<IconUsers size={24} />}
               title={state.contacts.length === 0 ? t('contacts.empty') : t('common.empty')}
-              hint={state.contacts.length === 0 ? t('contacts.emptyHint') : t('common.noMatchHint')}
             />
           </div>
         ) : (

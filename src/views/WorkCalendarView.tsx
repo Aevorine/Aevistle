@@ -75,7 +75,6 @@ import {
   countInYear,
   holidayNameFor,
   HOLIDAY_PRESETS,
-  PRESET_MAX_YEARS,
   yearRange,
   yearsInCalendar,
 } from '../core/holidayPresets'
@@ -1184,7 +1183,6 @@ export function WorkCalendarView({ onCompose }: { onCompose?: () => void } = {})
       <div className="view__inner">
         <PageHead
           title={t('workcal.title')}
-          subtitle={t('workcal.subtitle')}
           action={
             <StatusChip
               tone={todayWorking ? 'success' : 'neutral'}
@@ -1222,10 +1220,14 @@ export function WorkCalendarView({ onCompose }: { onCompose?: () => void } = {})
           <Card>
             <CardHeader
               title={periodLabel}
+              /* The instruction that used to sit here ("tap a day to flip it")
+                 is gone with the rest of the explanatory prose; the solar term
+                 stays because it is the month's data, not a description of the
+                 control below it. */
               hint={
                 state.settings.visualStyle === 'runecircuit'
-                  ? `${t('workcal.gridHint')} · ${t(SOLAR_TERM_LABEL[solarTerm])}`
-                  : t('workcal.gridHint')
+                  ? t(SOLAR_TERM_LABEL[solarTerm])
+                  : undefined
               }
               action={
                 <div className="btn-row">
@@ -1483,9 +1485,7 @@ export function WorkCalendarView({ onCompose }: { onCompose?: () => void } = {})
                       {t('common.cancel')}
                     </Button>
                   </div>
-                ) : (
-                  <div className="field__hint">{t('cal.gap.selectHint')}</div>
-                )
+                ) : null
               ) : null}
 
               {scope !== 'day' ? (
@@ -1537,7 +1537,6 @@ export function WorkCalendarView({ onCompose }: { onCompose?: () => void } = {})
           <Card>
             <CardHeader
               title={t('cal.conflict.title')}
-              hint={t('cal.conflict.hint', { days: conflictScan.days })}
               action={
                 conflictScan.conflicts.length > 0 ? (
                   <StatusChip
@@ -1593,7 +1592,7 @@ export function WorkCalendarView({ onCompose }: { onCompose?: () => void } = {})
           {/* --- presets ----------------------------------------------------- */}
 
           <Card>
-            <CardHeader title={t('workcal.presets')} hint={t('cal.preset.rangeHint', { max: PRESET_MAX_YEARS })} />
+            <CardHeader title={t('workcal.presets')} />
             <div className="card__body form-rows">
               <div className="field__row">
                 <Field label={t('cal.preset.from')}>
@@ -1631,7 +1630,7 @@ export function WorkCalendarView({ onCompose }: { onCompose?: () => void } = {})
           {/* --- China's statutory tables ------------------------------------ */}
 
           <Card>
-            <CardHeader title={t('cal.cn.title')} hint={t('cal.cn.hint')} />
+            <CardHeader title={t('cal.cn.title')} />
             <div className="card__body form-rows">
               <ul className="yearlist">
                 {[...new Set([...knownYears(cached), now.getFullYear(), now.getFullYear() + 1])]
@@ -1692,7 +1691,7 @@ export function WorkCalendarView({ onCompose }: { onCompose?: () => void } = {})
           {/* --- .ics -------------------------------------------------------- */}
 
           <Card>
-            <CardHeader title={t('cal.ics.title')} hint={t('cal.ics.hint')} />
+            <CardHeader title={t('cal.ics.title')} />
             <div className="card__body">
               <div className="btn-row">
                 <Button variant="secondary" icon={<IconDownload size={15} />} onClick={exportCalendarIcs}>
@@ -1720,9 +1719,7 @@ export function WorkCalendarView({ onCompose }: { onCompose?: () => void } = {})
                 checked={resolvedIcs}
                 onChange={setResolvedIcs}
                 title={t('cal.ics.resolved')}
-                description={t('cal.ics.resolvedHint')}
               />
-              <div className="field__hint">{t('cal.ics.importHint')}</div>
               {/*
                 Said here rather than discovered later. "Subscribe" in the sense
                 Google Calendar means it needs a public URL to poll, and this
@@ -1738,7 +1735,7 @@ export function WorkCalendarView({ onCompose }: { onCompose?: () => void } = {})
           {/* --- weekend ----------------------------------------------------- */}
 
           <Card>
-            <CardHeader title={t('workcal.weekend')} hint={t('workcal.weekendHint')} />
+            <CardHeader title={t('workcal.weekend')} />
             <div className="card__body">
               <div className="daypicker daypicker--wide">
                 {WEEKDAY_ORDER.map((day) => {
@@ -1773,7 +1770,7 @@ export function WorkCalendarView({ onCompose }: { onCompose?: () => void } = {})
           {/* --- paste ------------------------------------------------------- */}
 
           <Card>
-            <CardHeader title={t('workcal.paste')} hint={t('workcal.pasteHint')} />
+            <CardHeader title={t('workcal.paste')} />
             <div className="card__body form-rows">
               <Field label={t('workcal.pasteInto')}>
                 <div className="btn-row">
@@ -1816,7 +1813,7 @@ export function WorkCalendarView({ onCompose }: { onCompose?: () => void } = {})
 
           {years.length > 0 ? (
             <Card>
-              <CardHeader title={t('cal.year.title')} hint={t('cal.year.hint')} />
+              <CardHeader title={t('cal.year.title')} />
               <div className="card__body">
                 <ul className="yearlist">
                   {years.map((year) => {

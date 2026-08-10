@@ -349,6 +349,11 @@ textarea {
 }
 .view--list .view__inner {
   height: 100%;
+  /* Tighter than the base column. A list screen stacks four toolbars — heading,
+     account strip, search, actions — above the rows, and at `--sp-4` the gaps
+     alone were 64px of nothing before the first message. The rows themselves
+     are what this screen is for. */
+  gap: var(--sp-2);
 }
 .view--list .list-pane {
   flex: 1;
@@ -397,6 +402,15 @@ textarea {
   bottom: 0;
   height: 1px;
   background: var(--border-subtle);
+}
+/* On a list screen the heading is a label, not a band. `--pagehead-h` sizes
+   the head on the form screens, where it holds a title, a subtitle and a row
+   of actions; here the subtitle is gone and the actions already carry their
+   own control height, so the reserved minimum was 60px of guaranteed air above
+   the rows and nothing else. */
+.view--list .page-head {
+  min-height: 0;
+  padding-block: var(--sp-1);
 }
 .page-head__text {
   flex: 1;
@@ -477,7 +491,10 @@ textarea {
   display: flex;
   align-items: center;
   gap: var(--sp-3);
-  font-size: var(--text-lg);
+  /* 小四 rather than 四号. A section label is a signpost inside a card, and at
+     18.67px it competed with the screen title above it; the weight and the
+     hairline already say "this is a heading". */
+  font-size: var(--text-base);
   font-weight: 700;
   line-height: var(--leading-tight);
   color: var(--text-1);
@@ -1262,9 +1279,24 @@ textarea {
   border-radius: var(--r-xs);
   background: color-mix(in srgb, var(--accent) 13%, transparent);
   color: var(--accent);
-  font-size: var(--text-sm);
+  /* 五号, one step below the meta rows chips sit in. At `--text-sm` a chip was
+     *larger* than the 14px timestamp beside it, which is what made every list
+     row read as a row of badges with some text in it. */
+  font-size: var(--text-xs);
+  /* Paragraph leading inside a pill is 6px of dead space top and bottom, and a
+     chip is never more than one line. This is what keeps a chip from being the
+     tallest thing in a metadata row. */
+  line-height: var(--leading-tight);
   font-weight: 400;
   max-width: 100%;
+  /* A chip can hold one unbreakable token — "Sign in at accounts.example.com"
+     on the Codes screen is the case that broke. Without `anywhere` the pill
+     refuses to shrink below the string and the glyphs paint outside its own
+     background; the ellipsis is the second half of the same fix, for the
+     nowrap children (`.chip__text`) that must not wrap at all. */
+  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .chip--invalid {
   background: var(--danger-bg);
@@ -1819,10 +1851,6 @@ textarea {
   font-size: var(--text-base);
   font-weight: 700;
 }
-.dropzone__hint {
-  font-size: var(--text-sm);
-  color: var(--text-3);
-}
 
 .attachments {
   display: flex;
@@ -1907,7 +1935,7 @@ textarea {
 .joblist {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-3);
+  gap: var(--sp-2);
 }
 
 .job {
@@ -1966,7 +1994,12 @@ textarea {
   min-width: 0;
 }
 .job__name {
-  font-size: var(--text-lg);
+  /* 小四, not 四号. A mail subject is the row's headline, but it is one line of
+     truncated text in a list of fifty — bold is what marks it, not size. */
+  font-size: var(--text-base);
+  /* Single line by construction (nowrap + ellipsis below), so paragraph leading
+     buys nothing and costs 5px on every row. */
+  line-height: var(--leading-tight);
   font-weight: 700;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1977,7 +2010,7 @@ textarea {
   flex-wrap: wrap;
   gap: var(--sp-1) var(--sp-3);
   margin-top: 4px;
-  font-size: var(--text-sm);
+  font-size: var(--text-xs);
   color: var(--text-3);
 }
 .job__meta strong {
@@ -2151,15 +2184,15 @@ textarea {
   flex-direction: column;
   align-items: center;
   gap: var(--sp-3);
-  padding: var(--sp-12) var(--sp-6);
+  padding: var(--sp-8) var(--sp-5);
   text-align: center;
   color: var(--text-3);
 }
 .empty__icon {
   display: grid;
   place-items: center;
-  width: 52px;
-  height: 52px;
+  width: 40px;
+  height: 40px;
   border-radius: var(--r-lg);
   background: var(--surface-3);
   color: var(--text-3);
@@ -2234,7 +2267,7 @@ textarea {
   display: flex;
   align-items: center;
   gap: var(--sp-3);
-  padding: var(--sp-5) var(--sp-5) var(--sp-4);
+  padding: var(--sp-4) var(--sp-4) var(--sp-3);
   border-bottom: 1px solid var(--border-subtle);
 }
 .modal__title {
@@ -3635,10 +3668,6 @@ textarea {
   gap: var(--sp-2);
   flex-wrap: wrap;
 }
-.mergevars__label {
-  font-size: var(--text-xs);
-  color: var(--text-3);
-}
 
 /* ===========================================================================
    Draft history
@@ -4268,6 +4297,15 @@ textarea {
   min-width: 0;
 }
 
+/* The ellipsis above only engages once the item is allowed to be narrower than
+   its own text. A `nowrap` flex item's automatic minimum size is the full
+   unwrapped string, so without this the item simply refuses to shrink and the
+   sender address runs out of the row — see `.codecard__address` and
+   `.codecard__host` for the same fix on the Codes screen. */
+.job__from {
+  min-width: 0;
+}
+
 /* A row of buttons must wrap rather than push the page sideways. */
 .page-head__actions {
   min-width: 0;
@@ -4292,7 +4330,10 @@ textarea {
 .codelist {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-3);
+  /* The same knob `.job` and `.log` already answer to. This list was the one
+     row-shaped thing in the app that ignored the list-density setting, so
+     "compact" tightened every list except the one people scroll fastest. */
+  gap: var(--row-gap);
   padding: var(--sp-1);
 }
 
@@ -4325,7 +4366,10 @@ textarea {
   align-items: center;
   gap: var(--sp-4);
   width: 100%;
-  padding: var(--sp-4) var(--sp-5);
+  /* `--row-pad-y` for the same reason `.codelist` takes `--row-gap`: the block
+     axis is what the density setting is about, and the card was the only row in
+     the app deciding it privately. */
+  padding: var(--row-pad-y) var(--sp-4);
   border-radius: var(--r-lg);
   cursor: pointer;
   transition: transform var(--dur-fast) var(--ease);
@@ -4429,9 +4473,13 @@ textarea {
  * Tabular figures so the digits sit on a fixed grid — a code that reflows as
  * you read it is a code you check twice. Wide tracking because six digits read
  * as one long number otherwise; the display groups them 3+3 as well.
+ *
+ * 小二 (24px), down from 32px. Still the largest thing on the screen and still
+ * readable across a desk, but 32px made a single card 134px tall — three of
+ * them filled a laptop window, and this is a list you scan.
  */
 .codecard__value {
-  font-size: 2rem;
+  font-size: var(--text-xl);
   font-weight: 700;
   line-height: 1.15;
   font-variant-numeric: var(--numeric);
@@ -4456,11 +4504,17 @@ textarea {
   align-items: baseline;
   gap: var(--sp-2);
   min-width: 0;
-  font-size: var(--text-base);
+  /* One step below the value, level with the metadata under it. Who sent it is
+     context for the code, not a second headline. */
+  font-size: var(--text-xs);
   color: var(--text-1);
 }
 .codecard__address {
   color: var(--text-3);
+  /* Without this the nowrap address below cannot shrink — its automatic
+     minimum size is the whole string — so the ellipsis never engages and a
+     long address runs out past the card's edge. */
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -4469,8 +4523,13 @@ textarea {
   font-size: var(--text-xs);
   color: var(--text-3);
 }
+/* Same fix, same reason. The `max-width: 42ch` that used to be here was an
+   attempt at the same thing from the wrong end: it capped the box on wide
+   windows (where there was room) and did nothing at all on narrow ones (where
+   the subject actually overflowed), because the flex minimum was the real
+   constraint. */
 .codecard__subject {
-  max-width: 42ch;
+  min-width: 0;
 }
 .codecard__actions {
   flex: none;
@@ -4513,7 +4572,8 @@ textarea {
   align-items: center;
   gap: var(--sp-3);
   padding: var(--sp-2) var(--sp-4);
-  margin-bottom: var(--sp-3);
+  /* No margin: the column it sits in has a gap, and a margin on top of that is
+     the same air spent twice. */
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   background: var(--surface-2);
@@ -4535,9 +4595,6 @@ textarea {
 .checkbar__text {
   flex: 1;
   min-width: 0;
-}
-.checkbar__hint {
-  color: var(--text-2);
 }
 /* The server's own words, kept monospace so they read as quoted output rather
    than as something this app wrote. */
@@ -4575,6 +4632,11 @@ textarea {
   font-family: var(--font-mono);
   font-size: var(--text-xs);
   color: var(--text-3);
+  /* A host name is one unbreakable token and this is a nowrap flex item, so
+     its automatic minimum size is the whole name. This is the declaration that
+     lets the ellipsis below do anything — it is the reported "the sign-in link
+     runs outside the card". */
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -4638,10 +4700,16 @@ textarea {
   align-items: center;
   gap: var(--sp-2);
   flex-wrap: wrap;
+  min-width: 0;
 }
 .codewhy__alts code {
   font-family: var(--font-mono);
   font-variant-numeric: var(--numeric);
+  /* A rejected candidate can be a forty-character tracking id. `anywhere`
+     rather than `break-word` — only `anywhere` lets the box shrink below an
+     unbroken token, which is the same fix `.datecard__snippet` carries. */
+  min-width: 0;
+  overflow-wrap: anywhere;
   padding: 2px 6px;
   border-radius: var(--r-sm);
   background: var(--surface-3);
@@ -4962,7 +5030,7 @@ textarea {
 .modal__body--reader > .reader__meta,
 .modal__body--reader > .reader__find,
 .modal__body--reader > .reader__attachments {
-  margin: var(--sp-3) var(--sp-5);
+  margin: var(--sp-2) var(--sp-4);
 }
 
 .reader__meta {
@@ -4974,11 +5042,10 @@ textarea {
   color: var(--text-2);
   min-width: 0;
 }
-.reader__hint {
-  margin-inline-start: auto;
-  color: var(--text-3);
-  font-size: var(--text-xs);
-}
+/* `.reader__hint` used to print the keyboard map ("J / K next · U unread · …")
+   in grey beside the sender. It was explanation rather than information, it
+   was on screen for every message anyone ever opened, and the shortcuts still
+   work — so the line is gone rather than merely hidden below 1100px. */
 
 .reader__find {
   display: flex;
@@ -5002,10 +5069,14 @@ textarea {
  * Previously `min-height: 280px; max-height: 480px` inside a dialog that was
  * itself capped — so a long message scrolled inside a box inside a box, and
  * two thirds of a maximised window showed nothing at all.
+ *
+ * The floor is only reachable on a short window, where it stops helping: at
+ * 320px it forced the whole dialog to scroll on a laptop in a split view. The
+ * frame is `flex: 1` and takes everything going anyway.
  */
 .reader__frame {
   flex: 1 1 auto;
-  min-height: 320px;
+  min-height: 240px;
   width: 100%;
   border: 0;
   border-block: 1px solid var(--border);
@@ -5365,9 +5436,6 @@ textarea {
      them outright rather than relying on wrap to decide. */
   .field__row {
     flex-direction: column;
-  }
-  .reader__hint {
-    display: none;
   }
 }
 @media (min-width: 1600px) {
@@ -6237,10 +6305,14 @@ textarea {
 }
 
 /*
- * `flex-wrap` and not `overflow` on purpose: below ~900px the name and the four
- * controls wrap onto a second line, which costs a row on a phone and is the
- * right trade there — the alternative is a horizontally scrolling toolbar
+ * `flex-wrap` and not `overflow` on purpose: a second line costs a row and is
+ * the right trade — the alternative is a horizontally scrolling toolbar
  * holding the only route back to a lost draft.
+ *
+ * The band this sits in is gone below 900px, where the controls move into the
+ * options sheet instead (see the narrow-compose block further down), so the
+ * wrap is now only reached by a desktop window dragged narrow. It is also what
+ * lays the same buttons out inside that sheet.
  */
 .composebar {
   display: flex;
@@ -6311,6 +6383,206 @@ textarea {
   font-size: var(--text-lg);
 }
 
+/* ==========================================================================
+   The narrow compose screen — the message first, everything else behind a
+   button
+
+   Measured before writing, 360x800 with an account configured: the message box
+   was ~200px of a 748px screen. Twenty-five per cent, on the one screen whose
+   entire purpose is that box. The 548px around it was not slack anyone could
+   trim — a 36px title bar, a 150-228px stack of addressing fields, a 74px
+   dropzone, a 100px send-time row, a 96px action bar, each of them a
+   reasonable size for what it holds. Trimming had already been tried (v0.1.6,
+   316→406px on a desktop window) and had run out of pixels to take: to leave
+   the body 85% of the screen the chrome would have to come to 112px, and the
+   controls alone are more than that.
+
+   So this is a different arrangement rather than a tighter one. The addressing
+   stack folds to one 40px line the moment the message takes focus; the
+   dropzone and the send-time bar move into sheets; the action bar becomes one
+   52px row holding the buttons that open them. Nothing is removed, nothing is
+   set below 小四, and every one of those controls is one tap away instead of
+   permanently on screen — the height that frees up all lands in the box that
+   grows, because it is still the only thing on the card with `flex-grow`.
+
+   Gated on `data-narrow`, written by `useBodyFirst` in `ComposeView`, rather
+   than on a `@media` query of its own. The sheets are a JavaScript decision;
+   a stylesheet that switched at a different width from the component would be
+   broken in a band a few pixels wide, which is the kind of fault that only
+   ever reproduces on someone else's screen.
+   ========================================================================== */
+
+/* The scroller's last 8px, and the card frame, both go to the message. A
+   border drawn around the whole width of a phone is not a card, it is a line
+   down each edge of the window. */
+.view--compose[data-narrow] {
+  padding-bottom: 0;
+}
+.view--compose[data-narrow] .compose-card {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.view--compose[data-narrow] .compose-card > .card__body {
+  padding: 0;
+}
+
+/* Who it is for and what it is about, on one line, in place of the block that
+   holds five fields. A `<button>` because the whole bar is the tap target that
+   brings them back — an affordance that is only a chevron is an affordance
+   most people never find. */
+.composesummary {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  min-height: 40px;
+  padding: var(--sp-1) var(--sp-2);
+  border: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--text-1);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.composesummary:hover {
+  background: var(--surface-2);
+}
+.composesummary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+/* Both halves truncate on their own rather than the row scrolling: a bar that
+   moves sideways under a thumb is a bar that gets dragged by accident, on a
+   screen where the thumb is also how you scroll the message. */
+.composesummary__to {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 700;
+}
+.composesummary__subject {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-2);
+}
+.composesummary__chev {
+  flex: 0 0 auto;
+  color: var(--text-3);
+}
+
+/* The foot holds nothing but three closed sheets here, and a closed sheet
+   renders no element at all. `display: contents` rather than `:empty` or
+   `none`: the wrapper stops existing for layout, so the card does not charge
+   the message its 8px gap for a box with nothing in it, and the wrapper is
+   still there in the markup for the wide window that uses it. */
+.view--compose[data-narrow] .compose-foot {
+  display: contents;
+}
+
+/* Everything the other bands gave up arrives here. No floor — the box is the
+   only flexible thing on the card and a floor could only fight the basis it is
+   already being handed — and no drag handle: the handle is a pointer
+   affordance, and the height it remembers is a desktop number that would pin
+   the box on the one layout built to hand it the screen. `!important` for the
+   same reason the focus-mode rule needs it, and it is the same fault: an
+   inline `height` beats every rule in this file. `ComposeView` also clears it
+   on the way in, so this is the belt to that pair of braces. */
+.view--compose[data-narrow] .compose-layout > .field:has(.textarea--body) > .textarea--body {
+  min-height: 0;
+  height: auto !important;
+  resize: none;
+}
+
+/* --- the narrow action bar ------------------------------------------------ */
+
+/* One row, and it is the form's missing third of the screen. The wide bar
+   wraps to 96px on a phone because a two-line draft summary and two large
+   buttons do not share 360px; this holds three buttons, one sentence and Send,
+   and measures 52. */
+.actionbar[data-narrow] {
+  flex-wrap: nowrap;
+  gap: var(--sp-1);
+  padding: var(--sp-1) var(--sp-2);
+}
+.composeacts {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+/* A real target, and somewhere for the badge to sit. */
+.composeacts__btn {
+  position: relative;
+  flex: 0 0 auto;
+  min-width: var(--tap-min);
+  min-height: var(--tap-min);
+  padding-inline: 0;
+}
+/* How many files are attached, without spending a word on it — the row has no
+   width for "Files: 2". `--text-2xs` is the token fenced off for numeric
+   badges; it is not prose and the 小四 floor does not reach it. */
+.composeacts__badge {
+  position: absolute;
+  top: 3px;
+  inset-inline-end: 3px;
+  min-width: 17px;
+  padding-inline: 3px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: var(--text-2xs);
+  font-variant-numeric: tabular-nums;
+  line-height: 17px;
+  text-align: center;
+}
+/* The send-time sentence rides on the button that opens the send-time sheet:
+   one control's width for two, and the answer to "when does this go out?" —
+   the question this whole application exists to answer — stays on screen after
+   the bar it came from has left it. */
+.composeacts__when {
+  flex: 1 1 auto;
+  min-width: 0;
+  justify-content: flex-start;
+  gap: var(--sp-2);
+  min-height: var(--tap-min);
+  padding-inline: var(--sp-2);
+}
+.composeacts__whentext {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-2);
+}
+/* Send takes the width it needs and no more, and keeps a full touch target
+   without the 46px the wide bar gives it. */
+.actionbar[data-narrow] .btn--lg {
+  flex: 0 0 auto;
+  min-height: var(--tap-min);
+  padding-inline: var(--sp-3);
+}
+
+/* The secondary controls, in the sheet that stands in for the top bar they
+   normally live in. Full targets here: 34px is a pointer height, and this
+   sheet only ever opens on a screen being touched. */
+.composebar--sheet {
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
+}
+.composebar--sheet .btn {
+  min-height: var(--tap-min);
+}
+
 /* --- fields that are comfortable to type in ------------------------------- */
 
 .form-rows .field > .field__label {
@@ -6337,18 +6609,21 @@ textarea {
   background: none;
 }
 
-/* Rows tall enough to be a target rather than a line of text. */
+/* Rows tall enough to be a target rather than a line of text. A floor, not a
+   height: the inbox's two-line rows clear it easily and this only bites on a
+   one-line activity entry. Lowered one notch across all three densities now
+   that the text inside is a step smaller. */
 .job,
 .log {
-  min-height: 62px;
+  min-height: 54px;
 }
 :root[data-list-density="compact"] .job,
 :root[data-list-density="compact"] .log {
-  min-height: 50px;
+  min-height: 46px;
 }
 :root[data-list-density="roomy"] .job,
 :root[data-list-density="roomy"] .log {
-  min-height: 76px;
+  min-height: 68px;
 }
 
 /* --- codes: freshness is a mark, not a filter ----------------------------- */
@@ -6378,11 +6653,11 @@ textarea {
    under it, which is what stops one card per line looking sparse. */
 @media (min-width: 1500px) {
   .codecard {
-    gap: var(--sp-6);
-    padding-inline: var(--sp-6);
+    gap: var(--sp-4);
+    padding-inline: var(--sp-4);
   }
   .codecard__value {
-    font-size: 2.4rem;
+    font-size: 1.75rem;
   }
 }
 
@@ -6870,10 +7145,12 @@ textarea {
     gap: var(--sp-2);
   }
 
-  /* The dropzone puts its title and its hint side by side, which is right on a
-     wide card and wrong in a 448px one: each half got ~140px and both wrapped
-     every three words into a four-line block. Stacking them is the same fix
-     the left-hand compose column needed for the same reason. */
+  /* The dropzone puts its icon and its title side by side, which is right on a
+     wide card and wrong in a 448px one — and narrower still inside the
+     attachments sheet, where a 320px screen leaves the sentence about 250px.
+     Stacking gives it the full width instead of wrapping it every three words.
+     (It used to carry a second line naming the size cap, which is where most
+     of the damage came from; that line is gone.) */
   .dropzone {
     flex-direction: column;
     gap: var(--sp-1);
@@ -8633,7 +8910,7 @@ textarea {
  * treatment derived from the accent they chose rather than one invented here.
  */
 .modal__body--reader > .reader__dates {
-  margin: var(--sp-3) var(--sp-5);
+  margin: var(--sp-2) var(--sp-4);
 }
 
 .reader__dates {
@@ -8692,9 +8969,10 @@ textarea {
   flex-direction: column;
   gap: var(--sp-1);
 }
-/* The answer, first and largest — the same order `.codecard` puts it in. */
+/* The answer, first and largest — the same order `.codecard` puts it in, and
+   now the same step down: 小四 with the card's own weight carrying the rank. */
 .datecard__when {
-  font-size: var(--text-lg);
+  font-size: var(--text-base);
   color: var(--text-1);
   font-variant-numeric: var(--numeric);
   overflow-wrap: anywhere;

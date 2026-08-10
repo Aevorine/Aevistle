@@ -2097,6 +2097,110 @@ public class AevistleNativePlugin extends Plugin {
     }
 
     /**
+     * What another app shared with us, if anything is waiting.
+     *
+     * Polled at startup for exactly the reason {@link #takePendingOpen} is, only
+     * more so: a share is nearly always a cold start. The user was in a browser
+     * or a gallery, tapped Share and picked this app, and there was no process —
+     * let alone a WebView — to fire an event at. {@link MainActivity} parses the
+     * intent as it arrives and parks the result; this hands it over once.
+     *
+     * Resolves with an empty object rather than rejecting when there is nothing
+     * waiting, which is the overwhelmingly common case: it runs on every launch.
+     *
+     * The attachment copy happens here rather than in the activity because it
+     * needs a Context and touches the disk. It has to happen *now*, though: the
+     * `content://` URIs a share carries are readable only under the grant that
+     * came with the intent, which dies with this task. A reminder scheduled for
+     * next week has to find a real file, so the bytes are taken out at the first
+     * opportunity — which is this call.
+     */
+    @PluginMethod
+    public void takePendingShare(PluginCall call) {
+        JSObject result = new JSObject();
+        JSONObject share = MainActivity.takePendingShare();
+        if (share == null) {
+            call.resolve(result);
+            return;
+        }
+
+        String subject = share.optString("subject", "");
+        if (!subject.isEmpty()) result.put("subject", subject);
+        String body = share.optString("body", "");
+        if (!body.isEmpty()) result.put("body", body);
+        putAddressList(result, "to", share.optJSONArray("to"));
+        putAddressList(result, "cc", share.optJSONArray("cc"));
+        putAddressList(result, "bcc", share.optJSONArray("bcc"));
+
+        JSArray files = copySharedFiles(share.optJSONArray("uris"));
+        if (files.length() > 0) result.put("attachments", files);
+
+        call.resolve(result);
+    }
+
+    /** Copy an address array straight across, or leave the key absent. */
+    private static void putAddressList(JSObject into, String key, JSONArray addresses) {
+        if (addresses == null || addresses.length() == 0) return;
+        JSArray out = new JSArray();
+        for (int i = 0; i < addresses.length(); i++) {
+            String address = addresses.optString(i, "");
+            if (!address.isEmpty()) out.put(address);
+        }
+        if (out.length() > 0) into.put(key, out);
+    }
+
+    /**
+     * Turn the shared content URIs into real files on this app's own storage.
+     *
+     * Byte-for-byte the same treatment `filesPicked` gives a file the user
+     * chose through the picker, down to the destination folder and the emitted
+     * field set — an attachment that arrived through the share sheet is not a
+     * different kind of attachment, and anything that made it one would show up
+     * later as a scheduled send that could not find its file.
+     */
+    private JSArray copySharedFiles(JSONArray uris) {
+        JSArray files = new JSArray();
+        if (uris == null || uris.length() == 0) return files;
+
+        File dir = new File(DataRoot.attachments(getContext()), "inbox");
+        if (!dir.exists() && !dir.mkdirs()) {
+            // Said out loud rather than swallowed: the text half of the share
+            // still resolves, so the user gets their compose screen, and this
+            // line is the only record of why the photo did not come with it.
+            Log.e(TAG, "copySharedFiles: could not create " + dir);
+            return files;
+        }
+
+        for (int i = 0; i < uris.length(); i++) {
+            String raw = uris.optString(i, "");
+            if (raw.isEmpty()) continue;
+            try {
+                Uri uri = Uri.parse(raw);
+                String name = displayName(uri, "attachment-" + i);
+                File target = new File(dir, System.currentTimeMillis() + "_" + i + "_" + safeName(name));
+                long size = copy(uri, target);
+
+                JSObject file = new JSObject();
+                file.put("id", "att_" + System.currentTimeMillis() + "_" + i);
+                file.put("name", name);
+                file.put("size", size);
+                file.put("mime", mimeOf(uri));
+                file.put("source", "copy");
+                file.put("path", target.getAbsolutePath());
+                file.put("addedAt", System.currentTimeMillis());
+                file.put("inline", false);
+                files.put(file);
+            } catch (Exception e) {
+                // One unreadable share must not lose the others — the same
+                // policy as the file picker, and the same reason: a revoked
+                // grant on one of five photos is not a reason to drop four.
+                Log.e(TAG, "copySharedFiles: could not take a copy of " + raw, e);
+            }
+        }
+        return files;
+    }
+
+    /**
      * Put text on the clipboard, because the web API cannot do it here.
      *
      * `navigator.clipboard.writeText()` rejects inside an Android WebView with

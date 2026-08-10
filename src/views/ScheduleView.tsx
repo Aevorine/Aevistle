@@ -188,9 +188,14 @@ export function ScheduleView({ onCompose }: { onCompose: () => void }) {
     try {
       const result = await runJobNow(id)
       if (result?.ok) {
+        // `toast.sent` carries no placeholders — the recipients and the
+        // duration live in `toast.sentDetail`. Passing them to the title threw
+        // both away, so a send started here reported less than the identical
+        // send started from Compose.
         toast.push({
           tone: 'success',
-          title: t('toast.sent', { n: result.accepted.length, ms: result.durationMs }),
+          title: t('toast.sent'),
+          detail: t('toast.sentDetail', { n: result.accepted.length, ms: result.durationMs }),
         })
       } else {
         toast.push({ tone: 'error', title: t('toast.sendFailed'), detail: result?.error })
@@ -205,7 +210,6 @@ export function ScheduleView({ onCompose }: { onCompose: () => void }) {
       <div className="view__inner">
         <PageHead
           title={t('schedule.title')}
-          subtitle={t('schedule.subtitle')}
           action={
             <Button variant="primary" icon={<IconClock size={16} />} onClick={onCompose}>
               {t('schedule.new')}
@@ -249,7 +253,6 @@ export function ScheduleView({ onCompose }: { onCompose: () => void }) {
             <EmptyState
               icon={<IconClock size={24} />}
               title={t('schedule.empty')}
-              hint={t('schedule.emptyHint')}
               action={
                 <Button variant="secondary" onClick={onCompose}>
                   {t('nav.compose')}

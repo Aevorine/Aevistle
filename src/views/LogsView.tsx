@@ -183,7 +183,6 @@ export function LogsView() {
       <div className="view__inner">
         <PageHead
           title={t('logs.title')}
-          subtitle={t('logs.subtitle')}
           action={
             state.logs.length > 0 ? (
               <div className="btn-row">
@@ -267,7 +266,6 @@ export function LogsView() {
             <EmptyState
               icon={<IconActivity size={24} />}
               title={t('logs.empty')}
-              hint={t('logs.emptyHint')}
             />
           </div>
         ) : (
