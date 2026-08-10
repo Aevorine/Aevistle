@@ -23,7 +23,6 @@ import {
   ATMOSPHERE_MOTION_MIN,
   DEFAULT_RETRY,
   DEFAULT_SETTINGS,
-  JOB_TOMBSTONE_MAX_AGE_MS,
   SCHEMA_VERSION,
   defaultInboxAccountState,
   defaultRecurrence,
@@ -35,7 +34,6 @@ import {
   type InboxAccountState,
   type InboxMessage,
   type InboxTag,
-  type JobTombstone,
   type LogEntry,
   type MailAccount,
   type MessageDraft,
@@ -83,16 +81,11 @@ import { buildDigest, DIGEST_JOB_ID } from '../core/digest'
 import { renderDigestBody, renderDigestSubject } from '../core/digestText'
 import { greetingYears, holidayNameMap } from '../core/greetings'
 import { captureSnapshot, type SnapshotReason } from '../core/snapshots'
-import {
-  mergeHits,
-  recordRecipients as recordRecipientUse,
-  type NewHit,
-} from '../core/codeHistory'
+import type { NewHit } from '../core/codeHistory'
 import {
   afterAttempt,
   dueItems,
   isQueueable,
-  OUTBOX_CAP,
   probablyOnline,
   queueItem,
   type OutboxItem,
@@ -101,17 +94,15 @@ import { evaluateConditions, inboundKey, latestInboundIndex } from '../core/cond
 import { applyRun } from '../core/jobRun'
 import { forTransport } from '../core/markdown'
 import { mergeRemoved, rememberRemoved, restoreRemoved, withoutRemoved } from '../core/inboxRemoval'
+import { applyCodeHistoryAction } from './services/codeHistoryReducer'
+import { applyOutboxAction } from './services/outboxReducer'
+import { applyJobAction } from './services/jobReducer'
 import { executeControl } from './controlExecutor'
 import type { ControlRequest } from '../core/control'
 import { createI18n, detectLocale, localeMeta, type I18n, type TranslationKey } from '../i18n'
-import {
-  findPairedDevice,
-  recordSyncSeq,
-  removePairedDevice,
-  touchSynced,
-  type PairedDevice,
-} from '../core/pairedDevices'
+import { findPairedDevice, recordSyncSeq, touchSynced, type PairedDevice } from '../core/pairedDevices'
 import { pushConflictSnapshots, type ConflictSnapshot } from '../core/syncConflict'
+import { applySyncAction } from './services/syncReducer'
 import {
   respondToSyncRequest,
   SyncLoop,
@@ -423,19 +414,6 @@ function droppedLog(job: ScheduledJob, warning: CalendarWarning): LogEntry | nul
       `working day near — first ${new Date(warning.dropped[0]).toLocaleString()}.`,
     jobId: job.id,
   }
-}
-
-/**
- * Record that a job was deleted, so device sync can tell a peer "this was
- * cancelled" — see `AppState.deletedJobs` and `core/syncLoop.ts`'s handling
- * of `SchedulePayload.deletedJobs`. One entry per id: a job deleted twice
- * (rare, but re-adding via undo and deleting again is exactly that) only
- * needs its cancellation known once, at the latest time it happened.
- */
-function addJobTombstone(existing: JobTombstone[], id: string, deletedAt: number): JobTombstone[] {
-  const cutoff = deletedAt - JOB_TOMBSTONE_MAX_AGE_MS
-  const kept = existing.filter((t) => t.id !== id && t.deletedAt >= cutoff)
-  return [...kept, { id, deletedAt }]
 }
 
 /** The `Settings` keys `core/backup.ts`'s `AppearanceSettings` picks — kept as a runtime list so `patchSettings` can tell "did this touch appearance" without re-typing the field list. */
@@ -824,13 +802,13 @@ export function reducer(state: AppState, action: Action): AppState {
       return { ...state, accounts, jobs, draft, inboxAccounts, settings }
     }
 
-    case 'upsertJob': {
-      const exists = state.jobs.some((j) => j.id === action.job.id)
-      const jobs = exists
-        ? state.jobs.map((j) => (j.id === action.job.id ? action.job : j))
-        : [...state.jobs, action.job]
-      return { ...state, jobs }
-    }
+    // Job creation/replacement and deletion — see `services/jobReducer.ts`
+    // for the case-by-case logic, moved there unchanged. `jobRan` (just
+    // below) stays here rather than joining them: `scripts/check-job-status.mjs`
+    // greps this file's own source for `case 'jobRan'` followed by an
+    // `applyRun(` call close by, so that one case's body has to stay put.
+    case 'upsertJob':
+      return applyJobAction(state, action)
 
     /**
      * A run finished on the platform scheduler; write what it did back onto
@@ -849,15 +827,7 @@ export function reducer(state: AppState, action: Action): AppState {
       }
 
     case 'removeJob':
-      return {
-        ...state,
-        jobs: state.jobs.filter((j) => j.id !== action.id),
-        // Recorded even if `action.id` did not actually match a job — the
-        // caller (e.g. `deleteJob`) already resolved a real one before
-        // dispatching, and a no-op tombstone for an id that never synced
-        // anywhere is harmless.
-        deletedJobs: addJobTombstone(state.deletedJobs, action.id, Date.now()),
-      }
+      return applyJobAction(state, action)
 
     case 'upsertContact': {
       const exists = state.contacts.some((c) => c.id === action.contact.id)
@@ -1086,92 +1056,32 @@ export function reducer(state: AppState, action: Action): AppState {
     case 'clearSnapshots':
       return { ...state, draftSnapshots: [] }
 
+    // The offline send queue's own array in state — see
+    // `services/outboxReducer.ts`'s doc comment for what stayed behind here
+    // (`sendDraftNow`, `flushOutbox`, and everything that decides *when* to
+    // queue or retry).
     case 'enqueue':
-      return { ...state, outbox: [...state.outbox, action.item].slice(-OUTBOX_CAP) }
-
     case 'patchOutbox':
-      return {
-        ...state,
-        outbox: state.outbox.map((i) => (i.id === action.id ? { ...i, ...action.patch } : i)),
-      }
-
     case 'dequeue':
-      return { ...state, outbox: state.outbox.filter((i) => i.id !== action.id) }
-
     case 'clearOutbox':
-      return { ...state, outbox: [] }
+      return applyOutboxAction(state, action)
 
-    /**
-     * `mergeHits` returns the identical array when nothing is new, and the
-     * identity check here turns that into an identical *state* object —
-     * extraction re-runs every time a body lands in the cache, and without
-     * this a sync of twenty messages would re-render the app twenty times to
-     * arrive at the list it already had.
-     */
-    case 'recordCodes': {
-      const codeHits = mergeHits(state.codeHits, action.hits)
-      return codeHits === state.codeHits ? state : { ...state, codeHits }
-    }
-
-    case 'markCodeCopied': {
-      let changed = false
-      const codeHits = state.codeHits.map((h) => {
-        if (h.id !== action.id || h.copiedAt) return h
-        changed = true
-        return { ...h, copiedAt: Date.now() }
-      })
-      return changed ? { ...state, codeHits } : state
-    }
-
-    /* Reading is what the click means; copying is what it also happens to do.
-       Kept as its own action so the mark survives a clipboard failure. */
-    case 'markCodeRead': {
-      let changed = false
-      const codeHits = state.codeHits.map((h) => {
-        if (h.id !== action.id || h.readAt) return h
-        changed = true
-        return { ...h, readAt: Date.now() }
-      })
-      return changed ? { ...state, codeHits } : state
-    }
-
-    case 'markAllCodesRead': {
-      const now = Date.now()
-      let changed = false
-      const codeHits = state.codeHits.map((h) => {
-        if (h.readAt) return h
-        changed = true
-        return { ...h, readAt: now }
-      })
-      return changed ? { ...state, codeHits } : state
-    }
-
+    // Verification-code hits and the recent-recipient tally — see
+    // `services/codeHistoryReducer.ts` for the case-by-case logic, moved
+    // there unchanged.
+    case 'recordCodes':
+    case 'markCodeCopied':
+    case 'markCodeRead':
+    case 'markAllCodesRead':
     case 'clearCodeHits':
-      return { ...state, codeHits: [] }
+    case 'recordRecipients':
+      return applyCodeHistoryAction(state, action)
 
-    case 'recordRecipients': {
-      const recentRecipients = recordRecipientUse(
-        state.recentRecipients,
-        action.addresses,
-        action.names,
-      )
-      return recentRecipients === state.recentRecipients
-        ? state
-        : { ...state, recentRecipients }
-    }
-
-    case 'upsertPairedDevice': {
-      const exists = state.pairedDevices.some((d) => d.id === action.device.id)
-      return {
-        ...state,
-        pairedDevices: exists
-          ? state.pairedDevices.map((d) => (d.id === action.device.id ? action.device : d))
-          : [...state.pairedDevices, action.device],
-      }
-    }
-
+    // Device pairing — see `services/syncReducer.ts` for the case-by-case
+    // logic, moved there unchanged.
+    case 'upsertPairedDevice':
     case 'removePairedDevice':
-      return { ...state, pairedDevices: removePairedDevice(state.pairedDevices, action.id) }
+      return applySyncAction(state, action)
 
     /**
      * One sync cycle's worth of change, landed in one dispatch — see
@@ -1240,36 +1150,12 @@ export function reducer(state: AppState, action: Action): AppState {
       }
     }
 
-    case 'commitSyncSeq': {
-      return {
-        ...state,
-        pairedDevices: recordSyncSeq(state.pairedDevices, action.deviceId, { lastAcceptedSeq: action.seq }),
-      }
-    }
-
-    /** "Keep mine instead" — puts the losing record from `core/syncConflict.ts`'s rollback bucket back, then forgets the snapshot: restoring twice would mean the second press has nothing left to restore *from*. */
-    case 'restoreSyncConflict': {
-      const snapshot = state.syncConflicts.find((s) => s.id === action.id)
-      if (!snapshot) return state
-      const replaceById = <T extends { id: string }>(records: T[], record: T): T[] =>
-        records.map((r) => (r.id === record.id ? record : r))
-      let next = state
-      switch (snapshot.kind) {
-        case 'account':
-          next = { ...next, accounts: replaceById(next.accounts, snapshot.losing as MailAccount) }
-          break
-        case 'job':
-          next = { ...next, jobs: replaceById(next.jobs, snapshot.losing as ScheduledJob) }
-          break
-        case 'contact':
-          next = { ...next, contacts: replaceById(next.contacts, snapshot.losing as Contact) }
-          break
-        case 'template':
-          next = { ...next, templates: replaceById(next.templates, snapshot.losing as Template) }
-          break
-      }
-      return { ...next, syncConflicts: next.syncConflicts.filter((s) => s.id !== action.id) }
-    }
+    // Replay-protection bookkeeping and "keep mine instead" conflict
+    // rollback — see `services/syncReducer.ts` for the case-by-case logic,
+    // moved there unchanged.
+    case 'commitSyncSeq':
+    case 'restoreSyncConflict':
+      return applySyncAction(state, action)
 
     case 'reset':
       return initialState()
