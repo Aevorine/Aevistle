@@ -268,9 +268,12 @@ uploaded anywhere.
 
 A release with no `SHA256SUMS.txt.ed25519` yet (every release before this
 existed) is still installable on the checksum alone, exactly as a release
-with no `SHA256SUMS.txt` at all always has been. A release that publishes one
-which does *not* verify is refused outright — the updater will not install it
-and says why. Maintainers: the key is created once with
+with no `SHA256SUMS.txt` at all always has been. Anything past that point is
+refused outright, not just flagged: a signature that was published but does
+not verify, and — once the installer and the manifest have both already
+downloaded fine — a signature request that fails for any other reason, since
+a failure that selectively hits only that one request is not an ordinary
+outage. Maintainers: the key is created once with
 `node scripts/setup-update-signing-key.mjs`; after that, `npm run release`
 signs and verifies it the same way it already does for the GPG signature.
 `npm run check:update-signing` is the backstop.

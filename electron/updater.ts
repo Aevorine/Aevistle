@@ -142,13 +142,15 @@ type SignatureCheck =
  * Verify `manifestText` (the exact bytes `fetchManifestText` returned)
  * against the update-signing key baked into this build.
  *
- * `missing` and `unreachable` are both treated as soft everywhere this is
- * called — a manifest that fetched and hashed fine is still installable
- * without a signature, exactly like a release with no SHA256SUMS.txt at all
- * always has been. That is a deliberate rollout choice, not an oversight:
- * this is a second, additive check on top of the checksum this file already
- * enforces, and older releases will never retroactively grow a signature.
- * `invalid` is the only outcome this function's caller must never soften.
+ * Only `missing` (HTTP 404 — this release genuinely has no signature yet) is
+ * soft: a manifest that fetched and hashed fine is still installable without
+ * one, exactly like a release with no SHA256SUMS.txt at all always has been.
+ * That is a deliberate rollout choice, since older releases will never
+ * retroactively grow a signature — not an oversight. `invalid` and
+ * `unreachable` are both hard failures at the call site: by the time this
+ * runs, the installer and the manifest have both already been fetched
+ * successfully, so a failure that selectively hits only the signature
+ * request is not an ordinary outage.
  */
 async function verifyManifestSignature(manifestText: string): Promise<SignatureCheck> {
   let response: Response
@@ -257,6 +259,22 @@ export async function downloadUpdate(
       'The checksum file is signed, but the signature does not match — refusing to install',
     )
   }
+  /*
+   * `missing` (HTTP 404 — this release genuinely has no signature published,
+   * expected for a while after this feature ships) is the only soft outcome.
+   * `unreachable` is refused for the same reason the manifest fetch above
+   * is: by this point the installer and SHA256SUMS.txt have both already
+   * been fetched successfully, so a network condition that selectively
+   * blocks only the signature request is not an ordinary outage — it is
+   * exactly the shape blocking it to force a downgrade to hash-only
+   * verification would take.
+   */
+  if (signature.status === 'unreachable') {
+    await fs.rm(partPath, { force: true })
+    throw new Error(
+      'Could not verify the download: the update signature could not be fetched',
+    )
+  }
 
   await fs.rm(finalPath, { force: true })
   await fs.rename(partPath, finalPath)
@@ -269,8 +287,8 @@ export async function downloadUpdate(
     // `expectedHash === null` means this release simply did not publish a
     // checksum for this file, which is installable but unverified.
     checksumVerified: expectedHash !== null,
-    // `missing`/`unreachable` both read as "not verified this way" here,
-    // same tolerance as checksumVerified above — see verifyManifestSignature.
+    // Only `verified` and `missing` (this release has no signature yet) ever
+    // reach here — `invalid` and `unreachable` both throw above.
     signatureVerified: signature.status === 'verified',
   }
   onProgress(result)
