@@ -66,6 +66,14 @@ ipcRenderer.on(IPC.openMessage, (_event, messageId: string) => {
  *
  * Only the newest is kept, for the same reason as above: two links followed
  * before the page is alive still means one message to write.
+ *
+ * `shareDelivered` tracks whether a listener is attached *right now*, not
+ * whether one ever was. It used to latch on for the life of the window, which
+ * meant the buffer stopped recording the moment the app first subscribed —
+ * so any payload arriving while nobody was listening again was dropped with no
+ * trace. There are two ordinary ways to end up in that window: React's
+ * development double-mount, and the share effect resubscribing when `ready`
+ * turns true, which it now does on every cold start. Cleared on unsubscribe.
  */
 let pendingShare: SharePayload | null = null
 let shareDelivered = false
@@ -184,7 +192,10 @@ const api: DesktopApi = {
     const listener = (_event: unknown, share: SharePayload) => handler(share)
     ipcRenderer.on(IPC.share, listener)
     if (queued) handler(queued)
-    return () => ipcRenderer.removeListener(IPC.share, listener)
+    return () => {
+      ipcRenderer.removeListener(IPC.share, listener)
+      shareDelivered = false
+    }
   },
 
   notify: (title, body, messageId) => ipcRenderer.invoke(IPC.notify, title, body, messageId),

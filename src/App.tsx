@@ -405,9 +405,27 @@ function Shell() {
    * typed, and `setDraft` is a shallow merge — an explicit `subject: ''` would
    * do exactly that. Attachments are appended for the same reason: replacing
    * the array would silently drop files that were already on the draft.
+   *
+   * Gated on `ready`, which is the whole reason a cold share works at all.
+   *
+   * `ready` turns true in the same block that dispatches `hydrate`, and
+   * `hydrate` returns `{ ...action.state }` — the stored draft included. So a
+   * share applied before hydration was overwritten by whatever was last left
+   * in the compose box on disk, and the user watched the app open Compose with
+   * every field blank. On Windows that was not a race but a certainty: the
+   * preload buffer replays the payload synchronously inside this subscribe
+   * (see `onShare` there), so the `setDraft` always won the sprint and always
+   * lost the war. On Android it depended on whether one bridge round-trip beat
+   * another, which is worse — a text share usually vanished and an image share
+   * usually survived.
+   *
+   * Waiting costs nothing, because neither platform throws the payload away
+   * while nobody is listening: Windows holds it in the preload buffer and
+   * Android leaves it parked in a static field that `takePendingShare` reads
+   * and clears. Subscribing after hydration is therefore the entire fix.
    */
   useEffect(() => {
-    if (!bridge?.onShare) return
+    if (!ready || !bridge?.onShare) return
     return bridge.onShare((share) => {
       const patch: Partial<MessageDraft> = {}
       if (share.to?.length) patch.to = share.to
@@ -434,7 +452,7 @@ function Shell() {
       setOpenAccountOnMount(false)
       setView('compose')
     })
-  }, [bridge, dispatch])
+  }, [ready, bridge, dispatch])
 
   /*
    * The palette's three props are `useCallback`s and not inline arrows.
