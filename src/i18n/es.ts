@@ -82,6 +82,8 @@ export const es: Translations = {
   'common.empty': 'Aún no hay nada',
 
   'compose.title': 'Nuevo recordatorio',
+  'compose.titleEditing': 'Editar recordatorio',
+  'compose.editingBadge': 'Editando',
   'compose.account': 'Enviar desde',
   'compose.noAccount': 'Todavía no hay ninguna cuenta — añade una para empezar',
   'compose.addAccount': 'Añadir cuenta',
@@ -627,7 +629,8 @@ export const es: Translations = {
   'inbox.noAccountsEmpty': 'Ninguna cuenta está recibiendo correo todavía',
   'inbox.empty': 'Nada por aquí',
   'inbox.noBody': 'Este mensaje no tiene contenido legible.',
-  'inbox.from': 'De',
+  'inbox.showDetails': 'Mostrar detalles',
+  'inbox.hideDetails': 'Ocultar detalles',
   'inbox.open': 'Abrir',
   'inbox.revealAttachment': 'Mostrar en la carpeta',
   'inbox.openAttachmentFailed': 'No se pudo abrir {name}',

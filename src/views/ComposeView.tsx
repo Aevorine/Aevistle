@@ -1260,7 +1260,9 @@ export function ComposeView({
               */}
               {narrow ? null : (
                 <div className="composetop">
-                  <span className="composetop__title">{t('compose.title')}</span>
+                  <span className="composetop__title">
+                    {editingJob ? t('compose.titleEditing') : t('compose.title')}
+                  </span>
                   <div className="composebar">
                     {draftTools}
                     {moreOptionsButton}
@@ -1337,6 +1339,13 @@ export function ComposeView({
                   aria-label={t('compose.editHeader')}
                   title={t('compose.editHeader')}
                 >
+                  {/* Only the collapsed summary bar carries this — the one place
+                      `narrow` was asked to gain a permanent element rather than
+                      lose one. Kept to a flex-shrink:0 pill so it never claims
+                      the ellipsis room the to/subject text already fights for. */}
+                  {editingJob ? (
+                    <span className="composesummary__edit">{t('compose.editingBadge')}</span>
+                  ) : null}
                   {/* `data-empty` is what makes this read as an input rather
                       than as a missing field: the placeholder tone, and the
                       dashed border in `app.css`, both hang off it. A user who
@@ -1923,7 +1932,7 @@ export function ComposeView({
                     outcome.diagnostics?.securityUsed ?? account?.security ?? 'ssl',
                     { host: outcome.diagnostics?.host ?? account?.host, message: outcome.error },
                   )
-                  return key ? <div style={{ marginTop: 6 }}>{t(key as 'error.tlsHint')}</div> : null
+                  return key ? <div style={{ marginTop: 'var(--sp-2)' }}>{t(key as 'error.tlsHint')}</div> : null
                 })()}
               </>
             )}
@@ -2042,20 +2051,50 @@ export function ComposeView({
             {t('compose.schedule')}
           </Button>
         )}
-        <Button
-          size="lg"
-          variant="primary"
-          icon={<IconSend size={17} />}
-          disabled={blocked}
-          loading={sending}
-          onClick={doSend}
-        >
-          {sending
-            ? t('compose.sending')
-            : preflight.messageCount > 1
-              ? t('compose.sendNowN', { n: preflight.messageCount })
-              : t('compose.sendNow')}
-        </Button>
+        {/*
+          The one button a phone has room for cannot always say "send now" —
+          `doSend` calls `sendDraftNow`, unconditionally, so a phone with no
+          second button to fall back on was sending immediately no matter
+          what the "when" bar above said, `scheduleSet` included. The wide
+          layout never had this bug: its second button is the one that opens
+          the schedule dialog, sitting right next to a "send now" that always
+          means what it says.
+
+          `scheduleSet` is the same flag the "when" bar already sets the
+          moment a time or a repeat rule is touched, so this button starts
+          agreeing with it rather than a moment later. Tapping it opens the
+          schedule dialog rather than arming the job directly — the same one
+          click the wide layout's own Schedule button opens — because that
+          dialog is where retries, chains and conditions still live, and
+          skipping it would silently drop whatever a returning user had set
+          there.
+        */}
+        {narrow && scheduleSet ? (
+          <Button
+            size="lg"
+            variant="primary"
+            icon={<IconClock size={17} />}
+            disabled={blocked || sending}
+            onClick={openSchedule}
+          >
+            {t('compose.schedule')}
+          </Button>
+        ) : (
+          <Button
+            size="lg"
+            variant="primary"
+            icon={<IconSend size={17} />}
+            disabled={blocked}
+            loading={sending}
+            onClick={doSend}
+          >
+            {sending
+              ? t('compose.sending')
+              : preflight.messageCount > 1
+                ? t('compose.sendNowN', { n: preflight.messageCount })
+                : t('compose.sendNow')}
+          </Button>
+        )}
       </div>
 
       <PreflightDialog

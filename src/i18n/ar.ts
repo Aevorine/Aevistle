@@ -79,6 +79,8 @@ export const ar: Translations = {
   'common.empty': 'لا يوجد شيء بعد',
 
   'compose.title': 'تذكير جديد',
+  'compose.titleEditing': 'تعديل التذكير',
+  'compose.editingBadge': 'جارٍ التعديل',
   'compose.account': 'الإرسال من',
   'compose.noAccount': 'لا يوجد حساب بعد — أضف واحداً لتبدأ',
   'compose.addAccount': 'إضافة حساب',
@@ -623,7 +625,8 @@ export const ar: Translations = {
   'inbox.empty': 'لا يوجد شيء هنا',
   'inbox.noSubject': '(بلا موضوع)',
   'inbox.noBody': 'لا تحتوي هذه الرسالة على محتوى قابل للعرض.',
-  'inbox.from': 'من',
+  'inbox.showDetails': 'إظهار التفاصيل',
+  'inbox.hideDetails': 'إخفاء التفاصيل',
   'inbox.open': 'فتح',
   'inbox.revealAttachment': 'إظهار في المجلد',
   'inbox.openAttachmentFailed': 'تعذّر فتح {name}',

@@ -54,6 +54,7 @@ import {
 import {
   IconCalendar,
   IconCheck,
+  IconChevronDown,
   IconClock,
   IconDownload,
   IconExternal,
@@ -191,6 +192,29 @@ function hhmm(at: number): string {
   return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`
 }
 
+/**
+ * Splits a raw `From` header into a display name and an address.
+ *
+ * Mirrors `senderDomain`'s `<...>` extraction in `core/types.ts` rather than
+ * importing it, because that one throws the name half away and this needs
+ * both halves. A bare address with no angle brackets (no display name at
+ * all) comes back with `name: ''` — callers must not invent one.
+ */
+function splitSender(from: string): { name: string; address: string } {
+  const angled = /<([^>]*)>/.exec(from)
+  if (!angled) return { name: '', address: from.trim() }
+  return {
+    name: from.slice(0, angled.index).trim().replace(/^["']|["']$/g, ''),
+    address: angled[1].trim(),
+  }
+}
+
+/** First letter for the sender avatar: the name's, or the address's local part. */
+function senderInitial(name: string, address: string): string {
+  const source = name || address.split('@')[0] || address
+  return source.slice(0, 1).toUpperCase()
+}
+
 export function InboxView({
   onGoToAccounts,
   focusMessageId,
@@ -252,6 +276,8 @@ export function InboxView({
   const [findOpen, setFindOpen] = useState(false)
   /** Per-message escape hatch from the night filter below — reset in `openDetail`. */
   const [rawStyle, setRawStyle] = useState(false)
+  /** Recipient + precise timestamp, folded away by default — reset in `openDetail`. */
+  const [metaExpanded, setMetaExpanded] = useState(false)
   const [findText, setFindText] = useState('')
   /**
    * Highlighting is deferred, the input is not — the same trade the message
@@ -816,6 +842,7 @@ export function InboxView({
     state.settings.imagePolicyChosen,
   )
   const openSender = openMessage ? senderDomain(openMessage.from) : ''
+  const openSenderSplit = openMessage ? splitSender(openMessage.from) : { name: '', address: '' }
   const autoLoadImages = openMessage
     ? shouldAutoLoadImages(imagePolicy, openMessage.from, openInbox?.imageAllowlist)
     : false
@@ -956,6 +983,7 @@ export function InboxView({
       setFindOpen(false)
       setFindText('')
       setImmersive(true)
+      setMetaExpanded(false)
       if (!m.seen) void markInboxMessagesRead(m.accountId, [m.id], true)
 
       // No `run !== bodyRun.current` guard needed here: everything above this
@@ -1762,17 +1790,43 @@ export function InboxView({
         {openMessage ? (
           <>
             <div className="reader__meta">
-              <span>
-                <strong>{t('inbox.from')}</strong> {openMessage.from}
+              <span className="reader__avatar" aria-hidden="true">
+                {senderInitial(openSenderSplit.name, openSenderSplit.address)}
+              </span>
+              <span className="reader__sender">
+                <span className="reader__senderName">
+                  {openSenderSplit.name || openSenderSplit.address}
+                </span>
+                {/* A bare address (no display name) has nothing distinct to put
+                    here — repeating it below its own name line would just be
+                    the same string twice. */}
+                {openSenderSplit.name ? (
+                  <span className="reader__senderAddress">{openSenderSplit.address}</span>
+                ) : null}
               </span>
               <span>{formatDateTime(openMessage.date)}</span>
               <span className="chip">
                 <span className="chip__text">{accountLabel(openMessage.accountId)}</span>
               </span>
+              <IconButton
+                label={metaExpanded ? t('inbox.hideDetails') : t('inbox.showDetails')}
+                aria-expanded={metaExpanded}
+                onClick={() => setMetaExpanded((v) => !v)}
+              >
+                <IconChevronDown size={15} className="reader__chevron" data-open={metaExpanded} />
+              </IconButton>
               {/* The keyboard map used to be printed here in grey on every
                   message ever opened. The shortcuts are unchanged; the sentence
                   about them is not something anyone reads twice. */}
             </div>
+            {metaExpanded ? (
+              <div className="reader__details">
+                <span>
+                  <strong>{t('compose.to')}</strong> {openMessage.to}
+                </span>
+                <span>{formatDateTime(openMessage.date, { dateStyle: 'full', timeStyle: 'medium' })}</span>
+              </div>
+            ) : null}
 
             {findOpen ? (
               <div className="reader__find">

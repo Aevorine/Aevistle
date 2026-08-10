@@ -81,6 +81,8 @@ export const ru: Translations = {
   'common.empty': 'Пока пусто',
 
   'compose.title': 'Новое напоминание',
+  'compose.titleEditing': 'Изменить напоминание',
+  'compose.editingBadge': 'Изменение',
   'compose.account': 'Отправитель',
   'compose.noAccount': 'Учётных записей пока нет — добавьте одну, чтобы начать',
   'compose.addAccount': 'Добавить учётную запись',
@@ -626,7 +628,8 @@ export const ru: Translations = {
   'inbox.noAccountsEmpty': 'Пока ни одна учётная запись не получает почту',
   'inbox.empty': 'Здесь пусто',
   'inbox.noBody': 'В этом письме нет читаемого содержимого.',
-  'inbox.from': 'От',
+  'inbox.showDetails': 'Показать детали',
+  'inbox.hideDetails': 'Скрыть детали',
   'inbox.open': 'Открыть',
   'inbox.revealAttachment': 'Показать в папке',
   'inbox.openAttachmentFailed': 'Не удалось открыть {name}',

@@ -1514,7 +1514,7 @@ textarea {
   min-width: 18px;
   padding: 1px 5px;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--r-full);
   font-size: var(--text-xs);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
@@ -1925,7 +1925,7 @@ textarea {
   flex: none;
   padding: 4px 10px;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--r-full);
   background: transparent;
   color: var(--text-2);
   font: inherit;
@@ -2304,6 +2304,15 @@ textarea {
 }
 .modal__title {
   flex: 1;
+  /* Without this, a `flex: 1` item never shrinks below its own min-content
+     size — and a block of text's min-content is the width of its single
+     longest word, not the width of the box holding it. A modal with a long
+     title and a row of action buttons past its `flex: none` neighbors was
+     landing there: the title kept every word's width in reserve and wrapped
+     one word per line rather than filling the space it was actually given.
+     `min-width: 0` lets it shrink to the row's remaining width and wrap like
+     a normal paragraph instead. */
+  min-width: 0;
   font-size: var(--text-lg);
   font-weight: 700;
   letter-spacing: var(--tracking-tight);
@@ -2872,31 +2881,55 @@ textarea {
   .nav::-webkit-scrollbar {
     display: none;
   }
-  /* Seven tabs, a 360px-wide phone, and a 16px floor on Chinese text do not
-     all fit at once — 「联系人」alone is 48px of glyphs before padding. Rather
-     than shrink the type below 小四, only the tab you are on is named: the
-     other six are their icon plus an accessible label. One label at a legible
-     size beats seven at an illegible one, and the pill doubles as a much
-     louder "you are here" than a 3px underline. */
+  /* This bar carries `MOBILE_NAV` (5 items), not the 9-item `NAV` the row
+     layout below was written for — the stale version of this comment
+     reasoned about "seven tabs" and hid every label but the active one to
+     make that many fit. Five items, stacked icon-over-label instead of
+     icon-beside-label, is a different budget: each column gets ~1/5 of the
+     bar, the label sits under its icon at the auxiliary type rank, and it
+     fits with room to spare — measured against `MOBILE_NAV`'s own "~64px
+     each" note in `core/nav.ts`. All five stay named, all the time, because
+     an icon nobody can name (🔑 for the codes tab, in the report this was
+     written for) is not a control, it is a guess. */
   .nav__item {
-    flex: none;
-    gap: var(--sp-2);
-    padding: var(--sp-2);
+    flex: 1;
+    flex-direction: column;
+    justify-content: center;
+    gap: 2px;
+    padding: var(--sp-1) var(--sp-1);
     min-height: 52px;
-    border-radius: var(--r-full);
+    border-radius: var(--r-md);
   }
   .nav__item[aria-current="page"] {
-    padding-inline: var(--sp-4);
+    padding-inline: var(--sp-1);
   }
   .nav__item[aria-current="page"]::before {
     display: none;
   }
   .nav__label {
-    display: none;
-    flex: none;
-  }
-  .nav__item[aria-current="page"] .nav__label {
     display: block;
+    flex: none;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-align: center;
+    font-size: var(--text-xs);
+    line-height: 1.15;
+  }
+  /* Was the row layout's third flex child, riding to the right of the
+     label — stacked under a column `.nav__item` that reads as a fourth
+     line of the button instead of a count on the icon. Pinned to the
+     icon's top-right corner instead, off the label's own flow entirely,
+     because `.nav__item` already carries the `position: relative` its
+     `[aria-current="page"]::before` bar needs. */
+  .nav__badge {
+    position: absolute;
+    top: 2px;
+    inset-inline-end: calc(50% - 26px);
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    font-size: 10px;
   }
   .view {
     padding: 0 var(--sp-4) var(--sp-6);
@@ -5130,6 +5163,42 @@ textarea {
   max-height: 88vh;
 }
 
+/**
+ * The reader header on a phone: the subject and its four action buttons
+ * stopped sharing a row entirely, rather than being nudged to share it more
+ * politely.
+ *
+ * `min-width: 0` above (on `.modal__title` generally) stops the worst of it —
+ * a title no longer forces one word per line — but four 38px icon buttons
+ * plus a close button is still ~215px taken off a ~320px content width
+ * before the subject gets a single character, and a subject that only ever
+ * reaches two or three words of room reads as broken even without wrapping
+ * to single words. `flex-wrap` plus `flex-basis: 100%` on the title forces
+ * it onto a line of its own — the full width of the header, every time,
+ * regardless of how long the title or how many buttons follow it — and the
+ * buttons wrap to a second line where they have the whole row to themselves.
+ * Scoped to the reader specifically, not every `.modal__header`, because
+ * every other dialog's header title is short enough that the one-row layout
+ * still reads fine at this width, and moving all of them to two rows would
+ * cost every settings dialog a line of height it does not need back.
+ */
+@media (max-width: 760px) {
+  .modal:has(> .modal__body--reader) .modal__header {
+    flex-wrap: wrap;
+  }
+  .modal:has(> .modal__body--reader) .modal__title {
+    flex-basis: 100%;
+    font-size: var(--text-value);
+    line-height: 1.35;
+  }
+  /* Pushed to the end of the now-solo second line, so the buttons read as
+     a right-aligned toolbar under the title rather than trailing off from
+     wherever the header's own left edge happens to be. */
+  .modal:has(> .modal__body--reader) .modal__header > .btn-row {
+    margin-inline-start: auto;
+  }
+}
+
 /* The reader's own body: no gap-driven stack, the frame does the growing. */
 .modal__body--reader {
   padding: 0;
@@ -5140,6 +5209,7 @@ textarea {
 }
 .modal__body--reader > .banner,
 .modal__body--reader > .reader__meta,
+.modal__body--reader > .reader__details,
 .modal__body--reader > .reader__find,
 .modal__body--reader > .reader__attachments {
   margin: var(--sp-2) var(--sp-4);
@@ -5170,6 +5240,56 @@ textarea {
    in grey beside the sender. It was explanation rather than information, it
    was on screen for every message anyone ever opened, and the shortcuts still
    work — so the line is gone rather than merely hidden below 1100px. */
+
+/* The initial-letter badge, on the accent/accent-text pair `.composeacts__badge`
+   uses — not the softer tinted `.avatar` the recipient picker uses for an
+   anonymous list, because this one is the single sender of a message already
+   open on screen and can afford to read as solid rather than muted. */
+.reader__avatar {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-full);
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: var(--text-sm);
+  font-weight: 700;
+}
+.reader__sender {
+  display: flex;
+  flex-direction: column;
+  line-height: var(--leading-tight);
+}
+.reader__senderName {
+  font-weight: 700;
+  color: var(--text-1);
+}
+/* Only ever shown alongside a name (see the JSX), so this is the one place a
+   bare address appears twice removed from `.reader__meta`'s own `> span`
+   rule above — it needs the same shrink-and-break treatment restated here. */
+.reader__senderAddress {
+  color: var(--text-3);
+  overflow-wrap: anywhere;
+}
+.reader__chevron {
+  transition: transform 0.15s ease;
+}
+.reader__chevron[data-open='true'] {
+  transform: rotate(180deg);
+}
+.reader__details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  font-size: var(--text-sm);
+  color: var(--text-2);
+}
+.reader__details > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 
 .reader__find {
   display: flex;
@@ -6633,6 +6753,20 @@ textarea {
   flex: 0 0 auto;
   color: var(--text-3);
 }
+/* Solid `--accent`/`--accent-text`, the same pairing `.composeacts__badge` uses,
+   rather than the tinted `.chip` recipe — a badge that only appears while
+   editing an existing job needs to read before the eye reaches the to/subject
+   text it sits beside, not blend into the row like a tag would. */
+.composesummary__edit {
+  flex: 0 0 auto;
+  padding-inline: var(--sp-2);
+  border-radius: var(--r-full);
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  line-height: 17px;
+}
 
 /* The foot holds nothing but three closed sheets here, and a closed sheet
    renders no element at all. `display: contents` rather than `:empty` or
@@ -6836,7 +6970,7 @@ textarea {
   inset-inline-end: 3px;
   min-width: 17px;
   padding-inline: 3px;
-  border-radius: 999px;
+  border-radius: var(--r-full);
   background: var(--accent);
   color: var(--accent-text);
   font-size: var(--text-2xs);

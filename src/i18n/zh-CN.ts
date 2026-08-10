@@ -77,6 +77,8 @@ export const zhCN: Translations = {
   'common.empty': '这里还是空的',
 
   'compose.title': '新建提醒',
+  'compose.titleEditing': '编辑提醒',
+  'compose.editingBadge': '编辑中',
   'compose.account': '发件账号',
   'compose.noAccount': '还没有账号 —— 添加一个才能开始发送',
   'compose.addAccount': '添加账号',
@@ -618,7 +620,8 @@ export const zhCN: Translations = {
   'inbox.noAccountsEmpty': '还没有账号在收件',
   'inbox.empty': '暂时没有邮件',
   'inbox.noBody': '这封邮件没有可显示的内容。',
-  'inbox.from': '发件人',
+  'inbox.showDetails': '展开详情',
+  'inbox.hideDetails': '收起详情',
   'inbox.open': '打开',
   'inbox.revealAttachment': '在文件夹中显示',
   'inbox.openAttachmentFailed': '{name} 打不开',

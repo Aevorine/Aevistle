@@ -82,6 +82,8 @@ export const fr: Translations = {
   'common.empty': 'Rien pour l’instant',
 
   'compose.title': 'Nouveau rappel',
+  'compose.titleEditing': 'Modifier le rappel',
+  'compose.editingBadge': 'Modification',
   'compose.account': 'Envoyer depuis',
   'compose.noAccount': 'Aucun compte — ajoutez-en un pour commencer',
   'compose.addAccount': 'Ajouter un compte',
@@ -627,7 +629,8 @@ export const fr: Translations = {
   'inbox.noAccountsEmpty': 'Aucun compte ne reçoit de courrier pour le moment',
   'inbox.empty': 'Rien ici',
   'inbox.noBody': 'Ce message ne contient aucun contenu lisible.',
-  'inbox.from': 'De',
+  'inbox.showDetails': 'Afficher les détails',
+  'inbox.hideDetails': 'Masquer les détails',
   'inbox.open': 'Ouvrir',
   'inbox.revealAttachment': 'Afficher dans le dossier',
   'inbox.openAttachmentFailed': "Impossible d'ouvrir {name}",

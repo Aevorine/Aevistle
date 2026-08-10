@@ -86,6 +86,8 @@ export const en = {
   'common.empty': 'Nothing here yet',
 
   'compose.title': 'New reminder',
+  'compose.titleEditing': 'Edit reminder',
+  'compose.editingBadge': 'Editing',
   'compose.account': 'Send from',
   'compose.noAccount': 'No account yet — add one to start sending',
   'compose.addAccount': 'Add account',
@@ -631,7 +633,8 @@ export const en = {
   'inbox.noAccountsEmpty': 'No account is receiving mail yet',
   'inbox.empty': 'Nothing here',
   'inbox.noBody': 'This message has no readable content.',
-  'inbox.from': 'From',
+  'inbox.showDetails': 'Show details',
+  'inbox.hideDetails': 'Hide details',
   'inbox.open': 'Open',
   'inbox.revealAttachment': 'Show in folder',
   'inbox.openAttachmentFailed': '{name} could not be opened',
