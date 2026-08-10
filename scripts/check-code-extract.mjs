@@ -140,6 +140,10 @@ const CASES = [
   { name: 'validity zh', from: 'x@example.cn', subject: '', body: '您的验证码是 947500，15 分钟内有效。', expect: '947500', expectValidityMs: 900_000 },
   { name: 'one-time wording', from: 'x@example.com', subject: '', body: 'Your single-use code is 300921.', expect: '300921', expectOneTime: true },
   { name: 'a 90-day footer is not this code expiring', from: 'x@example.com', subject: '', body: 'Your code is 481027. Passwords are valid for 90 days.', expect: '481027', expectValidityMs: null },
+
+  // --- mixed-token blanking (the ReDoS fix must keep doing its job) --------
+  { name: 'mixed alnum tracking token does not blot out the real code', from: 'x@example.com', subject: '', body: 'Tracking ref ORDER8842X shipped today. Your verification code is 552901.', expect: '552901' },
+  { name: 'mixed alnum token alone is not mistaken for a code', from: 'x@example.com', subject: '', body: 'Please reference ticket AB12CD34 when you contact support.', expect: null },
 ]
 
 const root = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')
@@ -286,9 +290,31 @@ for (const c of CASES) {
   }
 }
 
+/*
+ * ReDoS regression — a mail this size used to cost the old lookahead regex
+ * ~1.8s (measured on a 40,000-character body of the same shape); a hostile
+ * IMAP message can hand this function a body like this with no user action,
+ * so this has to stay fast, not just correct. `%` sits inside the token
+ * character class but outside the old regex's lookbehind exclusion set,
+ * which is what made every one of these positions a fresh, expensive retry.
+ */
+{
+  const adversarial = 'a1%'.repeat(40_000) // 120,000 chars, well past the 64 KiB cap
+  const start = performance.now()
+  extractFromMessage({ subject: '', bodyText: adversarial, from: 'x@example.com' })
+  const ms = performance.now() - start
+  const BUDGET_MS = 300
+  if (ms > BUDGET_MS) {
+    wrong++
+    problems.push(`REDOS REGRESSION: adversarial body took ${ms.toFixed(0)}ms, budget is ${BUDGET_MS}ms`)
+  } else {
+    passed++
+  }
+}
+
 rmSync(out, { recursive: true, force: true })
 
-const total = CASES.length + 2
+const total = CASES.length + 3
 for (const line of problems) console.error(`  ${line}`)
 
 console.log(

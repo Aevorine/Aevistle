@@ -220,15 +220,28 @@ const URL_PATTERN = /https?:\/\/\S+/gi
  * stripping tags out of HTML, where `jane<span>@</span>example.com` arrives as
  * `jane @ example.com`. Tolerating the stray spaces is what keeps such an
  * address recognisable as one.
+ *
+ * The local part and each domain label are bounded to `{0,63}`/`{1,63}`
+ * rather than left as `*`/`+`. Uncapped, a long run of local-part characters
+ * with no `@` anywhere after it (easy for a hostile mail to construct) makes
+ * the engine backtrack the greedy run one character at a time from every
+ * starting position — quadratic in the run's length. RFC 5321 already caps a
+ * local part at 64 octets and a DNS label at 63, so the bound costs nothing
+ * on real addresses and turns the worst case linear.
  */
-const EMAIL_PATTERN = /[a-z0-9][a-z0-9._%+-]*\s*@\s*[a-z0-9-]+(?:\s*\.\s*[a-z0-9-]+)+/gi
+const EMAIL_PATTERN =
+  /[a-z0-9][a-z0-9._%+-]{0,63}\s*@\s*[a-z0-9-]{1,63}(?:\s*\.\s*[a-z0-9-]{1,63})+/gi
 
 /**
- * Any token that mixes letters and digits — `someone1234`, `ID20250811`,
- * `order7788x`. A verification code is always digits only, so a token with a
- * letter in it can be removed wholesale rather than reasoned about.
+ * A verification code is always digits only, so a token that mixes letters
+ * and digits — `someone1234`, `ID20250811`, `order7788x` — can be removed
+ * wholesale rather than reasoned about. `blankMixedTokens` below implements
+ * this with a single linear pass; see its comment for why it isn't a regex.
  */
-const MIXED_TOKEN_PATTERN = /(?<![\w@.\-])(?=[^\s]*[a-z])(?=[^\s]*\d)[a-z0-9._%+-]{2,}/gi
+const TOKEN_CHAR = /[a-zA-Z0-9._%+-]/
+const LETTER_CHAR = /[a-zA-Z]/
+const DIGIT_CHAR = /[0-9]/
+const BOUNDARY_EXCLUDED = /[\w@.\-]/
 
 /** Years read as four-digit codes; only accepted when a keyword vouches for them. */
 const YEAR_LIKE = /^(19|20)\d{2}$/
@@ -414,6 +427,42 @@ function blankGroup(
   return chars.join('')
 }
 
+/**
+ * Blank every token that mixes letters and digits — same job the old
+ * `MIXED_TOKEN_PATTERN` regex did, but in one linear pass instead of one.
+ *
+ * The regex it replaced paired two lookaheads with a `{2,}` body: cheap on
+ * ordinary mail, but a single attacker-controlled run with no whitespace made
+ * the engine retry both lookaheads from every offset in that run, which is
+ * quadratic in the run's length (confirmed: ~1.8s on a 40,000-character body
+ * that a hostile IMAP message can hand to this function with no user action).
+ * A hand-rolled scan classifies each run once — start, end, "has a letter",
+ * "has a digit" — and can only ever be linear in the input length.
+ */
+function blankMixedTokens(text: string): string {
+  const chars = [...text]
+  let i = 0
+  while (i < chars.length) {
+    if (!TOKEN_CHAR.test(chars[i])) {
+      i++
+      continue
+    }
+    const start = i
+    let hasLetter = false
+    let hasDigit = false
+    while (i < chars.length && TOKEN_CHAR.test(chars[i])) {
+      if (LETTER_CHAR.test(chars[i])) hasLetter = true
+      else if (DIGIT_CHAR.test(chars[i])) hasDigit = true
+      i++
+    }
+    const boundaryOk = start === 0 || !BOUNDARY_EXCLUDED.test(chars[start - 1])
+    if (boundaryOk && hasLetter && hasDigit && i - start >= 2) {
+      for (let j = start; j < i; j++) chars[j] = ' '
+    }
+  }
+  return chars.join('')
+}
+
 /** `3 9 0 0 8 9` → `390089`, padded back out so offsets keep meaning something. */
 function joinSplitDigits(text: string): string {
   return text.replace(SPLIT_DIGITS, (m) => {
@@ -433,7 +482,7 @@ function scrub(text: string, struck: CodeAlternative[]): string {
   out = joinSplitDigits(out)
   out = blank(out, URL_PATTERN)
   out = blank(out, EMAIL_PATTERN)
-  out = blank(out, MIXED_TOKEN_PATTERN)
+  out = blankMixedTokens(out)
   for (const { re, reason } of NEGATIVES) out = blankGroup(out, re, reason, struck)
   return out
 }
@@ -822,6 +871,19 @@ export interface ExtractInput {
 }
 
 /**
+ * A code or link is always near the top of a real mail, so the rest of an
+ * unusually long body buys nothing but CPU time — capped as a second,
+ * independent backstop alongside the linear rewrite above, not a substitute
+ * for it: this bounds every regex in `scrub`/`NEGATIVES`, not just the one
+ * that was proven quadratic.
+ */
+const MAX_EXTRACT_BODY = 64 * 1024
+
+function capBody(bodyText: string): string {
+  return bodyText.length > MAX_EXTRACT_BODY ? bodyText.slice(0, MAX_EXTRACT_BODY) : bodyText
+}
+
+/**
  * Extract both a code and a link from one message when present — a message
  * legitimately containing both (common: "your code is 482913, or click to
  * sign in") must surface both rather than picking whichever regex matched
@@ -829,7 +891,8 @@ export interface ExtractInput {
  * to avoid.
  */
 export function extractFromMessage(input: ExtractInput): Extracted[] {
-  const { subject, bodyText, links = [], from = '', rules = [] } = input
+  const { subject, links = [], from = '', rules = [] } = input
+  const bodyText = capBody(input.bodyText)
   const out: Extracted[] = []
   const code = extractCode(subject, bodyText, {
     fromDomain: from ? senderDomain(from) : '',
@@ -893,7 +956,7 @@ export function learnRule(
   }
   if (input.preferred && input.bodyText) {
     const struck: CodeAlternative[] = []
-    const body = scrub(input.bodyText, struck)
+    const body = scrub(capBody(input.bodyText), struck)
     const at = body.indexOf(input.preferred)
     if (at > 0) {
       const run = contextBefore(body, at)
