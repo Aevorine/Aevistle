@@ -63,8 +63,10 @@ import {
   IconInbox,
   IconMaximize,
   IconMinimize,
+  IconMoon,
   IconRefresh,
   IconSearch,
+  IconSun,
   IconTrash,
   IconX,
 } from '../components/icons'
@@ -248,6 +250,8 @@ export function InboxView({
   /** Reading starts full-screen; Escape steps out before it closes. */
   const [immersive, setImmersive] = useState(true)
   const [findOpen, setFindOpen] = useState(false)
+  /** Per-message escape hatch from the night filter below — reset in `openDetail`. */
+  const [rawStyle, setRawStyle] = useState(false)
   const [findText, setFindText] = useState('')
   /**
    * Highlighting is deferred, the input is not — the same trade the message
@@ -272,6 +276,19 @@ export function InboxView({
   const [lightboxPath, setLightboxPath] = useState<string | null>(null)
   /** Attachment id currently being fetched from the server, for the row spinner. */
   const [fetchingAttachment, setFetchingAttachment] = useState<string | null>(null)
+
+  /**
+   * `themeMode` is the *setting*; `'system'` still needs the OS asked
+   * directly, the same test `theme.css`'s own `@media` block runs. Read once
+   * per render rather than watched live — the reader has to be reopened to
+   * pick up a mid-session OS theme flip, which is the same staleness every
+   * other `system`-mode read in this file already accepts.
+   */
+  const readerIsDark =
+    state.settings.themeMode === 'dark' ||
+    (state.settings.themeMode !== 'light' &&
+      typeof window !== 'undefined' &&
+      window.matchMedia?.('(prefers-color-scheme: dark)').matches === true)
 
   const accountsById = useMemo(() => new Map(state.accounts.map((a) => [a.id, a])), [state.accounts])
   const enabledInboxes = useMemo(() => state.inboxAccounts.filter((i) => i.enabled), [state.inboxAccounts])
@@ -815,6 +832,17 @@ export function InboxView({
    */
   const imageRun = useRef(0)
 
+  /**
+   * Which body load is the current one — the same problem `imageRun` solves,
+   * one level up. Without this, clicking message A then quickly message B
+   * (cached, so it renders instantly) left A's slower in-flight fetch to land
+   * afterwards and overwrite B's correctly-shown body with A's, header and
+   * content silently pointing at two different messages. The cached branch
+   * also used to skip `setLoadingBody(false)` entirely, so a spinner from A's
+   * still-pending fetch could sit over B's already-rendered content.
+   */
+  const bodyRun = useRef(0)
+
   const loadRemoteImages = useCallback(
     async (options?: { retry?: boolean }) => {
       const body = openBody
@@ -916,11 +944,13 @@ export function InboxView({
       setResolvedHtml(null)
       setImageStage('blocked')
       setImageFailures(0)
+      setRawStyle(false)
       // Retires any image load still in flight for the message being left. It
       // has to happen here and not only when the next load starts: a message
       // with no pictures never starts one, and the previous message's result
       // would arrive to find nothing had superseded it.
       imageRun.current += 1
+      const run = ++bodyRun.current
       setPreview(null)
       setLightboxPath(null)
       setFindOpen(false)
@@ -930,23 +960,27 @@ export function InboxView({
 
       const cached = getCachedBody(m.id)
       if (cached) {
+        if (run !== bodyRun.current) return
         setOpenBody(cached)
+        setLoadingBody(false)
         return
       }
       setOpenBody(null)
       setLoadingBody(true)
       try {
         const body = await getInboxMessageBody(m)
+        if (run !== bodyRun.current) return
         putCachedBody(m.id, body)
         setOpenBody(body)
       } catch (e) {
+        if (run !== bodyRun.current) return
         toast.push({
           tone: 'error',
           title: t('inbox.loadFailed'),
           detail: e instanceof Error ? e.message : String(e),
         })
       } finally {
-        setLoadingBody(false)
+        if (run === bodyRun.current) setLoadingBody(false)
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1703,6 +1737,14 @@ export function InboxView({
                 <IconTrash size={16} />
               </IconButton>
             ) : null}
+            {openMessage && readerIsDark ? (
+              <IconButton
+                label={rawStyle ? t('inbox.viewNightColors') : t('inbox.viewOriginalColors')}
+                onClick={() => setRawStyle((v) => !v)}
+              >
+                {rawStyle ? <IconMoon size={16} /> : <IconSun size={16} />}
+              </IconButton>
+            ) : null}
             <IconButton label={t('inbox.find')} onClick={() => setFindOpen((v) => !v)}>
               <IconSearch size={16} />
             </IconButton>
@@ -1849,6 +1891,7 @@ export function InboxView({
                   html={resolvedHtml ?? openBody.sanitizedHtml ?? textAsHtml(openBody.text ?? t('inbox.noBody'))}
                   find={findOpen ? deferredFind : ''}
                   onLinkClick={openLinkSafely}
+                  nightFilter={readerIsDark && !rawStyle}
                 />
 
                 {attachments.length > 0 ? (

@@ -31,12 +31,23 @@ export function MessageBodyFrame({
   find,
   onLinkClick,
   frameClassName = 'reader__frame',
+  nightFilter = false,
 }: {
   html: string
   find: string
   onLinkClick: (url: string) => void
   /** Defaults to the inbox reader's own sizing; callers with a tighter budget (the calendar's row preview) pass their own. */
   frameClassName?: string
+  /**
+   * Sender mail is always built on a white `#fff` body (see the injected
+   * style below) regardless of the app's own theme — reasonable in light
+   * mode, a lit rectangle in the middle of a dark one. This inverts the
+   * whole frame and un-inverts images/video so photos still look right; it
+   * cannot know which senders picked colours on purpose, which is why the
+   * caller offers a way back to the original per message rather than this
+   * component deciding for good.
+   */
+  nightFilter?: boolean
 }) {
   const ref = useRef<HTMLIFrameElement>(null)
   const [loaded, setLoaded] = useState(0)
@@ -113,6 +124,34 @@ export function MessageBodyFrame({
     iframe.addEventListener('load', handleLoad)
     return () => iframe.removeEventListener('load', handleLoad)
   }, [])
+
+  /**
+   * A second, dedicated `<style>` rather than folding this into the one
+   * above: that one is written once, in `handleLoad`, and never again for
+   * the life of this document — right for the fixed base rules, wrong for a
+   * filter the reader toggles on and off without the frame reloading.
+   */
+  useEffect(() => {
+    const doc = ref.current?.contentDocument
+    if (!doc?.head) return
+    let style = doc.getElementById('aev-night') as HTMLStyleElement | null
+    if (!nightFilter) {
+      style?.remove()
+      return
+    }
+    if (!style) {
+      style = doc.createElement('style')
+      style.id = 'aev-night'
+      doc.head.appendChild(style)
+    }
+    // Invert the frame, then invert media back — the standard trick for
+    // adapting content nobody authored for a dark background. It changes
+    // colours the sender chose on purpose too, which is exactly what the
+    // "view original colors" toggle this is paired with exists to undo.
+    style.textContent =
+      'html{filter:invert(1) hue-rotate(180deg)}' +
+      'img,video,svg,canvas{filter:invert(1) hue-rotate(180deg)}'
+  }, [nightFilter, loaded])
 
   useEffect(() => {
     const doc = ref.current?.contentDocument

@@ -1136,6 +1136,8 @@ export const ru: Translations = {
   'inbox.findPlaceholder': 'Найти в этом письме',
   'inbox.fullscreen': 'Во весь экран',
   'inbox.exitFullscreen': 'Выйти из полноэкранного режима',
+  'inbox.viewOriginalColors': 'Исходные цвета',
+  'inbox.viewNightColors': 'Вернуть ночной режим',
   'inbox.saveAs': 'Сохранить как…',
   'inbox.saveAll': 'Сохранить всё',
   'inbox.openExternally': 'Открыть системной программой',
@@ -1588,5 +1590,4 @@ export const ru: Translations = {
   'sync.conflict.keptNewer': 'Сохранена более новая версия вместо «{theirs}»',
   'sync.conflict.keepMineInstead': 'Оставить мою версию',
   'sync.conflict.restored': 'Ваша версия восстановлена',
-  'sync.conflict.none': 'Нет конфликтов синхронизации для просмотра.',
 }

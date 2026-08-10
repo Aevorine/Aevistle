@@ -60,9 +60,12 @@
  *      which does not clip and does not scroll inside the card — it makes the
  *      whole list scroll sideways.
  *
- *   4. **The inbox row spends its width on text.** Reported rather than asserted,
- *      because the useful number is the trend: furniture px, subject px, rows
- *      visible.
+ *   4. **The inbox row spends its width on text, and at least 9 fit a phone screen.**
+ *      The row count used to be reported rather than asserted, because it moved
+ *      with subject length (6-8 rows depending on how many wrapped to a second
+ *      line). The subject clamp is one line now, specifically so this is no
+ *      longer a trend to watch but a number to hold: `fits < 9` at the 360x800
+ *      band is a failure, not a note.
  *
  * ---------------------------------------------------------------------------
  * Running it
@@ -572,7 +575,11 @@ const SYNTHETIC_CODECARD = `(() => {
  * Same contract as `SYNTHETIC_CODECARD`: appended to `document.body`, never into
  * the React tree, and it measures the stylesheet — which is what the row rules
  * are. The subject is 22 Chinese characters, which is an ordinary length and long
- * enough to need the second line the clamp allows.
+ * enough to still need the ellipsis on a one-line clamp. Because the clamp no
+ * longer varies by content, `row(false)` (long subject) and `row('short')`
+ * exist to prove the row height does *not* move with subject length any more —
+ * both should measure the same `rowH`, which is what makes a fixed 9-row floor
+ * assertable instead of a range.
  *
  * `.swipe` is not decoration here: every narrow mail-row rule is scoped through
  * it, because that is what tells an inbox row apart from a Scheduled row, and a
@@ -595,6 +602,7 @@ const SYNTHETIC_MAILROW = `(() => {
         <div class="job"\${selecting === true ? ' data-selecting="true"' : ''}>
           <input type="checkbox" class="job__select">
           <span class="job__pulse" data-unread="true"></span>
+          <span class="avatar job__avatar" aria-hidden="true">Z</span>
           <div class="job__body">
             <div class="job__name">\${selecting === 'short' ? '会议通知' : '下周三上午十点的项目进度评审会议安排通知'}</div>
             <div class="job__meta">
@@ -933,8 +941,8 @@ for (const band of [NARROW, TABLET]) {
       console.log(`    real list pane ${r.paneH}px, and what fits it:`)
       for (const [name, d] of Object.entries(r.density)) {
         console.log(
-          `      ${name.padEnd(8)} gap ${d.listGap}px · short subject ${d.shortRowH}px -> ` +
-            `${d.fitsShort} rows · two-line subject ${d.longRowH}px -> ${d.fitsLong} rows`,
+          `      ${name.padEnd(8)} gap ${d.listGap}px · row ${d.shortRowH}px -> ${d.fitsShort} rows ` +
+            `(long-subject row ${d.longRowH}px -> ${d.fitsLong} rows)`,
         )
       }
       console.log(`    horizontal overflow ${r.overflowX}px`)
@@ -949,15 +957,21 @@ for (const band of [NARROW, TABLET]) {
         if (r.idle.subjectW < 256)
           fail(`inbox @ 360px: the subject gets ${r.idle.subjectW}px, under the 256px target`)
         else ok(`inbox @ 360px: the subject gets ${r.idle.subjectW}px (target >=256)`)
-        if (r.idle.subjectLines < 2)
-          fail(`inbox @ 360px: a 22-character subject still renders on ${r.idle.subjectLines} line(s)`)
-        else ok(`inbox @ 360px: a 22-character subject wraps to ${r.idle.subjectLines} lines`)
+        if (r.idle.subjectLines !== 1)
+          fail(`inbox @ 360px: the one-line subject clamp renders on ${r.idle.subjectLines} line(s), not 1`)
+        else ok(`inbox @ 360px: the subject clamps to 1 line`)
+        if (!r.idle.subjectClipped)
+          fail(`inbox @ 360px: a 22-character subject does not overflow — the ellipsis rule has nothing to prove`)
+        else ok(`inbox @ 360px: a 22-character subject is clipped with an ellipsis`)
         if (!r.selecting.checkboxShown)
           fail(`inbox @ 360px: the checkbox does not come back while a selection is live`)
         else ok(`inbox @ 360px: the checkbox is hidden when idle and shown while selecting`)
         if (r.overflowX !== 0)
           fail(`inbox @ 360px: a row overflows horizontally by ${r.overflowX}px`)
         else ok(`inbox @ 360px: 0px horizontal overflow inside a row`)
+        if (r.density.default.fitsShort < 9)
+          fail(`inbox @ 360px: only ${r.density.default.fitsShort} rows fit the pane at default density, under the 9-row floor`)
+        else ok(`inbox @ 360px: ${r.density.default.fitsShort} rows fit the pane at default density (floor 9)`)
       }
     } else {
       console.log(`  rows rendered  ${i.inbox.rows}   list pane ${i.inbox.paneH}px`)
@@ -972,6 +986,9 @@ for (const band of [NARROW, TABLET]) {
         if (i.inbox.subjectW !== null && i.inbox.subjectW < 256)
           fail(`inbox @ 360px: the subject gets ${i.inbox.subjectW}px, under the 256px target`)
         else ok(`inbox @ 360px: the subject gets ${i.inbox.subjectW}px (target ≥256)`)
+        if (i.inbox.fits !== null && i.inbox.fits < 9)
+          fail(`inbox @ 360px: only ${i.inbox.fits} real rows fit the pane, under the 9-row floor`)
+        else if (i.inbox.fits !== null) ok(`inbox @ 360px: ${i.inbox.fits} real rows fit the pane (floor 9)`)
       }
     }
     reportType(i, `inbox @ ${band.w}px`)

@@ -2021,25 +2021,20 @@ textarea {
   /* 小四, not 四号. A mail subject is the row's headline, but it is one line of
      truncated text in a list of fifty — bold is what marks it, not size. */
   font-size: var(--text-base);
-  /* Tight, not paragraph leading: two lines at most (see the clamp below), and
-     `--leading-normal` would spend 10px a row on air inside a headline. */
   line-height: var(--leading-tight);
   font-weight: 700;
-  /* Two lines, then the ellipsis — not one.
-     Measured at 360px before this: the row spent 150px on furniture (an 18px
-     checkbox, an 8px dot, two 38px buttons, three 16px gaps) and left the
-     subject 146px, which `white-space: nowrap` then cut at about nine Chinese
-     characters. Nine characters is not a subject, it is a prefix. The narrow
-     block below is what pays for the second line: with the buttons in the
-     swipe gesture and the checkbox behind a long press the furniture is 8px,
-     so the subject gets the row.
-     `-webkit-line-clamp` and the standard `line-clamp` both, because the
-     unprefixed property is the one that will still be honoured and the
-     prefixed one is what Chromium actually reads today. */
+  /* One line, then the ellipsis — reversed from two. The two-line clamp read
+     more subjects in full, but it also meant a screenful of mail showed 6-8
+     rows depending on subject length, never a fixed count. The user's call:
+     a predictable ≥9 rows beats a subject that sometimes gets a second line —
+     tap the row for the rest. `-webkit-line-clamp` and the standard
+     `line-clamp` both, because the unprefixed property is the one that will
+     still be honoured and the prefixed one is what Chromium actually reads
+     today. */
   display: -webkit-box;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
   overflow: hidden;
 }
 .job__meta {
@@ -4275,6 +4270,13 @@ textarea {
   flex-direction: column;
   flex: 1;
   min-height: 0;
+  /* The one screen on this app where the input is the whole point gets the
+     same "this matters" border+tint `.condition[data-on="true"]` already
+     uses for an active send condition — not a new visual language, the
+     existing one applied to a card that had been indistinguishable from
+     Settings or Contacts despite holding the most-used input in the app. */
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: color-mix(in srgb, var(--accent) 4%, var(--surface-1));
 }
 .compose-card > .card__body {
   flex: 1;
@@ -7764,6 +7766,14 @@ textarea {
   .swipe .job {
     /* 8px of furniture instead of 150: the unread dot, and nothing else. */
     gap: var(--sp-3);
+    /* Pinned to compact's padding regardless of `--list-density`: measured
+       with `layout-probe.mjs` at 360x800, the default 12px pad was a
+       74.1px row and 8 rows to the pane; this 8px pad is 66.1px and 9,
+       which is the floor the subject clamp above was shortened to hit.
+       "Roomy" would drop under 9 too if left alone, so this overrides all
+       three settings here — the 9-row floor is not something list-density
+       gets to trade away on a phone. */
+    padding-block: var(--sp-2);
     /* The wrap the band below gives every other row is wrong here: with the
        actions gone there is nothing to wrap *to*, and `flex: 1 1 100%` would
        put the unread dot on a line of its own above the subject. */
@@ -7781,6 +7791,14 @@ textarea {
     display: block;
   }
   .swipe .job > .job__actions {
+    display: none;
+  }
+  /* The avatar is new furniture, and this band has none to spare — the 150px
+     breakdown above is why the checkbox and actions left. A 28px circle plus
+     its gap would put the subject right back under the 256px floor the 360px
+     check holds it to, so the avatar stays a wide-screen thing; the unread
+     dot keeps doing that job here. */
+  .swipe .job > .job__avatar {
     display: none;
   }
   .swipe .job > .job__body {

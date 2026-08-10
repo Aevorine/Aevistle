@@ -110,130 +110,8 @@ things that deliberately stay behind → **[docs/PRIVACY.md](docs/PRIVACY.md)**.
 Thirty-six of these, each with the reasoning behind it →
 **[docs/FEATURES.md](docs/FEATURES.md)**
 
-## New in 0.1.21
-
-**The account list and tab strip hold up past a handful of accounts.** Every
-layout bug here shared one cause: a flex child had its automatic minimum size
-zeroed out (`min-width: 0` or `overflow: hidden`) without anything to catch
-what that was protecting against, so the bug stayed invisible on the two- or
-three-account screen every earlier check ran against and only showed up once
-someone had real inbox worth of them.
-
-- **The account list no longer turns into unreadable overlapping text.** Its
-  row buttons sat bare on the row instead of inside their own container, so on
-  a narrow window the address/host line was squeezed to near-zero width and
-  wrapped one character at a time.
-- **The account list scrolls again with many accounts.** The card holding it
-  used `overflow: hidden` inside a column flex modal body, which let the
-  modal shrink the card to fit instead of scrolling past it — past a
-  screenful of accounts, the rest were simply clipped and unreachable.
-- **The inbox's account tabs stop smearing together.** Past three or four
-  accounts, the tab strip divided its width evenly and crushed every label
-  into the next one instead of falling back to the horizontal scroll it
-  already had.
-- **Switching "All accounts" and a single account no longer overlaps rows.**
-  The windowed list kept the previous account's scroll range for one frame
-  after the item list changed underneath it.
-- **Settings on a phone no longer offers the same four cards twice.** Daily
-  digest, holiday greetings, calendar subscription and pairing already live on
-  Home; Settings dropped its second copy of each on a narrow window. A wide
-  window is unchanged.
-
-## New in 0.1.17
-
-**Any two devices can pair now, from either end.** The phone and tablet apps can
-show a pairing QR code, not just read one — so phone-to-phone, tablet-to-tablet
-and tablet-to-phone work without a computer in the room to hold the code.
-Android answers ongoing sync too, rather than only starting it.
-
-- **The QR code and the camera appeared where you were not looking.** Tapping
-  "Pair a new device" added a panel *after* the device list, which on a phone is
-  below the fold — the camera switched on off-screen. All three pairing panels
-  are dialogs now, full screen, each with the close button they never had.
-- **Tablets were getting the desktop layout.** The phone/desktop switch was a
-  760px query and a tablet is 800px in portrait, so Settings rendered a grid of
-  cards instead of rows that open. Structure now asks "narrow window *or* touch
-  platform"; the tab bar still goes by width, so a tablet keeps all nine tabs.
-- **"Publish the working calendar" opened an empty screen** on Android. It now
-  says why a phone cannot hold that listener open, and offers a `.ics` export
-  instead — which also fixes exporting a backup, a reminder transfer file and an
-  encrypted pairing file from a phone, all blocked the same way.
-
-The pairing handshake is not new code: the socket is the only native part, and
-`core/pairing.ts` still holds the one implementation of the key exchange.
-
-## New in 0.1.16
-
-Repairs to the phone layout 0.1.15 introduced — no feature changed, and nothing
-about how mail is scheduled, sent, stored or encrypted was touched.
-
-- **Dialogs are the screen, not a card floating on it.** A settings section
-  opened with a gutter all round and the tab bar showing through underneath.
-  Content dialogs now go edge to edge, closed with the button in the header;
-  short confirmations deliberately stay cards.
-- **Screens opened from Home had lost their main button.** Hiding a duplicated
-  heading also hid the element carrying each screen's primary control, so
-  Contacts offered no way to add a contact. Only the heading text goes now.
-- **Settings stopped repeating itself** — the sticky subtitle that summarised
-  the rows directly beneath it, and each section naming itself twice.
-
-Measured on the running window rather than reasoned about: the three content
-dialogs each report `(0, 0, 390, 800)` in a `390×800` viewport, the
-confirmation `350×254` with symmetric gutters.
-
-## New in 0.1.15
-
-- **📲 Android updates itself.** The check always worked; downloading and
-  installing were desktop-only, so the phone could announce a new version and
-  then offer a link to a web page. It now fetches the APK in-app with a
-  progress bar, verified against the release's published `SHA256SUMS`, and
-  hands it to the system installer — which still asks you to confirm. The file
-  is written to app-private storage, not a shared Downloads folder.
-- **🏠 A Home tab, and a bottom bar that fits.** Nine tabs never fit a 360px
-  screen; the bar had quietly been a horizontal scroller with four of them
-  off-screen. It is five now — Compose, Codes, Home, Inbox, Settings — with
-  schedules, contacts, templates, the working calendar and the send log behind
-  Home. The desktop sidebar still lists all nine, and `Ctrl+1`–`Ctrl+9` still
-  reach all nine on both.
-- **⚙️ Settings is a list, not fourteen screens of scrolling.** Sixteen sections
-  in one column made reaching Privacy a scroll past every other section. On a
-  phone it is now sixteen rows that open one at a time; the desktop keeps its
-  two-column grid. Explanatory text under toggles stands down on phones —
-  warnings and errors never do.
-- **📡 Pairing dials the right network card.** It used to publish the first
-  address the OS listed, which on a machine with a VPN, a hypervisor or a
-  container runtime was routinely a virtual adapter no phone can reach — a
-  four-second timeout on the other device and no clue anywhere. Addresses are
-  ranked now, the chosen one is printed beside the QR code, and a multi-homed
-  machine gets a picker.
-
-Also fixed: toggle switches whose knob never moved on older Android WebView
-builds, and a "launch at login" entry a source checkout could leave pointing at
-Electron's own placeholder window.
-
-## New in 0.1.14
-
-- **🔗 Pair two devices over your LAN, and nothing else.** Scan a QR code on the
-  other device: ECDH P-256 + AES-GCM, a one-time token that expires in two
-  minutes, and no cloud and no relay server at any point. Choose what syncs —
-  accounts, schedule, contacts, templates, appearance — and manage paired
-  devices from one screen. Two devices that cannot see each other exchange a
-  PIN-encrypted file instead.
-- **📅 The calendar knows about the mail.** Recipient chips and mail counts per
-  day, a density heatmap, body preview without leaving the grid, the
-  recipient's local time shown *while* you drag to reschedule, a suggestion
-  when a send lands on a holiday, bulk actions across a recurring series,
-  filtering by account or recipient, delivery-status badges, and a local `.ics`
-  subscribe address for the working calendar.
-- **🎨 A new visual style: runecircuit.** Chinese-classical ink meets cyberpunk
-  neon, with day and night forms, an atmosphere-intensity dial and a two-axis
-  accent picker. The seventh style, and the first one with weather.
-- **🌾 24 solar terms (节气), computed rather than looked up.** Meeus's solar
-  position, not a bundled table — so there is no year the coverage stops. It
-  tints the calendar; it never touches a send time.
-
-Written up at length in **[docs/FEATURES.md](docs/FEATURES.md)**; what changed
-before this is in the `release-notes-0.1.*.md` files.
+What changed recently → **[Releases](https://github.com/Aevorine/Aevistle/releases)**
+(each tag has notes; older ones are also in the `release-notes-0.1.*.md` files).
 
 ## Download
 
@@ -282,26 +160,11 @@ place. Deliberately not written out here, so this table cannot go stale.
 4. **Write your reminder**, attach what you need, and choose **Schedule**.
 
 > **"Aevistle has not completed the Google verification process" — Error 403:
-> access_denied.** Use an app password instead; step 2 is the supported path for
-> Gmail and it is unaffected.
->
-> This is not a fault in your install, and retrying or reinstalling will not
-> change it. It is the state of *this project's* Google Cloud registration.
-> Signing in with Google needs the `https://mail.google.com/` scope — the only
-> scope Google offers that IMAP and SMTP actually accept — and Google classes
-> that as a **restricted** scope. A restricted-scope app stays in *Testing*
-> until it passes
-> [restricted-scope verification](https://developers.google.com/identity/protocols/oauth2/production-readiness/restricted-scope-verification),
-> which on top of the usual review requires an independent **CASA Tier 2**
-> security assessment, renewed annually. While the registration is in Testing,
-> Google admits only accounts that have been added to it by hand as test users
-> and refuses everyone else with exactly that 403.
->
-> So the OAuth button in the account dialog works only for approved testers
-> today. If you want it for your own account, the reliable route is to register
-> your own OAuth client — the client id is a public identifier, not a secret,
-> and `src/core/oauth.ts` documents the console steps — and build from source.
-> Otherwise use an app password, which needs no verification and no third party.
+> access_denied.** Expected — this project's Google OAuth registration is not
+> verified for public use. Use an app password instead (step 2 above); it needs
+> no verification and is the supported path for Gmail. Details, and how to
+> register your own OAuth client if you want that route instead, are in
+> `src/core/oauth.ts`.
 
 <div align="center">
 <img src="docs/assets/screenshot-settings.png" alt="Aevistle settings, showing the mail account and data folder cards" width="880">
@@ -368,11 +231,6 @@ electron/       Windows: nodemailer + imapflow, DPAPI secret storage, tray,
                 hybrid tick/precise scheduler, HTML sanitization for received mail
 android/        Android: JavaMail (send + receive), Keystore, AlarmManager + WorkManager
 ```
-
-The recurrence engine deliberately lives in TypeScript only. It precomputes a
-list of absolute timestamps, and each platform's scheduler just answers "wake
-me at T" — so every calendar rule (leap years, short months, DST, weekend
-skipping) exists once, in one language, and is testable without an emulator.
 
 More detail in **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
 

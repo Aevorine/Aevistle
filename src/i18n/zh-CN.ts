@@ -1127,6 +1127,8 @@ export const zhCN: Translations = {
   'inbox.findPlaceholder': '在这封邮件里查找',
   'inbox.fullscreen': '全屏',
   'inbox.exitFullscreen': '退出全屏',
+  'inbox.viewOriginalColors': '查看原始颜色',
+  'inbox.viewNightColors': '恢复夜间显示',
   'inbox.saveAs': '另存为…',
   'inbox.saveAll': '全部保存',
   'inbox.openExternally': '用系统程序打开',
@@ -1579,5 +1581,4 @@ export const zhCN: Translations = {
   'sync.conflict.keptNewer': '保留了较新的版本，而不是「{theirs}」',
   'sync.conflict.keepMineInstead': '改用我这边的版本',
   'sync.conflict.restored': '已恢复为你的版本',
-  'sync.conflict.none': '没有需要处理的同步冲突。',
 }

@@ -1149,6 +1149,8 @@ export const en = {
   'inbox.findPlaceholder': 'Find in this message',
   'inbox.fullscreen': 'Full screen',
   'inbox.exitFullscreen': 'Leave full screen',
+  'inbox.viewOriginalColors': 'View original colors',
+  'inbox.viewNightColors': 'Restore night colors',
   'inbox.saveAs': 'Save as…',
   'inbox.saveAll': 'Save all',
   'inbox.openExternally': 'Open with system app',
@@ -1609,7 +1611,6 @@ export const en = {
   'sync.conflict.keptNewer': 'Kept the newer version over "{theirs}"',
   'sync.conflict.keepMineInstead': 'Keep mine instead',
   'sync.conflict.restored': 'Restored your version',
-  'sync.conflict.none': 'No sync conflicts to review.',
 } as const
 
 export type TranslationKey = keyof typeof en

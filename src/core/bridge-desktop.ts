@@ -78,6 +78,7 @@ export function createDesktopBridge(): PlatformBridge {
     fetchRemoteImage: (url) => api.fetchRemoteImage(url),
     fetchFeed: (url) => api.fetchFeed(url),
     onInboxEvent: (handler) => api.onInboxEvent(handler),
+    clearImageCache: () => api.clearImageCache(),
 
     dataFolder: () => api.dataFolder(),
     chooseDataFolder: (move) => api.chooseDataFolder(move),

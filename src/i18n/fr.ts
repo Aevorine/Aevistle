@@ -1137,6 +1137,8 @@ export const fr: Translations = {
   'inbox.findPlaceholder': 'Rechercher dans ce message',
   'inbox.fullscreen': 'Plein écran',
   'inbox.exitFullscreen': 'Quitter le plein écran',
+  'inbox.viewOriginalColors': 'Voir les couleurs d’origine',
+  'inbox.viewNightColors': 'Rétablir l’affichage nocturne',
   'inbox.saveAs': 'Enregistrer sous…',
   'inbox.saveAll': 'Tout enregistrer',
   'inbox.openExternally': 'Ouvrir avec l’application système',
@@ -1589,5 +1591,4 @@ export const fr: Translations = {
   'sync.conflict.keptNewer': 'Version la plus récente conservée plutôt que « {theirs} »',
   'sync.conflict.keepMineInstead': 'Garder la mienne à la place',
   'sync.conflict.restored': 'Votre version a été restaurée',
-  'sync.conflict.none': 'Aucun conflit de synchronisation à examiner.',
 }

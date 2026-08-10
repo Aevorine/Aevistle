@@ -1132,6 +1132,8 @@ export const ar: Translations = {
   'inbox.findPlaceholder': 'ابحث في هذه الرسالة',
   'inbox.fullscreen': 'ملء الشاشة',
   'inbox.exitFullscreen': 'إنهاء ملء الشاشة',
+  'inbox.viewOriginalColors': 'عرض الألوان الأصلية',
+  'inbox.viewNightColors': 'استعادة العرض الليلي',
   'inbox.saveAs': 'حفظ باسم…',
   'inbox.saveAll': 'حفظ الكل',
   'inbox.openExternally': 'فتح ببرنامج النظام',
@@ -1584,5 +1586,4 @@ export const ar: Translations = {
   'sync.conflict.keptNewer': 'تم الاحتفاظ بالنسخة الأحدث بدلًا من «{theirs}»',
   'sync.conflict.keepMineInstead': 'استخدام نسختي بدلًا من ذلك',
   'sync.conflict.restored': 'تمت استعادة نسختك',
-  'sync.conflict.none': 'لا توجد تعارضات مزامنة لمراجعتها.',
 }
