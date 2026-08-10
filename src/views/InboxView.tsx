@@ -958,9 +958,11 @@ export function InboxView({
       setImmersive(true)
       if (!m.seen) void markInboxMessagesRead(m.accountId, [m.id], true)
 
+      // No `run !== bodyRun.current` guard needed here: everything above this
+      // point since `run` was assigned is synchronous, so `bodyRun.current`
+      // cannot have moved on yet.
       const cached = getCachedBody(m.id)
       if (cached) {
-        if (run !== bodyRun.current) return
         setOpenBody(cached)
         setLoadingBody(false)
         return

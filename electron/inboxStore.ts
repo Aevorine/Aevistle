@@ -110,11 +110,15 @@ async function readCachedAttachments(
     // ENOENT — no attachments were ever cached for this message — is the only
     // case that means "none". A permission error or a directory locked by
     // antivirus scanning was being treated the same as "none" before this,
-    // which is indistinguishable in the UI from a message that really has no
-    // attachments; the user just sees them missing, not why.
+    // silently: logged now so it is diagnosable, but still returned as an
+    // empty list rather than thrown. This is called from `readMessageBody`
+    // alongside the already-parsed body text, and a transient lock on the
+    // *attachments* folder is not a reason to fail reading the message
+    // *text* the caller already has in hand — that would turn "no attachment
+    // list this time" into "cannot open this email at all".
     if ((e as NodeJS.ErrnoException).code === 'ENOENT') return []
     console.error(`[aevistle] could not list attachments in ${dir}:`, e)
-    throw e
+    return []
   }
   const out: Attachment[] = []
   for (const name of names) {

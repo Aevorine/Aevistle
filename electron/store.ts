@@ -412,8 +412,11 @@ async function readJson<T>(file: string): Promise<T | null> {
         await fs.rename(dataPath(file), moved)
         recoveredPaths.push(moved)
       } catch {
-        // Could not even move it. Still worth reporting that it was unreadable.
-        recoveredPaths.push(dataPath(file))
+        // Could not even move it, so the file is still sitting at `dataPath(file)`
+        // and every later read of it (credentials are re-read on every send and
+        // every IMAP connection) hits this exact branch again. Deduplicated so
+        // that stays one banner line instead of growing once per read.
+        if (!recoveredPaths.includes(dataPath(file))) recoveredPaths.push(dataPath(file))
       }
       return null
     }

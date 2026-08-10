@@ -741,13 +741,29 @@ async function clearViewport() {
  */
 async function goto(view) {
   const other = view === 'compose' ? 'schedule' : 'compose'
-  await evaluate(`document.querySelector('.nav__item[data-view="${other}"]')?.click(), true`)
-  await sleep(200)
-  await evaluate(`document.querySelector('.nav__item[data-view="${view}"]')?.click(), true`)
-  await sleep(500)
-  const at = await evaluate(
-    `document.querySelector('.view--compose') ? 'compose' : (document.querySelector('.view')?.dataset.screen ?? 'unknown')`,
-  )
+  const click = async () => {
+    await evaluate(`document.querySelector('.nav__item[data-view="${other}"]')?.click(), true`)
+    await sleep(200)
+    await evaluate(`document.querySelector('.nav__item[data-view="${view}"]')?.click(), true`)
+    await sleep(500)
+    return evaluate(
+      `document.querySelector('.view--compose') ? 'compose' : (document.querySelector('.view')?.dataset.screen ?? 'unknown')`,
+    )
+  }
+  let at = await click()
+  // "unknown" — neither `.view--compose` nor a `.view[data-screen]` found at
+  // all — means the nav click landed before React had finished registering
+  // handlers, not that the app went somewhere unexpected. That race is worst
+  // on the very first interaction of a freshly reloaded, unbundled dev-server
+  // session; every later `goto()` call in the same run has already proven the
+  // nav works. Retried here rather than by widening the waits above for
+  // every call: a screen that genuinely opened somewhere else (`at` is a real
+  // name, just the wrong one) is not this problem, and retrying it would only
+  // hide an actual navigation bug behind a second identical click.
+  for (let i = 0; at === 'unknown' && i < 2; i += 1) {
+    await sleep(500)
+    at = await click()
+  }
   return at
 }
 

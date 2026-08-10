@@ -126,6 +126,11 @@ const vite =
   process.platform === 'win32'
     ? spawn('npx vite --host 127.0.0.1', { shell: true })
     : spawn('npx', ['vite', '--host', '127.0.0.1'], { detached: true })
+// Node throws an uncaught exception — past the try/catch below, cleanup
+// skipped entirely — if a spawned process is unspawnable (bad path, no
+// permission) and nothing is listening for its 'error' event. Both children
+// get a listener that does nothing but keep that from happening.
+vite.on('error', () => {})
 let chromeProc = null
 let exitCode = 1
 
@@ -145,6 +150,7 @@ try {
       ],
       { detached: process.platform !== 'win32' },
     )
+    chromeProc.on('error', () => {})
 
     const ready = await waitFor(`http://127.0.0.1:${CDP_PORT}/json/list`, 20_000)
     if (!ready) throw new Error('Chrome did not open its CDP port in time')
@@ -154,8 +160,11 @@ try {
     // its first interaction in a session is the narrow-viewport nav click,
     // and racing that against a cold Vite dev-server load — many unbundled
     // module requests, not a production bundle — landed on "unknown" often
-    // enough to be worth a fixed settle here rather than intermittently.
-    await new Promise((r) => setTimeout(r, 3000))
+    // enough to be worth a settle here rather than intermittently. Backed up
+    // by a retry inside `layout-probe.mjs`'s own `goto()` now too, so a
+    // slower machine than this one gets a second chance instead of a flat
+    // false failure.
+    await new Promise((r) => setTimeout(r, 5000))
 
     const probe = spawnSync('node', ['scripts/layout-probe.mjs'], {
       stdio: 'inherit',
