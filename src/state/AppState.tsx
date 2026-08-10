@@ -101,7 +101,7 @@ import { forTransport } from '../core/markdown'
 import { mergeRemoved, rememberRemoved, restoreRemoved, withoutRemoved } from '../core/inboxRemoval'
 import { executeControl } from './controlExecutor'
 import type { ControlRequest } from '../core/control'
-import { createI18n, detectLocale, localeMeta, type I18n } from '../i18n'
+import { createI18n, detectLocale, localeMeta, type I18n, type TranslationKey } from '../i18n'
 import {
   findPairedDevice,
   removePairedDevice,
@@ -160,10 +160,28 @@ function shapeOccurrences(
   windows: DeliveryWindow[] = [],
 ): { occurrences: number[]; warning?: CalendarWarning } {
   const calendar = settings.workCalendar ?? DEFAULT_WORK_CALENDAR
+  /*
+   * `now` is passed as the floor, which is the point of this function existing.
+   *
+   * `applyWorkCalendarDetailed` takes `notBefore` as opt-in because several of
+   * its callers walk historical dates on purpose — the conflict scan and the
+   * calendar screen's month view both do. This one never does: every path that
+   * reaches here is arming a real reminder. Without the floor a `'before'`
+   * shift off a holiday could land in the past, and the two platforms then
+   * disagreed about a send the preview had already promised would not happen —
+   * the desktop's `tick()` fired it immediately, Android dropped it and left
+   * the row showing a next-send time that never advanced. `upcoming()` passed
+   * the floor from the day it was added; this is the path that actually arms.
+   *
+   * The catch-up instants are deliberately not subject to it: `rearm`'s
+   * `dueNow` is prepended by the caller, after this, precisely because a past
+   * instant there is being *paid*, not placed.
+   */
   const { occurrences: shaped, adjustment } = applyWorkCalendarDetailed(
     occurrences,
     job.recurrence.workdayPolicy ?? 'off',
     calendar,
+    now,
   )
   const quieted = applyQuietHours(shaped, quietFrom(settings))
   return {
@@ -1365,6 +1383,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [state.settings.locale],
   )
   const i18n = useMemo(() => createI18n(locale), [locale])
+  /**
+   * The translator, reachable from long-lived subscriptions — same mechanism
+   * and same reason as `liveRef` above.
+   *
+   * The platform's job-event subscription writes translated activity rows.
+   * Naming `i18n` in that effect's dependencies would tear the subscription
+   * down and build it back up every time the language changed, and whichever
+   * send reported itself in the gap would go unrecorded. A ref keeps one
+   * subscription for the life of the window and still reads the current
+   * language.
+   */
+  const i18nRef = useRef(i18n)
+  i18nRef.current = i18n
 
   /**
    * Keep the tray menu in the same language as the window.
@@ -1945,13 +1976,43 @@ export function AppProvider({ children }: { children: ReactNode }) {
        * anything. It never did. The Logs screen reported "0 bounced" for a
        * mailbox full of bounces, and no read receipt was ever attributed.
        */
-      const subject = liveRef.current.jobs.find((j) => j.id === event.jobId)?.draft.subject
+      const t = i18nRef.current.t
+      const subject =
+        liveRef.current.jobs.find((j) => j.id === event.jobId)?.draft.subject ||
+        t('inbox.noSubject')
+      /*
+       * A skip is not a failure, and it is the only outcome that has to explain
+       * itself.
+       *
+       * `result.ok` is false for a skip, so branching on it alone put "a
+       * condition said no" through the failure arm: a red row reading
+       * "Scheduled send failed", with an empty detail — because a skip carries
+       * `skipReasonKey`, never `error`. The reason, which is the single thing
+       * the user needs, was thrown away. `runNow` in ScheduleView already
+       * reports the same event correctly; this is the path that matters more,
+       * because it is the one that runs when nobody is watching.
+       *
+       * `kind: 'schedule'` rather than `'send'` on purpose: nothing was sent,
+       * and `receipts.sendsFromLogs` reads send-kind rows as deliveries to
+       * correlate bounces against. Filing a skip as a send would have it
+       * hunting for a bounce to a message that was never written.
+       */
+      if (event.result.skipped) {
+        addLog({
+          kind: 'schedule',
+          level: 'warn',
+          title: `${t('toast.skipped')} — ${subject}`,
+          detail: event.result.skipReasonKey
+            ? t(event.result.skipReasonKey as TranslationKey, event.result.skipReasonValues)
+            : undefined,
+          jobId: event.jobId,
+        })
+        return
+      }
       addLog({
         kind: 'send',
         level: event.result.ok ? 'info' : 'error',
-        title: event.result.ok
-          ? subject || '(no subject)'
-          : `Scheduled send failed: ${subject || '(no subject)'}`,
+        title: event.result.ok ? subject : `${t('toast.sendFailed')} — ${subject}`,
         detail: event.result.error,
         jobId: event.jobId,
         recipients: event.result.accepted.length,

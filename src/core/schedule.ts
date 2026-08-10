@@ -462,7 +462,21 @@ export function rearm(
 ): RearmResult {
   const now = opts.now ?? Date.now()
   const missed = storedOccurrences.filter((t) => t <= now)
-  const dueNow = rec.catchUp === 'fireOnce' && missed.length > 0 ? [missed[missed.length - 1]] : []
+  /*
+   * `!== 'skip'`, not `=== 'fireOnce'`, so this agrees with who consumes it.
+   *
+   * `tick()` in `electron/scheduler` fires a backlog unless the policy is
+   * `'skip'`. Testing for `'fireOnce'` here meant the two disagreed on exactly
+   * one value — `undefined` — and `undefined` is reachable at runtime even
+   * though the type says otherwise: `catchUp` is non-optional in `types.ts`,
+   * `DEFAULT_RECURRENCE` sets `'fireOnce'`, and nothing merges that default
+   * into a recurrence read back off disk or arriving over device sync. For any
+   * job stored before the field existed, `dueNow` was therefore always empty
+   * and the catch-up promise silently did not apply to it — while an otherwise
+   * identical job created today caught up normally. `'fireOnce'` is the
+   * documented default, so absent means it.
+   */
+  const dueNow = rec.catchUp !== 'skip' && missed.length > 0 ? [missed[missed.length - 1]] : []
 
   const stillFuture = storedOccurrences.filter((t) => t > now)
   const needed = Math.max(1, opts.count ?? 24)

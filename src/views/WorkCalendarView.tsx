@@ -768,14 +768,26 @@ export function WorkCalendarView({ onCompose }: { onCompose?: () => void } = {})
   /**
    * `SeriesSheet`'s bulk reschedule — a UI front door onto the exact same
    * `planReschedule` shift a drag on the grid performs, not a second way to
-   * move a job. `job.occurrences[0]` (rather than, say, today) is the anchor
-   * because it is a date `planReschedule`'s weekly branch can trust: it is an
-   * actual fire time the current rule produced, so its weekday is guaranteed
-   * to be one the rule names, the same guarantee a real drag has.
+   * move a job. The anchor (rather than, say, today) is a date
+   * `planReschedule`'s weekly branch can trust: it is an actual fire time the
+   * current rule produced, so its weekday is guaranteed to be one the rule
+   * names, the same guarantee a real drag has.
+   *
+   * The first *future* occurrence, not `occurrences[0]`.
+   *
+   * Since catch-up landed, `occurrences[0]` can be a missed instant waiting to
+   * be paid — prepended unshaped, so unlike every other entry it carries no
+   * promise about its weekday. Anchoring on it computed the day delta from
+   * yesterday, which moved the series one day further than the user asked, in
+   * silence, and only for jobs that had missed a run. Falling back to the last
+   * entry keeps a job whose whole list is overdue draggable rather than inert.
    */
   const shiftSeries = (job: ScheduledJob, days: number) => {
     if (job.occurrences.length === 0 || days === 0) return
-    const fromIso = toIsoDate(job.occurrences[0])
+    const now = Date.now()
+    const anchor =
+      job.occurrences.find((at) => at > now) ?? job.occurrences[job.occurrences.length - 1]
+    const fromIso = toIsoDate(anchor)
     void moveJob(job.id, fromIso, addIsoDays(fromIso, days))
   }
 
