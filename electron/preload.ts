@@ -120,7 +120,8 @@ const api: DesktopApi = {
   // than reopening the picker.
   pathForFile: (file) => webUtils.getPathForFile(file),
 
-  syncJobs: (jobs, accounts) => ipcRenderer.invoke(IPC.syncJobs, jobs, accounts),
+  syncJobs: (jobs, accounts, headless) =>
+    ipcRenderer.invoke(IPC.syncJobs, jobs, accounts, headless),
 
   onJobEvent: (handler) => {
     const listener = (_event: unknown, payload: JobEvent) => handler(payload)

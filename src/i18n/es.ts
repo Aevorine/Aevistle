@@ -894,6 +894,7 @@ export const es: Translations = {
   'condition.blocked.fileMissing': 'Omitido: {path} no existe',
   'condition.blocked.filePresent': 'Omitido: {path} está presente',
   'condition.blocked.replied': 'Omitido: {who} ya respondió',
+  'condition.blocked.unsupportedKind': 'Omitido: esta versión no puede comprobar {kind}',
   'condition.blocked.outsideWindow': 'Omitido: fuera de {from}–{to}',
   'condition.blocked.noPreviousRun': 'Omitido: no hay envío anterior que escalar',
   'condition.blocked.previousOk': 'Omitido: el envío anterior tuvo éxito',

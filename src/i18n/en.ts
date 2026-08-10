@@ -904,6 +904,7 @@ export const en = {
   'condition.blocked.fileMissing': 'Skipped — {path} does not exist',
   'condition.blocked.filePresent': 'Skipped — {path} is there',
   'condition.blocked.replied': 'Skipped — {who} has replied',
+  'condition.blocked.unsupportedKind': 'Skipped — this version cannot check {kind}',
   'condition.blocked.outsideWindow': 'Skipped — outside {from}–{to}',
   'condition.blocked.noPreviousRun': 'Skipped — there is no earlier run to escalate from',
   'condition.blocked.previousOk': 'Skipped — the previous run succeeded',

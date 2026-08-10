@@ -2040,7 +2040,32 @@ export function AppProvider({ children }: { children: ReactNode }) {
       try {
         const runs = await pull()
         if (cancelled) return
-        for (const { jobId, ...run } of runs) dispatch({ type: 'jobRan', jobId, run })
+        const t = i18nRef.current.t
+        for (const { jobId, ...run } of runs) {
+          dispatch({ type: 'jobRan', jobId, run })
+          /*
+           * A skip that happened with nobody watching still has to be
+           * accounted for.
+           *
+           * This loop only ever moved the row, so on Android — where the alarm
+           * fires into a worker hours after the app was last open, which is the
+           * ordinary case rather than the exception — a reminder held back by a
+           * condition produced no activity line whatsoever. The next-send time
+           * advanced and nothing said why the send had not happened. The live
+           * desktop path reports the same outcome through `onJobEvent` above;
+           * these are the runs that never reach it.
+           */
+          if (run.skipReasonKey) {
+            const name = liveRef.current.jobs.find((j) => j.id === jobId)?.draft.subject
+            addLog({
+              kind: 'schedule',
+              level: 'warn',
+              title: `${t('toast.skipped')} — ${name || t('inbox.noSubject')}`,
+              detail: t(run.skipReasonKey as TranslationKey, run.skipReasonValues),
+              jobId,
+            })
+          }
+        }
       } catch (err) {
         // A failure here costs a stale row, not a lost send — the mail already
         // went out and the queue is only cleared once we have the data.
@@ -2057,7 +2082,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       cancelled = true
       document.removeEventListener('visibilitychange', onVisible)
     }
-  }, [bridge, ready])
+  }, [bridge, ready, addLog])
 
   // --- undo ---------------------------------------------------------------
   //
@@ -2437,18 +2462,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
    */
   const conditionContext = useCallback(() => {
     const live = liveRef.current
-    const inbound = new Map<string, number>()
-    for (const inbox of live.inboxAccounts) {
-      for (const m of inbox.messages) {
-        const key = (/<([^>]+)>/.exec(m.from)?.[1] ?? m.from).trim().toLowerCase()
-        const prev = inbound.get(key)
-        if (prev === undefined || m.date > prev) inbound.set(key, m.date)
-      }
-    }
+    /*
+     * Built by `core/conditions`, not here.
+     *
+     * This was a private loop with its own `From:`-header parse, and the lookup
+     * below normalised the draft address by a second, shorter rule. The two
+     * agree today only because `draft.to` holds bare addresses — the display
+     * name lives on the contact, not in the stored string. The desktop
+     * scheduler now needs the same index for an automatic run, which would have
+     * made that two near-copies of one rule in different processes, so the rule
+     * is stated once and both sides call it.
+     */
+    const inbound = latestInboundIndex(live.inboxAccounts)
     return {
       now: Date.now(),
       inboxKnown: live.inboxAccounts.some((i) => i.enabled && i.lastSyncAt !== undefined),
-      latestInboundFrom: (address: string) => inbound.get(address.trim().toLowerCase()),
+      latestInboundFrom: (address: string) => inbound[inboundKey(address)],
     }
   }, [])
 

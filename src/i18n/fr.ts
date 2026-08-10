@@ -894,6 +894,7 @@ export const fr: Translations = {
   'condition.blocked.fileMissing': 'Sauté — {path} n’existe pas',
   'condition.blocked.filePresent': 'Sauté — {path} est présent',
   'condition.blocked.replied': 'Sauté — {who} a répondu',
+  'condition.blocked.unsupportedKind': 'Sauté — cette version ne peut pas vérifier {kind}',
   'condition.blocked.outsideWindow': 'Sauté — hors de {from}–{to}',
   'condition.blocked.noPreviousRun': 'Sauté — aucun envoi précédent à relancer',
   'condition.blocked.previousOk': 'Sauté — l’envoi précédent a réussi',

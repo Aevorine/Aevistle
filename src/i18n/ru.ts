@@ -893,6 +893,7 @@ export const ru: Translations = {
   'condition.blocked.fileMissing': 'Пропущено — {path} не существует',
   'condition.blocked.filePresent': 'Пропущено — {path} присутствует',
   'condition.blocked.replied': 'Пропущено — {who} уже ответил',
+  'condition.blocked.unsupportedKind': 'Пропущено — эта версия не умеет проверять {kind}',
   'condition.blocked.outsideWindow': 'Пропущено — вне {from}–{to}',
   'condition.blocked.noPreviousRun': 'Пропущено — нет предыдущей отправки',
   'condition.blocked.previousOk': 'Пропущено — предыдущая отправка удалась',

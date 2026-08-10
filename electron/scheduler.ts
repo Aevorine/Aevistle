@@ -10,7 +10,7 @@
 
 import { EventEmitter } from 'node:events'
 import { existsSync } from 'node:fs'
-import { evaluateConditions } from '../src/core/conditions'
+import { evaluateConditions, inboundKey } from '../src/core/conditions'
 import { applyJitter, computeOccurrences, rearm } from '../src/core/schedule'
 import { MAX_BURST_COUNT } from '../src/core/types'
 import type { MailAccount, ScheduledJob, SendResult } from '../src/core/types'
@@ -54,6 +54,13 @@ function runOf(job: ScheduledJob): JobRun {
 export class Scheduler extends EventEmitter {
   private jobs: ScheduledJob[] = []
   private accounts: MailAccount[] = []
+  /**
+   * The renderer's inbox index, for `noReplySince`. Empty and `false` until the
+   * first `sync()` carries one, which is the honest starting state: not
+   * "nobody has replied" but "this process has not been told".
+   */
+  private latestInbound: Record<string, number> = {}
+  private inboxKnown = false
   private timer: NodeJS.Timeout | null = null
   private preciseTimer: NodeJS.Timeout | null = null
   private running = new Set<string>()
@@ -95,8 +102,24 @@ export class Scheduler extends EventEmitter {
   }
 
   /** Replace the whole working set. Called whenever the renderer changes anything. */
-  sync(jobs: ScheduledJob[], accounts: MailAccount[]): void {
+  sync(
+    jobs: ScheduledJob[],
+    accounts: MailAccount[],
+    /**
+     * The inbox index, so `noReplySince` can be answered here.
+     *
+     * See `PlatformBridge.syncJobs`. It arrives on this call rather than
+     * through a channel of its own because it has to be as fresh as the jobs
+     * it will be evaluated against, and this is the call the renderer already
+     * makes on every state change — including every inbox sync.
+     */
+    headless?: { inboxKnown?: boolean; latestInbound?: Record<string, number> },
+  ): void {
     this.accounts = accounts
+    if (headless) {
+      this.inboxKnown = headless.inboxKnown === true
+      this.latestInbound = headless.latestInbound ?? {}
+    }
     this.jobs = jobs.map((job) => {
       const { dueNow, upcoming } = rearm(job.recurrence, job.occurrences ?? [], {
         runsSoFar: job.runCount,
@@ -254,10 +277,16 @@ export class Scheduler extends EventEmitter {
     /**
      * Send conditions, checked here because here is where a scheduled run is
      * actually decided — and because this process is the only one that can
-     * answer the filesystem questions. `noReplySince` needs the inbox, which
-     * lives in the renderer, so it reports as undecidable and does not block:
-     * holding mail back on a question nobody answered is exactly the silent
-     * failure this application exists to avoid.
+     * answer the filesystem questions.
+     *
+     * `noReplySince` needs the inbox, which lives in the renderer. It used to
+     * be left unanswered here, and an unanswered condition deliberately sends
+     * rather than blocking — so "only send if they haven't replied" worked from
+     * the Run now button and did nothing at all for a scheduled send, which is
+     * the case it exists for. The renderer now hands the index over on
+     * `syncJobs`; until it has done so once, `inboxKnown` is false and the old
+     * undecidable-and-send behaviour still applies, which is the right answer
+     * for a process that has genuinely not been told anything.
      */
     const verdict = evaluateConditions(job.conditions, job.draft, {
       now: Date.now(),
@@ -275,6 +304,8 @@ export class Scheduler extends EventEmitter {
       // never run. Without it `noReplySince` reached back to the epoch.
       armedAt: job.createdAt,
       lastResult: job.lastResult,
+      inboxKnown: this.inboxKnown,
+      latestInboundFrom: (address: string) => this.latestInbound[inboundKey(address)],
     })
 
     if (!verdict.send) {

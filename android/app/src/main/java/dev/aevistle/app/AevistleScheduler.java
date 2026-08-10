@@ -54,7 +54,7 @@ final class AevistleScheduler {
 
             if (!job.optBoolean("enabled", false)) continue;
 
-            long next = nextOccurrence(job);
+            long next = nextOccurrence(context, job);
             if (next <= 0) continue;
 
             arm(context, alarms, jobId, next);
@@ -95,15 +95,101 @@ final class AevistleScheduler {
                 extraFlags | PendingIntent.FLAG_IMMUTABLE);
     }
 
-    /** The earliest occurrence still in the future, or -1 when there is none. */
-    static long nextOccurrence(JSONObject job) {
+    /**
+     * When to wake for this job next, or -1 when there is nothing to arm.
+     *
+     * Usually the earliest occurrence still ahead of us. But an occurrence that
+     * is already *past* means a reminder was missed while the device was off,
+     * and this returned -1 for it: the whole list was filtered to
+     * {@code at > now}, so the missed instant was dropped on the floor and
+     * nothing on this side ever read `occurrences` again. The web layer had
+     * already done its half of the work — `rearm` in `src/core/schedule.ts`
+     * puts the missed instant back at the head of the list precisely so the
+     * platform scheduler can pay it, and `electron/scheduler.ts`'s `tick()`
+     * does. The phone threw it away, so the two platforms disagreed about
+     * whether a reminder missed overnight ever arrives. It did not, here.
+     *
+     * A backlog collapses to its most recent entry — waking a phone after a
+     * week owes one reminder, not seven — and is armed for *now*, which is
+     * the immediate alarm that pays it.
+     */
+    static long nextOccurrence(Context context, JSONObject job) {
+        JSONArray occurrences = job.optJSONArray("occurrences");
+        if (occurrences == null) return -1;
+
+        long now = System.currentTimeMillis();
+        long soonest = -1;
+        long owed = -1;
+        for (int i = 0; i < occurrences.length(); i++) {
+            long at = occurrences.optLong(i, 0L);
+            if (at <= 0) continue;
+            if (at > now) {
+                if (soonest < 0 || at < soonest) soonest = at;
+            } else if (at > owed) {
+                owed = at;
+            }
+        }
+
+        if (owed > 0 && paysCatchUp(job)) {
+            /*
+             * Unless it was already paid. Every route into this method runs
+             * repeatedly — boot, package replacement, the exact-alarm
+             * permission changing, and every `syncJobs` the app makes — and the
+             * web layer keeps the missed instant in its own copy of the job
+             * until a run report round-trips back to it. So without this check
+             * the same instant would be re-armed on each pass. The claim is
+             * taken in {@link SendWorker}, where the send actually happens;
+             * this only declines to wake up for work that is already done.
+             */
+            if (!new JobStore(context).occurrenceClaimed(job.optString("id", ""), owed)) {
+                return now;
+            }
+        }
+        return soonest;
+    }
+
+    /**
+     * Does this job's catch-up policy owe a missed occurrence?
+     *
+     * `'fireOnce'` and nothing else, which needs saying because the two halves
+     * of the desktop disagree: `rearm` produces a backlog only for `fireOnce`,
+     * while `tick()` fires anything it finds unless the policy is `'skip'`.
+     * They differ on a policy that is absent.
+     *
+     * `rearm` is the one to match. It is the gate that decides whether a
+     * missed instant is in the list at all when a machine comes back from
+     * being off, which is exactly the situation this method is asked about —
+     * on the desktop `tick()` never sees such an instant, because the renderer
+     * re-armed before the scheduler was told anything. `tick()`'s looser rule
+     * applies to an instant that elapsed while the process was running, and the
+     * Android equivalent of that is an alarm AlarmManager delivers late, which
+     * fires without consulting this list at all.
+     *
+     * So: absent or unrecognised means no catch-up, matching
+     * `rec.catchUp === 'fireOnce'`. `defaultRecurrence()` sets `fireOnce`, so
+     * the default is still to pay.
+     */
+    private static boolean paysCatchUp(JSONObject job) {
+        JSONObject recurrence = job.optJSONObject("recurrence");
+        return recurrence != null && "fireOnce".equals(recurrence.optString("catchUp", ""));
+    }
+
+    /**
+     * The most recent occurrence that is already due, or -1 when none is.
+     *
+     * What {@link SendWorker} claims before it sends. Deliberately *not* gated
+     * on the catch-up policy: this is the identity of the instant being paid,
+     * used to stop it being paid twice, and an ordinary on-time alarm needs
+     * that protection just as much as a catch-up does.
+     */
+    static long dueOccurrence(JSONObject job) {
         JSONArray occurrences = job.optJSONArray("occurrences");
         if (occurrences == null) return -1;
         long now = System.currentTimeMillis();
         long best = -1;
         for (int i = 0; i < occurrences.length(); i++) {
             long at = occurrences.optLong(i, 0L);
-            if (at > now && (best < 0 || at < best)) best = at;
+            if (at > 0 && at <= now && at > best) best = at;
         }
         return best;
     }

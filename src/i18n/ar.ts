@@ -889,6 +889,7 @@ export const ar: Translations = {
   'condition.blocked.fileMissing': 'تم التخطي — {path} غير موجود',
   'condition.blocked.filePresent': 'تم التخطي — {path} موجود',
   'condition.blocked.replied': 'تم التخطي — ردّ {who}',
+  'condition.blocked.unsupportedKind': 'تم التخطي — هذا الإصدار لا يستطيع التحقق من {kind}',
   'condition.blocked.outsideWindow': 'تم التخطي — خارج {from}–{to}',
   'condition.blocked.noPreviousRun': 'تم التخطي — لا يوجد إرسال سابق للتصعيد',
   'condition.blocked.previousOk': 'تم التخطي — نجح الإرسال السابق',

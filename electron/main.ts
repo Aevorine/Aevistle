@@ -1832,8 +1832,13 @@ function registerIpc(): void {
 
   ipcMain.handle(
     IPC.syncJobs,
-    async (_e, jobs: ScheduledJob[], accounts: MailAccount[]) => {
-      scheduler.sync(jobs, accounts)
+    async (
+      _e,
+      jobs: ScheduledJob[],
+      accounts: MailAccount[],
+      headless?: { inboxKnown?: boolean; latestInbound?: Record<string, number> },
+    ) => {
+      scheduler.sync(jobs, accounts, headless)
       // The tray shows the next fire time, so it is stale the moment the
       // schedule changes. Redrawing here is what keeps "next: 09:00 tomorrow"
       // from still saying that after the reminder has been deleted.

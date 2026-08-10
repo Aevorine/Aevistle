@@ -69,6 +69,40 @@ export interface ConditionContext {
   lastResult?: 'ok' | 'failed'
 }
 
+/**
+ * The one rule for turning a `From:` header into a comparison key.
+ *
+ * `"Ada Lovelace" <ada@example.com>` and `ada@Example.com` are the same person
+ * asking the same question, and `noReplySince` is worthless if the two spellings
+ * miss each other. Exported because three places need to agree on it: the
+ * renderer builds the index for a manual run, the desktop scheduler is handed
+ * the same index for an automatic one, and the address being looked up comes
+ * from the draft rather than from a header. Two private copies of this is how
+ * the condition ends up answering "nobody has replied" to a mailbox that has.
+ */
+export function inboundKey(address: string): string {
+  return (/<([^>]+)>/.exec(address)?.[1] ?? address).trim().toLowerCase()
+}
+
+/**
+ * Latest inbound message per sender, epoch ms, from synced inbox folders.
+ *
+ * A plain object rather than a `Map` on purpose: this crosses the IPC boundary
+ * to the main process, where a `Map` arrives as `{}`.
+ */
+export function latestInboundIndex(
+  inboxAccounts: Array<{ messages: Array<{ from: string; date: number }> }>,
+): Record<string, number> {
+  const out: Record<string, number> = {}
+  for (const inbox of inboxAccounts) {
+    for (const m of inbox.messages) {
+      const key = inboundKey(m.from)
+      if (out[key] === undefined || m.date > out[key]) out[key] = m.date
+    }
+  }
+  return out
+}
+
 export interface ConditionVerdict {
   send: boolean
   /** Translation key explaining a block. Absent when `send` is true. */

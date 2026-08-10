@@ -59,7 +59,10 @@ export function createDesktopBridge(): PlatformBridge {
     attachPaths: (paths) => api.attachPaths(paths),
     pathForFile: (file) => api.pathForFile(file),
 
-    syncJobs: (jobs, accounts) => api.syncJobs(jobs, accounts),
+    // The third argument is forwarded, not dropped. It used to stop here,
+    // which is how the desktop scheduler ended up with no inbox index and
+    // reported every scheduled `noReplySince` undecidable.
+    syncJobs: (jobs, accounts, headless) => api.syncJobs(jobs, accounts, headless),
     onJobEvent: (handler) => api.onJobEvent(handler),
 
     syncInbox: (config) => api.syncInbox(config),

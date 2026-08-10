@@ -79,6 +79,19 @@ export interface JobRun {
   status: ScheduledJob['status']
   /** What is still due after this run. Empty means the job is finished. */
   occurrences: number[]
+  /**
+   * Set instead of `lastResult` when a send condition said no.
+   *
+   * A skip is neither `'ok'` nor `'failed'`, and on Android it is the *normal*
+   * case for it to happen with no UI attached — the alarm fires into a worker
+   * hours after the app was last open. Without these two the drain below had
+   * nothing to write, so a reminder deliberately held back left no line in the
+   * activity log at all: the row's next-send time moved and nothing anywhere
+   * said why the send had not happened. The live desktop event carries the same
+   * two on its `SendResult`.
+   */
+  skipReasonKey?: string
+  skipReasonValues?: Record<string, string | number>
 }
 
 export interface JobEvent {
@@ -451,16 +464,35 @@ export interface PlatformBridge {
     jobs: ScheduledJob[],
     accounts: MailAccount[],
     /**
-     * The two notification switches, for platforms whose scheduler runs with
-     * no UI attached.
+     * What a scheduler running with no UI attached cannot ask for itself.
      *
-     * Android's worker used to ask each *job* whether to announce a success —
-     * a field `ScheduledJob` has never carried, so the answer was always the
-     * default `false` and a scheduled send that worked notified on nothing,
-     * ever. Optional so the desktop, which receives the same two through
-     * `setDesktopPrefs`, is not obliged to send them twice.
+     * The two notification switches: Android's worker used to ask each *job*
+     * whether to announce a success — a field `ScheduledJob` has never carried,
+     * so the answer was always the default `false` and a scheduled send that
+     * worked notified on nothing, ever.
+     *
+     * And the inbox index, which is what makes `noReplySince` mean anything
+     * away from the UI. The mailbox lives in application state, so the desktop
+     * scheduler had no way to answer "have they replied" and reported the
+     * condition undecidable — and undecidable deliberately *sends*, because
+     * holding mail back on a guess is worse than sending it. The effect was
+     * that "only if they haven't replied" worked for the Run now button and
+     * quietly did nothing for every scheduled send, which is the one case it
+     * was written for. Handed over here, on the same call and at the same
+     * moment as the jobs themselves, so it cannot drift out of step with them.
+     *
+     * Optional throughout: a platform that ignores it is no worse off than
+     * before, and the desktop still receives the two switches through
+     * `setDesktopPrefs` as well.
      */
-    notify?: { notifyOnSuccess: boolean; notifyOnFailure: boolean },
+    headless?: {
+      notifyOnSuccess: boolean
+      notifyOnFailure: boolean
+      /** True once at least one enabled inbox has synced. */
+      inboxKnown?: boolean
+      /** `core/conditions.latestInboundIndex` — sender key to epoch ms. */
+      latestInbound?: Record<string, number>
+    },
   ): Promise<void>
   /** Fires when the platform completed a scheduled send while we were open. */
   onJobEvent(handler: (event: JobEvent) => void): () => void

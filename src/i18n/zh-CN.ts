@@ -885,6 +885,7 @@ export const zhCN: Translations = {
   'condition.blocked.fileMissing': '已跳过——{path} 不存在',
   'condition.blocked.filePresent': '已跳过——{path} 已经存在',
   'condition.blocked.replied': '已跳过——{who} 已经回复了',
+  'condition.blocked.unsupportedKind': '已跳过——这个版本查不了「{kind}」这个条件',
   'condition.blocked.outsideWindow': '已跳过——不在 {from}–{to} 之间',
   'condition.blocked.noPreviousRun': '已跳过——还没有上一次可以升级',
   'condition.blocked.previousOk': '已跳过——上一次已经发成功了',

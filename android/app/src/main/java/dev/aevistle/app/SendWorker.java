@@ -13,6 +13,12 @@ import org.json.JSONObject;
  *
  * Runs with no UI and no WebView. Everything it needs is in {@link JobStore}
  * and {@link SecretStore}.
+ *
+ * Two gates stand in front of the send, and neither used to exist here:
+ * {@link Conditions}, which is why a job saying "only if they haven't replied"
+ * now honours that on a phone as well as on a desktop; and the occurrence claim
+ * in {@link JobStore#claimOccurrence}, which is what makes an immediate alarm
+ * for a missed reminder safe to arm repeatedly.
  */
 public class SendWorker extends Worker {
 
@@ -44,6 +50,77 @@ public class SendWorker extends Worker {
 
         JSONObject draft = job.optJSONObject("draft");
         if (draft == null) return Result.failure();
+
+        /*
+         * Which instant is being paid, and has it been paid already?
+         *
+         * `dueOccurrence` is the identity of this dispatch — the mirror of
+         * `${job.id}:${fireAt}` in `electron/scheduler.ts`. It matters now that
+         * {@link AevistleScheduler} arms an immediate alarm for an occurrence
+         * missed while the device was off: everything that arms alarms runs
+         * again on the next boot, the next package update and the next
+         * `syncJobs`, so without a claim a phone that reboots twice would send
+         * the same missed reminder twice.
+         *
+         * Only on the first attempt. A WorkManager retry is a continuation of a
+         * dispatch that was already claimed, and re-checking would turn every
+         * transient network failure into a permanently dropped send.
+         *
+         * -1 means no occurrence is due yet — an alarm that arrived a hair
+         * early, or a list the web layer has already pruned on a retry. Sending
+         * unclaimed is the old behaviour and the right one: an alarm that fired
+         * is a reminder the user asked for.
+         */
+        long due = AevistleScheduler.dueOccurrence(job);
+        if (due > 0 && getRunAttemptCount() == 0 && !store.claimOccurrence(jobId, due)) {
+            // Somebody already sent this one. Consume the occurrence so the
+            // alarm is not re-armed for it forever and the schedule row stops
+            // offering a past instant as its next send, then move on.
+            store.dropOccurrencesThrough(jobId, due);
+            armNext(context, store, jobId);
+            return Result.success();
+        }
+
+        /*
+         * Send conditions, checked here because here is where a scheduled run
+         * is actually decided — the same place and for the same reason
+         * `electron/scheduler.ts` checks them, and before the account lookup so
+         * a run the user asked to be called off does not complain about
+         * unrelated configuration.
+         *
+         * There was no check at all on this platform. See {@link Conditions}.
+         */
+        Conditions.Verdict verdict = Conditions.evaluate(context, job);
+        if (!verdict.send) {
+            long ranAt = System.currentTimeMillis();
+            JSONObject run = store.recordSkip(jobId, ranAt, verdict.reasonKey, verdict.reasonValues);
+            /*
+             * Reported three ways, because a skip nobody can see is the bug
+             * that replaces the one being fixed — and on this platform the app
+             * is usually not running when it happens:
+             *
+             *   - the live event, which becomes the activity-log line when the
+             *     app is open, carrying the reason as its detail;
+             *   - the queued run report above, which moves the schedule row off
+             *     "waiting to send" on the next open;
+             *   - a notification, gated on the same switch a failed send uses,
+             *     which is the only one of the three that reaches somebody who
+             *     was not looking at the app. Keyed by job id like every other
+             *     status notification, so a repeatedly-blocked reminder
+             *     replaces its own row instead of stacking.
+             */
+            AevistleNativePlugin.emitJobEvent(jobId, ranAt, verdict.toSendResult(), run);
+            if (store.notifyOnFailure()) {
+                notify(context, jobId, "Not sent — " + job.optString("name", "Aevistle"),
+                        verdict.reason == null ? "A send condition was not met" : verdict.reason);
+            }
+
+            armNext(context, store, jobId);
+            // Success: the worker did exactly what it was asked to. A failure
+            // here would hand the job to WorkManager's backoff and re-run the
+            // same decision every few minutes.
+            return Result.success();
+        }
 
         JSONObject account = store.account(draft.optString("accountId", ""));
         if (account == null) {
@@ -77,11 +154,7 @@ public class SendWorker extends Worker {
         // Re-arm from whatever occurrences remain. The list is refilled by the
         // JavaScript layer next time the app opens; until then the job keeps
         // firing off the horizon that was computed when it was saved.
-        JSONObject refreshed = store.job(jobId);
-        if (refreshed != null) {
-            long next = AevistleScheduler.nextOccurrence(refreshed);
-            if (next > 0) AevistleScheduler.armOne(context, jobId, next);
-        }
+        armNext(context, store, jobId);
 
         if (!result.ok) {
             String title = job.optString("name", "Aevistle");
@@ -119,6 +192,22 @@ public class SendWorker extends Worker {
             notify(context, jobId, "Aevistle", "Sent: " + draft.optString("subject", ""));
         }
         return Result.success();
+    }
+
+    /**
+     * Arm whatever comes next for this job, re-read from the store.
+     *
+     * Re-read rather than reusing the in-memory copy, because every path that
+     * reaches here has just changed the occurrence list — a completed send, a
+     * condition skip, or an instant somebody else already paid. Shared by all
+     * three so none of them can be the one that forgets, which is how a job
+     * stops firing altogether.
+     */
+    private static void armNext(Context context, JobStore store, String jobId) {
+        JSONObject refreshed = store.job(jobId);
+        if (refreshed == null) return;
+        long next = AevistleScheduler.nextOccurrence(context, refreshed);
+        if (next > 0) AevistleScheduler.armOne(context, jobId, next);
     }
 
     /**

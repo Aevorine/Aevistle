@@ -201,7 +201,10 @@ check(
 // of src/i18n. It is itself a caller: `formatRelative` and `formatAgo`
 // translate the nine time.* keys, and excluding it reports all nine as dead.
 
-const REACH_DIRS = ['src', 'electron', 'scripts', 'tests']
+// `android` is in the list because the native scheduler is a caller too: a send
+// condition it blocks on emits a `skipReasonKey`, which the web layer renders
+// through `t()`. Leaving it out reports every Java-only reason key as dead.
+const REACH_DIRS = ['src', 'electron', 'scripts', 'tests', 'android/app/src/main/java']
 const RECORD_FILES = new Set(locales.map((l) => `src/i18n/${l}.ts`))
 
 /**
@@ -218,7 +221,7 @@ const reachWalk = (dir) => {
     const rel = `${dir}/${entry.name}`
     if (entry.name === 'node_modules') continue
     if (entry.isDirectory()) reachWalk(rel)
-    else if (/\.(tsx?|mjs)$/.test(entry.name) && !RECORD_FILES.has(rel)) reachFiles.push(rel)
+    else if (/\.(tsx?|mjs|java)$/.test(entry.name) && !RECORD_FILES.has(rel)) reachFiles.push(rel)
   }
 }
 for (const dir of REACH_DIRS) {

@@ -210,7 +210,17 @@ export interface DesktopApi {
   /** Resolve a dropped `File` to its real path. Renderer-side, no IPC. */
   pathForFile(file: File): string
 
-  syncJobs(jobs: ScheduledJob[], accounts: MailAccount[]): Promise<void>
+  /** `headless` is documented on `PlatformBridge.syncJobs` in `core/bridge`. */
+  syncJobs(
+    jobs: ScheduledJob[],
+    accounts: MailAccount[],
+    headless?: {
+      notifyOnSuccess: boolean
+      notifyOnFailure: boolean
+      inboxKnown?: boolean
+      latestInbound?: Record<string, number>
+    },
+  ): Promise<void>
   onJobEvent(handler: (event: JobEvent) => void): () => void
 
   syncInbox(config: InboxAccountState): Promise<InboxAccountState>
