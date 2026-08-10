@@ -660,6 +660,14 @@ export interface Settings {
    */
   workCalendar?: WorkCalendar
   /**
+   * When `workCalendar` last changed on *this* device. Undefined reads as 0 —
+   * older than anything a peer could send. This is what lets device sync
+   * (`core/syncLoop.ts`) treat the calendar as last-write-wins instead of
+   * exchanging whichever value each side happened to hold before the other's
+   * update arrived, which is a swap, not a sync.
+   */
+  workCalendarUpdatedAt?: number
+  /**
    * Tint each day on the working calendar by how many sends land on it.
    *
    * On by default; the switch exists for the reader who finds five shades of
@@ -786,6 +794,12 @@ export interface Settings {
    * one only moves list rows, and the two are set from different places.
    */
   listDensity?: 'compact' | 'standard' | 'roomy'
+  /**
+   * When any `AppearanceSettings` field (`core/backup.ts`) last changed on
+   * *this* device. Same last-write-wins role as `workCalendarUpdatedAt` — see
+   * its doc — but for the "match my theme" scope instead of the calendar.
+   */
+  appearanceUpdatedAt?: number
   /**
    * Whether the remote-image control in Settings has ever been used.
    *

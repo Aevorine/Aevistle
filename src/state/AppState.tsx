@@ -422,6 +422,66 @@ function droppedLog(job: ScheduledJob, warning: CalendarWarning): LogEntry | nul
   }
 }
 
+/** The `Settings` keys `core/backup.ts`'s `AppearanceSettings` picks — kept as a runtime list so `patchSettings` can tell "did this touch appearance" without re-typing the field list. */
+const APPEARANCE_KEYS: readonly (keyof Settings)[] = [
+  'themeMode',
+  'visualStyle',
+  'accent',
+  'accentBase',
+  'accentCyber',
+  'themeIntensity',
+  'density',
+  'listDensity',
+]
+
+/**
+ * Re-derive every enabled job's occurrences against a calendar/quiet-hours
+ * settings that just changed — the one place both a local edit
+ * (`patchSettings`) and an incoming sync patch (`applySyncResult`) go
+ * through, so a calendar that arrives over device sync rearms the scheduler
+ * exactly the way editing it locally already does, instead of leaving
+ * `job.occurrences` computed against the calendar the UI no longer shows.
+ */
+function recomputeJobsForCalendar(
+  jobs: ScheduledJob[],
+  logs: LogEntry[],
+  settings: Settings,
+  contacts: Contact[],
+  touchesQuiet: boolean,
+): { jobs: ScheduledJob[]; logs: LogEntry[] } {
+  const now = Date.now()
+  const fresh: LogEntry[] = []
+  const nextJobs = jobs.map((job) => {
+    // Quiet hours apply to every armed job; the calendar only reaches the
+    // ones that opted in, so the rest are left strictly untouched — no new
+    // `updatedAt`, no re-arm, no churn on the device.
+    if (!job.enabled) return job
+    if (!touchesQuiet && (job.recurrence.workdayPolicy ?? 'off') === 'off') return job
+    const next = reshapeJob(job, settings, now, contacts)
+    if (
+      sameList(next.occurrences, job.occurrences) &&
+      next.recurrence === job.recurrence &&
+      next.calendarWarning === undefined &&
+      job.calendarWarning === undefined
+    ) {
+      // The visible answer did not change, so this must not bump
+      // `updatedAt` or touch anything the scheduler-sync signature watches.
+      return job.rawOccurrences === next.rawOccurrences && job.rawOccurrencesRunCount === next.rawOccurrencesRunCount
+        ? job
+        : { ...job, rawOccurrences: next.rawOccurrences, rawOccurrencesRunCount: next.rawOccurrencesRunCount }
+    }
+    // `updatedAt` is what the scheduler-sync signature watches. Without
+    // bumping it, a change that moved only the *later* occurrences would
+    // leave the device holding the old alarms.
+    if (next.calendarWarning) {
+      const entry = droppedLog(next, next.calendarWarning)
+      if (entry) fresh.push(entry)
+    }
+    return { ...next, updatedAt: now }
+  })
+  return { jobs: nextJobs, logs: fresh.length > 0 ? pruneLogs([...fresh, ...logs], settings) : logs }
+}
+
 /**
  * Delete a batch of stored credentials and report, in one string, whichever
  * ones refused to go.
@@ -569,10 +629,20 @@ export function reducer(state: AppState, action: Action): AppState {
      * at the same time, so there is nothing to read back.
      */
     case 'patchSettings': {
-      const settings = { ...state.settings, ...action.patch }
+      const touchesCalendar = action.patch.workCalendar !== undefined
+      const touchesAppearance = APPEARANCE_KEYS.some((key) => key in action.patch)
+      const now = Date.now()
+      const settings = {
+        ...state.settings,
+        ...action.patch,
+        // Stamped here, centrally, rather than at every caller that can
+        // change a theme or calendar field — see `Settings.workCalendarUpdatedAt`
+        // / `appearanceUpdatedAt` for why device sync needs this.
+        ...(touchesCalendar ? { workCalendarUpdatedAt: now } : {}),
+        ...(touchesAppearance ? { appearanceUpdatedAt: now } : {}),
+      }
       const touchesRetention =
         action.patch.logRetentionDays !== undefined || action.patch.logMaxEntries !== undefined
-      const touchesCalendar = action.patch.workCalendar !== undefined
       const touchesQuiet =
         action.patch.quietHoursEnabled !== undefined ||
         action.patch.quietStart !== undefined ||
@@ -581,46 +651,7 @@ export function reducer(state: AppState, action: Action): AppState {
       let jobs = state.jobs
       let logs = state.logs
       if (touchesCalendar || touchesQuiet) {
-        const now = Date.now()
-        const fresh: LogEntry[] = []
-        jobs = state.jobs.map((job) => {
-          // Quiet hours apply to every armed job; the calendar only reaches the
-          // ones that opted in, so the rest are left strictly untouched — no new
-          // `updatedAt`, no re-arm, no churn on the device.
-          if (!job.enabled) return job
-          if (touchesCalendar && !touchesQuiet && (job.recurrence.workdayPolicy ?? 'off') === 'off') {
-            return job
-          }
-          const next = reshapeJob(job, settings, now, state.contacts)
-          if (
-            sameList(next.occurrences, job.occurrences) &&
-            next.recurrence === job.recurrence &&
-            next.calendarWarning === undefined &&
-            job.calendarWarning === undefined
-          ) {
-            // The visible answer did not change, so this must not bump
-            // `updatedAt` or touch anything the scheduler-sync signature
-            // watches. But `reshapeJob` may have just healed a cache that was
-            // stale on the way in (a run moved `runCount` past what it was
-            // computed against, yet the recomputed answer landed on the same
-            // occurrences anyway) — keeping the healed cache is what lets the
-            // *next* edit take the fast path instead of silently falling back
-            // to a full rebuild every time, forever.
-            return job.rawOccurrences === next.rawOccurrences &&
-              job.rawOccurrencesRunCount === next.rawOccurrencesRunCount
-              ? job
-              : { ...job, rawOccurrences: next.rawOccurrences, rawOccurrencesRunCount: next.rawOccurrencesRunCount }
-          }
-          // `updatedAt` is what the scheduler-sync signature watches. Without
-          // bumping it, a change that moved only the *later* occurrences would
-          // leave the device holding the old alarms.
-          if (next.calendarWarning) {
-            const entry = droppedLog(next, next.calendarWarning)
-            if (entry) fresh.push(entry)
-          }
-          return { ...next, updatedAt: now }
-        })
-        if (fresh.length > 0) logs = pruneLogs([...fresh, ...logs], settings)
+        ;({ jobs, logs } = recomputeJobsForCalendar(state.jobs, state.logs, settings, state.contacts, touchesQuiet))
       }
 
       return {
@@ -1112,20 +1143,47 @@ export function reducer(state: AppState, action: Action): AppState {
      */
     case 'applySyncResult': {
       const { patch, conflicts, deviceId, syncedAt } = action
+      // `syncLoop.ts` already gated `patch.appearance`/`patch.workCalendar` on
+      // being newer than what this device held when the exchange started —
+      // re-checked here against *current* state too, in case a local edit
+      // landed while the exchange was still in flight.
+      const adoptAppearance =
+        patch.appearance !== undefined && (patch.appearanceUpdatedAt ?? 0) > (state.settings.appearanceUpdatedAt ?? 0)
+      const adoptCalendar =
+        patch.workCalendar !== undefined &&
+        (patch.workCalendarUpdatedAt ?? 0) > (state.settings.workCalendarUpdatedAt ?? 0)
+
+      const settings =
+        adoptAppearance || adoptCalendar
+          ? {
+              ...state.settings,
+              ...(adoptAppearance ? { ...patch.appearance, appearanceUpdatedAt: patch.appearanceUpdatedAt } : {}),
+              ...(adoptCalendar
+                ? { workCalendar: patch.workCalendar, workCalendarUpdatedAt: patch.workCalendarUpdatedAt }
+                : {}),
+            }
+          : state.settings
+
+      let jobs = patch.jobs ?? state.jobs
+      let logs = state.logs
+      if (adoptCalendar) {
+        // Mirrors `patchSettings`'s own rearm — a calendar that arrived over
+        // sync must recompute occurrences the same way editing it locally
+        // does, or the UI shows the new calendar while the scheduler keeps
+        // firing against the old one.
+        const recomputed = recomputeJobsForCalendar(jobs, state.logs, settings, state.contacts, false)
+        jobs = recomputed.jobs
+        logs = recomputed.logs
+      }
+
       return {
         ...state,
         accounts: patch.accounts ?? state.accounts,
-        jobs: patch.jobs ?? state.jobs,
+        jobs,
+        logs,
         contacts: patch.contacts ?? state.contacts,
         templates: patch.templates ?? state.templates,
-        settings:
-          patch.appearance || patch.workCalendar
-            ? {
-                ...state.settings,
-                ...(patch.appearance ?? {}),
-                ...(patch.workCalendar ? { workCalendar: patch.workCalendar } : {}),
-              }
-            : state.settings,
+        settings,
         pairedDevices: touchSynced(state.pairedDevices, deviceId, syncedAt),
         syncConflicts: pushConflictSnapshots(state.syncConflicts, conflicts),
       }

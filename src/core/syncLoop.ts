@@ -206,7 +206,13 @@ export function buildChangedPayload(
   }
   if (want.has('schedule')) {
     const jobs = changedSince(state.jobs, sinceLocal)
-    if (jobs.length > 0) payload.schedule = { jobs, workCalendar: calendar }
+    const calendarChanged = (state.settings.workCalendarUpdatedAt ?? 0) > sinceLocal
+    // A calendar-only edit (no job touched since) must still travel — it used
+    // to ride along only when `jobs` was non-empty, so "moved a holiday, sent
+    // nothing else" never reached the peer at all.
+    if (jobs.length > 0 || calendarChanged) {
+      payload.schedule = { jobs, workCalendar: calendar, workCalendarUpdatedAt: state.settings.workCalendarUpdatedAt }
+    }
   }
   if (want.has('contacts')) {
     const changed = changedSince(state.contacts, sinceLocal)
@@ -220,7 +226,11 @@ export function buildChangedPayload(
     // Settings carry no per-field `updatedAt`, so appearance travels whole
     // every cycle rather than being diffed — small enough that this costs
     // nothing, and "match my theme" is meant to converge, not merge.
+    // `appearanceUpdatedAt` is what makes it actually converge: the receiver
+    // only adopts this if it is newer than its own, rather than both sides
+    // handing back whatever they already had (see `applyExchange`).
     payload.appearance = appearanceSettings(state.settings)
+    payload.appearanceUpdatedAt = state.settings.appearanceUpdatedAt
   }
 
   return payload
@@ -284,9 +294,13 @@ export interface SyncApplyPatch {
   accounts?: MailAccount[]
   jobs?: ScheduledJob[]
   workCalendar?: WorkCalendar
+  /** Set whenever `workCalendar` is, so the reducer can record what it adopted — see `Settings.workCalendarUpdatedAt`. */
+  workCalendarUpdatedAt?: number
   contacts?: Contact[]
   templates?: Template[]
   appearance?: AppearanceSettings
+  /** Set whenever `appearance` is, so the reducer can record what it adopted — see `Settings.appearanceUpdatedAt`. */
+  appearanceUpdatedAt?: number
 }
 
 export interface ExchangeOutcome {
@@ -377,7 +391,17 @@ export async function applyExchange(
       clockOffsetMs,
     )
     if (result.merged) patch.jobs = result.merged
-    if (incoming.schedule.workCalendar) patch.workCalendar = incoming.schedule.workCalendar
+    // Last-write-wins on the timestamp, not "whoever's payload we saw last":
+    // without this, two devices with a different calendar hand each other's
+    // old value back and forth forever instead of converging on the newer one.
+    if (incoming.schedule.workCalendar) {
+      const incomingAt = incoming.schedule.workCalendarUpdatedAt ?? 0
+      const localAt = state.settings.workCalendarUpdatedAt ?? 0
+      if (incomingAt > localAt) {
+        patch.workCalendar = incoming.schedule.workCalendar
+        patch.workCalendarUpdatedAt = incomingAt
+      }
+    }
     conflicts = conflicts.concat(result.conflicts)
   }
 
@@ -407,7 +431,14 @@ export async function applyExchange(
     conflicts = conflicts.concat(result.conflicts)
   }
 
-  if (incoming.appearance) patch.appearance = incoming.appearance
+  if (incoming.appearance) {
+    const incomingAt = incoming.appearanceUpdatedAt ?? 0
+    const localAt = state.settings.appearanceUpdatedAt ?? 0
+    if (incomingAt > localAt) {
+      patch.appearance = incoming.appearance
+      patch.appearanceUpdatedAt = incomingAt
+    }
+  }
 
   return { patch, conflicts, accountSecrets }
 }

@@ -62,6 +62,8 @@ export const SYNC_SCOPE_KEYS: readonly SyncScopeKey[] = [
 export interface SchedulePayload {
   jobs: ScheduledJob[]
   workCalendar: WorkCalendar
+  /** See `Settings.workCalendarUpdatedAt` — carried alongside so the receiver can tell whether to adopt it. */
+  workCalendarUpdatedAt?: number
 }
 
 /** An account as it may travel inside a *live* pairing session only — see the module doc for why. */
@@ -84,6 +86,8 @@ export interface ScopePayload {
   contacts?: Contact[]
   templates?: Template[]
   appearance?: AppearanceSettings
+  /** See `Settings.appearanceUpdatedAt` — carried alongside so the receiver can tell whether to adopt it. */
+  appearanceUpdatedAt?: number
 }
 
 export interface BuildScopeOptions {
@@ -111,7 +115,7 @@ export function buildScopePayload(
     })
   }
   if (want.has('schedule')) {
-    payload.schedule = { jobs: state.jobs, workCalendar: calendar }
+    payload.schedule = { jobs: state.jobs, workCalendar: calendar, workCalendarUpdatedAt: state.settings.workCalendarUpdatedAt }
   }
   if (want.has('contacts')) {
     payload.contacts = state.contacts
@@ -121,6 +125,7 @@ export function buildScopePayload(
   }
   if (want.has('appearance')) {
     payload.appearance = appearanceSettings(state.settings)
+    payload.appearanceUpdatedAt = state.settings.appearanceUpdatedAt
   }
 
   return payload
