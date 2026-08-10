@@ -59,6 +59,13 @@ export interface ConditionContext {
   /** True when the inbox has synced at least once — see `undecidable` below. */
   inboxKnown?: boolean
   lastRunAt?: number
+  /**
+   * When the job was first armed, epoch ms — the window's opening edge for a
+   * job that has never run. Callers that cannot supply it may omit it; `now`
+   * is the fallback, which is strictly safer than the epoch. See the
+   * `noReplySince` branch for what the epoch cost.
+   */
+  armedAt?: number
   lastResult?: 'ok' | 'failed'
 }
 
@@ -125,9 +132,18 @@ function evaluateOne(
       if (!ctx.latestInboundFrom || ctx.inboxKnown !== true) {
         return { send: true, undecidable: true }
       }
-      // The window opens at the last run, or at the job's first arming if it
-      // has never run — "have they replied since I last chased them".
-      const since = ctx.lastRunAt ?? 0
+      /*
+       * The window opens at the last run, or at the job's first arming if it
+       * has never run — "have they replied since I last chased them".
+       *
+       * That is what the sentence above always said and what the code below
+       * never did: the fallback was `0`, the epoch, so a job that had not run
+       * yet asked "have they ever written to me, in the whole history of this
+       * mailbox". A reminder to chase someone who last mailed you in 2019 was
+       * blocked on its very first arming and never sent — visible only as a
+       * "Skipped" line nobody was looking for.
+       */
+      const since = ctx.lastRunAt ?? ctx.armedAt ?? ctx.now
       const recipients = [...draft.to, ...draft.cc]
       for (const address of recipients) {
         const at = ctx.latestInboundFrom(address)

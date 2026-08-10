@@ -12,7 +12,7 @@ import {
 } from '../components/ui'
 import { IconClock, IconCopy, IconPause, IconPlay, IconSend, IconTrash } from '../components/icons'
 import { useApp } from '../state/AppState'
-import { useI18n } from '../i18n'
+import { useI18n, type TranslationKey } from '../i18n'
 import { summarizeRecurrence } from '../core/schedule'
 import { isFinished } from '../core/jobRun'
 import { ATMOSPHERE_MOTION_MIN, type ScheduledJob } from '../core/types'
@@ -187,7 +187,21 @@ export function ScheduleView({ onCompose }: { onCompose: () => void }) {
     setBusy(id)
     try {
       const result = await runJobNow(id)
-      if (result?.ok) {
+      if (result && !result.ok && result.skipped) {
+        /*
+         * A condition said "not now". That is a decision, not a failure, and
+         * it used to fall into the `else` below and render as "Send failed"
+         * with an empty detail — because a skip carries `skipReasonKey`, not
+         * `error`. The one thing the user needs is which condition stopped it.
+         */
+        toast.push({
+          tone: 'info',
+          title: t('toast.skipped'),
+          detail: result.skipReasonKey
+            ? t(result.skipReasonKey as TranslationKey, result.skipReasonValues)
+            : undefined,
+        })
+      } else if (result?.ok) {
         // `toast.sent` carries no placeholders — the recipients and the
         // duration live in `toast.sentDetail`. Passing them to the title threw
         // both away, so a send started here reported less than the identical

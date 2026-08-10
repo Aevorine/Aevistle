@@ -472,6 +472,8 @@ export const es: Translations = {
   'toast.copied': 'Copiado al portapapeles',
   'toast.sendFailed': 'Falló el envío',
 
+  'toast.skipped': 'No enviado: una condición lo impidió',
+
   'confirm.bulkTitle': '¿Enviar a {n} personas?',
   'confirm.bulkBody': 'Este mensaje sale de inmediato y no se puede recuperar.',
   'confirm.deleteJob': '¿Eliminar esta programación?',

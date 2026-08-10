@@ -1424,7 +1424,19 @@ export function InboxView({
               </div>
             </div>
 
-            {selected.size === 0 && filteredMessages.length > 0 ? (
+            {/*
+              Gated on the selection only. It used to also require
+              `filteredMessages.length > 0`, which made emptying the list
+              destroy the way back into it: select all, "Remove from here", and
+              the whole row — including the recycle-bin button — stopped
+              rendering, so `showBin` could never become true and the removed
+              messages were unreachable until a sync brought a different one
+              back. The same gate also hid auto-check and push on an empty
+              inbox, which is exactly when someone goes looking for them.
+
+              The bulk actions inside still need something to act on; they keep
+              their own gate. */}
+            {selected.size === 0 ? (
               <div className="btn-row">
                 {/* Auto-check lives here rather than in Settings: it is the
                     control people reach for the moment mail seems late, and
@@ -1464,23 +1476,27 @@ export function InboxView({
                     ))}
                   </select>
                 </div>
-                <Button variant="ghost" onClick={selectAllVisible}>
-                  {t('inbox.selectAll')}
-                </Button>
-                {unreadTotal > 0 ? (
-                  <Button variant="ghost" icon={<IconCheck size={15} />} onClick={markAllRead}>
-                    {t('inbox.markAllRead')}
-                  </Button>
+                {filteredMessages.length > 0 ? (
+                  <>
+                    <Button variant="ghost" onClick={selectAllVisible}>
+                      {t('inbox.selectAll')}
+                    </Button>
+                    {unreadTotal > 0 ? (
+                      <Button variant="ghost" icon={<IconCheck size={15} />} onClick={markAllRead}>
+                        {t('inbox.markAllRead')}
+                      </Button>
+                    ) : null}
+                    <Button variant="ghost" onClick={deleteAllRead}>
+                      {t('inbox.deleteAllRead')}
+                    </Button>
+                    <Button variant="ghost" onClick={deleteAllMessages}>
+                      {t('inbox.deleteAll')}
+                    </Button>
+                    <Button variant="danger" onClick={purgeAllMessages}>
+                      {t('inbox.deleteAllOnServer')}
+                    </Button>
+                  </>
                 ) : null}
-                <Button variant="ghost" onClick={deleteAllRead}>
-                  {t('inbox.deleteAllRead')}
-                </Button>
-                <Button variant="ghost" onClick={deleteAllMessages}>
-                  {t('inbox.deleteAll')}
-                </Button>
-                <Button variant="danger" onClick={purgeAllMessages}>
-                  {t('inbox.deleteAllOnServer')}
-                </Button>
                 {/* Only once there is something in it. A bin that is always
                     there and always empty is a control people stop seeing. */}
                 {removedAll.length > 0 ? (

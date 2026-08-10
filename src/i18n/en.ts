@@ -544,6 +544,8 @@ export const en = {
   'toast.copied': 'Copied to clipboard',
   'toast.sendFailed': 'Send failed',
 
+  'toast.skipped': 'Not sent — a condition said no',
+
   'result.sentTitle': 'Sent successfully',
   'result.sentBody': 'Delivered to {n} recipient(s) in {ms} ms via {host}',
   'result.dismiss': 'Dismiss',

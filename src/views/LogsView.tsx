@@ -13,6 +13,7 @@ import { VirtualList } from '../components/VirtualList'
 import { IconActivity, IconDownload, IconTrash } from '../components/icons'
 import { sendsFromLogs, summariseReceipts, trackReceipts } from '../core/receipts'
 import { saveGeneratedFile } from '../core/download'
+import { pruneLogs } from '../core/logRetention'
 import { useApp } from '../state/AppState'
 import { useI18n } from '../i18n'
 import type { LogEntry } from '../core/types'
@@ -87,10 +88,19 @@ export function LogsView() {
 
   const deferredQuery = useDeferredValue(query)
   const entries = useMemo(() => {
-    const cutoff = Date.now() - state.settings.logRetentionDays * 86_400_000
     const needle = deferredQuery.trim().toLowerCase()
-    return state.logs
-      .filter((l) => l.at >= cutoff)
+    /*
+     * `pruneLogs`, not a second cutoff computed here.
+     *
+     * The inline version this replaces was `Date.now() - logRetentionDays *
+     * 86400000` with none of the fallbacks `pruneLogs` documents at length.
+     * Clear the "Keep activity log for" box in Settings and the browser
+     * reports `''` mid-edit, `Number('')` is 0, the cutoff becomes `Date.now()`
+     * and every comparison fails: this screen renders "Nothing has happened
+     * yet" while the entire log is still sitting in state.json. Nothing throws
+     * and nothing warns — the log simply appears to have been erased.
+     */
+    return pruneLogs(state.logs, state.settings)
       .filter((l) => {
         if (filter === 'all') return true
         if (filter === 'error') return l.level === 'error'

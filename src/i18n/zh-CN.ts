@@ -463,6 +463,8 @@ export const zhCN: Translations = {
   'toast.copied': '已复制到剪贴板',
   'toast.sendFailed': '发送失败',
 
+  'toast.skipped': '没有发送——有个条件不满足',
+
   'confirm.bulkTitle': '确定发给 {n} 个人？',
   'confirm.bulkBody': '这封信会立刻发出去，发出后收不回来。',
   'confirm.deleteJob': '删除这个定时任务？',

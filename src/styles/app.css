@@ -6502,6 +6502,80 @@ textarea {
   resize: none;
 }
 
+/* --- the label line, the last band still charging the message for four rows -
+
+   Measured at 360x800 with the rest of this block in place: the body box came
+   to 476.6px of 662, which is 72%, and every one of the missing 86px was in
+   one element. `.field__labelrow` renders 129.4px here against 28.4px on a
+   desktop, because the phone layer wraps the seven 44px markup buttons onto
+   four lines — a trade the note above `.field__label` in that block spells out
+   and, at the time, defended. The 85% floor overrules it: four rows of format
+   buttons is not what the screen is for.
+
+   So the row holds its one line and the toolbar scrolls inside it. The
+   buttons stay 44px — shrinking them is what that rule exists to prevent —
+   and six of the seven are visible at 360px, all of them at 412px. The byte
+   count stays too: it is the number that explains a bounced attachment, and
+   it is data, not guidance. What goes is the word "Body" above a box that is
+   nine tenths of the screen, and it goes to `.sr-only` rather than
+   `display: none` so the textarea keeps its accessible name.
+
+   Result, measured the same way: 569.6px of 662, 86%. */
+.view--compose[data-narrow] .compose-layout > .field:has(.textarea--body) > .field__labelrow {
+  flex-wrap: nowrap;
+  gap: var(--sp-2);
+}
+.view--compose[data-narrow]
+  .compose-layout
+  > .field:has(.textarea--body)
+  > .field__labelrow
+  > .field__label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.view--compose[data-narrow] .compose-layout > .field:has(.textarea--body) .field__tools {
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-wrap: nowrap;
+  gap: var(--sp-2);
+}
+/* "0 字 · 0 B" wrapped to two lines at 360px, and two lines of 16px text is
+   52.8px — taller than the 44px buttons beside it, so the count, not the
+   toolbar, was setting the row height. Measured: 52.8 → 44. */
+.view--compose[data-narrow] .compose-layout > .field:has(.textarea--body) .field__count {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+/* `min-width: 0` is the whole fix: without it a nowrap flex item refuses to
+   shrink below its content, so the row would push the count off the side of
+   the window instead of scrolling the strip. The scrollbar is hidden because
+   a horizontal bar here would take back part of the row it is buying. */
+.view--compose[data-narrow] .compose-layout > .field:has(.textarea--body) .markup {
+  flex: 0 1 auto;
+  min-width: 0;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.view--compose[data-narrow]
+  .compose-layout
+  > .field:has(.textarea--body)
+  .markup::-webkit-scrollbar {
+  display: none;
+}
+/* 4px between the summary, the message and nothing else. At `--sp-2` the two
+   gaps were 16px of the 86 this block had to find. */
+.view--compose[data-narrow] .compose-layout {
+  gap: var(--sp-1);
+}
+
 /* --- the narrow action bar ------------------------------------------------ */
 
 /* One row, and it is the form's missing third of the screen. The wide bar

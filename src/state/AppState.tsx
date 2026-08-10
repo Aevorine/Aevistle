@@ -702,11 +702,38 @@ export function reducer(state: AppState, action: Action): AppState {
       const jobs = state.jobs.map((j) =>
         j.draft.accountId === action.id ? { ...j, enabled: false, status: 'paused' as const } : j,
       )
-      // A default pointing at a now-deleted account is dead state, not a
-      // preference — clear it so the next account falls back cleanly.
+      /*
+       * A default pointing at a now-deleted account is dead state, not a
+       * preference — clear it so the next account falls back cleanly.
+       *
+       * All three of them. `defaultAccountId` was the only one cleared, and
+       * the other two are read the same way: `digestAccountId ||
+       * defaultAccountId || accounts[0]`. A dangling id short-circuits that
+       * chain, `find` returns undefined, and the sender gives up at its
+       * `if (!account) return`. Delete the account the daily digest was using
+       * and the digest switch still reads ON, the "no account" notice stays
+       * hidden because there IS an account, and no digest is ever sent again —
+       * with nothing anywhere saying so. Same for holiday greetings.
+       */
       const settings =
-        state.settings.defaultAccountId === action.id
-          ? { ...state.settings, defaultAccountId: undefined }
+        state.settings.defaultAccountId === action.id ||
+        state.settings.digestAccountId === action.id ||
+        state.settings.greetingAccountId === action.id
+          ? {
+              ...state.settings,
+              defaultAccountId:
+                state.settings.defaultAccountId === action.id
+                  ? undefined
+                  : state.settings.defaultAccountId,
+              digestAccountId:
+                state.settings.digestAccountId === action.id
+                  ? undefined
+                  : state.settings.digestAccountId,
+              greetingAccountId:
+                state.settings.greetingAccountId === action.id
+                  ? undefined
+                  : state.settings.greetingAccountId,
+            }
           : state.settings
       const draft =
         state.draft.accountId === action.id
@@ -1479,7 +1506,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
               if (recurrence === job.recurrence && job.rawOccurrences === undefined) return job
               return { ...job, recurrence, rawOccurrences: undefined, rawOccurrencesRunCount: undefined }
             }
-            const { upcoming } = rearm(recurrence, job.occurrences ?? [], {
+            const { dueNow, upcoming } = rearm(recurrence, job.occurrences ?? [], {
               runsSoFar: job.runCount,
               calendar,
             })
@@ -1493,7 +1520,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
             return {
               ...job,
               recurrence,
-              occurrences: shaped.occurrences,
+              /*
+               * `dueNow` first, unshaped.
+               *
+               * This is the whole of the catch-up promise. `rearm` collapses
+               * everything missed while the machine was off into at most one
+               * instant — and both call sites, here and `electron/scheduler`,
+               * destructured only `upcoming` and let it fall on the floor. The
+               * default policy is `fireOnce`; what it actually did was nothing,
+               * for every reminder, on every launch after a night with the
+               * laptop shut. Nothing failed: the row simply showed its next
+               * future run, as if the missed one had never been due.
+               *
+               * Kept out of `shapeOccurrences` on purpose. Quiet hours, the
+               * delivery window and the working calendar all decide *when to
+               * place* a send in the future; an instant that is already past
+               * is not being placed, it is being paid. The desktop scheduler's
+               * `tick()` already knows how to fire a past occurrence exactly
+               * once — putting it back in the list is all it ever needed.
+               */
+              occurrences: [...dueNow, ...shaped.occurrences],
               calendarWarning: shaped.warning,
               rawOccurrences: undefined,
               rawOccurrencesRunCount: undefined,
@@ -1886,14 +1932,31 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // sent still read "waiting to send" — the send result reached the
       // activity list and never reached the job.
       if (event.run) dispatch({ type: 'jobRan', jobId: event.jobId, run: event.run })
+      /*
+       * The subject and the message id, the same two the manual-send path
+       * has always written.
+       *
+       * Without them, bounce and read-receipt tracking was dead for every
+       * scheduled send — which is to say for the app's primary feature.
+       * `receipts.sendsFromLogs` reads `subject: l.title`, so it was handed
+       * the literal string 'Scheduled send completed' for every send ever
+       * made, with `messageId: undefined`; `reportMatches` then needed a
+       * bounce whose subject contained "scheduledsendcompleted" to match
+       * anything. It never did. The Logs screen reported "0 bounced" for a
+       * mailbox full of bounces, and no read receipt was ever attributed.
+       */
+      const subject = liveRef.current.jobs.find((j) => j.id === event.jobId)?.draft.subject
       addLog({
         kind: 'send',
         level: event.result.ok ? 'info' : 'error',
-        title: event.result.ok ? 'Scheduled send completed' : 'Scheduled send failed',
+        title: event.result.ok
+          ? subject || '(no subject)'
+          : `Scheduled send failed: ${subject || '(no subject)'}`,
         detail: event.result.error,
         jobId: event.jobId,
         recipients: event.result.accepted.length,
         durationMs: event.result.durationMs,
+        messageId: event.result.messageId,
       })
     })
   }, [bridge, addLog])
@@ -2336,6 +2399,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const verdict = evaluateConditions(job.conditions, job.draft, {
         ...conditionContext(),
         lastRunAt: job.lastRunAt,
+        // The opening edge of "since I last chased them" for a job that has
+        // never run. Without it `noReplySince` reached back to the epoch.
+        armedAt: job.createdAt,
         lastResult: job.lastResult,
       })
       if (!verdict.send) {

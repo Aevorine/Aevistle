@@ -57,6 +57,18 @@ export class Scheduler extends EventEmitter {
   private timer: NodeJS.Timeout | null = null
   private preciseTimer: NodeJS.Timeout | null = null
   private running = new Set<string>()
+  /**
+   * `${jobId}:${instant}` for every occurrence this process has dispatched.
+   *
+   * `sync()` puts a missed occurrence back into the working set so `tick()`
+   * can pay it — see the comment there — and `sync()` is called again on every
+   * renderer state change. Without this the renderer's copy of the job, which
+   * still lists that instant until the run finishes and the update round-trips
+   * back to it, would resurrect the same catch-up on the next `sync()` and
+   * send it twice. Pruned in `tick()` so a long-running process does not carry
+   * every send it has ever made.
+   */
+  private fired = new Set<string>()
 
   start(): void {
     if (this.timer) return
@@ -86,10 +98,25 @@ export class Scheduler extends EventEmitter {
   sync(jobs: ScheduledJob[], accounts: MailAccount[]): void {
     this.accounts = accounts
     this.jobs = jobs.map((job) => {
-      const { upcoming } = rearm(job.recurrence, job.occurrences ?? [], {
+      const { dueNow, upcoming } = rearm(job.recurrence, job.occurrences ?? [], {
         runsSoFar: job.runCount,
       })
-      return { ...job, occurrences: upcoming }
+      /*
+       * The missed occurrence goes back in front of the future ones.
+       *
+       * `tick()` below has always known how to pay a backlog — it filters
+       * `t <= now` and fires the last one. It never found anything, because
+       * this line handed it a list `rearm` had already stripped of everything
+       * past. Waking the machine after a night produced no send and no sign
+       * that one had been skipped.
+       *
+       * Filtered against `fired` so the same instant cannot be paid twice: the
+       * renderer's copy of the job still carries it until the run completes
+       * and the update round-trips, and `sync()` runs on every state change in
+       * between.
+       */
+      const owed = dueNow.filter((t) => !this.fired.has(`${job.id}:${t}`))
+      return { ...job, occurrences: [...owed, ...upcoming] }
     })
     this.armPrecise()
   }
@@ -151,8 +178,23 @@ export class Scheduler extends EventEmitter {
         continue
       }
 
+      // Claimed before the send starts, so a `sync()` arriving mid-run cannot
+      // put this instant back and have it paid a second time.
+      this.fired.add(`${job.id}:${fireAt}`)
       this.running.add(job.id)
       void this.run(job, remaining).finally(() => this.running.delete(job.id))
+    }
+
+    // A claim older than a day can no longer be resurrected by any `sync()` —
+    // `rearm` would have to be handed an occurrence that old, and the renderer
+    // pruned it long before. Keeps the set from growing for the life of the
+    // process.
+    if (this.fired.size > 512) {
+      const cutoff = now - 24 * 60 * 60 * 1000
+      for (const key of this.fired) {
+        const at = Number(key.slice(key.lastIndexOf(':') + 1))
+        if (Number.isFinite(at) && at < cutoff) this.fired.delete(key)
+      }
     }
 
     this.armPrecise()
@@ -229,6 +271,9 @@ export class Scheduler extends EventEmitter {
         }
       },
       lastRunAt: job.lastRunAt,
+      // The opening edge of "since I last chased them" for a job that has
+      // never run. Without it `noReplySince` reached back to the epoch.
+      armedAt: job.createdAt,
       lastResult: job.lastResult,
     })
 

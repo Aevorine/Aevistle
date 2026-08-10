@@ -472,6 +472,8 @@ export const fr: Translations = {
   'toast.copied': 'Copié dans le presse-papiers',
   'toast.sendFailed': 'Échec de l’envoi',
 
+  'toast.skipped': "Non envoyé — une condition s'y oppose",
+
   'confirm.bulkTitle': 'Envoyer à {n} personnes ?',
   'confirm.bulkBody': 'Ce message part immédiatement et ne peut pas être rappelé.',
   'confirm.deleteJob': 'Supprimer cette programmation ?',

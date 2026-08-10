@@ -467,6 +467,8 @@ export const ar: Translations = {
   'toast.copied': 'نُسخ إلى الحافظة',
   'toast.sendFailed': 'فشل الإرسال',
 
+  'toast.skipped': 'لم يُرسل — أحد الشروط منع ذلك',
+
   'confirm.bulkTitle': 'إرسال إلى {n} شخصاً؟',
   'confirm.bulkBody': 'ستخرج هذه الرسالة فوراً ولا يمكن استرجاعها.',
   'confirm.deleteJob': 'حذف هذه الجدولة؟',

@@ -311,6 +311,18 @@ export function placeWithin(
       t = candidate
       if (!seen.has(t)) break
     }
+    /*
+     * Nothing free inside the cap — so the occurrence keeps its instant, which
+     * is what the doc comment above has always promised.
+     *
+     * The loop leaves `t` on the last candidate it tried, and that candidate
+     * is taken too. Measured: 63 occurrences on one instant, one-minute steps,
+     * a one-hour cap — #61, #62 and #63 all came back as base + 60 min. Three
+     * mails went out together anyway, an hour later than asked, and only the
+     * lateness was new. Colliding at `base` is the honest outcome, and it is
+     * the one `adj.crowded` below is there to report.
+     */
+    if (seen.has(t)) t = base
   }
   if (t !== base) adj.spread.push({ at: base, byMs: t - base })
   if (seen.has(t)) adj.crowded.push(t)
@@ -338,6 +350,16 @@ export function applyWorkCalendarDetailed(
   occurrences: number[],
   policy: WorkdayPolicy,
   cal: WorkCalendar,
+  /**
+   * The floor a `'before'` shift may not cross, epoch ms.
+   *
+   * Opt-in, and absent by default, because the shift itself is pure calendar
+   * arithmetic that several callers run over historical dates on purpose — a
+   * fixture, a preview of last month, the conflict scan. Pass it from the
+   * paths that are arming a real reminder; see the `'before'` branch below for
+   * what happens without it.
+   */
+  notBefore?: number,
 ): { occurrences: number[]; adjustment: CalendarAdjustment } {
   const adjustment = emptyAdjustment()
   if (policy === 'off') return { occurrences, adjustment }
@@ -359,6 +381,27 @@ export function applyWorkCalendarDetailed(
     if (shifted === null) {
       // Every day within a month is off. Dropping is the only thing left to
       // do, but it is now recorded — see `calendarWarning`.
+      adjustment.dropped.push(at)
+      continue
+    }
+    /*
+     * A `'before'` shift is the one direction that can land in the past, and
+     * it did so in silence.
+     *
+     * Measured: it is 12:00 on Tue 2026-08-10, a one-off is set for Wed 09:00,
+     * Wednesday is a holiday, the policy is "move it earlier". The shift
+     * returns Tue 09:00 — three hours ago. Nothing here objected, and
+     * `upcoming()` then filtered it out for being in the past, so the send
+     * preview read "0 sends" with no warning attached and the reminder simply
+     * ceased to exist.
+     *
+     * Dropped and recorded instead, which is the same treatment the
+     * no-working-day-within-a-month case already gets: it reaches
+     * `calendarWarning`, and the schedule row keeps saying the calendar could
+     * not place this one. Moving it later instead would be the wrong repair —
+     * "before" is usually chosen because after the date is no use.
+     */
+    if (notBefore !== undefined && shifted < notBefore) {
       adjustment.dropped.push(at)
       continue
     }

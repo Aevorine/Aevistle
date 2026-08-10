@@ -470,6 +470,8 @@ export const ru: Translations = {
   'toast.copied': 'Скопировано в буфер обмена',
   'toast.sendFailed': 'Ошибка отправки',
 
+  'toast.skipped': 'Не отправлено — условие не выполнено',
+
   'confirm.bulkTitle': 'Отправить {n} адресатам?',
   'confirm.bulkBody': 'Письмо уйдёт немедленно, отозвать его будет нельзя.',
   'confirm.deleteJob': 'Удалить это расписание?',

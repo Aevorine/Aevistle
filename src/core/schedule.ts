@@ -475,7 +475,19 @@ export function rearm(
   const more = computeOccurrences(rec, {
     after: seed,
     count: needed - stillFuture.length,
-    runsSoFar: (opts.runsSoFar ?? 0) + missed.length,
+    /*
+     * `dueNow.length`, not `missed.length`.
+     *
+     * `maxRuns` counts sends, and a backlog is not sends: under
+     * `catchUp: 'skip'` nothing is sent at all, and under `fireOnce` a backlog
+     * of any size collapses to exactly one. Charging every missed occurrence
+     * against the quota ended a bounded recurrence early and silently —
+     * measured with `{daily, afterCount, maxRuns: 10, catchUp: 'skip'}` and
+     * four missed occurrences: zero sends had happened, and only six were
+     * ever scheduled again. The schedule screen showed a normal countdown to
+     * the first of them.
+     */
+    runsSoFar: (opts.runsSoFar ?? 0) + dueNow.length,
     calendar: opts.calendar,
   })
 

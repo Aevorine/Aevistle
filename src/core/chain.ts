@@ -65,22 +65,34 @@ export function buildChain(
 
   const stages = base.recurrence.kind === 'once' ? [...new Set(leadTimes)].sort((a, b) => b - a) : [0]
 
-  const jobs = stages
+  /*
+   * Survivors first, then the tag — `stages.length` counted the stages asked
+   * for, including the ones already in the past.
+   *
+   * Measured: an event two days out with lead times of a week and a day leaves
+   * exactly one job, and it still carried `chainId` and `chainLeadMs`. The
+   * comment below states the rule it was breaking: the schedule screen drew
+   * grouping affordances around that single row, and deleting it opened the
+   * "cancel this one, or the whole chain of 1?" dialog.
+   */
+  const surviving = stages
     .map((leadMs) => ({ leadMs, at: target - leadMs }))
     .filter((stage) => stage.at > now)
-    .map(({ leadMs, at }): ScheduledJob => {
-      const recurrence: Recurrence = { ...base.recurrence, startAt: at }
-      return {
-        ...base,
-        id: newId('job'),
-        // A single-stage chain is just a job. Tagging it would make the
-        // schedule screen draw grouping affordances around one row.
-        chainId: stages.length > 1 ? chainId : undefined,
-        chainLeadMs: stages.length > 1 ? leadMs : undefined,
-        recurrence,
-        occurrences: [],
-      }
-    })
+  const isChain = surviving.length > 1
+
+  const jobs = surviving.map(({ leadMs, at }): ScheduledJob => {
+    const recurrence: Recurrence = { ...base.recurrence, startAt: at }
+    return {
+      ...base,
+      id: newId('job'),
+      // A single-stage chain is just a job. Tagging it would make the
+      // schedule screen draw grouping affordances around one row.
+      chainId: isChain ? chainId : undefined,
+      chainLeadMs: isChain ? leadMs : undefined,
+      recurrence,
+      occurrences: [],
+    }
+  })
 
   // Everything was in the past — including the event itself. Give back the
   // event stage anyway so the caller reports "that time has gone" rather than

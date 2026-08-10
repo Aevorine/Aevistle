@@ -90,7 +90,11 @@ export function upcoming(
     calendar: opts.calendar,
   })
   const detailed = opts.calendar
-    ? applyWorkCalendarDetailed(raw, recurrence.workdayPolicy ?? 'off', opts.calendar)
+    ? // `now` as the floor: this is the preview a user reads, and a `'before'`
+      // shift that lands in the past used to be filtered out three lines below
+      // as "not upcoming" — leaving a reminder that will never fire showing no
+      // warning at all. With the floor it comes back as `dropped` and says so.
+      applyWorkCalendarDetailed(raw, recurrence.workdayPolicy ?? 'off', opts.calendar, now)
     : null
   const shaped = detailed ? detailed.occurrences : raw
   const final = opts.quiet ? applyQuietHours(shaped, opts.quiet) : shaped
