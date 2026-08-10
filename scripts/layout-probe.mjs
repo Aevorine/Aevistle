@@ -521,7 +521,7 @@ const SYNTHETIC_CODECARD = `(() => {
           <div class="codecard__main">
             <div class="codecard__value" data-kind="link">Sign in to your account</div>
             <div class="codecard__purpose"><span class="chip chip--strong"><span class="chip__text">Sign in at accounts.example.com</span></span></div>
-            <div class="codecard__url">https://accounts.example.com/auth/verify/callback?token=aGVsbG8td29ybGQtdGhpcy1pcy1hLXZlcnktbG9uZy10b2tlbi1pbmRlZWQ&amp;source=email&amp;utm_campaign=login</div>
+            <div class="codecard__url">https://accounts.example.com/auth/verify/callback?token=synthetic-sign-in-token-for-the-layout-probe-not-a-real-one&amp;source=email&amp;utm_campaign=login</div>
             <div class="codecard__sender"><strong>Example</strong><span class="codecard__address">no-reply@accounts.example.com</span></div>
             <div class="codecard__meta"><span class="codecard__subject">Your sign-in link</span><span>2 min</span><span class="chip"><span class="chip__text">work@example.com</span></span></div>
           </div>
