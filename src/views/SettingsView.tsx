@@ -1146,6 +1146,70 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
               onChange={(v) => patch({ redactLogs: v })}
               title={t('settings.redactLogs')}
             />
+            {/*
+              Two switches that existed in the settings type, were read on every
+              run, and could not be reached from anywhere.
+
+              `autoCopyCode` puts a verification code on the system clipboard
+              the moment one is recognised, and `draftHistoryEnabled` keeps a
+              rolling copy of unsent draft bodies on disk. Both are read as
+              `!== false`, so both were permanently on, and neither had a
+              control or even a translated string — the app was overwriting the
+              clipboard and storing draft text with no way to decline. That is
+              precisely the kind of thing a user goes looking for a switch for,
+              and the honest fix is the switch, not a paragraph explaining why
+              there isn't one.
+
+              Titles carry their own meaning rather than leaning on a
+              `description`: the descriptions are hidden below 760px anyway, so
+              a switch that needs one is a switch nobody on a phone understands.
+            */}
+            <Switch
+              checked={s.autoCopyCode !== false}
+              onChange={(v) => patch({ autoCopyCode: v })}
+              title={t('settings.autoCopyCode')}
+            />
+            <Switch
+              checked={s.draftHistoryEnabled !== false}
+              onChange={(v) => patch({ draftHistoryEnabled: v })}
+              title={t('settings.draftHistory')}
+            />
+
+            {/*
+              And the two cache limits, for the same reason.
+
+              The main process reads them out of `state.json` with hardcoded
+              fallbacks of 500 MB and 90 days (`electron/main.ts`), and those
+              two `??` were the only references in the repository besides the
+              type. A data folder growing towards half a gigabyte of downloaded
+              mail had no control anywhere that touched it.
+            */}
+            <div className="section-label" style={{ marginTop: 'var(--sp-2)' }}>
+              {t('settings.inboxCache')}
+            </div>
+            <div className="field__row">
+              <Field label={t('settings.inboxCacheMaxMb')} hint={t('settings.megabytes')}>
+                <input
+                  className="input"
+                  type="number"
+                  min={50}
+                  max={20000}
+                  step={50}
+                  value={s.inboxCacheMaxMb}
+                  onChange={(e) => patch({ inboxCacheMaxMb: Number(e.target.value) })}
+                />
+              </Field>
+              <Field label={t('settings.inboxCacheRetentionDays')} hint={t('settings.days')}>
+                <input
+                  className="input"
+                  type="number"
+                  min={1}
+                  max={3650}
+                  value={s.inboxCacheRetentionDays}
+                  onChange={(e) => patch({ inboxCacheRetentionDays: Number(e.target.value) })}
+                />
+              </Field>
+            </div>
 
             {/*
               Remote images: off by default, meaning they are shown.
