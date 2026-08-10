@@ -16,9 +16,11 @@ import org.json.JSONObject;
  *
  * Two gates stand in front of the send, and neither used to exist here:
  * {@link Conditions}, which is why a job saying "only if they haven't replied"
- * now honours that on a phone as well as on a desktop; and the occurrence claim
- * in {@link JobStore#claimOccurrence}, which is what makes an immediate alarm
- * for a missed reminder safe to arm repeatedly.
+ * now honours that on a phone as well as on a desktop; and the dispatch-ledger
+ * claim in {@link JobStore#claimLedgerEntry}, which is what makes an immediate
+ * alarm for a missed reminder safe to arm repeatedly — see
+ * {@link AevistleScheduler#nextOccurrence} for the restart-recovery half of
+ * that story.
  */
 public class SendWorker extends Worker {
 
@@ -61,34 +63,47 @@ public class SendWorker extends Worker {
         if (draft == null) return Result.failure();
 
         /*
-         * Which instant is being paid, and has it been paid already?
+         * Which instant is being paid, and what ledger entry tracks it?
          *
          * `dueOccurrence` is the identity of this dispatch — the mirror of
-         * `${job.id}:${fireAt}` in `electron/scheduler.ts`. It matters now that
-         * {@link AevistleScheduler} arms an immediate alarm for an occurrence
-         * missed while the device was off: everything that arms alarms runs
-         * again on the next boot, the next package update and the next
-         * `syncJobs`, so without a claim a phone that reboots twice would send
-         * the same missed reminder twice.
+         * `${job.id}:${fireAt}` in `electron/scheduler.ts`. Claimed fresh here
+         * on the worker's first attempt (minting or reusing a dispatch-ledger
+         * entry — see {@link JobStore#claimLedgerEntry}); recovered from the
+         * store on a WorkManager retry instead, via
+         * {@link JobStore#ledgerEntryForJob}, because by then this same
+         * attempt's own {@link JobStore#recordRun} call — below — has already
+         * dropped the occurrence out of `job.occurrences` on the failed try
+         * that led to the retry, so `dueOccurrence` would find nothing to
+         * re-derive a claimKey from.
          *
-         * Only on the first attempt. A WorkManager retry is a continuation of a
-         * dispatch that was already claimed, and re-checking would turn every
-         * transient network failure into a permanently dropped send.
+         * Stale-claim recovery itself does not live here any more — see
+         * {@link AevistleScheduler#nextOccurrence}, which has already resolved
+         * (resent, or completed the bookkeeping for) any ledger entry a
+         * crashed prior attempt left behind, before this worker ever runs. A
+         * fresh claim here should therefore not collide with an old one; if it
+         * somehow does, {@link JobStore#claimLedgerEntry} just bumps
+         * `attempts` and carries the existing message id forward — worst case
+         * is the occasional duplicate the new policy already accepts.
          *
-         * -1 means no occurrence is due yet — an alarm that arrived a hair
-         * early, or a list the web layer has already pruned on a retry. Sending
-         * unclaimed is the old behaviour and the right one: an alarm that fired
-         * is a reminder the user asked for.
+         * `due <= 0` means no occurrence is due at all — an alarm that arrived
+         * a hair early, or a list the web layer has already pruned. There is
+         * no occurrence identity to track in that case; sending with no ledger
+         * entry at all is the old, correct behaviour: an alarm that fired is a
+         * reminder the user asked for.
          */
         long due = AevistleScheduler.dueOccurrence(job);
-        if (due > 0 && getRunAttemptCount() == 0 && !store.claimOccurrence(jobId, due)) {
-            // Somebody already sent this one. Consume the occurrence so the
-            // alarm is not re-armed for it forever and the schedule row stops
-            // offering a past instant as its next send, then move on.
-            store.dropOccurrencesThrough(jobId, due);
-            armNext(context, store, jobId);
-            return Result.success();
-        }
+        JSONObject ledgerEntry = getRunAttemptCount() == 0
+                ? (due > 0 ? store.claimLedgerEntry(jobId, due) : null)
+                : store.ledgerEntryForJob(jobId);
+        String claimKey = ledgerEntry != null
+                ? ledgerEntry.optString("claimKey", null)
+                : (due > 0 ? JobStore.ledgerClaimKey(jobId, due) : null);
+        // A usable id even when the durable claim write above failed — a send
+        // should proceed with *some* id rather than drop a reminder the user
+        // is waiting on, matching the desktop build's claimThenRun.
+        String messageId = ledgerEntry != null
+                ? ledgerEntry.optString("messageId", null)
+                : (claimKey != null ? JobStore.mintMessageId(claimKey) : null);
 
         /*
          * Send conditions, checked here because here is where a scheduled run
@@ -125,6 +140,13 @@ public class SendWorker extends Worker {
             }
 
             armNext(context, store, jobId);
+            // No SMTP attempt was ever made for this claimKey — the ledger
+            // entry, if any, is still sitting in 'claimed'. Cleared here
+            // rather than left for a future restart to resolve, so a
+            // condition that skips every time does not leave it hanging
+            // around until the 24-hour prune — mirrors the skip branch of
+            // `run()` in electron/scheduler.ts.
+            if (claimKey != null) store.deleteLedgerEntry(claimKey);
             // Success: the worker did exactly what it was asked to. A failure
             // here would hand the job to WorkManager's backoff and re-run the
             // same decision every few minutes.
@@ -140,11 +162,21 @@ public class SendWorker extends Worker {
             if (store.notifyOnFailure()) {
                 notify(context, jobId, "Aevistle", "Scheduled send failed: no such account");
             }
+            if (claimKey != null) store.deleteLedgerEntry(claimKey);
             return Result.failure();
         }
 
         String secret = new SecretStore(context).get(account.optString("id", ""), "smtp");
-        MailSender.Result result = MailSender.send(context, draft, account, secret);
+        // Durable before the SMTP call, not after — see
+        // JobStore#markLedgerSending. Written once per WorkManager attempt,
+        // the same way `sendOnce()`'s retry loop on the desktop build writes
+        // it once per actual attempt.
+        if (claimKey != null) store.markLedgerSending(claimKey);
+        MailSender.Result result = MailSender.send(context, draft, account, secret, messageId);
+        // The one state with positive proof the SMTP server accepted the
+        // message — anything short of it resolves towards a resend on
+        // restart. See AevistleScheduler#nextOccurrence.
+        if (claimKey != null && result.ok) store.markLedgerAccepted(claimKey);
 
         long ranAt = System.currentTimeMillis();
         JSONObject run = store.recordRun(jobId, ranAt, result.ok, result.error);
@@ -183,7 +215,15 @@ public class SendWorker extends Worker {
             int maxAttempts = job.optJSONObject("retry") == null
                     ? 3
                     : job.optJSONObject("retry").optInt("maxAttempts", 3);
-            if (retryable && getRunAttemptCount() + 1 < maxAttempts) return Result.retry();
+            if (retryable && getRunAttemptCount() + 1 < maxAttempts) {
+                // Not terminal — the ledger entry stays in 'sending' so a
+                // crash during the wait for this retry still resolves towards
+                // resending it (see AevistleScheduler#nextOccurrence), and the
+                // next attempt reuses the same claimKey/messageId via
+                // JobStore#ledgerEntryForJob above.
+                return Result.retry();
+            }
+            if (claimKey != null) store.deleteLedgerEntry(claimKey);
             return Result.failure();
         }
 
@@ -197,6 +237,7 @@ public class SendWorker extends Worker {
          * a notification on Android, whatever the settings screen showed. It is
          * an application setting and now arrives as one, through `syncJobs`.
          */
+        if (claimKey != null) store.deleteLedgerEntry(claimKey);
         if (store.notifyOnSuccess()) {
             notify(context, jobId, "Aevistle", "Sent: " + draft.optString("subject", ""));
         }

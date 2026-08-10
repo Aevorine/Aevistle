@@ -7,6 +7,7 @@ import android.util.Log;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.security.SecureRandom;
 import java.util.Iterator;
 
 /**
@@ -48,19 +49,10 @@ final class JobStore {
      */
     private static final String KEY_LOCAL_DEVICE_ID = "localDeviceId";
     /**
-     * `jobId:instant` for every occurrence that has already been dispatched.
-     * See {@link #claimOccurrence}. The mirror of the `fired` set in
-     * `electron/scheduler.ts`, made durable because the case it guards is a
-     * reboot loop and a set in memory does not survive one.
+     * Per-occurrence send state — see the "Dispatch ledger" section below.
+     * Replaces the old boolean `firedOccurrences` claim entirely.
      */
-    private static final String KEY_CLAIMS = "firedOccurrences";
-    /**
-     * How long a claim is kept. Past this, no route can put the instant back:
-     * a run report has long since pruned it out of `occurrences` on both sides,
-     * and the web layer's `rearm` collapses a backlog to its most recent entry.
-     * Same day-long window `electron/scheduler.ts` prunes its set with.
-     */
-    private static final long CLAIM_RETENTION_MS = 24 * 60 * 60 * 1000L;
+    private static final String KEY_LEDGER = "dispatchLedger";
 
     private final SharedPreferences prefs;
 
@@ -293,22 +285,8 @@ final class JobStore {
     }
 
     /**
-     * Drop occurrences up to and including {@code through} without recording a
-     * run at all — the job did not send and did not decide anything.
-     *
-     * Used for exactly one case: an occurrence that {@link #claimOccurrence}
-     * says was already dispatched. Something has to remove it, or the alarm
-     * armed for it is re-armed for it forever and the schedule row keeps
-     * offering a past instant as the next send.
-     */
-    JSONObject dropOccurrencesThrough(String jobId, long through) {
-        return consume(jobId, through, null);
-    }
-
-    /**
-     * Shared body of {@link #recordSkip} and {@link #dropOccurrencesThrough}:
-     * prune the occurrence list, restate the status, and queue the result for
-     * the web layer.
+     * Shared body of {@link #recordSkip}: prune the occurrence list, restate
+     * the status, and queue the result for the web layer.
      *
      * @param ranAt stamped as `lastRunAt` when non-null; left untouched when not.
      */
@@ -365,92 +343,267 @@ final class JobStore {
     }
 
     // -----------------------------------------------------------------------
-    // Occurrence claims
+    // Dispatch ledger
     // -----------------------------------------------------------------------
+    //
+    // Replaces the old boolean "firedOccurrences" claim entirely -- not run
+    // alongside it. That claim only ever answered "did we start sending
+    // this", and a crash between MailSender.send() accepting a message and
+    // recordRun() catching up looked exactly like a crash *before* anything
+    // was sent; both resolved to "never touch it again" ("duplicate is worse
+    // than a miss", the old comment said). This ledger records *how far* an
+    // occurrence's send got -- 'claimed' -> 'sending' -> 'accepted' -- one
+    // entry per occurrence, keyed the same way the old claim was
+    // (`${jobId}:${occurrenceMs}`), so AevistleScheduler#nextOccurrence's
+    // restart-recovery hook can tell an unconfirmed attempt (resend it) from
+    // a confirmed one (leave it alone, just catch the bookkeeping up).
+    // Mirrors `src/core/dispatchLedger.ts` and the "Dispatch ledger" section
+    // of `electron/store.ts` field for field; see those for the full
+    // rationale behind the new "prefer a duplicate over a silent miss" policy.
 
-    /**
-     * Claim one (job, instant) pair before dispatching it.
-     *
-     * The mirror of `this.fired.add(`${job.id}:${fireAt}`)` in
-     * `electron/scheduler.ts`, and the reason a missed occurrence can now be
-     * paid at all: {@link AevistleScheduler} arms an immediate alarm for a past
-     * instant, and every route that arms alarms runs repeatedly — on boot, on
-     * package replacement, on the exact-alarm permission changing, and on every
-     * `syncJobs` the app makes. Without a claim the same instant would be armed
-     * and sent again each time, and a device that reboots twice would send the
-     * same reminder twice. Duplicate mail is worse than the late reminder this
-     * whole mechanism exists to deliver, so the claim is not optional.
-     *
-     * Written with {@code commit()}, not {@code apply()}. {@code apply()}
-     * returns before the write reaches disk, and the caller is a worker that
-     * may be killed the moment the send finishes — the one case where losing
-     * the claim produces the duplicate it exists to prevent.
-     *
-     * @return true when the pair had not been claimed before, i.e. the caller
-     *         owns this dispatch. False means somebody already sent it.
-     */
-    boolean claimOccurrence(String jobId, long instant) {
-        String key = claimKey(jobId, instant);
-        JSONObject claims = claims();
-        if (claims.has(key)) return false;
+    /** Same window the old claim was kept for -- see its retired doc comment. */
+    private static final long LEDGER_MAX_AGE_MS = 24 * 60 * 60 * 1000L;
+    private static final char[] HEX_DIGITS = "0123456789abcdef".toCharArray();
 
-        JSONObject next = pruneClaims(claims);
+    static String ledgerClaimKey(String jobId, long occurrenceMs) {
+        return jobId + ":" + occurrenceMs;
+    }
+
+    private JSONObject ledger() {
         try {
-            next.put(key, instant);
-        } catch (Exception e) {
-            // A claim that cannot be stored cannot stop a second send. Refusing
-            // the dispatch loses at most one reminder; allowing it risks the
-            // same mail arriving on every reboot, which is the failure people
-            // cannot undo.
-            Log.e(TAG, "claimOccurrence: could not record the claim for " + key, e);
-            return false;
-        }
-        prefs.edit().putString(KEY_CLAIMS, next.toString()).commit();
-        return true;
-    }
-
-    /**
-     * Has this pair already been dispatched? A read-only peek, so
-     * {@link AevistleScheduler} can decline to arm an alarm that would only be
-     * thrown away — without taking a claim it is not going to act on.
-     */
-    boolean occurrenceClaimed(String jobId, long instant) {
-        return claims().has(claimKey(jobId, instant));
-    }
-
-    private static String claimKey(String jobId, long instant) {
-        return jobId + ":" + instant;
-    }
-
-    private JSONObject claims() {
-        try {
-            return new JSONObject(prefs.getString(KEY_CLAIMS, "{}"));
+            return new JSONObject(prefs.getString(KEY_LEDGER, "{}"));
         } catch (Exception e) {
             return new JSONObject();
         }
     }
 
     /**
-     * Drop claims older than {@link #CLAIM_RETENTION_MS} so this does not grow
-     * for the life of the install. The value stored against each key is the
-     * instant itself, which is what makes the sweep a single pass with no
-     * parsing of the key back apart.
+     * Drop entries older than {@link #LEDGER_MAX_AGE_MS} so this does not grow
+     * for the life of the install — applied on every write, mirroring
+     * `pruneLedger` in `electron/store.ts`. Entries are normally removed the
+     * moment they are done (see {@link #deleteLedgerEntry}); this is only the
+     * safety net for ones a crash left behind with nobody left to clean them
+     * up.
      */
-    private static JSONObject pruneClaims(JSONObject claims) {
-        long cutoff = System.currentTimeMillis() - CLAIM_RETENTION_MS;
+    private static JSONObject pruneLedger(JSONObject ledger) {
+        long cutoff = System.currentTimeMillis() - LEDGER_MAX_AGE_MS;
         JSONObject kept = new JSONObject();
-        Iterator<String> keys = claims.keys();
+        Iterator<String> keys = ledger.keys();
         while (keys.hasNext()) {
             String key = keys.next();
-            long at = claims.optLong(key, 0L);
-            if (at < cutoff) continue;
+            JSONObject entry = ledger.optJSONObject(key);
+            if (entry == null || entry.optLong("claimedAt", 0L) < cutoff) continue;
             try {
-                kept.put(key, at);
+                kept.put(key, entry);
             } catch (Exception e) {
-                Log.w(TAG, "pruneClaims: could not keep the claim " + key, e);
+                Log.w(TAG, "pruneLedger: could not keep the entry " + key, e);
             }
         }
         return kept;
+    }
+
+    private void writeLedger(JSONObject ledger, boolean durable) {
+        SharedPreferences.Editor editor = prefs.edit().putString(KEY_LEDGER, pruneLedger(ledger).toString());
+        if (durable) {
+            editor.commit();
+        } else {
+            editor.apply();
+        }
+    }
+
+    /** Read-only peek at one entry, or null when there is none. */
+    JSONObject ledgerEntry(String claimKey) {
+        return ledger().optJSONObject(claimKey);
+    }
+
+    /**
+     * Whatever ledger entry belongs to this job, if any. There should be at
+     * most one: {@link AlarmReceiver} enqueues {@link SendWorker} with
+     * {@code ExistingWorkPolicy.KEEP}, which never lets two instances for the
+     * same job run at once. Used to recover a claim's key and message id on a
+     * WorkManager retry, where {@link AevistleScheduler#dueOccurrence} can no
+     * longer find the occurrence — the first attempt's {@link #recordRun} has
+     * already dropped it out of `job.occurrences` by the time a retry re-reads
+     * the job fresh.
+     *
+     * If more than one somehow exists (an older, orphaned entry that a
+     * restart-recovery pass has not yet reached — see
+     * {@link AevistleScheduler#nextOccurrence}), the most recently claimed one
+     * wins: that is the one this attempt's own {@link #claimLedgerEntry} call
+     * just wrote.
+     */
+    JSONObject ledgerEntryForJob(String jobId) {
+        JSONObject ledger = ledger();
+        JSONObject latest = null;
+        Iterator<String> keys = ledger.keys();
+        while (keys.hasNext()) {
+            JSONObject entry = ledger.optJSONObject(keys.next());
+            if (entry == null || !jobId.equals(entry.optString("jobId", null))) continue;
+            if (latest == null || entry.optLong("claimedAt", 0L) > latest.optLong("claimedAt", 0L)) {
+                latest = entry;
+            }
+        }
+        return latest;
+    }
+
+    /**
+     * `<${claimKey}.${16 hex chars}@aevistle.local>` — shaped like an RFC
+     * 5322 msg-id, not validated as one, mirroring `mintMessageId` in
+     * `src/core/dispatchLedger.ts`. {@link SecureRandom} with no seeding is
+     * the same convention {@link OAuthConsent#randomToken} already uses for
+     * this app's other unguessable-string needs.
+     *
+     * Best-effort duplicate hinting for the recipient's mail system, not a
+     * deduplication guarantee — most mail clients do not dedupe on
+     * `Message-Id` at all, and the ones that do are under no obligation to.
+     */
+    static String mintMessageId(String claimKey) {
+        byte[] bytes = new byte[8];
+        new SecureRandom().nextBytes(bytes);
+        char[] hex = new char[bytes.length * 2];
+        for (int i = 0; i < bytes.length; i++) {
+            int v = bytes[i] & 0xFF;
+            hex[i * 2] = HEX_DIGITS[v >>> 4];
+            hex[i * 2 + 1] = HEX_DIGITS[v & 0x0F];
+        }
+        return "<" + claimKey + "." + new String(hex) + "@aevistle.local>";
+    }
+
+    /**
+     * Durably record that this occurrence has been picked to fire — the
+     * 'claimed' state. Reuses an existing entry's message id and bumps its
+     * `attempts` count when this claimKey was already claimed by a prior
+     * attempt (a restart-recovered resend); mints a fresh id otherwise.
+     *
+     * Written with {@code apply()}. Unlike the old boolean claim, losing this
+     * particular write is not a correctness problem under the new policy: a
+     * missing entry and a 'claimed' entry both resolve to "resend" on restart
+     * (see {@link AevistleScheduler#nextOccurrence}), so nothing but
+     * {@link #markLedgerSending}'s durability — immediately before the SMTP
+     * call — is load-bearing here.
+     *
+     * @return the claimed entry, or null if it could not even be built —
+     *         {@link SendWorker} falls back to a locally-minted message id in
+     *         that case and sends anyway, matching the desktop build's
+     *         tolerance for a failed claim write.
+     */
+    JSONObject claimLedgerEntry(String jobId, long occurrenceMs) {
+        String claimKey = ledgerClaimKey(jobId, occurrenceMs);
+        JSONObject ledger = ledger();
+        JSONObject existing = ledger.optJSONObject(claimKey);
+        try {
+            JSONObject entry = new JSONObject();
+            entry.put("claimKey", claimKey);
+            entry.put("jobId", jobId);
+            entry.put("occurrenceMs", occurrenceMs);
+            entry.put("state", "claimed");
+            entry.put("messageId", existing != null && existing.has("messageId")
+                    ? existing.optString("messageId")
+                    : mintMessageId(claimKey));
+            entry.put("claimedAt", System.currentTimeMillis());
+            entry.put("attempts", (existing != null ? existing.optLong("attempts", 0L) : 0L) + 1);
+
+            ledger.put(claimKey, entry);
+            writeLedger(ledger, false);
+            return entry;
+        } catch (Exception e) {
+            Log.e(TAG, "claimLedgerEntry: could not claim " + claimKey, e);
+            return null;
+        }
+    }
+
+    /**
+     * Durably record that an SMTP attempt for this claimKey is starting right
+     * now — written with {@code commit()}, not {@code apply()}, for the same
+     * reason the old claim write was: the caller is about to hand control to
+     * {@link MailSender#send}, which may be the last thing that runs before
+     * the OS kills this process, and {@code commit()} blocks until the write
+     * has actually reached disk. Written once per WorkManager attempt —
+     * {@link SendWorker} calls this again on every retry, the same way
+     * `sendOnce()`'s retry loop writes it once per actual attempt on the
+     * desktop build — without re-claiming, so the entry's `attempts` count
+     * keeps meaning "attempts across restarts", not "attempts across retries".
+     *
+     * A no-op if there is no entry to transition — the claim write above
+     * failed, or was itself lost. Nothing durable to update in that case; the
+     * send proceeds regardless.
+     */
+    void markLedgerSending(String claimKey) {
+        JSONObject ledger = ledger();
+        JSONObject entry = ledger.optJSONObject(claimKey);
+        if (entry == null) return;
+        try {
+            entry.put("state", "sending");
+            entry.put("sendingAt", System.currentTimeMillis());
+            ledger.put(claimKey, entry);
+            writeLedger(ledger, true);
+        } catch (Exception e) {
+            Log.e(TAG, "markLedgerSending: could not record sending for " + claimKey, e);
+        }
+    }
+
+    /**
+     * Durably record that the SMTP server accepted the message — the one
+     * state with positive proof of delivery.
+     */
+    void markLedgerAccepted(String claimKey) {
+        JSONObject ledger = ledger();
+        JSONObject entry = ledger.optJSONObject(claimKey);
+        if (entry == null) return;
+        try {
+            entry.put("state", "accepted");
+            entry.put("acceptedAt", System.currentTimeMillis());
+            ledger.put(claimKey, entry);
+            writeLedger(ledger, false);
+        } catch (Exception e) {
+            Log.e(TAG, "markLedgerAccepted: could not record acceptance for " + claimKey, e);
+        }
+    }
+
+    /**
+     * Remove the ledger entry for this claimKey — the completion signal. A
+     * missing entry means "fully done", exactly like the boolean claim file
+     * it replaced. Called once the job's own bookkeeping ({@link #recordRun},
+     * {@link #recordSkip}, or {@link #completeAcceptedRecovery}) has recorded
+     * this occurrence's outcome, whatever that outcome was.
+     */
+    void deleteLedgerEntry(String claimKey) {
+        JSONObject ledger = ledger();
+        if (!ledger.has(claimKey)) return;
+        ledger.remove(claimKey);
+        writeLedger(ledger, false);
+    }
+
+    /**
+     * Apply the same bookkeeping {@link #recordRun} does for a successful
+     * send, for an occurrence the ledger has positive proof was already sent
+     * before a crash — without attempting the send again and without
+     * re-evaluating send conditions, because the send already genuinely
+     * happened. Mirrors `completeAcceptedRecovery` in `electron/scheduler.ts`,
+     * which reuses the same `completeRun` its live send path does;
+     * {@link #recordRun} is that shared function here.
+     *
+     * @return null when this occurrence is not pending any more — the job's
+     *         own bookkeeping may already have caught up with it before the
+     *         crash that left the ledger entry behind ({@link #recordRun} and
+     *         {@link #deleteLedgerEntry} are two separate steps) — in which
+     *         case there is nothing left to record.
+     */
+    JSONObject completeAcceptedRecovery(String jobId, long occurrenceMs) {
+        JSONObject job = job(jobId);
+        if (job == null) return null;
+        JSONArray occurrences = job.optJSONArray("occurrences");
+        boolean stillPending = false;
+        if (occurrences != null) {
+            for (int i = 0; i < occurrences.length(); i++) {
+                if (occurrences.optLong(i, 0L) == occurrenceMs) {
+                    stillPending = true;
+                    break;
+                }
+            }
+        }
+        if (!stillPending) return null;
+        return recordRun(jobId, System.currentTimeMillis(), true, null);
     }
 
     /** Append one run report to the queue the web layer drains on next open. */

@@ -29,12 +29,13 @@ import { promises as fs, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import path from 'node:path'
 import { isInside } from './fsUtil'
 import type { SecretKind } from '../src/core/types'
+import { mintMessageId, type DispatchLedgerEntry } from '../src/core/dispatchLedger'
 
 const STATE_FILE = 'state.json'
 const SECRET_FILE = 'secrets.json'
 const POINTER_FILE = 'location.json'
-/** Durable occurrence claims — see `claimOccurrence` below. Follows the data folder like everything else the jobs it describes move with. */
-const FIRED_FILE = 'fired-occurrences.json'
+/** Durable per-occurrence send state — see the "Dispatch ledger" section below. Follows the data folder like everything else the jobs it describes move with. */
+const LEDGER_FILE = 'dispatch-ledger.json'
 const ATTACHMENTS_DIR = 'attachments'
 /** Images pasted from the clipboard straight into a compose body. */
 const PASTED_DIR = 'pasted'
@@ -42,7 +43,7 @@ const PASTED_DIR = 'pasted'
 const PATH_HINT_FILE = 'datapath.txt'
 
 /** What follows the user when the data folder moves. */
-const MOVABLE = [STATE_FILE, SECRET_FILE, FIRED_FILE, ATTACHMENTS_DIR, PASTED_DIR] as const
+const MOVABLE = [STATE_FILE, SECRET_FILE, LEDGER_FILE, ATTACHMENTS_DIR, PASTED_DIR] as const
 
 /**
  * Rebuildable on demand, so it is discarded at the old location rather than
@@ -767,7 +768,7 @@ export async function flushState(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Durable occurrence claims
+// Dispatch ledger
 // ---------------------------------------------------------------------------
 //
 // `electron/scheduler.ts` keeps an in-memory `fired` set so the same
@@ -775,63 +776,146 @@ export async function flushState(): Promise<void> {
 // gap. SMTP can accept a send and the process can die before that in-memory
 // fact ever reaches `state.json`, which is written on a debounce several
 // steps downstream of the send. On restart `job.occurrences` (still holding
-// the just-sent instant) looks exactly like a missed occurrence, and
-// `rearm()`'s catch-up logic resends it.
+// the just-sent instant) looks exactly like a missed occurrence.
 //
-// This file is the fix: one key per occurrence, written *before* the SMTP
-// call, not after. It mirrors `JobStore.claimOccurrence` on the Android side,
-// down to writing before the send rather than after — the same reasoning
-// applies to a process `kill` as to a worker OS-killed mid-send.
+// This file is where that gets resolved, and it replaces the old boolean
+// "fired-occurrences" claim entirely — one entry per occurrence, tracking
+// *how far* the send got (`'claimed'` -> `'sending'` -> `'accepted'`), not
+// just whether it started. See `src/core/dispatchLedger.ts` for the entry
+// shape and `resolveLedgerEntryOnRestart`, the pure decision table restart
+// recovery is built on. It mirrors `JobStore`'s ledger on the Android side,
+// down to writing the `'sending'` transition durably before the SMTP call
+// rather than after — the same reasoning applies to a process `kill` as to a
+// worker OS-killed mid-send.
 
-/** How old a claim can be before `rearm()` could no longer resurrect the occurrence it names — see `pruneClaims`. */
+/** How old an entry can be before no restart recovery could still make sense of the occurrence it names — see `pruneLedger`. Same bound the old claim file used. */
 const CLAIM_MAX_AGE_MS = 24 * 60 * 60 * 1000
 
-async function readFiredClaims(): Promise<string[]> {
-  return (await readJson<string[]>(FIRED_FILE)) ?? []
+type LedgerMap = Record<string, DispatchLedgerEntry>
+
+async function readLedger(): Promise<LedgerMap> {
+  return (await readJson<LedgerMap>(LEDGER_FILE)) ?? {}
 }
 
-/** Drop claims old enough that no `rearm()` could still resurrect the occurrence — keeps the file from growing for the life of the install. */
-function pruneClaims(claims: string[]): string[] {
+/** Drop entries old enough that no `rearm()` could still resurrect the occurrence — keeps the file from growing for the life of the install. Entries are normally removed the moment they are done (see `deleteLedgerEntry`); this is the safety net for the ones a crash left behind with nobody left to clean them up. */
+function pruneLedger(map: LedgerMap): LedgerMap {
   const cutoff = Date.now() - CLAIM_MAX_AGE_MS
-  return claims.filter((key) => {
-    const at = Number(key.slice(key.lastIndexOf(':') + 1))
-    return !Number.isFinite(at) || at >= cutoff
-  })
+  const out: LedgerMap = {}
+  for (const [key, entry] of Object.entries(map)) {
+    if (entry.claimedAt >= cutoff) out[key] = entry
+  }
+  return out
+}
+
+async function writeLedger(map: LedgerMap): Promise<void> {
+  await writeAtomic(LEDGER_FILE, JSON.stringify(pruneLedger(map)))
 }
 
 /**
- * Every claim on disk, as `${jobId}:${occurrenceMs}` keys — read once at
- * startup to seed `Scheduler`'s in-memory `fired` set before the first
- * `sync()`/`tick()` runs, so a crash between "SMTP accepted" and "state.json
- * caught up" cannot resend on the next launch.
+ * Every entry on disk — read once at startup so `Scheduler.restoreDispatchLedger`
+ * can resolve each one (resend, or complete the bookkeeping only) before the
+ * first `sync()`/`tick()` runs.
  */
-export async function loadFiredClaims(): Promise<string[]> {
-  return readFiredClaims()
+export async function loadDispatchLedger(): Promise<DispatchLedgerEntry[]> {
+  return Object.values(await readLedger())
 }
 
 /**
- * One claim at a time — two jobs due in the same 15-second tick would
+ * One ledger write at a time — two jobs due in the same 15-second tick would
  * otherwise both read-modify-write this file concurrently, and the loser's
- * claim is exactly the one this function exists to not lose. Nothing else in
- * this module needs the same treatment: `state.json` already serializes
- * through `enqueueStateWrite`/`writeLoop`, and secrets are read-then-written
- * only from user-triggered, non-concurrent calls.
+ * transition is exactly the one this exists to not lose. Nothing else in this
+ * module needs the same treatment: `state.json` already serializes through
+ * `enqueueStateWrite`/`writeLoop`, and secrets are read-then-written only from
+ * user-triggered, non-concurrent calls.
  */
-let claimQueue: Promise<unknown> = Promise.resolve()
+let ledgerQueue: Promise<unknown> = Promise.resolve()
+
+function enqueueLedgerWrite<T>(job: () => Promise<T>): Promise<T> {
+  const next = ledgerQueue.catch(() => {}).then(job)
+  ledgerQueue = next.catch(() => {})
+  return next
+}
 
 /**
- * Durably record that this occurrence is about to be sent. Callers must
- * `await` this *before* the SMTP call, not after — writing it after would
- * reopen exactly the crash window this exists to close.
+ * Durably record that this occurrence has been picked to fire. Callers must
+ * `await` this *before* evaluating send conditions, not after — writing it
+ * after would reopen exactly the crash window this exists to close.
+ *
+ * Reuses the existing entry's `messageId` (and bumps `attempts`) when this
+ * claimKey was already claimed by a prior attempt — a restart-recovered
+ * resend, or a retry after a durable-write failure — so the message a
+ * recipient eventually gets carries the same `Message-Id` across every
+ * attempt at the same occurrence. A claimKey with no prior entry mints a
+ * fresh one.
  */
-export function claimOccurrence(key: string): Promise<void> {
-  const next = claimQueue.catch(() => {}).then(async () => {
-    const claims = await readFiredClaims()
-    if (claims.includes(key)) return
-    await writeAtomic(FIRED_FILE, JSON.stringify(pruneClaims([...claims, key])))
+export function claimLedgerEntry(
+  claimKey: string,
+  jobId: string,
+  occurrenceMs: number,
+): Promise<DispatchLedgerEntry> {
+  return enqueueLedgerWrite(async () => {
+    const map = await readLedger()
+    const existing = map[claimKey]
+    const entry: DispatchLedgerEntry = {
+      claimKey,
+      jobId,
+      occurrenceMs,
+      state: 'claimed',
+      messageId: existing?.messageId ?? mintMessageId(claimKey),
+      claimedAt: Date.now(),
+      attempts: (existing?.attempts ?? 0) + 1,
+    }
+    map[claimKey] = entry
+    await writeLedger(map)
+    return entry
   })
-  claimQueue = next
-  return next
+}
+
+/**
+ * Durably record that an SMTP attempt for this claimKey is starting right
+ * now. Callers must `await` this *before* the SMTP call, not after — this is
+ * the transition that matters most, the one a process `kill` mid-send needs
+ * to have already reached disk. Written once per actual attempt, so
+ * `sendOnce`'s in-process retry loop calls this again on every retry.
+ *
+ * A no-op if the claim itself never made it to disk (a prior durable write
+ * failed) — there is nothing to transition, and the send proceeds anyway; see
+ * the caller in `electron/scheduler.ts`.
+ */
+export function markLedgerSending(claimKey: string): Promise<void> {
+  return enqueueLedgerWrite(async () => {
+    const map = await readLedger()
+    const entry = map[claimKey]
+    if (!entry) return
+    map[claimKey] = { ...entry, state: 'sending', sendingAt: Date.now() }
+    await writeLedger(map)
+  })
+}
+
+/** Durably record that the SMTP server accepted the message — the one state with positive proof of delivery. Callers should await this immediately after the send call resolves successfully. */
+export function markLedgerAccepted(claimKey: string): Promise<void> {
+  return enqueueLedgerWrite(async () => {
+    const map = await readLedger()
+    const entry = map[claimKey]
+    if (!entry) return
+    map[claimKey] = { ...entry, state: 'accepted', acceptedAt: Date.now() }
+    await writeLedger(map)
+  })
+}
+
+/**
+ * Remove the ledger entry for this claimKey — the completion signal. Called
+ * once the job's own bookkeeping (runCount / lastRunAt / status /
+ * occurrences) has recorded this occurrence's outcome, whatever that outcome
+ * was: a missing entry means "fully done", not "fully sent".
+ */
+export function deleteLedgerEntry(claimKey: string): Promise<void> {
+  return enqueueLedgerWrite(async () => {
+    const map = await readLedger()
+    if (!(claimKey in map)) return
+    delete map[claimKey]
+    await writeLedger(map)
+  })
 }
 
 // ---------------------------------------------------------------------------

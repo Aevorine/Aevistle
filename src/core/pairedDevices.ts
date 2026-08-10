@@ -65,6 +65,26 @@ export interface PairedDevice {
    * offer a peer it has not synced with yet.
    */
   remoteDeviceId?: string
+  /**
+   * This device's own advancing counter for the long-lived sync channel —
+   * see `core/syncLoop.ts`'s `SyncExchangePayload.seq`. Incremented every
+   * time this device seals a payload to this peer, whether an outgoing poll
+   * request (`SyncLoop.runDeviceCycle`) or a reply to the peer's own request
+   * (`respondToSyncRequest`) — one counter for both roles, since both are
+   * "this device originated a sealed message to this peer". Undefined on a
+   * device paired (or last synced) before this field shipped; every read
+   * treats that the same as 0, so the first payload sealed under it is `1`.
+   */
+  outgoingSeq?: number
+  /**
+   * The highest `SyncExchangePayload.seq` this device has accepted from this
+   * peer so far — the replay high-water mark `core/syncLoop.ts`'s
+   * `assertFreshSeq` checks before trusting a decrypted payload. Learned
+   * from whichever of the incoming-request or incoming-reply path this
+   * device last accepted a message on; only ever moves forward, via
+   * `recordSyncSeq` below. Same "absent means 0" treatment as `outgoingSeq`.
+   */
+  lastAcceptedSeq?: number
 }
 
 /** Add or replace a device by id — pairing again with a device already known updates in place rather than duplicating the row. */
@@ -110,4 +130,38 @@ export function applyRegeneratedSecret(
   clockOffsetMs: number,
 ): PairedDevice[] {
   return devices.map((d) => (d.id === id ? { ...d, clockOffsetMs } : d))
+}
+
+/**
+ * Advance this device's replay-protection counters — never backward. See
+ * `core/syncLoop.ts`'s `SyncExchangePayload.seq`, `PairedDevice.outgoingSeq`
+ * and `.lastAcceptedSeq`.
+ *
+ * `Math.max` rather than a plain overwrite, because both counters can be
+ * written from either sync direction (`respondToSyncRequest`'s incoming
+ * request path and `SyncLoop`'s incoming reply path share one
+ * `lastAcceptedSeq`; a reply-seal and a request-seal share one
+ * `outgoingSeq`), and the two directions can race when two paired devices
+ * poll each other within the same window — see `core/syncLoop.ts`'s module
+ * doc. Whichever of two racing updates for the same device is applied last
+ * must not be allowed to regress a counter a moment-earlier update already
+ * advanced further: a regressed `lastAcceptedSeq` would reopen exactly the
+ * replay window this feature exists to close, and a regressed `outgoingSeq`
+ * risks a future seal reusing a number the peer has already seen.
+ */
+export function recordSyncSeq(
+  devices: PairedDevice[],
+  id: string,
+  update: { outgoingSeq?: number; lastAcceptedSeq?: number },
+): PairedDevice[] {
+  if (update.outgoingSeq === undefined && update.lastAcceptedSeq === undefined) return devices
+  return devices.map((d) =>
+    d.id === id
+      ? {
+          ...d,
+          outgoingSeq: Math.max(d.outgoingSeq ?? 0, update.outgoingSeq ?? 0),
+          lastAcceptedSeq: Math.max(d.lastAcceptedSeq ?? 0, update.lastAcceptedSeq ?? 0),
+        }
+      : d,
+  )
 }

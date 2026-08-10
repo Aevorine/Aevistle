@@ -35,6 +35,36 @@
  * a request — see `electron/syncServer.ts` — but *asking* only needs
  * `SyncTransport.postJson`, which every platform already has a working
  * implementation of via `pairingJoinRequest`'s sibling, `syncRequest`.
+ *
+ * **Replay protection.** `sealWithRandomIv`/`openWithRandomIv` authenticate a
+ * message but not its position in time — a captured envelope re-sent later
+ * would decrypt exactly as it did the first time. `SyncExchangePayload.seq`,
+ * `PairedDevice.outgoingSeq`/`.lastAcceptedSeq` and `assertFreshSeq` are what
+ * close that: every sealed payload carries this sender's own advancing
+ * counter, and a receiver requires it to be strictly greater than the
+ * highest it has already accepted from this peer, or rejects the message the
+ * same way a failed decryption is rejected. One counter per direction, not
+ * one per role — a request and a reply to the peer's own request share the
+ * sender's single `outgoingSeq`, and an incoming request and an incoming
+ * reply share the receiver's single `lastAcceptedSeq` — because both
+ * `SyncLoop.runDeviceCycle` (asking) and `respondToSyncRequest` (answering)
+ * can run for the *same pair of devices* within the same poll window: each
+ * device's `SyncLoop` timer fires on its own schedule, so nothing prevents
+ * device A initiating toward device B in the same few seconds B happens to
+ * be initiating toward A. When that happens, each device is simultaneously
+ * a requester on one exchange and a responder on another, both touching the
+ * same `PairedDevice` row for the other, which is why `recordSyncSeq`
+ * (`pairedDevices.ts`) merges a counter forward with `Math.max` rather than
+ * overwriting it, and why every fresh-seq check re-reads the device's
+ * counters at the moment of the check rather than trusting a snapshot taken
+ * before that exchange's own decrypt. The one thing this does not fully rule
+ * out is a single cycle's exchange in *one* direction being rejected because
+ * the *other* direction's exchange (racing it) was accepted first and moved
+ * the shared counter past it — indistinguishable, from the rejected side's
+ * perspective, from a dropped packet, and handled the same way: logged via
+ * `onError`, not retried within the cycle, and resolved automatically by the
+ * next poll `SYNC_POLL_INTERVAL_MS` later, which is squarely the "a missed
+ * cycle is never a problem" tolerance this module already designs around.
  */
 
 import { accountFields, appearanceSettings, mergeById, type AppearanceSettings } from './backup'
@@ -130,6 +160,46 @@ export interface SyncExchangePayload {
    * this.
    */
   selfDeviceId?: string
+  /**
+   * This sender's own `PairedDevice.outgoingSeq` at the moment this payload
+   * was sealed — inside the encrypted envelope, not alongside it, so
+   * stripping or rewriting it breaks AES-GCM authentication the same way
+   * tampering with `changed` would. `assertFreshSeq` below is what makes
+   * this worth sending at all: replaying a captured envelope byte-for-byte
+   * reproduces this same `seq`, which is exactly what a receiver that has
+   * already accepted it once will reject.
+   *
+   * Not "the pairing session's counter carried forward" — this channel has
+   * no session, only a `PairedDevice` record that outlives the process (see
+   * `pairingCrypto.ts`'s `sealWithRandomIv` doc on why that rules out
+   * reusing `PairingChannel`'s counter-as-IV scheme). A fresh field, checked
+   * against a value persisted on `PairedDevice`, is the adaptation.
+   */
+  seq: number
+}
+
+/**
+ * Anti-replay check for the long-lived sync channel — the same idea as
+ * `pairingCrypto.ts`'s `PairingChannel` counter (a claimed value must climb
+ * or the message is rejected as a possible replay), adapted for a channel
+ * that outlives the process: the counter lives on `PairedDevice`, not in
+ * memory, and "climbs by exactly one" is loosened to "climbs by at least
+ * one" (`>`, not `=== expected + 1`). A request and its reply share one
+ * `outgoingSeq` per sender (see that field's doc), so a legitimate exchange
+ * can skip a number — a strict "+1" would reject it as readily as an actual
+ * replay, which is not the failure mode this exists to catch.
+ *
+ * Called immediately after a successful decrypt, before the plaintext is
+ * used for anything else. Both call sites (`respondToSyncRequest`,
+ * `SyncLoop.runDeviceCycle`) fold this into the same try/catch that already
+ * handles a failed decryption, so a rejected replay is indistinguishable —
+ * on the wire, and to the caller — from bad ciphertext.
+ */
+export function assertFreshSeq(device: PairedDevice, payload: SyncExchangePayload): void {
+  const lastAccepted = device.lastAcceptedSeq ?? 0
+  if (!(payload.seq > lastAccepted)) {
+    throw new Error('out-of-sequence sync message — possible replay')
+  }
 }
 
 /** What crosses the relay in `electron/syncServer.ts` — main process never sees the plaintext, only this envelope and the `pairId` that says which key answers it. */
@@ -324,6 +394,23 @@ export interface SyncApplyPatch {
   deletedJobs?: JobTombstone[]
   /** The peer's own `Settings.localDeviceId`, learned from `SyncExchangePayload.selfDeviceId` — set in `performExchange`, not `applyExchange`, since it is protocol-level rather than scoped user data. Written onto `PairedDevice.remoteDeviceId`. */
   remoteDeviceId?: string
+  /**
+   * The `SyncExchangePayload.seq` this exchange's `incoming` carried, already
+   * validated by `assertFreshSeq` before `performExchange` ever ran — written
+   * onto `PairedDevice.lastAcceptedSeq` via `recordSyncSeq`'s forward-only
+   * merge, never a plain overwrite (see that function's doc for why).
+   */
+  lastAcceptedSeq?: number
+  /**
+   * The `SyncExchangePayload.seq` stamped on `PerformExchangeResult.outgoing`
+   * — written onto `PairedDevice.outgoingSeq`. On `respondToSyncRequest`'s
+   * call this is the real number the reply is about to be sealed with. On
+   * `SyncLoop.runDeviceCycle`'s call, `outgoing` is discarded (see that
+   * method's doc), so its caller overwrites this field with the number
+   * actually used for the request it already sent, before handing the
+   * result to `onSynced`.
+   */
+  outgoingSeq?: number
 }
 
 export interface ExchangeOutcome {
@@ -508,6 +595,18 @@ export interface PerformExchangeResult extends ExchangeOutcome {
  * device's own reply — the one function both `SyncLoop.runCycle` (after
  * getting a response) and `respondToSyncRequest` (after getting a request)
  * call, so the two directions cannot quietly drift into different rules.
+ *
+ * `incoming.seq` is trusted here without being re-checked: both callers run
+ * `assertFreshSeq` immediately after decrypting, before this function is
+ * ever invoked, and a rejected payload must never reach `applyExchange` at
+ * all — see `assertFreshSeq`'s doc. `outgoingSeq` is the number `outgoing`
+ * gets stamped with; the caller decides what that means. On
+ * `respondToSyncRequest`'s call it is the real number the reply is about to
+ * be sealed with. On `SyncLoop.runDeviceCycle`'s call, `outgoing` here is
+ * built only because this function always builds one and is discarded
+ * unread — the request that call already sent used its own, separately
+ * allocated, number — so that caller passes the peer's *current* value
+ * unchanged, and overwrites `patch.outgoingSeq` itself afterwards.
  */
 export async function performExchange(
   state: AppState,
@@ -515,6 +614,7 @@ export async function performExchange(
   device: PairedDevice,
   incoming: SyncExchangePayload,
   now: number,
+  outgoingSeq: number,
   secrets?: SyncSecretTransport,
 ): Promise<PerformExchangeResult> {
   const sessionId = `${device.id}:${now}`
@@ -528,13 +628,20 @@ export async function performExchange(
     secrets,
   )
   if (incoming.selfDeviceId) patch.remoteDeviceId = incoming.selfDeviceId
+  patch.lastAcceptedSeq = incoming.seq
+  patch.outgoingSeq = outgoingSeq
   const changed = buildChangedPayload(state, calendar, device.scopes, sinceLocal)
   // Only ever after `buildChangedPayload` has already applied `device.scopes`:
   // an account the user unchecked is not in `changed.accounts`, so its password
   // is never among the ids handed to the trusted layer to seal. Unchecking a
   // scope keeps it off the wire, rather than off the screen at the far end.
   await attachAccountSecrets(changed, secrets, state)
-  const outgoing: SyncExchangePayload = { since: now, changed, selfDeviceId: state.settings.localDeviceId }
+  const outgoing: SyncExchangePayload = {
+    since: now,
+    changed,
+    selfDeviceId: state.settings.localDeviceId,
+    seq: outgoingSeq,
+  }
   return { patch, conflicts, accountSecrets, outgoing }
 }
 
@@ -550,6 +657,21 @@ export interface RespondHooks {
   now(): number
   /** Per-device, because the key credentials are sealed under is this pairing's — see `SyncSecretTransport`. Absent on a build with no trusted layer to seal in. */
   secrets?(device: PairedDevice): SyncSecretTransport | undefined
+  /**
+   * Advance `pairId`'s replay high-water mark to `seq`, synchronously and
+   * durably enough that the very next `findDevice(pairId)` call — including
+   * one from a second, concurrently-arriving request for this same peer —
+   * observes it. Required, not optional: without it, `assertFreshSeq` only
+   * protects against a *sequential* replay (wait for the first delivery to
+   * fully finish, then resend), because the actual counter write has
+   * historically happened only after the whole exchange — keystore IPC,
+   * conflict resolution, sealing the reply — completed. Two copies of the
+   * same envelope delivered close enough together both read the
+   * not-yet-advanced counter and both pass. Calling this the moment the
+   * check itself passes, rather than waiting for the exchange to finish, is
+   * what closes that window.
+   */
+  commitAcceptedSeq(pairId: string, seq: number): void
 }
 
 /** Everything a caller needs to actually commit the exchange to state and the keystore — kept separate from the sealed reply so `respondToSyncRequest` can answer before the renderer has finished dispatching. */
@@ -569,20 +691,45 @@ export async function respondToSyncRequest(
 
   let key: CryptoKey
   let incoming: SyncExchangePayload
+  let fresh: PairedDevice
   try {
     key = await importLongLivedKey(keyB64)
     incoming = await openWithRandomIv<SyncExchangePayload>(key, envelope)
+    // Re-read rather than reuse `device` from above: a concurrent exchange
+    // with this same peer — see the module doc's note on two paired devices
+    // polling each other within the same window — can have advanced this
+    // device's counters while the decrypt above was in flight, and the
+    // check below must run against the freshest value available or it risks
+    // re-accepting something a moment-earlier exchange already accepted.
+    // Folded into this same try/catch, on purpose: a rejected replay is
+    // meant to be indistinguishable from a failed decryption — see
+    // `assertFreshSeq`'s doc.
+    fresh = hooks.findDevice(pairId) ?? device
+    assertFreshSeq(fresh, incoming)
   } catch {
     return { error: 'could not open the request' }
   }
 
+  // Committed immediately — before any of the slow work below (keystore IPC,
+  // conflict resolution, sealing the reply) — so a second delivery of this
+  // same envelope, however soon it arrives, reads an already-advanced
+  // counter and is rejected by its own `assertFreshSeq` call above. See
+  // `RespondHooks.commitAcceptedSeq`'s doc for the concurrent-delivery
+  // window this closes.
+  hooks.commitAcceptedSeq(pairId, incoming.seq)
+
   const now = hooks.now()
+  // This device's own advancing counter — see `PairedDevice.outgoingSeq`'s
+  // doc. Allocated from the same freshly-read `fresh`, not `device`, for the
+  // same reason as the check above.
+  const outgoingSeq = (fresh.outgoingSeq ?? 0) + 1
   const result = await performExchange(
     hooks.getState(),
     hooks.getCalendar(),
     device,
     incoming,
     now,
+    outgoingSeq,
     hooks.secrets?.(device),
   )
   const replyEnvelope = await sealWithRandomIv(key, result.outgoing)
@@ -661,7 +808,20 @@ export class SyncLoop {
       const state = this.hooks.getState()
       const changed = buildChangedPayload(state, this.hooks.getCalendar(), device.scopes, sinceLocal)
       await attachAccountSecrets(changed, secrets, state)
-      const outgoing: SyncExchangePayload = { since: now, changed, selfDeviceId: state.settings.localDeviceId }
+      // This device's own advancing counter — see `PairedDevice.outgoingSeq`'s
+      // doc. Read fresh from `getPairedDevices` rather than the `device`
+      // argument, which is a snapshot from whenever `runCycle` started
+      // iterating and can already be behind a reply this device just sealed
+      // for this same peer as a responder — see the module doc's note on two
+      // paired devices polling each other within the same window.
+      const beforeSend = this.hooks.getPairedDevices().find((d) => d.id === device.id) ?? device
+      const requestSeq = (beforeSend.outgoingSeq ?? 0) + 1
+      const outgoing: SyncExchangePayload = {
+        since: now,
+        changed,
+        selfDeviceId: state.settings.localDeviceId,
+        seq: requestSeq,
+      }
       const requestEnvelope = await sealWithRandomIv(key, outgoing)
 
       let raw: unknown
@@ -683,18 +843,30 @@ export class SyncLoop {
       }
 
       const theirs = await openWithRandomIv<SyncExchangePayload>(key, response.envelope)
+      // Same freshness reasoning as `requestSeq` above: check against
+      // whatever this device has learned about this peer as of right now,
+      // not a snapshot from before the round trip.
+      const beforeApply = this.hooks.getPairedDevices().find((d) => d.id === device.id) ?? device
+      assertFreshSeq(beforeApply, theirs)
       // Builds (and seals) an outgoing payload this side has already sent and
       // will discard — the price of both directions running the one function,
       // and cheap in the steady state where nothing changed since last cycle
-      // and there is no account to seal a password for.
+      // and there is no account to seal a password for. `beforeApply
+      // .outgoingSeq` (unchanged) is what it gets stamped with, since nothing
+      // reads it; see `performExchange`'s doc.
       const result = await performExchange(
         this.hooks.getState(),
         this.hooks.getCalendar(),
         device,
         theirs,
         now,
+        beforeApply.outgoingSeq ?? 0,
         secrets,
       )
+      // The number actually used for the request already sent above — not
+      // whatever `performExchange` stamped on the `outgoing` object it built
+      // (and this method discards) while processing the reply.
+      result.patch.outgoingSeq = requestSeq
       this.hooks.onSynced(device, result, now)
     } catch (e) {
       this.hooks.onError?.(device, e instanceof Error ? e.message : String(e))

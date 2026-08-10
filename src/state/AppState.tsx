@@ -106,6 +106,7 @@ import type { ControlRequest } from '../core/control'
 import { createI18n, detectLocale, localeMeta, type I18n, type TranslationKey } from '../i18n'
 import {
   findPairedDevice,
+  recordSyncSeq,
   removePairedDevice,
   touchSynced,
   type PairedDevice,
@@ -602,6 +603,15 @@ type Action =
       conflicts: ConflictSnapshot[]
       syncedAt: number
     }
+  /**
+   * Advance a peer's replay-protection high-water mark, and nothing else —
+   * deliberately not folded into `applySyncResult`, which also touches
+   * `lastSyncedAt` via `touchSynced`. This fires *before* an exchange has
+   * finished (see `syncResponder.current`'s `commitAcceptedSeq` hook), so
+   * marking the device "just synced" at that point would be premature — the
+   * exchange might still fail to save.
+   */
+  | { type: 'commitSyncSeq'; deviceId: string; seq: number }
   | { type: 'restoreSyncConflict'; id: string }
   | { type: 'reset' }
 
@@ -1212,12 +1222,28 @@ export function reducer(state: AppState, action: Action): AppState {
         contacts: patch.contacts ?? state.contacts,
         templates: patch.templates ?? state.templates,
         settings,
-        pairedDevices: touchSynced(state.pairedDevices, deviceId, syncedAt, undefined, patch.remoteDeviceId),
+        // `recordSyncSeq` after `touchSynced`, not folded into it: it merges
+        // `outgoingSeq`/`lastAcceptedSeq` forward with `Math.max` rather than
+        // overwriting, which is what keeps a racing exchange with this same
+        // device (see `syncLoop.ts`'s module doc) from regressing either
+        // counter — see `recordSyncSeq`'s own doc for why that matters.
+        pairedDevices: recordSyncSeq(
+          touchSynced(state.pairedDevices, deviceId, syncedAt, undefined, patch.remoteDeviceId),
+          deviceId,
+          { outgoingSeq: patch.outgoingSeq, lastAcceptedSeq: patch.lastAcceptedSeq },
+        ),
         syncConflicts: pushConflictSnapshots(state.syncConflicts, conflicts),
         // The full updated tombstone set, not a merge — `syncLoop.ts` already
         // computed the union of what this device knew plus what the peer
         // just sent before handing it back.
         deletedJobs: patch.deletedJobs ?? state.deletedJobs,
+      }
+    }
+
+    case 'commitSyncSeq': {
+      return {
+        ...state,
+        pairedDevices: recordSyncSeq(state.pairedDevices, action.deviceId, { lastAcceptedSeq: action.seq }),
       }
     }
 
@@ -3313,13 +3339,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const applyExchangeOutcome = useCallback(
     (deviceLabel: string, deviceId: string, result: PerformExchangeResult, at: number) => {
-      dispatch({
-        type: 'applySyncResult',
+      const action = {
+        type: 'applySyncResult' as const,
         deviceId,
         patch: result.patch,
         conflicts: result.conflicts,
         syncedAt: at,
-      })
+      }
+      // Same reasoning as the responder path's own `liveRef.current` write
+      // (see `syncResponder.current` above): this device may simultaneously
+      // be answering a request from the very peer it just finished syncing
+      // with as the initiator, and that responder call reads `liveRef
+      // .current` to check and allocate its own replay-protection counters.
+      liveRef.current = reducer(liveRef.current, action)
+      dispatch(action)
       logExchangeOutcome(deviceLabel, result)
     },
     [logExchangeOutcome],
@@ -3374,6 +3407,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
           getCalendar: () => liveRef.current.settings.workCalendar ?? DEFAULT_WORK_CALENDAR,
           now: () => Date.now(),
           secrets: secretsFor,
+          // Written to `liveRef.current` synchronously, the instant the
+          // freshness check passes — not batched with the rest of this
+          // exchange's outcome below, which only lands after the full
+          // exchange (keystore IPC, conflict resolution, sealing the reply)
+          // completes. See `RespondHooks.commitAcceptedSeq`'s doc.
+          commitAcceptedSeq: (pairId, seq) => {
+            const action = { type: 'commitSyncSeq' as const, deviceId: pairId, seq }
+            liveRef.current = reducer(liveRef.current, action)
+            dispatch(action)
+          },
         },
         request.pairId,
         request.envelope,
@@ -3396,6 +3439,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // agree — see `reducer`'s export note for why calling it directly here
       // is sanctioned rather than reimplementing the merge.
       const nextState = reducer(liveRef.current, action)
+      // Written back immediately, ahead of React's own re-render (which would
+      // only update `liveRef.current` on its own schedule): a second sync
+      // exchange with this same peer — see `syncLoop.ts`'s module doc on two
+      // paired devices polling each other within the same window — reads
+      // `liveRef.current` via `findDevice` to check and allocate its own
+      // replay-protection counters, and must see this exchange's result
+      // rather than a stale pre-exchange snapshot.
+      liveRef.current = nextState
       dispatch(action)
       logExchangeOutcome(device.label, outcome.outcome)
 

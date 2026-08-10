@@ -360,6 +360,25 @@ final class MailSender {
     }
 
     static Result send(Context context, JSONObject draft, JSONObject account, String secret) {
+        return send(context, draft, account, secret, null);
+    }
+
+    /**
+     * @param overrideMessageId Overrides the {@code Message-ID} JavaMail would
+     *        otherwise mint on its own in {@code saveChanges()} (which only
+     *        generates one when the header is not already present). Used by
+     *        the scheduler's dispatch-ledger path (see {@link SendWorker}) so
+     *        a resend of the same occurrence carries the same id across
+     *        attempts — see {@link JobStore}'s "Dispatch ledger" section and
+     *        `src/core/dispatchLedger.ts`. Null from every other caller (the
+     *        compose screen's "send now"), which keeps JavaMail's default
+     *        behaviour. Named distinctly from the {@code messageId} this
+     *        method reads back off the sent message below (which, when this is
+     *        passed, is simply this same value echoed back) to keep the two
+     *        unambiguous — mirrors `overrideMessageId` in `electron/mailer.ts`.
+     */
+    static Result send(Context context, JSONObject draft, JSONObject account, String secret,
+                        String overrideMessageId) {
         long started = System.currentTimeMillis();
         Result result = new Result();
 
@@ -402,13 +421,14 @@ final class MailSender {
                     if (draft.optBoolean("individualDelivery", false)) {
                         for (String address : everyone) {
                             MimeMessage message =
-                                    compose(session, draft, account, single(address), null, null);
+                                    compose(session, draft, account, single(address), null, null,
+                                            overrideMessageId);
                             Transport.send(message);
                             result.accepted.add(address);
                             result.messageId = message.getMessageID();
                         }
                     } else {
-                        MimeMessage message = compose(session, draft, account, to, cc, bcc);
+                        MimeMessage message = compose(session, draft, account, to, cc, bcc, overrideMessageId);
                         Transport.send(message);
                         result.accepted.addAll(everyone);
                         result.messageId = message.getMessageID();
@@ -556,9 +576,17 @@ final class MailSender {
             JSONObject account,
             List<String> to,
             List<String> cc,
-            List<String> bcc) throws Exception {
+            List<String> bcc,
+            String overrideMessageId) throws Exception {
 
         MimeMessage message = new MimeMessage(session);
+
+        if (!TextUtils.isEmpty(overrideMessageId)) {
+            // Set before saveChanges() below, which only mints its own
+            // Message-ID when the header is not already present — see the
+            // doc on the overload of send() this id came from.
+            message.setHeader("Message-ID", overrideMessageId);
+        }
 
         String fromName = account.optString("fromName", "");
         String fromAddress = account.optString("fromAddress", "");

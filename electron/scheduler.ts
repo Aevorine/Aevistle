@@ -12,11 +12,24 @@ import { EventEmitter } from 'node:events'
 import { existsSync } from 'node:fs'
 import { evaluateConditions, inboundKey } from '../src/core/conditions'
 import { applyJitter, computeOccurrences, rearm } from '../src/core/schedule'
+import {
+  mintMessageId,
+  resolveLedgerEntryOnRestart,
+  spliceForcedResends,
+  type DispatchLedgerEntry,
+} from '../src/core/dispatchLedger'
 import { MAX_BURST_COUNT } from '../src/core/types'
 import type { MailAccount, ScheduledJob, SendResult } from '../src/core/types'
 import type { JobRun } from '../src/core/bridge'
 import { sendMail } from './mailer'
-import { claimOccurrence, getSecret, loadFiredClaims } from './store'
+import {
+  claimLedgerEntry,
+  deleteLedgerEntry,
+  getSecret,
+  loadDispatchLedger,
+  markLedgerAccepted,
+  markLedgerSending,
+} from './store'
 
 const TICK_MS = 15_000
 /**
@@ -83,20 +96,152 @@ export class Scheduler extends EventEmitter {
    * every send it has ever made.
    *
    * In-memory only — this guards *this* process against sending the same
-   * occurrence twice. `store.ts`'s `claimOccurrence` is the durable half that
-   * guards the *next* process, after a crash, against the same thing; see
-   * `restoreFiredClaims` for how the two meet at startup.
+   * occurrence twice. `store.ts`'s dispatch ledger is the durable half that
+   * guards the *next* process, after a crash, against the same thing — but
+   * only for occurrences the ledger has positive proof were actually sent;
+   * see `restoreDispatchLedger` for how the two meet at startup, and
+   * `src/core/dispatchLedger.ts` for why an *unconfirmed* send is deliberately
+   * left out of this set instead of added to it.
    */
   private fired = new Set<string>()
 
   /**
-   * Seed `fired` from the durable claims `store.ts` wrote before previous
-   * sends, so a crash between "SMTP accepted" and "state.json caught up" does
-   * not look like a missed occurrence on restart. Must be called — and
-   * awaited — before `start()`; `main.ts` does this once, at launch.
+   * Ledger entries recovered at startup with positive proof the send already
+   * happened (`resolveLedgerEntryOnRestart` returned `'complete-bookkeeping-only'`),
+   * waiting for their job to become known. Restart recovery runs before the
+   * renderer has synced any jobs in, so the bookkeeping these entries need —
+   * `completeRun`, which mutates an actual `ScheduledJob` — cannot happen yet.
+   * `sync()` drains this on every call once the matching job appears. Keyed by
+   * claimKey so the same entry cannot be queued for completion twice.
    */
-  async restoreFiredClaims(): Promise<void> {
-    for (const key of await loadFiredClaims()) this.fired.add(key)
+  private pendingLedgerRecovery = new Map<string, DispatchLedgerEntry>()
+
+  /**
+   * Ledger entries recovered at startup with NO confirmed evidence the send
+   * ever happened (`resolveLedgerEntryOnRestart` returned `'resend'`),
+   * waiting for their job to become known so the occurrence can be forced
+   * back into its `occurrences` array.
+   *
+   * This has to be a separate pass from the ordinary `rearm()`/`owed`
+   * computation in `sync()`: a job whose recurrence uses `catchUp: 'skip'`
+   * has `rearm()` unconditionally drop every missed occurrence, including
+   * one that was actively claimed (or mid-send) when the process died —
+   * which would silently reintroduce the exact miss this whole file exists
+   * to close, for that one policy. A resend recovered here overrides
+   * whatever the catch-up policy computes for this specific occurrence,
+   * because the app already committed to sending it before the crash; the
+   * policy only ever meant to govern occurrences nothing had attempted yet.
+   * Cleared, and the ledger entry deleted, once `sync()` confirms the
+   * occurrence has actually landed back in the job's `occurrences`.
+   */
+  private pendingResend = new Map<string, DispatchLedgerEntry>()
+
+  /**
+   * Best-effort: clear the ledger entry for a claimKey whose occurrence has
+   * finished being processed — sent, failed for good, skipped by a
+   * condition, or recovered from a prior crash. A write failure here leaves
+   * a stale entry behind (worst case: a spurious resend later, exactly the
+   * trade this whole file leans towards), not a reason to fail the caller.
+   */
+  private async finishLedgerEntry(claimKey: string): Promise<void> {
+    try {
+      await deleteLedgerEntry(claimKey)
+    } catch (e) {
+      console.error('[aevistle] could not clear a completed dispatch-ledger entry:', claimKey, e)
+    }
+  }
+
+  /**
+   * Resolve every ledger entry left behind by the previous run, before the
+   * first `tick()` can fire anything. Must be called — and awaited — before
+   * `start()`; `main.ts` does this once, at launch.
+   *
+   * - No confirmed evidence the send completed (`'resend'`): the stale entry
+   *   is dropped and the occurrence is left out of `fired` entirely, so it
+   *   fires normally on the next tick — exactly as if it had never been
+   *   claimed. This is the deliberate reversal from the old claim file, which
+   *   put every claim into `fired` and thereby suppressed a resend even when
+   *   nothing had actually gone out.
+   * - Positive proof of acceptance (`'complete-bookkeeping-only'`): the
+   *   occurrence *is* added to `fired`, so it is protected from being resent
+   *   by `tick()` in the ordinary way, and the entry is parked in
+   *   `pendingLedgerRecovery` until `sync()` can find the job it belongs to
+   *   and complete its bookkeeping without re-sending.
+   */
+  async restoreDispatchLedger(): Promise<void> {
+    for (const entry of await loadDispatchLedger()) {
+      const resolution = resolveLedgerEntryOnRestart(entry)
+      if (resolution === 'resend') {
+        // Left on disk on purpose — see `pendingResend`. Deleting it here,
+        // before `sync()` has actually spliced the occurrence back in, would
+        // lose the resend entirely if the process crashed again before the
+        // renderer ever connected.
+        this.pendingResend.set(entry.claimKey, entry)
+        continue
+      }
+      this.fired.add(entry.claimKey)
+      this.pendingLedgerRecovery.set(entry.claimKey, entry)
+    }
+  }
+
+  /**
+   * Finish the bookkeeping for any recovered `'accepted'` ledger entry whose
+   * job has just become known. Called at the end of every `sync()` — cheap
+   * when `pendingLedgerRecovery` is empty, which is the common case.
+   *
+   * `rawJobs` is the renderer's actual current state (`sync()`'s own `jobs`
+   * parameter, untouched), not `this.jobs` — see `completeAcceptedRecovery`
+   * for why the distinction matters.
+   */
+  private resolvePendingLedgerRecovery(rawJobs: ScheduledJob[]): void {
+    if (this.pendingLedgerRecovery.size === 0) return
+    for (const entry of this.pendingLedgerRecovery.values()) {
+      const job = this.jobs.find((j) => j.id === entry.jobId)
+      const rawJob = rawJobs.find((j) => j.id === entry.jobId)
+      if (!job || !rawJob) continue // Not synced in yet — try again on the next sync(). See the field doc for the (rare, undeleted-job) case this never resolves.
+      this.pendingLedgerRecovery.delete(entry.claimKey)
+      void this.completeAcceptedRecovery(job, rawJob, entry)
+    }
+  }
+
+  /**
+   * Apply the job bookkeeping for an occurrence the ledger has positive proof
+   * was already sent, then clear the entry. No send is attempted and no send
+   * condition is re-evaluated — the send already genuinely happened before
+   * the crash; this only catches the job's own record-keeping up to that
+   * fact, via the exact same `completeRun` the live send path uses.
+   *
+   * Checked against `rawJob` (the renderer's untouched state), not `job`
+   * (this `sync()` call's own `this.jobs` entry): by the time this runs,
+   * `job.occurrences` has already had this instant filtered out by the
+   * `owed` computation above — because this entry's claimKey was added to
+   * `fired` back in `restoreDispatchLedger`, precisely so `tick()` would not
+   * also try to resend it. Checking `job` here would therefore always read
+   * "already gone" and this bookkeeping would never run. `rawJob` still
+   * reflects whatever the renderer's own state.json actually recorded, which
+   * is the real question this check exists to answer: did state.json's
+   * bookkeeping reach this occurrence before the crash, or not.
+   */
+  private async completeAcceptedRecovery(
+    job: ScheduledJob,
+    rawJob: ScheduledJob,
+    entry: DispatchLedgerEntry,
+  ): Promise<void> {
+    if (rawJob.occurrences.includes(entry.occurrenceMs)) {
+      const result: SendResult = {
+        ok: true,
+        messageId: entry.messageId,
+        // Best-effort: the ledger does not record which individual
+        // recipients were accepted, only that the SMTP transaction as a
+        // whole was — see the caveat on `DispatchLedgerEntry.messageId`.
+        accepted: [],
+        rejected: [],
+        durationMs: 0,
+      }
+      const remaining = job.occurrences.filter((t) => t !== entry.occurrenceMs)
+      this.completeRun(job, remaining, result)
+    }
+    await this.finishLedgerEntry(entry.claimKey)
   }
 
   start(): void {
@@ -164,8 +309,28 @@ export class Scheduler extends EventEmitter {
        * between.
        */
       const owed = dueNow.filter((t) => !this.fired.has(`${job.id}:${t}`))
-      return { ...job, occurrences: [...owed, ...upcoming] }
+      // See `pendingResend` and `spliceForcedResends`'s doc — a recovered,
+      // unconfirmed send is forced back in even for a `catchUp: 'skip'` job
+      // that `rearm()` above would otherwise have dropped it from.
+      const occurrences = spliceForcedResends([...owed, ...upcoming], job.id, this.pendingResend.values())
+      return { ...job, occurrences }
     })
+    // Now that every pending resend has had a chance to land in `this.jobs`
+    // above, clear whichever ones actually did — leaving the rest (their job
+    // hasn't synced in yet) for the next `sync()` call to retry.
+    for (const [claimKey, entry] of this.pendingResend) {
+      const job = this.jobs.find((j) => j.id === entry.jobId)
+      if (job?.occurrences.includes(entry.occurrenceMs)) {
+        this.pendingResend.delete(claimKey)
+        void this.finishLedgerEntry(claimKey)
+      }
+    }
+    // Jobs are known now, so any `'accepted'` ledger entry recovered at
+    // startup before the renderer had synced anything in can finally have
+    // its bookkeeping completed. See `pendingLedgerRecovery`. `jobs` (the raw
+    // argument, not `this.jobs`) is passed through deliberately — see
+    // `completeAcceptedRecovery`.
+    this.resolvePendingLedgerRecovery(jobs)
     this.armPrecise()
   }
 
@@ -254,7 +419,7 @@ export class Scheduler extends EventEmitter {
       const claimKey = `${job.id}:${fireAt}`
       this.fired.add(claimKey)
       this.running.add(job.id)
-      void this.claimThenRun(job, remaining, claimKey).finally(() => this.running.delete(job.id))
+      void this.claimThenRun(job, remaining, claimKey, fireAt).finally(() => this.running.delete(job.id))
     }
 
     // A claim older than a day can no longer be resurrected by any `sync()` —
@@ -272,13 +437,48 @@ export class Scheduler extends EventEmitter {
     this.armPrecise()
   }
 
-  /** One send, with the existing retry-on-transient-failure policy. */
+  /**
+   * Best-effort: a durable-write failure here is a reason the crash-safety
+   * net has a hole for this one attempt, not a reason to hold up (or fail)
+   * an actual send — same trade `claimThenRun` makes for the claim write.
+   */
+  private async markSending(claimKey: string): Promise<void> {
+    try {
+      await markLedgerSending(claimKey)
+    } catch (e) {
+      console.error('[aevistle] could not durably record a sending attempt:', claimKey, e)
+    }
+  }
+
+  private async markAccepted(claimKey: string): Promise<void> {
+    try {
+      await markLedgerAccepted(claimKey)
+    } catch (e) {
+      console.error('[aevistle] could not durably record a send acceptance:', claimKey, e)
+    }
+  }
+
+  /**
+   * One send, with the existing retry-on-transient-failure policy.
+   *
+   * `claimKey`/`messageId` thread the dispatch ledger through: `'sending'` is
+   * written durably immediately before every actual SMTP attempt below —
+   * including retries, which is why the write sits inside this loop rather
+   * than once around the whole call — and `'accepted'` immediately after one
+   * succeeds. `messageId` is passed into `sendMail` so the message itself
+   * carries the same `Message-Id` across every attempt at this claimKey. See
+   * `src/core/dispatchLedger.ts`.
+   */
   private async sendOnce(
     job: ScheduledJob,
     account: MailAccount,
     secret: string | null,
+    claimKey: string,
+    messageId: string,
   ): Promise<SendResult> {
-    let result = await sendMail(job.draft, account, secret)
+    await this.markSending(claimKey)
+    let result = await sendMail(job.draft, account, secret, undefined, messageId)
+    if (result.ok) await this.markAccepted(claimKey)
 
     // Retry only failures that a retry could plausibly fix. A wrong password
     // or a malformed address will fail identically every time, and hammering
@@ -293,7 +493,9 @@ export class Scheduler extends EventEmitter {
       retryable.has(result.errorKind ?? 'unknown')
     ) {
       await delay(waitSeconds * 1000)
-      result = await sendMail(job.draft, account, secret)
+      await this.markSending(claimKey)
+      result = await sendMail(job.draft, account, secret, undefined, messageId)
+      if (result.ok) await this.markAccepted(claimKey)
       attempt++
       waitSeconds = Math.min(waitSeconds * job.retry.backoffFactor, 3600)
     }
@@ -320,25 +522,65 @@ export class Scheduler extends EventEmitter {
   }
 
   /**
+   * Apply a finished run's outcome onto `job` and tell everyone about it —
+   * shared between the live send path at the end of `run()` and
+   * `completeAcceptedRecovery`, which reaches the exact same outcome for an
+   * occurrence the ledger has positive proof was already sent before a
+   * crash, without attempting the send again.
+   */
+  private completeRun(job: ScheduledJob, remaining: number[], result: SendResult): void {
+    job.runCount += 1
+    job.lastRunAt = Date.now()
+    job.lastResult = result.ok ? 'ok' : 'failed'
+    job.lastError = result.error
+    job.status = result.ok ? 'armed' : 'failed'
+
+    job.occurrences = this.topUp(job, remaining)
+
+    if (job.occurrences.length === 0) job.status = 'done'
+
+    this.emit('jobEvent', { jobId: job.id, at: job.lastRunAt, result, run: runOf(job) })
+    this.emit('jobUpdated', job)
+    this.armPrecise()
+  }
+
+  /**
    * The durable half of the claim, awaited before `run()` can reach the SMTP
    * call inside it. `this.fired.add` in `tick()` already guards this process
    * against firing the same occurrence twice; this guards the *next*
    * process, after a crash between "SMTP accepted" and "state.json caught
    * up", against the same thing.
+   *
+   * Mints a `messageId` up front so a send can proceed with *some* id even if
+   * the durable claim write itself fails; `claimLedgerEntry` overrides it with
+   * the entry's own id (freshly minted, or reused from a prior attempt at the
+   * same claimKey) the moment it succeeds.
    */
-  private async claimThenRun(job: ScheduledJob, remaining: number[], claimKey: string): Promise<void> {
+  private async claimThenRun(
+    job: ScheduledJob,
+    remaining: number[],
+    claimKey: string,
+    occurrenceMs: number,
+  ): Promise<void> {
+    let messageId = mintMessageId(claimKey)
     try {
-      await claimOccurrence(claimKey)
+      const entry = await claimLedgerEntry(claimKey, job.id, occurrenceMs)
+      messageId = entry.messageId
     } catch (e) {
       // A claim that failed to reach disk is a reason the crash-safety net
       // has a hole this one time, not a reason to skip a reminder the user is
       // waiting on — same trade `writeAtomic`'s best-effort fsync makes.
       console.error('[aevistle] could not durably claim occurrence before sending:', claimKey, e)
     }
-    await this.run(job, remaining)
+    await this.run(job, remaining, claimKey, messageId)
   }
 
-  private async run(job: ScheduledJob, remaining: number[]): Promise<void> {
+  private async run(
+    job: ScheduledJob,
+    remaining: number[],
+    claimKey: string,
+    messageId: string,
+  ): Promise<void> {
     const jitterMs = applyJitter(0, job.recurrence.jitterSeconds)
     if (jitterMs > 0) await delay(jitterMs)
 
@@ -395,6 +637,12 @@ export class Scheduler extends EventEmitter {
       this.emit('jobEvent', { jobId: job.id, at: job.lastRunAt, result: skipped, run: runOf(job) })
       this.emit('jobUpdated', job)
       this.armPrecise()
+      // No SMTP attempt was ever made for this claimKey — the ledger entry
+      // is still sitting in `'claimed'`. Cleared here rather than left for a
+      // future restart to resolve, so a condition that skips every time
+      // (e.g. a file that is simply never going to exist) does not leave a
+      // ledger entry hanging around until the 24-hour prune.
+      await this.finishLedgerEntry(claimKey)
       return
     }
 
@@ -428,7 +676,7 @@ export class Scheduler extends EventEmitter {
 
       for (let i = 0; i < repeats; i++) {
         if (i > 0 && pacingMs > 0) await delay(pacingMs)
-        last = await this.sendOnce(job, account, secret)
+        last = await this.sendOnce(job, account, secret, claimKey, messageId)
         totalDuration += last.durationMs
         accepted.push(...last.accepted)
         rejected.push(...last.rejected)
@@ -452,19 +700,12 @@ export class Scheduler extends EventEmitter {
             }
     }
 
-    job.runCount += 1
-    job.lastRunAt = Date.now()
-    job.lastResult = result.ok ? 'ok' : 'failed'
-    job.lastError = result.error
-    job.status = result.ok ? 'armed' : 'failed'
-
-    job.occurrences = this.topUp(job, remaining)
-
-    if (job.occurrences.length === 0) job.status = 'done'
-
-    this.emit('jobEvent', { jobId: job.id, at: job.lastRunAt, result, run: runOf(job) })
-    this.emit('jobUpdated', job)
-    this.armPrecise()
+    this.completeRun(job, remaining, result)
+    // Whatever `result` turned out to be — sent, failed for good, or a
+    // missing-account config error — the occurrence has finished being
+    // processed and the ledger's job here is done. See `deleteLedgerEntry`'s
+    // doc for why a missing entry means "fully done", not "fully sent".
+    await this.finishLedgerEntry(claimKey)
   }
 }
 

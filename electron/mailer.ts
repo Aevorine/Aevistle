@@ -571,6 +571,17 @@ export async function sendMail(
   account: MailAccount,
   secret: string | null,
   totalTimeoutMs?: number,
+  /**
+   * Overrides the `Message-Id` nodemailer would otherwise mint on its own.
+   * Used by the scheduler's dispatch-ledger path so a resend of the same
+   * occurrence carries the same id across attempts — see
+   * `src/core/dispatchLedger.ts`. Omitted by every other caller (the compose
+   * screen's "send now"), which keeps nodemailer's default behaviour. Named
+   * distinctly from the `messageId` nodemailer hands back below (which, when
+   * this is passed, is simply this same value echoed back) to keep the two
+   * unambiguous in scope.
+   */
+  overrideMessageId?: string,
 ): Promise<SendResult> {
   const started = Date.now()
   const fallbackEndpoint: Endpoint = { port: account.port, security: account.security }
@@ -600,6 +611,7 @@ export async function sendMail(
       attachments,
       priority: draft.priority,
       headers,
+      ...(overrideMessageId ? { messageId: overrideMessageId } : {}),
     }
 
     // A send carries a payload, so it is given a longer floor than a bare

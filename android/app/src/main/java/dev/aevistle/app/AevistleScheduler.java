@@ -127,7 +127,8 @@ final class AevistleScheduler {
      *
      * A backlog collapses to its most recent entry — waking a phone after a
      * week owes one reminder, not seven — and is armed for *now*, which is
-     * the immediate alarm that pays it.
+     * the immediate alarm that pays it, unless the dispatch ledger says that
+     * instant was already handled — see the restart-recovery block below.
      */
     static long nextOccurrence(Context context, JSONObject job) {
         JSONArray occurrences = job.optJSONArray("occurrences");
@@ -146,22 +147,88 @@ final class AevistleScheduler {
             }
         }
 
-        if (owed > 0 && paysCatchUp(job)) {
+        if (owed > 0) {
             /*
-             * Unless it was already paid. Every route into this method runs
-             * repeatedly — boot, package replacement, the exact-alarm
-             * permission changing, and every `syncJobs` the app makes — and the
-             * web layer keeps the missed instant in its own copy of the job
-             * until a run report round-trips back to it. So without this check
-             * the same instant would be re-armed on each pass. The claim is
-             * taken in {@link SendWorker}, where the send actually happens;
-             * this only declines to wake up for work that is already done.
+             * Restart recovery — the dispatch-ledger mirror of
+             * `resolveLedgerEntryOnRestart` in `src/core/dispatchLedger.ts`.
+             * Every route into this method runs repeatedly — boot, package
+             * replacement, the exact-alarm permission changing, every
+             * `syncJobs` the app makes — so a {@link SendWorker} that started
+             * dispatching `owed` and never got to finish (a crash, an OS kill,
+             * a force-stop) leaves a ledger entry behind for exactly this
+             * check to find.
+             *
+             * Checked before, and independently of, {@link #paysCatchUp}
+             * below: a dispatch that may already be in flight is a different
+             * question from whether a *merely missed, never-attempted*
+             * reminder is still worth firing late, and a job that opts out of
+             * catch-up must not leave a crashed send's occurrence stuck in its
+             * list forever — either unresent, or, worse, unrecorded if it did
+             * go out.
              */
-            if (!new JobStore(context).occurrenceClaimed(job.optString("id", ""), owed)) {
+            JobStore store = new JobStore(context);
+            String jobId = job.optString("id", "");
+            String claimKey = JobStore.ledgerClaimKey(jobId, owed);
+            JSONObject entry = store.ledgerEntry(claimKey);
+
+            if (entry != null) {
+                if ("accepted".equals(entry.optString("state", "claimed"))) {
+                    // Positive proof the SMTP server already accepted this
+                    // message — resending would be a guaranteed duplicate for
+                    // no benefit. Catch the bookkeeping up instead; do not wake.
+                    completeAcceptedOccurrence(store, jobId, owed, entry);
+                    return soonest;
+                }
+                // 'claimed' or 'sending': no confirmed evidence the SMTP call
+                // this entry describes ever completed — it may have succeeded,
+                // failed, or never reached the server, and there is no way to
+                // tell from here. The new policy resolves that ambiguity
+                // towards resending rather than towards silence (see
+                // src/core/dispatchLedger.ts). Drop the stale entry and wake
+                // now so SendWorker claims it fresh.
+                store.deleteLedgerEntry(claimKey);
                 return now;
             }
+
+            // No ledger entry at all: an ordinary occurrence missed while the
+            // device was off or asleep, never even attempted. Whether that
+            // still deserves an immediate wake is the job's own catch-up
+            // policy, unchanged from before this ledger existed.
+            if (paysCatchUp(job)) return now;
         }
         return soonest;
+    }
+
+    /**
+     * Positive proof this occurrence's SMTP attempt was already accepted
+     * before whatever stopped this device short — catch the job's own
+     * bookkeeping up to that fact via the same {@link JobStore#recordRun} a
+     * live successful send uses (mirrors `completeAcceptedRecovery` in
+     * `electron/scheduler.ts`, which reuses its live send path's
+     * `completeRun` the same way), tell an app that happens to be open right
+     * now, and clear the entry. No send is attempted and no send condition is
+     * re-evaluated — the send already genuinely happened.
+     */
+    private static void completeAcceptedOccurrence(
+            JobStore store, String jobId, long occurrenceMs, JSONObject entry) {
+        String messageId = entry.optString("messageId", null);
+        JSONObject run = store.completeAcceptedRecovery(jobId, occurrenceMs);
+        store.deleteLedgerEntry(JobStore.ledgerClaimKey(jobId, occurrenceMs));
+        // Null means the job's own bookkeeping already caught up with this
+        // occurrence in an earlier pass — see completeAcceptedRecovery's doc.
+        if (run == null) return;
+
+        JSONObject result = new JSONObject();
+        try {
+            result.put("ok", true);
+            if (messageId != null) result.put("messageId", messageId);
+            result.put("accepted", new JSONArray());
+            result.put("rejected", new JSONArray());
+            result.put("durationMs", 0);
+        } catch (Exception e) {
+            Log.w(TAG, "completeAcceptedOccurrence: could not build the recovered send result", e);
+        }
+        AevistleNativePlugin.emitJobEvent(jobId, System.currentTimeMillis(), result, run);
     }
 
     /**
