@@ -177,6 +177,87 @@ check(
   unfilled.length === 0,
 )
 
+// --- keys nothing can reach -------------------------------------------------
+//
+// The checks above all run in one direction: is every key that exists here
+// present, consistent and filled in. None of them asks whether anything ever
+// renders it. Thirty-six did not — a screen's `hint` prop had been dropped in
+// an earlier round and the sentence stayed behind, translated six times, for a
+// UI element that no longer asked for it. Six translators' worth of work on
+// text no user could see, and nothing anywhere said so.
+//
+// Three ways a key is legitimately reached, all of which occur in this repo:
+//
+//   1. a literal        t('codes.title'), or the key travelling as a prop
+//   2. a template       t(`condition.kind.${kind}`)  -> prefix condition.kind.
+//   3. concatenation    'codes.reason.' + reason     -> prefix codes.reason.
+//
+// Literals are matched anywhere in the file, not only inside `t(...)`: keys are
+// passed as props (`summary.key`), returned from helpers (`purposeKey`) and
+// listed in tuple arrays. Over-matching here is the safe direction — a key
+// wrongly called dead gets deleted and renders as raw `foo.bar` on screen.
+//
+// `src/i18n/index.ts` is scanned, unlike the parity walk above which skips all
+// of src/i18n. It is itself a caller: `formatRelative` and `formatAgo`
+// translate the nine time.* keys, and excluding it reports all nine as dead.
+
+const REACH_DIRS = ['src', 'electron', 'scripts', 'tests']
+const RECORD_FILES = new Set(locales.map((l) => `src/i18n/${l}.ts`))
+
+/**
+ * Keys deliberately kept despite having no caller, with the reason. An entry
+ * here is a decision someone made, not an exemption to be handed out freely.
+ */
+const KEEP_UNREACHED = new Map([
+  ['home.subtitle', 'the home screen was raised with the user, who asked for it to be left alone'],
+])
+
+const reachFiles = []
+const reachWalk = (dir) => {
+  for (const entry of readdirSync(path.join(ROOT, dir), { withFileTypes: true })) {
+    const rel = `${dir}/${entry.name}`
+    if (entry.name === 'node_modules') continue
+    if (entry.isDirectory()) reachWalk(rel)
+    else if (/\.(tsx?|mjs)$/.test(entry.name) && !RECORD_FILES.has(rel)) reachFiles.push(rel)
+  }
+}
+for (const dir of REACH_DIRS) {
+  try {
+    reachWalk(dir)
+  } catch {
+    // An optional tree (`tests` is not present in every checkout) is not a
+    // failure — it just contributes no call sites.
+  }
+}
+
+const seenLiterals = new Set()
+const seenPrefixes = new Set()
+for (const file of reachFiles) {
+  const text = readFileSync(path.join(ROOT, file), 'utf8')
+  for (const m of text.matchAll(/(['"])([a-zA-Z][a-zA-Z0-9]*(?:\.[a-zA-Z0-9_-]+)+)\1/g)) {
+    seenLiterals.add(m[2])
+  }
+  for (const m of text.matchAll(/`([a-zA-Z][a-zA-Z0-9]*(?:\.[a-zA-Z0-9_-]+)*\.?)\$\{/g)) {
+    seenPrefixes.add(m[1])
+  }
+  for (const m of text.matchAll(/(['"])([a-zA-Z][a-zA-Z0-9]*(?:\.[a-zA-Z0-9_-]+)*\.)\1\s*\+/g)) {
+    seenPrefixes.add(m[2])
+  }
+}
+
+const unreached = [...baseKeys].filter(
+  (key) =>
+    !KEEP_UNREACHED.has(key) &&
+    !seenLiterals.has(key) &&
+    ![...seenPrefixes].some((p) => p.length > 0 && key.startsWith(p)),
+)
+check(
+  `every key must be reachable from some code path (${unreached.length}: ${unreached
+    .slice(0, 4)
+    .join(', ')})`,
+  unreached.length === 0,
+)
+
 // ---------------------------------------------------------------------------
 
 const label = 'the six locales agree'
