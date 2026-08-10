@@ -418,6 +418,22 @@ export interface ScheduledJob {
   rawOccurrences?: number[]
   /** The `runCount` `rawOccurrences` was computed against. See above. */
   rawOccurrencesRunCount?: number
+  /**
+   * `Settings.localDeviceId` of the one device allowed to actually fire this
+   * job. Absent (the default, and every job from before this existed) means
+   * "whichever device has it enabled" — unchanged behaviour, and the only
+   * sane default for someone who has never paired a second device.
+   *
+   * Set once two devices are paired and syncing the same job: without this,
+   * both devices' schedulers independently decide the same occurrence is
+   * theirs to send, and a laptop and a phone that are both open near the
+   * fire time can both send it. This field does not stop the job from
+   * *syncing* everywhere — every device still sees it, can edit it, pause it,
+   * or delete it — it only gates who is allowed to let it actually fire.
+   * See `electron/scheduler.ts` and the Android `AevistleScheduler`/
+   * `SendWorker`, which both read it the same way.
+   */
+  executorDeviceId?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -812,6 +828,17 @@ export interface Settings {
    * its doc — but for the "match my theme" scope instead of the calendar.
    */
   appearanceUpdatedAt?: number
+  /**
+   * This install's own stable identity, minted once at first boot and never
+   * regenerated. Distinct from `PairedDevice.id`, which names a *pairing
+   * relationship* and is shared between exactly two devices — the whole
+   * reason this field exists is that neither device can otherwise tell "is
+   * this id me?" apart from "is this id my peer?", since a pairing id looks
+   * identical from both ends. Exchanged with a peer over ongoing sync (see
+   * `SyncExchangePayload.selfDeviceId`) so it can be written into
+   * `ScheduledJob.executorDeviceId`.
+   */
+  localDeviceId?: string
   /**
    * Whether the remote-image control in Settings has ever been used.
    *

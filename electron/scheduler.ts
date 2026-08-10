@@ -61,6 +61,13 @@ export class Scheduler extends EventEmitter {
    */
   private latestInbound: Record<string, number> = {}
   private inboxKnown = false
+  /**
+   * This process's own `Settings.localDeviceId`, from the last `sync()` —
+   * see `isMyJob`. `undefined` until the first `sync()` call, which matches
+   * every job being armable by default until told otherwise: a device that
+   * has not yet heard from the renderer has no basis to refuse anything.
+   */
+  private localDeviceId: string | undefined
   private timer: NodeJS.Timeout | null = null
   private preciseTimer: NodeJS.Timeout | null = null
   private running = new Set<string>()
@@ -129,8 +136,11 @@ export class Scheduler extends EventEmitter {
      * makes on every state change — including every inbox sync.
      */
     headless?: { inboxKnown?: boolean; latestInbound?: Record<string, number> },
+    /** See `isMyJob`. Threaded through separately from `headless` because `electron/main.ts`'s IPC handler destructures it off the same object the renderer sends, not because it means anything different. */
+    localDeviceId?: string,
   ): void {
     this.accounts = accounts
+    this.localDeviceId = localDeviceId
     if (headless) {
       this.inboxKnown = headless.inboxKnown === true
       this.latestInbound = headless.latestInbound ?? {}
@@ -164,6 +174,25 @@ export class Scheduler extends EventEmitter {
   }
 
   /**
+   * Whether *this* process is allowed to let `job` actually fire.
+   *
+   * Absent `executorDeviceId` — every job from before this field existed,
+   * and every job on a device that has never paired a second one — means
+   * "whoever has it enabled", unchanged from before. `localDeviceId` itself
+   * being unset (no `sync()` call has happened yet) never blocks a job
+   * either: a device that has not been told who it is has no basis to
+   * refuse a job the renderer already armed.
+   *
+   * This only decides whether *this* device may send. It does not touch
+   * `job.occurrences` on a device that is not the executor — the job stays
+   * exactly as visible, editable and pausable as any other; it simply never
+   * reaches `run()` here.
+   */
+  private isMyJob(job: ScheduledJob): boolean {
+    return !job.executorDeviceId || !this.localDeviceId || job.executorDeviceId === this.localDeviceId
+  }
+
+  /**
    * The 15-second poll alone would make ms/second-level `intervalMs`
    * recurrences fire up to 15 seconds late — nowhere near what
    * millisecond-precision local dispatch is supposed to mean. This arms one
@@ -180,7 +209,7 @@ export class Scheduler extends EventEmitter {
     const now = Date.now()
     let soonest = Infinity
     for (const job of this.jobs) {
-      if (!job.enabled) continue
+      if (!job.enabled || !this.isMyJob(job)) continue
       for (const t of job.occurrences) {
         if (t > now && t < soonest) soonest = t
       }
@@ -201,6 +230,10 @@ export class Scheduler extends EventEmitter {
     for (const job of this.jobs) {
       if (!job.enabled) continue
       if (this.running.has(job.id)) continue
+      // Another device owns this job's occurrences — see `isMyJob`. Left
+      // entirely untouched here, not drained: this device doing nothing to
+      // it is the point.
+      if (!this.isMyJob(job)) continue
 
       const due = job.occurrences.filter((t) => t <= now)
       if (due.length === 0) continue

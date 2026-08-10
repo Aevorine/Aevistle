@@ -194,6 +194,12 @@ export const es: Translations = {
   'schedule.burstCount': 'Número de copias',
   'schedule.burstPacing': 'Intervalo entre copias',
   'schedule.burstPacingMs': 'ms',
+  'schedule.executor.label': 'Envía desde',
+  'schedule.executor.hint':
+    'Qué dispositivo puede enviarlo realmente. Solo importa si hay más de un dispositivo emparejado; si no, cada dispositivo con este horario activado lo intentaría.',
+  'schedule.executor.any': 'Cualquier dispositivo (por defecto)',
+  'schedule.executor.thisDevice': 'Este dispositivo',
+  'schedule.executor.pending': '{device} (sincronizar primero)',
 
   'recur.once': 'Una sola vez',
   'recur.interval': 'Cada N minutos',

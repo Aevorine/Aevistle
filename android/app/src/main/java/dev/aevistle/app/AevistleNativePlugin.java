@@ -1976,7 +1976,8 @@ public class AevistleNativePlugin extends Plugin {
                 incoming,
                 accounts == null ? new JSONArray() : accounts,
                 !Boolean.FALSE.equals(call.getBoolean("notifyOnSuccess", true)),
-                !Boolean.FALSE.equals(call.getBoolean("notifyOnFailure", true)));
+                !Boolean.FALSE.equals(call.getBoolean("notifyOnFailure", true)),
+                call.getString("localDeviceId"));
 
         AevistleScheduler.rearmAll(getContext());
         call.resolve();

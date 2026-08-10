@@ -47,6 +47,15 @@ public class SendWorker extends Worker {
             // Deleted or paused between the alarm firing and the work running.
             return Result.success();
         }
+        if (!AevistleScheduler.isMyJob(job, store.localDeviceId())) {
+            // Defense in depth, not the primary guard: `AevistleScheduler
+            // .rearmAll` already refuses to arm a job assigned to another
+            // device. This only matters for an alarm that was armed before
+            // an executor reassignment synced in and has not been cancelled
+            // yet — the same "already in flight when the rule changed"
+            // window `SendWorker`'s other checks below exist for.
+            return Result.success();
+        }
 
         JSONObject draft = job.optJSONObject("draft");
         if (draft == null) return Result.failure();

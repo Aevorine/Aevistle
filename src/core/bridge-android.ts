@@ -239,6 +239,8 @@ interface AevistleNativePlugin extends AndroidPermissionApi {
     accounts: MailAccount[]
     notifyOnSuccess: boolean
     notifyOnFailure: boolean
+    /** See `Settings.localDeviceId` — what `AevistleScheduler`/`SendWorker` compare each job's `executorDeviceId` against. */
+    localDeviceId?: string
   }): Promise<void>
   pullJobRuns(): Promise<{ runs: Array<JobRun & { jobId: string }> }>
   notify(opts: {
@@ -687,6 +689,7 @@ export function createAndroidBridge(): PlatformBridge & AndroidPermissionApi {
         // remove, and it would be a shame to reintroduce it here.
         notifyOnSuccess: notify?.notifyOnSuccess !== false,
         notifyOnFailure: notify?.notifyOnFailure !== false,
+        localDeviceId: notify?.localDeviceId,
       })
       void Native.ensureNotificationPermission().catch(() => {})
     },

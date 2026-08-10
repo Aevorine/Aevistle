@@ -306,6 +306,8 @@ export function ComposeView({
   const [quickOpen, setQuickOpen] = useState(false)
   const [retry, setRetry] = useState<RetryPolicy>(DEFAULT_RETRY)
   const [burst, setBurst] = useState<BurstPolicy>(DEFAULT_BURST)
+  /** Undefined means "whoever has it enabled" — see `ScheduledJob.executorDeviceId`. */
+  const [executorDeviceId, setExecutorDeviceId] = useState<string | undefined>(undefined)
 
   const toId = useFieldId('to')
   const subjectId = useFieldId('subject')
@@ -830,6 +832,10 @@ export function ComposeView({
     // Same reasoning for conditions: a leftover "only if no reply" would
     // silently suppress an unrelated reminder later.
     setConditions([])
+    // And for the executor: a leftover "only my phone sends this" would
+    // silently assign an unrelated reminder to a device the user never
+    // chose for it.
+    setExecutorDeviceId(undefined)
     setScheduleOpen(true)
   }
 
@@ -839,6 +845,7 @@ export function ComposeView({
     setRecurrence(seedRecurrence())
     setLeadTimes([0])
     setConditions([])
+    setExecutorDeviceId(undefined)
   }
 
   const scheduleSummary = useMemo(() => summarizeRecurrence(recurrence), [recurrence])
@@ -1009,6 +1016,7 @@ export function ComposeView({
       retry,
       burst,
       conditions: conditions.length > 0 ? conditions : undefined,
+      executorDeviceId,
       status: 'armed',
       createdAt: now,
       updatedAt: now,
@@ -2093,6 +2101,37 @@ export function ComposeView({
           burst={burst}
           onBurstChange={setBurst}
         />
+
+        {/* Only shown once a second device is actually paired for ongoing sync
+            — offering "which device sends this" to someone who has never
+            paired anything would be a control with exactly one meaningful
+            answer, on a screen already asking for a lot. See
+            `ScheduledJob.executorDeviceId`. */}
+        {state.pairedDevices.some((d) => d.mode === 'ongoing') ? (
+          <Field label={t('schedule.executor.label')} hint={t('schedule.executor.hint')}>
+            <select
+              className="input"
+              value={executorDeviceId ?? ''}
+              onChange={(e) => setExecutorDeviceId(e.target.value || undefined)}
+            >
+              <option value="">{t('schedule.executor.any')}</option>
+              <option value={state.settings.localDeviceId ?? ''}>{t('schedule.executor.thisDevice')}</option>
+              {state.pairedDevices
+                .filter((d) => d.mode === 'ongoing')
+                .map((d) =>
+                  d.remoteDeviceId ? (
+                    <option key={d.id} value={d.remoteDeviceId}>
+                      {d.label}
+                    </option>
+                  ) : (
+                    <option key={d.id} value="" disabled>
+                      {t('schedule.executor.pending', { device: d.label })}
+                    </option>
+                  ),
+                )}
+            </select>
+          </Field>
+        ) : null}
 
         {/* Fire-time checks. Only offered where they can actually be enforced:
             the desktop scheduler can read the disk, the browser build cannot,

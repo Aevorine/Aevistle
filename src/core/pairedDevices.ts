@@ -56,6 +56,15 @@ export interface PairedDevice {
    * never applied to a record's own timestamp.
    */
   clockOffsetMs?: number
+  /**
+   * The peer's own `Settings.localDeviceId`, learned from
+   * `SyncExchangePayload.selfDeviceId` on the first ongoing sync after both
+   * sides support it — not from the handshake that created this record,
+   * which predates the field for any pairing made before it shipped.
+   * Absent until then, which is also why a job's executor picker cannot
+   * offer a peer it has not synced with yet.
+   */
+  remoteDeviceId?: string
 }
 
 /** Add or replace a device by id — pairing again with a device already known updates in place rather than duplicating the row. */
@@ -79,9 +88,18 @@ export function touchSynced(
   id: string,
   syncedAt: number,
   address?: PairedDeviceAddress,
+  /** See `PairedDevice.remoteDeviceId`. Only ever moves forward — a peer that stops sending it (an older build reconnecting) must not erase what an earlier exchange already learned. */
+  remoteDeviceId?: string,
 ): PairedDevice[] {
   return devices.map((d) =>
-    d.id === id ? { ...d, lastSyncedAt: syncedAt, lastAddress: address ?? d.lastAddress } : d,
+    d.id === id
+      ? {
+          ...d,
+          lastSyncedAt: syncedAt,
+          lastAddress: address ?? d.lastAddress,
+          remoteDeviceId: remoteDeviceId ?? d.remoteDeviceId,
+        }
+      : d,
   )
 }
 

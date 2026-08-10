@@ -121,6 +121,15 @@ export interface SyncTransport {
 export interface SyncExchangePayload {
   since: number
   changed: ScopePayload
+  /**
+   * The sender's own `Settings.localDeviceId` — protocol-level, not
+   * scope-gated, since it identifies the device rather than any user data.
+   * Absent from a peer on an older build; the receiver just does not learn
+   * `PairedDevice.remoteDeviceId` from that exchange yet. See
+   * `Settings.localDeviceId`'s doc for why a pairing id cannot stand in for
+   * this.
+   */
+  selfDeviceId?: string
 }
 
 /** What crosses the relay in `electron/syncServer.ts` — main process never sees the plaintext, only this envelope and the `pairId` that says which key answers it. */
@@ -313,6 +322,8 @@ export interface SyncApplyPatch {
   appearanceUpdatedAt?: number
   /** The full updated tombstone set (local ∪ incoming), replacing `AppState.deletedJobs` wholesale — see the `incoming.schedule` handling in `applyExchange`. */
   deletedJobs?: JobTombstone[]
+  /** The peer's own `Settings.localDeviceId`, learned from `SyncExchangePayload.selfDeviceId` — set in `performExchange`, not `applyExchange`, since it is protocol-level rather than scoped user data. Written onto `PairedDevice.remoteDeviceId`. */
+  remoteDeviceId?: string
 }
 
 export interface ExchangeOutcome {
@@ -516,13 +527,14 @@ export async function performExchange(
     device.clockOffsetMs ?? 0,
     secrets,
   )
+  if (incoming.selfDeviceId) patch.remoteDeviceId = incoming.selfDeviceId
   const changed = buildChangedPayload(state, calendar, device.scopes, sinceLocal)
   // Only ever after `buildChangedPayload` has already applied `device.scopes`:
   // an account the user unchecked is not in `changed.accounts`, so its password
   // is never among the ids handed to the trusted layer to seal. Unchecking a
   // scope keeps it off the wire, rather than off the screen at the far end.
   await attachAccountSecrets(changed, secrets, state)
-  const outgoing: SyncExchangePayload = { since: now, changed }
+  const outgoing: SyncExchangePayload = { since: now, changed, selfDeviceId: state.settings.localDeviceId }
   return { patch, conflicts, accountSecrets, outgoing }
 }
 
@@ -649,7 +661,7 @@ export class SyncLoop {
       const state = this.hooks.getState()
       const changed = buildChangedPayload(state, this.hooks.getCalendar(), device.scopes, sinceLocal)
       await attachAccountSecrets(changed, secrets, state)
-      const outgoing: SyncExchangePayload = { since: now, changed }
+      const outgoing: SyncExchangePayload = { since: now, changed, selfDeviceId: state.settings.localDeviceId }
       const requestEnvelope = await sealWithRandomIv(key, outgoing)
 
       let raw: unknown

@@ -189,6 +189,11 @@ export const zhCN: Translations = {
   'schedule.burstCount': '发送份数',
   'schedule.burstPacing': '每份间隔',
   'schedule.burstPacingMs': '毫秒',
+  'schedule.executor.label': '由哪台设备发送',
+  'schedule.executor.hint': '决定到点了由哪台设备真正发出去。只有配对了不止一台设备才用得上——不然每台开着这条提醒的设备都会各自尝试发送。',
+  'schedule.executor.any': '任意设备（默认）',
+  'schedule.executor.thisDevice': '本机',
+  'schedule.executor.pending': '{device}（需要先和它同步一次）',
 
   'recur.once': '只发一次',
   'recur.interval': '每隔 N 分钟',

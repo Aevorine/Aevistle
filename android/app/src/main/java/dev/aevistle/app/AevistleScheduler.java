@@ -36,6 +36,7 @@ final class AevistleScheduler {
     static void rearmAll(Context context) {
         JobStore store = new JobStore(context);
         JSONArray jobs = store.jobs();
+        String localDeviceId = store.localDeviceId();
         AlarmManager alarms = context.getSystemService(AlarmManager.class);
         if (alarms == null) return;
 
@@ -53,12 +54,27 @@ final class AevistleScheduler {
             }
 
             if (!job.optBoolean("enabled", false)) continue;
+            // Assigned to a different device — see `isMyJob`. The cancel
+            // above already dropped any alarm this device had previously
+            // armed for it, so there is nothing left to do.
+            if (!isMyJob(job, localDeviceId)) continue;
 
             long next = nextOccurrence(context, job);
             if (next <= 0) continue;
 
             arm(context, alarms, jobId, next);
         }
+    }
+
+    /**
+     * Whether *this* device is allowed to let `job` actually fire — mirrors
+     * `Scheduler.isMyJob` in `electron/scheduler.ts`; see its doc for why
+     * absent `executorDeviceId` or an unknown `localDeviceId` both default to
+     * "yes, arm it" rather than refusing.
+     */
+    static boolean isMyJob(JSONObject job, String localDeviceId) {
+        String executorDeviceId = job.optString("executorDeviceId", "");
+        return executorDeviceId.isEmpty() || localDeviceId == null || executorDeviceId.equals(localDeviceId);
     }
 
     static void armOne(Context context, String jobId, long triggerAt) {

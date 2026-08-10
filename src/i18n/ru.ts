@@ -193,6 +193,12 @@ export const ru: Translations = {
   'schedule.burstCount': 'Количество копий',
   'schedule.burstPacing': 'Интервал между копиями',
   'schedule.burstPacingMs': 'мс',
+  'schedule.executor.label': 'Отправляет',
+  'schedule.executor.hint':
+    'Какое устройство реально отправит это письмо. Важно только если сопряжено больше одного устройства — иначе попытается каждое, на котором включено это расписание.',
+  'schedule.executor.any': 'Любое устройство (по умолчанию)',
+  'schedule.executor.thisDevice': 'Это устройство',
+  'schedule.executor.pending': '{device} (сначала синхронизировать)',
 
   'recur.once': 'Один раз',
   'recur.interval': 'Каждые N минут',

@@ -191,6 +191,12 @@ export const ar: Translations = {
   'schedule.burstCount': 'عدد النسخ',
   'schedule.burstPacing': 'الفاصل الزمني بين النسخ',
   'schedule.burstPacingMs': 'مللي ثانية',
+  'schedule.executor.label': 'يُرسل من',
+  'schedule.executor.hint':
+    'أي جهاز يُسمح له بإرسال هذا فعليًا. يهم فقط عند إقران أكثر من جهاز واحد - وإلا فسيحاول كل جهاز مفعّل عليه هذا الجدول.',
+  'schedule.executor.any': 'أي جهاز (افتراضي)',
+  'schedule.executor.thisDevice': 'هذا الجهاز',
+  'schedule.executor.pending': '{device} (يلزم المزامنة أولاً)',
 
   'recur.once': 'مرة واحدة',
   'recur.interval': 'كل N دقيقة',

@@ -194,6 +194,12 @@ export const fr: Translations = {
   'schedule.burstCount': 'Nombre de copies',
   'schedule.burstPacing': 'Intervalle entre les copies',
   'schedule.burstPacingMs': 'ms',
+  'schedule.executor.label': 'Envoyé depuis',
+  'schedule.executor.hint':
+    "Quel appareil est autorisé à réellement envoyer ceci. Utile seulement si plusieurs appareils sont associés — sinon chacun d'eux essaierait d'envoyer.",
+  'schedule.executor.any': "N'importe quel appareil (par défaut)",
+  'schedule.executor.thisDevice': 'Cet appareil',
+  'schedule.executor.pending': "{device} (à synchroniser d'abord)",
 
   'recur.once': 'Une seule fois',
   'recur.interval': 'Toutes les N minutes',

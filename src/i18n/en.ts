@@ -198,6 +198,12 @@ export const en = {
   'schedule.burstCount': 'Number of copies',
   'schedule.burstPacing': 'Gap between copies',
   'schedule.burstPacingMs': 'ms',
+  'schedule.executor.label': 'Sends from',
+  'schedule.executor.hint':
+    'Which device is allowed to actually send this. Only matters once more than one device is paired — otherwise every device with this schedule enabled would try.',
+  'schedule.executor.any': 'Any device (default)',
+  'schedule.executor.thisDevice': 'This device',
+  'schedule.executor.pending': '{device} (sync once first)',
 
   'recur.once': 'Once',
   'recur.interval': 'Every N minutes',

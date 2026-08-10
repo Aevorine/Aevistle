@@ -529,7 +529,11 @@ function initialState(): AppState {
     contacts: [],
     templates: [],
     logs: [],
-    settings: { ...DEFAULT_SETTINGS },
+    // Minted once, here — `useReducer(reducer, undefined, initialState)` calls
+    // this exactly once per install (lazy init), and `case 'reset'` reusing it
+    // is correct too: a reset device has no paired devices left either, so a
+    // fresh identity is the right thing for it to present next time it pairs.
+    settings: { ...DEFAULT_SETTINGS, localDeviceId: newId('device') },
     draft: emptyDraft(),
     inboxAccounts: [],
     draftSnapshots: [],
@@ -1208,7 +1212,7 @@ export function reducer(state: AppState, action: Action): AppState {
         contacts: patch.contacts ?? state.contacts,
         templates: patch.templates ?? state.templates,
         settings,
-        pairedDevices: touchSynced(state.pairedDevices, deviceId, syncedAt),
+        pairedDevices: touchSynced(state.pairedDevices, deviceId, syncedAt, undefined, patch.remoteDeviceId),
         syncConflicts: pushConflictSnapshots(state.syncConflicts, conflicts),
         // The full updated tombstone set, not a merge — `syncLoop.ts` already
         // computed the union of what this device knew plus what the peer
@@ -1574,7 +1578,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const merged: AppState = {
           ...initialState(),
           ...stored,
-          settings: { ...DEFAULT_SETTINGS, ...(stored.settings ?? {}) },
+          settings: {
+            ...DEFAULT_SETTINGS,
+            ...(stored.settings ?? {}),
+            // An install from before this field existed reads as `undefined`
+            // here — mint it once, now, rather than leaving executor
+            // assignment permanently unavailable for whichever device
+            // happens to still be running an old state.json.
+            localDeviceId: stored.settings?.localDeviceId ?? newId('device'),
+          },
           draft: { ...emptyDraft(), ...(stored.draft ?? {}) },
           draftSnapshots: stored.draftSnapshots ?? [],
           outbox: stored.outbox ?? [],
@@ -1961,6 +1973,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
               (i) => i.enabled && i.lastSyncAt !== undefined,
             ),
             latestInbound: latestInboundIndex(liveRef.current.inboxAccounts),
+            localDeviceId: liveRef.current.settings.localDeviceId,
           },
         )
         if (!cancelled) setSchedulerUnreachable(false)
@@ -2778,6 +2791,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         await bridge?.syncJobs(repaired, state.accounts, {
           notifyOnSuccess: state.settings.notifyOnSuccess,
           notifyOnFailure: state.settings.notifyOnFailure,
+          localDeviceId: state.settings.localDeviceId,
         })
       } catch (e) {
         // The files did move, so the caller reports success and nothing else in

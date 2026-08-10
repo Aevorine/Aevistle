@@ -40,6 +40,14 @@ final class JobStore {
     private static final String KEY_NOTIFY_SUCCESS = "notifyOnSuccess";
     private static final String KEY_NOTIFY_FAILURE = "notifyOnFailure";
     /**
+     * Mirror of `Settings.localDeviceId` — see its doc in `src/core/types.ts`.
+     * Compared against `ScheduledJob.executorDeviceId` by both
+     * {@link AevistleScheduler#rearmAll} and {@link SendWorker}, the same two
+     * places that already read {@link #KEY_NOTIFY_SUCCESS} for the same
+     * reason: a worker with no WebView attached has to already have it.
+     */
+    private static final String KEY_LOCAL_DEVICE_ID = "localDeviceId";
+    /**
      * `jobId:instant` for every occurrence that has already been dispatched.
      * See {@link #claimOccurrence}. The mirror of the `fired` set in
      * `electron/scheduler.ts`, made durable because the case it guards is a
@@ -61,13 +69,23 @@ final class JobStore {
                 .getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }
 
-    void save(JSONArray jobs, JSONArray accounts, boolean notifyOnSuccess, boolean notifyOnFailure) {
-        prefs.edit()
+    void save(JSONArray jobs, JSONArray accounts, boolean notifyOnSuccess, boolean notifyOnFailure, String localDeviceId) {
+        SharedPreferences.Editor editor = prefs.edit()
                 .putString(KEY_JOBS, jobs.toString())
                 .putString(KEY_ACCOUNTS, accounts.toString())
                 .putBoolean(KEY_NOTIFY_SUCCESS, notifyOnSuccess)
-                .putBoolean(KEY_NOTIFY_FAILURE, notifyOnFailure)
-                .apply();
+                .putBoolean(KEY_NOTIFY_FAILURE, notifyOnFailure);
+        // Never cleared by an absent value — an older web layer that has not
+        // learned this yet must not erase what a newer one already told us.
+        if (localDeviceId != null && !localDeviceId.isEmpty()) {
+            editor.putString(KEY_LOCAL_DEVICE_ID, localDeviceId);
+        }
+        editor.apply();
+    }
+
+    /** Null until the first `syncJobs` call that carries one — see {@link #KEY_LOCAL_DEVICE_ID}. */
+    String localDeviceId() {
+        return prefs.getString(KEY_LOCAL_DEVICE_ID, null);
     }
 
     /**

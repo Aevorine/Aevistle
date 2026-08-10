@@ -495,6 +495,12 @@ export interface PlatformBridge {
       inboxKnown?: boolean
       /** `core/conditions.latestInboundIndex` — sender key to epoch ms. */
       latestInbound?: Record<string, number>
+      /**
+       * This device's own `Settings.localDeviceId` — what the platform
+       * scheduler compares each job's `executorDeviceId` against before
+       * letting it actually fire. See `ScheduledJob.executorDeviceId`'s doc.
+       */
+      localDeviceId?: string
     },
   ): Promise<void>
   /** Fires when the platform completed a scheduled send while we were open. */
