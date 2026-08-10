@@ -200,6 +200,9 @@ export const fr: Translations = {
   'schedule.executor.any': "N'importe quel appareil (par défaut)",
   'schedule.executor.thisDevice': 'Cet appareil',
   'schedule.executor.pending': "{device} (à synchroniser d'abord)",
+  'schedule.edit': 'Modifier la programmation',
+  'schedule.saveChanges': 'Enregistrer les modifications',
+  'schedule.updated': 'Mis à jour',
 
   'recur.once': 'Une seule fois',
   'recur.interval': 'Toutes les N minutes',

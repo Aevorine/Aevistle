@@ -10,11 +10,12 @@ import {
   useConfirm,
   useToast,
 } from '../components/ui'
-import { IconClock, IconCopy, IconPause, IconPlay, IconSend, IconTrash } from '../components/icons'
+import { IconClock, IconCopy, IconEdit, IconPause, IconPlay, IconSend, IconTrash } from '../components/icons'
 import { useApp } from '../state/AppState'
 import { useI18n, type TranslationKey } from '../i18n'
 import { summarizeRecurrence } from '../core/schedule'
 import { isFinished } from '../core/jobRun'
+import { seedEditJob } from '../core/editJobSeed'
 import { ATMOSPHERE_MOTION_MIN, type ScheduledJob } from '../core/types'
 
 /**
@@ -180,6 +181,16 @@ export function ScheduleView({ onCompose }: { onCompose: () => void }) {
   const repeat = (job: (typeof jobs)[number]) => {
     dispatch({ type: 'setDraft', patch: { ...job.draft } })
     toast.push({ tone: 'info', title: t('schedule.copiedToCompose') })
+    onCompose()
+  }
+
+  /**
+   * Open this exact reminder on the compose screen for change, rather than
+   * "send another" (`repeat`, above), which only copies the message and
+   * always creates something new. See `core/editJobSeed.ts`.
+   */
+  const edit = (job: (typeof jobs)[number]) => {
+    seedEditJob(job)
     onCompose()
   }
 
@@ -411,6 +422,9 @@ export function ScheduleView({ onCompose }: { onCompose: () => void }) {
                   </div>
 
                   <div className="job__actions">
+                    <IconButton label={t('common.edit')} onClick={() => edit(job)}>
+                      <IconEdit size={16} />
+                    </IconButton>
                     <IconButton label={t('schedule.sendAnother')} onClick={() => repeat(job)}>
                       <IconCopy size={16} />
                     </IconButton>

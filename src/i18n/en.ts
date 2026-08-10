@@ -204,6 +204,9 @@ export const en = {
   'schedule.executor.any': 'Any device (default)',
   'schedule.executor.thisDevice': 'This device',
   'schedule.executor.pending': '{device} (sync once first)',
+  'schedule.edit': 'Edit schedule',
+  'schedule.saveChanges': 'Save changes',
+  'schedule.updated': 'Updated',
 
   'recur.once': 'Once',
   'recur.interval': 'Every N minutes',

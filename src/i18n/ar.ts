@@ -197,6 +197,9 @@ export const ar: Translations = {
   'schedule.executor.any': 'أي جهاز (افتراضي)',
   'schedule.executor.thisDevice': 'هذا الجهاز',
   'schedule.executor.pending': '{device} (يلزم المزامنة أولاً)',
+  'schedule.edit': 'تعديل الجدولة',
+  'schedule.saveChanges': 'حفظ التغييرات',
+  'schedule.updated': 'تم التحديث',
 
   'recur.once': 'مرة واحدة',
   'recur.interval': 'كل N دقيقة',

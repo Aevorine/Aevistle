@@ -200,6 +200,9 @@ export const es: Translations = {
   'schedule.executor.any': 'Cualquier dispositivo (por defecto)',
   'schedule.executor.thisDevice': 'Este dispositivo',
   'schedule.executor.pending': '{device} (sincronizar primero)',
+  'schedule.edit': 'Editar programación',
+  'schedule.saveChanges': 'Guardar cambios',
+  'schedule.updated': 'Actualizado',
 
   'recur.once': 'Una sola vez',
   'recur.interval': 'Cada N minutos',

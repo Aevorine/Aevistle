@@ -194,6 +194,9 @@ export const zhCN: Translations = {
   'schedule.executor.any': '任意设备（默认）',
   'schedule.executor.thisDevice': '本机',
   'schedule.executor.pending': '{device}（需要先和它同步一次）',
+  'schedule.edit': '编辑提醒',
+  'schedule.saveChanges': '保存修改',
+  'schedule.updated': '已更新',
 
   'recur.once': '只发一次',
   'recur.interval': '每隔 N 分钟',

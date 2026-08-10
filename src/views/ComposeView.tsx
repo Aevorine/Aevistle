@@ -41,6 +41,7 @@ import {
   worthShowing,
 } from '../components/deliveryPreview'
 import { CHAIN_STAGES, buildChain, leadLabelKey } from '../core/chain'
+import { takeEditJobSeed } from '../core/editJobSeed'
 import { SEEDED_HOUR, takeComposeDates } from '../core/composeSeed'
 import { summarizeRecurrence } from '../core/schedule'
 import { upcoming } from '../core/upcoming'
@@ -281,8 +282,16 @@ export function ComposeView({
   const [preflightOpen, setPreflightOpen] = useState(false)
   const [detailsOpen, setDetailsOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
+  /**
+   * The job this mount of the compose screen is updating, if any — spent
+   * once, at mount, from `core/editJobSeed.ts`. Every other piece of
+   * schedule-related state below reads its initial value from this where
+   * relevant, and `confirmSchedule` branches on it to update in place
+   * (`upsertJob` on the same id) instead of creating a new job.
+   */
+  const [editingJob, setEditingJob] = useState<ScheduledJob | null>(() => takeEditJobSeed())
   /** Fire-time checks attached to the job being scheduled, not to the draft. */
-  const [conditions, setConditions] = useState<SendCondition[]>([])
+  const [conditions, setConditions] = useState<SendCondition[]>(() => editingJob?.conditions ?? [])
   /** The last send, kept on screen until dismissed or superseded. */
   const [outcome, setOutcome] = useState<SendResult | null>(null)
   const [scheduleOpen, setScheduleOpen] = useState(false)
@@ -296,18 +305,37 @@ export function ComposeView({
    * summary, neither of which is worth putting on screen about a rule nobody
    * has looked at. Cleared with the draft, so the next reminder does not
    * inherit the last one's time.
+   *
+   * Also true from the first render when editing — the schedule on screen is
+   * an existing job's, not a blank seed, and the forecast/retry summary are
+   * exactly what someone opening a job to change it wants to see.
    */
-  const [scheduleSet, setScheduleSet] = useState(false)
-  const [jobName, setJobName] = useState('')
-  /** Lead times ticked in the chain picker. `[0]` is "just the event itself". */
+  const [scheduleSet, setScheduleSet] = useState(() => editingJob !== null)
+  const [jobName, setJobName] = useState(() => editingJob?.name ?? '')
+  /** Lead times ticked in the chain picker. `[0]` is "just the event itself". Meaningless while editing — see `chainable` below, which the picker is also gated on. */
   const [leadTimes, setLeadTimes] = useState<number[]>([0])
-  const [recurrence, setRecurrence] = useState<Recurrence>(() => seedRecurrence())
+  const [recurrence, setRecurrence] = useState<Recurrence>(() => editingJob?.recurrence ?? seedRecurrence())
   /** The quick-pick popover. Anchored, so opening it costs the message box no height. */
   const [quickOpen, setQuickOpen] = useState(false)
-  const [retry, setRetry] = useState<RetryPolicy>(DEFAULT_RETRY)
-  const [burst, setBurst] = useState<BurstPolicy>(DEFAULT_BURST)
+  const [retry, setRetry] = useState<RetryPolicy>(() => editingJob?.retry ?? DEFAULT_RETRY)
+  const [burst, setBurst] = useState<BurstPolicy>(() => editingJob?.burst ?? DEFAULT_BURST)
   /** Undefined means "whoever has it enabled" — see `ScheduledJob.executorDeviceId`. */
-  const [executorDeviceId, setExecutorDeviceId] = useState<string | undefined>(undefined)
+  const [executorDeviceId, setExecutorDeviceId] = useState<string | undefined>(() => editingJob?.executorDeviceId)
+
+  /**
+   * The other half of loading a job for edit: the message itself lives in
+   * `state.draft`, which nothing above can seed from a `useState` initialiser
+   * without racing whatever the draft already held. Runs once, against the
+   * job this mount was seeded with — `editingJob` never changes after mount,
+   * so re-running this on every render would just replace the draft the user
+   * is now typing into with itself.
+   */
+  useEffect(() => {
+    if (!editingJob) return
+    dispatch({ type: 'setDraft', patch: { ...editingJob.draft } })
+    setScheduleOpen(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const toId = useFieldId('to')
   const subjectId = useFieldId('subject')
@@ -818,6 +846,14 @@ export function ComposeView({
   }
 
   const openSchedule = () => {
+    // Editing an existing job: every field below is already seeded from it
+    // (see the `useState` initialisers above), and resetting them here — on
+    // every open, not just mount — would discard the job's own settings the
+    // moment the dialog was closed and reopened by hand.
+    if (editingJob) {
+      setScheduleOpen(true)
+      return
+    }
     setJobName(draft.subject.trim() || t('schedule.namePlaceholder'))
     // The time the user already picked on the compose screen is kept. Resetting
     // it unconditionally — which is what this did when the dialog was the only
@@ -846,6 +882,10 @@ export function ComposeView({
     setLeadTimes([0])
     setConditions([])
     setExecutorDeviceId(undefined)
+    // Whatever happened — saved, sent immediately instead, or the schedule
+    // was simply cleared — this mount is no longer mid-edit of a specific
+    // job afterward.
+    setEditingJob(null)
   }
 
   const scheduleSummary = useMemo(() => summarizeRecurrence(recurrence), [recurrence])
@@ -988,9 +1028,12 @@ export function ComposeView({
 
   /**
    * Which stages of the chain to create. Only meaningful for a one-off — see
-   * `buildChain` for why a repeating reminder has no "three days before".
+   * `buildChain` for why a repeating reminder has no "three days before" —
+   * and never while editing: `confirmSchedule`'s edit branch updates exactly
+   * the one job it was given, never `buildChain`, so a picker offering to
+   * create *more* stages would promise something that branch does not do.
    */
-  const chainable = recurrence.kind === 'once'
+  const chainable = recurrence.kind === 'once' && !editingJob
   const plannedStages = chainable
     ? CHAIN_STAGES.filter(
         (stage) => leadTimes.includes(stage.leadMs) && recurrence.startAt - stage.leadMs > Date.now(),
@@ -1006,6 +1049,44 @@ export function ComposeView({
   const confirmSchedule = async () => {
     if (scheduleHasErrors) return
     const now = Date.now()
+
+    /*
+     * Updating an existing job, not creating one — `scheduleDraft` already
+     * does exactly the right thing given a job with a matching id
+     * (`upsertJob` replaces in place rather than appending) and an existing
+     * `runCount` (an `afterCount` end condition is measured against runs so
+     * far, not reset to zero). Everything the job carries that this dialog
+     * has no field for — `id`, `createdAt`, `chainId`, `chainLeadMs`,
+     * `runCount`, `lastRunAt`, `lastResult`, `lastError` — comes from the
+     * original job untouched via the spread.
+     *
+     * `status`/`enabled` are the one pair worth a comment: a job that was
+     * paused stays paused (editing it is not a silent "resume"), but one that
+     * was armed, done or failed is re-armed — the recurrence or conditions
+     * may have just changed, and `scheduleDraft` is about to recompute
+     * `occurrences` for it either way.
+     */
+    if (editingJob) {
+      const updated: ScheduledJob = {
+        ...editingJob,
+        name: jobName.trim() || t('schedule.namePlaceholder'),
+        draft: { ...draft },
+        recurrence,
+        retry,
+        burst,
+        conditions: conditions.length > 0 ? conditions : undefined,
+        executorDeviceId,
+        status: editingJob.enabled ? 'armed' : editingJob.status,
+        updatedAt: now,
+      }
+      await scheduleDraft(updated)
+      setScheduleOpen(false)
+      toast.push({ tone: 'success', title: t('schedule.updated') })
+      dispatch({ type: 'resetDraft', accountId: draft.accountId })
+      clearSchedule()
+      return
+    }
+
     const base: Omit<ScheduledJob, 'id' | 'chainId'> = {
       name: jobName.trim() || t('schedule.namePlaceholder'),
       enabled: true,
@@ -1996,7 +2077,7 @@ export function ComposeView({
       <Modal
         open={scheduleOpen}
         wide
-        title={t('schedule.new')}
+        title={editingJob ? t('schedule.edit') : t('schedule.new')}
         onClose={() => setScheduleOpen(false)}
         closeLabel={t('common.close')}
         footer={
@@ -2010,7 +2091,7 @@ export function ComposeView({
               onClick={confirmSchedule}
               disabled={scheduleHasErrors}
             >
-              {t('compose.schedule')}
+              {editingJob ? t('schedule.saveChanges') : t('compose.schedule')}
             </Button>
           </>
         }

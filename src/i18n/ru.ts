@@ -199,6 +199,9 @@ export const ru: Translations = {
   'schedule.executor.any': 'Любое устройство (по умолчанию)',
   'schedule.executor.thisDevice': 'Это устройство',
   'schedule.executor.pending': '{device} (сначала синхронизировать)',
+  'schedule.edit': 'Изменить расписание',
+  'schedule.saveChanges': 'Сохранить изменения',
+  'schedule.updated': 'Обновлено',
 
   'recur.once': 'Один раз',
   'recur.interval': 'Каждые N минут',
