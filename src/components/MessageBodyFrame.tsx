@@ -148,8 +148,16 @@ export function MessageBodyFrame({
     // adapting content nobody authored for a dark background. It changes
     // colours the sender chose on purpose too, which is exactly what the
     // "view original colors" toggle this is paired with exists to undo.
+    //
+    // `contrast(0.92) brightness(0.94)` after the invert, on the frame only
+    // (not the media rule): a plain white-background/#111-text message —
+    // most of them — inverts to pure #000 on #eee, ~18:1 contrast. The rest
+    // of this app's dark theme was deliberately backed off from ~15-16:1 to
+    // ~12-13:1 (see theme.css) because that flatter black-on-white extreme
+    // reads as glare over a longer read. This nudges the same pair to
+    // ~13.8:1 — inside that tuned range — without touching the mechanism.
     style.textContent =
-      'html{filter:invert(1) hue-rotate(180deg)}' +
+      'html{filter:invert(1) hue-rotate(180deg) contrast(0.92) brightness(0.94)}' +
       'img,video,svg,canvas{filter:invert(1) hue-rotate(180deg)}'
   }, [nightFilter, loaded])
 

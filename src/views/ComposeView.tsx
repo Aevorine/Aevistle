@@ -41,6 +41,7 @@ import {
   worthShowing,
 } from '../components/deliveryPreview'
 import { CHAIN_STAGES, buildChain, leadLabelKey } from '../core/chain'
+import { runSendGuardian } from '../core/sendGuardian'
 import { takeEditJobSeed } from '../core/editJobSeed'
 import { SEEDED_HOUR, takeComposeDates } from '../core/composeSeed'
 import { summarizeRecurrence } from '../core/schedule'
@@ -145,10 +146,21 @@ const BODY_HEIGHT_KEY = 'aevistle.compose.bodyHeight'
  * Never *narrower* than the shell's own answer. `useNarrow()` is OR-ed in so
  * that if `NARROW_QUERY` is ever widened past this, the compose screen follows
  * the shell rather than becoming the one place that quietly disagrees with it.
+ *
+ * Width alone still isn't enough: a landscape phone or a tablet held wide can
+ * clear 900px while still being a screen typed on with two thumbs, no pointer.
+ * The same gap `useMobileShell` closed for Settings and the tab bar exists
+ * here, so `nativeMobile` (the Android app, regardless of its current width or
+ * orientation) is OR-ed in the same way — see that hook's comment for the full
+ * reasoning. Without it, the 85%-floor rules below `[data-narrow]` in
+ * `app.css` simply never applied on a landscape tablet, which is exactly the
+ * width band where all of the addressing block, the dropzone and the
+ * send-time row were rendered inline and the message box was measured back
+ * down to 52–66%.
  */
 const BODY_FIRST_QUERY = '(max-width: 900px)'
 
-function useBodyFirst(): boolean {
+function useBodyFirst(nativeMobile: boolean): boolean {
   const narrow = useNarrow()
   const [belowNine, setBelowNine] = useState(() =>
     // Guarded exactly as `useNarrow` is, and wide is the safer default for the
@@ -170,7 +182,7 @@ function useBodyFirst(): boolean {
     return () => query.removeEventListener('change', onChange)
   }, [])
 
-  return narrow || belowNine
+  return narrow || belowNine || nativeMobile
 }
 
 /**
@@ -247,7 +259,7 @@ export function ComposeView({
    * Below this width the screen is rebuilt around the message rather than
    * restyled. See `useBodyFirst` for the number and why it is not the shell's.
    */
-  const narrow = useBodyFirst()
+  const narrow = useBodyFirst(bridge?.platform === 'android')
   /**
    * Whether the addressing block is showing, on a narrow screen.
    *
@@ -501,6 +513,30 @@ export function ComposeView({
   const bannerIssues = useMemo(
     () => issues.filter((i) => i.key !== 'validate.noSubject' && i.key !== 'validate.emptyBody'),
     [issues],
+  )
+
+  /**
+   * Send Guardian: a second, separate set of checks — see `core/sendGuardian.ts`
+   * for why these are not folded into `issues` above. `scheduledAt` is only
+   * given for a one-off ("once") schedule; a recurring one has no single fixed
+   * instant a relative-date phrase in the body could be judged stale against,
+   * so `checkStaleDatePhrase` is deliberately given nothing to compare in that
+   * case (see that function's doc comment).
+   */
+  const guardianFindings = useMemo(
+    () =>
+      runSendGuardian({
+        body: draft.body,
+        to: draft.to,
+        cc: draft.cc,
+        bcc: draft.bcc,
+        attachmentCount: draft.attachments.length,
+        individualDelivery: draft.individualDelivery,
+        mergeEnabled: draft.mergeEnabled,
+        scheduledAt: scheduleSet && recurrence.kind === 'once' ? recurrence.startAt : undefined,
+        recipientHistory: state.recentRecipients,
+      }),
+    [draft, scheduleSet, recurrence, state.recentRecipients],
   )
   const recipientCount = draft.to.length + draft.cc.length + draft.bcc.length
   /** Has the user put anything in the draft yet? Nothing is "wrong" until so. */
@@ -933,6 +969,21 @@ export function ComposeView({
   }, [draft.to, state.contacts, recurrence.startAt])
 
   /**
+   * The same `To:` windows, for `RecurrenceEditor`'s schedule simulator and
+   * "why this time?" panel. A second call to `windowsForRecipients` rather
+   * than sharing `delivery`'s own lookup above — `check:delivery-ui` reads
+   * that memo's literal source to prove the marker consults `To:` the same
+   * way the scheduler does, and splitting the call out from under it would
+   * only be trading one kind of duplication for a test that no longer
+   * verifies what it says it verifies. The lookup itself is a cheap map over
+   * `To:` and the contact list, so computing it twice costs nothing real.
+   */
+  const recipientWindows = useMemo(
+    () => windowsForRecipients(draft.to, state.contacts),
+    [draft.to, state.contacts],
+  )
+
+  /**
    * The whole per-recipient story, as a tooltip rather than as markup.
    *
    * Every pixel below the message box is taken off the message box — six
@@ -1270,28 +1321,24 @@ export function ComposeView({
                 a heading is mostly the space around the heading. A bar sized
                 by its buttons has no such floor.
 
-                This full band — title plus the four secondary controls — is
-                skipped on a narrow screen: 36px is 5% of a 360x800 phone
-                spent on controls that are not what anybody opened this
-                screen to do, and they move into the options sheet, which
-                the action bar has a button for.
+                Absent entirely on a narrow screen. 36px is 5% of a 360x800
+                phone spent on a title that repeats the tab already highlighted
+                at the bottom of the window, plus four controls that are not
+                what anybody opened this screen to do; the four move into the
+                options sheet, which the action bar has a button for.
 
-                What is not skipped is the title text itself. Without it a
-                narrow screen had no answer to "new mail or editing an
-                existing one" from the top of the screen at all — the only
-                signal left was `.composesummary__edit`'s small "编辑中"
-                badge, easy to miss and only present once there is
-                something to fold. `.composetop--compact` below is that one
-                line reinstated on its own, sized and padded to stay near
-                20px rather than reopening the 36px band this replaced.
+                A one-line title-only band was tried here for "new mail or
+                editing an existing one", and pulled back out the same day:
+                the message box has a hard 85% floor on this screen, the
+                band's own smallest measurement only left 82.4%, and the fix
+                for that shortfall was to lower the 85% to 80% rather than
+                find the space elsewhere — trading away the requirement
+                instead of meeting it. `.composesummary__edit`'s "编辑中"
+                badge is what answers "new or editing" here instead; revisit
+                only once room is actually found for a band, not by moving
+                the floor again.
               */}
-              {narrow ? (
-                <div className="composetop composetop--compact">
-                  <span className="composetop__title">
-                    {editingJob ? t('compose.titleEditing') : t('compose.title')}
-                  </span>
-                </div>
-              ) : (
+              {narrow ? null : (
                 <div className="composetop">
                   <span className="composetop__title">
                     {editingJob ? t('compose.titleEditing') : t('compose.title')}
@@ -1926,6 +1973,20 @@ export function ComposeView({
               </ul>
             </div>
           ) : null}
+
+          {/* Send Guardian's own banner, separate from the one above: these are
+              heuristic guesses about intent, not settled facts about the draft,
+              and always non-blocking — Send stays enabled no matter what is
+              shown here. See `core/sendGuardian.ts`. */}
+          {started && guardianFindings.length > 0 ? (
+            <Banner tone="warning" title={t('sendGuardian.title')}>
+              <ul className="banner__list">
+                {guardianFindings.map((finding) => (
+                  <li key={finding.rule}>{t(finding.key as TranslationKey, finding.values)}</li>
+                ))}
+              </ul>
+            </Banner>
+          ) : null}
         </div>
       </div>
 
@@ -2251,6 +2312,12 @@ export function ComposeView({
           onRetryChange={setRetry}
           burst={burst}
           onBurstChange={setBurst}
+          // Runs already used against an `afterCount` end condition — absent
+          // for a brand-new job, `editingJob.runCount` for one being edited,
+          // so the simulator and "why this time?" agree with what the
+          // scheduler itself would count from here.
+          runsSoFar={editingJob?.runCount ?? 0}
+          recipientWindows={recipientWindows}
         />
 
         {/* Only shown once a second device is actually paired for ongoing sync

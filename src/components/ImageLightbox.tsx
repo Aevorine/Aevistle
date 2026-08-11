@@ -522,6 +522,7 @@ export function ImageLightbox({
           type="button"
           className="lightbox__btn"
           aria-pressed={showInfo}
+          aria-label={t('image.info')}
           title={`${t('image.info')} (I)`}
           onClick={() => setShowInfo((s) => !s)}
         >
@@ -530,6 +531,7 @@ export function ImageLightbox({
         <button
           type="button"
           className="lightbox__btn"
+          aria-label={t('image.close')}
           title={`${t('image.close')} (Esc)`}
           onClick={onClose}
         >
@@ -567,6 +569,7 @@ export function ImageLightbox({
             <button
               type="button"
               className="lightbox__nav lightbox__nav--prev"
+              aria-label={t('image.prev')}
               title={`${t('image.prev')} (←)`}
               onClick={(e) => {
                 e.stopPropagation()
@@ -578,6 +581,7 @@ export function ImageLightbox({
             <button
               type="button"
               className="lightbox__nav lightbox__nav--next"
+              aria-label={t('image.next')}
               title={`${t('image.next')} (→)`}
               onClick={(e) => {
                 e.stopPropagation()
@@ -629,6 +633,7 @@ export function ImageLightbox({
         <button
           type="button"
           className="lightbox__btn"
+          aria-label={t('image.zoomOut')}
           title={`${t('image.zoomOut')} (−)`}
           onClick={() => zoomBy(1 / ZOOM_STEP)}
         >
@@ -638,6 +643,7 @@ export function ImageLightbox({
         <button
           type="button"
           className="lightbox__btn"
+          aria-label={t('image.zoomIn')}
           title={`${t('image.zoomIn')} (+)`}
           onClick={() => zoomBy(ZOOM_STEP)}
         >
@@ -666,6 +672,7 @@ export function ImageLightbox({
         <button
           type="button"
           className="lightbox__btn"
+          aria-label={t('image.rotateLeft')}
           title={`${t('image.rotateLeft')} (Shift+R)`}
           onClick={() => rotate(-90)}
         >
@@ -674,6 +681,7 @@ export function ImageLightbox({
         <button
           type="button"
           className="lightbox__btn"
+          aria-label={t('image.rotateRight')}
           title={`${t('image.rotateRight')} (R)`}
           onClick={() => rotate(90)}
         >
@@ -683,6 +691,7 @@ export function ImageLightbox({
           type="button"
           className="lightbox__btn"
           aria-pressed={view.flipH}
+          aria-label={t('image.flipH')}
           title={`${t('image.flipH')} (H)`}
           onClick={() => setView((v) => ({ ...v, flipH: !v.flipH }))}
         >
@@ -692,6 +701,7 @@ export function ImageLightbox({
           type="button"
           className="lightbox__btn"
           aria-pressed={view.flipV}
+          aria-label={t('image.flipV')}
           title={`${t('image.flipV')} (V)`}
           onClick={() => setView((v) => ({ ...v, flipV: !v.flipV }))}
         >

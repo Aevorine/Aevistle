@@ -71,6 +71,46 @@ const ALLOWED_STYLES: sanitizeHtmlLib.IOptions['allowedStyles'] = {
   },
 }
 
+/**
+ * The classic "hide this paragraph" trick: `color: red; background-color: red`
+ * on the same element renders invisible text a scraper or a human skimming
+ * the message never sees, but it is still there — used for keyword stuffing
+ * past spam filters and for hiding fake "this is legitimate" disclaimers.
+ *
+ * `ALLOWED_STYLES` validates each property with its own regex and cannot
+ * compare two properties against each other, so this runs first, on the raw
+ * `style` string, before that allowlist filtering. It only catches the
+ * same-element case (an inherited background from a parent isn't visible
+ * here) — that is the trick actually reported, not a claim of a complete
+ * invisible-text defence.
+ */
+function stripSameColorHidingTrick(style: string): string {
+  const declarations = style.split(';').map((d) => d.trim()).filter(Boolean)
+  let colorValue: string | null = null
+  let colorIndex = -1
+  let bgValue: string | null = null
+  let bgIndex = -1
+
+  declarations.forEach((decl, index) => {
+    const colonIndex = decl.indexOf(':')
+    if (colonIndex === -1) return
+    const prop = decl.slice(0, colonIndex).trim().toLowerCase()
+    const value = decl.slice(colonIndex + 1).trim().toLowerCase().replace(/\s+/g, '')
+    if (prop === 'color') {
+      colorValue = value
+      colorIndex = index
+    } else if (prop === 'background-color' || prop === 'background') {
+      bgValue = value
+      bgIndex = index
+    }
+  })
+
+  if (colorValue !== null && bgValue !== null && colorValue === bgValue) {
+    return declarations.filter((_, index) => index !== colorIndex && index !== bgIndex).join('; ')
+  }
+  return style
+}
+
 export function sanitizeMessageHtml(rawHtml: string): SanitizeResult {
   const remoteImages: string[] = []
 
@@ -86,6 +126,10 @@ export function sanitizeMessageHtml(rawHtml: string): SanitizeResult {
     // sender's JS source onto the screen.
     nonTextTags: ['script', 'style', 'textarea', 'option', 'noscript', 'template'],
     transformTags: {
+      '*': (tagName, attribs) =>
+        attribs.style
+          ? { tagName, attribs: { ...attribs, style: stripSameColorHidingTrick(attribs.style) } }
+          : { tagName, attribs },
       img: (tagName, attribs) => {
         const src = attribs.src || ''
         if (src.startsWith('data:image/')) return { tagName, attribs }

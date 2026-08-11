@@ -36,6 +36,14 @@
   font-style: normal;
   font-weight: 100 900;
   src:
+    /* Bundled fallback for platforms with none of the `local()` names below —
+       Android chief among them. Tinos (Google, SIL OFL 1.1) is metric-
+       compatible with Times New Roman by design, subset to the Latin/
+       Cyrillic/Greek/punctuation ranges this face actually covers (see the
+       unicode-range below) — 90KB rather than the ~510KB full font. See
+       src/assets/fonts/OFL-Tinos.txt for the license text this subset ships
+       under. */
+    url("../assets/fonts/aevistle-serif-latin.woff2") format("woff2"),
     local("Times New Roman"), local("TimesNewRomanPSMT"), local("Tinos"),
     local("Liberation Serif"), local("Nimbus Roman"),
     /* Android. None of the five above ship on it — Times New Roman is a
@@ -59,6 +67,25 @@
   font-style: normal;
   font-weight: 100 900;
   src:
+    /* Bundled fallback: SimSun is Microsoft-proprietary and ships on no
+       Android device, so the `local()` names below are a silent no-op there
+       — this is the actual fix for that platform. Noto Serif SC (Google, SIL
+       OFL 1.1) is the free, redistributable substitute — same underlying
+       design as Source Han Serif SC (Adobe/Google). Instanced from the
+       variable font to a static Regular weight, then subset to the CJK
+       Unified Ideographs Basic block (U+4E00-9FFF, 100% glyph coverage) plus
+       CJK symbols/punctuation and halfwidth/fullwidth forms — the range this
+       UI's Chinese text actually needs — at 4.05MB, down from a 25.1MB
+       full/variable source font. Characters outside that subset (rare CJK
+       Extension-A ideographs, Hiragana/Katakana, compatibility ideographs —
+       none of which this app's UI or locale strings use) will fall through
+       to `.notdef` on any platform once this file has loaded, rather than to
+       the `local()` names after it: a successfully-loaded `url()` font is
+       used for its whole declared unicode-range, and per-glyph fallback to
+       a later `src` entry only happens on total load failure, not on a
+       missing individual glyph. See src/assets/fonts/OFL-NotoSerifSC.txt for
+       the license text this subset ships under. */
+    url("../assets/fonts/aevistle-serif-cjk.woff2") format("woff2"),
     local("SimSun"), local("宋体"), local("NSimSun"), local("Songti SC"),
     local("STSong"), local("Noto Serif CJK SC"), local("Noto Serif SC"),
     local("Source Han Serif SC"), local("AR PL UMing CN"),

@@ -17,15 +17,19 @@ import java.util.regex.Pattern;
  *
  * Mirrors `electron/sanitizeHtml.ts` in intent — same tag allowlist, same
  * `javascript:`/`vbscript:` rejection via protocol restriction, same
- * blank-pixel-placeholder treatment for remote `<img>` sources — with one
- * deliberate narrowing: no `style` attribute at all. Jsoup's {@link Safelist}
- * can allow or reject an attribute wholesale but cannot filter individual CSS
- * *properties* the way the desktop's `allowedStyles` does (which keeps layout
- * properties but specifically omits `background-image` and anything else
- * that can carry a `url(...)`). Rather than hand-roll a CSS parser to get that
- * same precision here, dropping `style` outright is the safer trade — a
- * received message loses inline text color/alignment, not a security
- * boundary.
+ * blank-pixel-placeholder treatment for remote `<img>` sources, and — as of
+ * the property-level {@link #filterStyle} pass below — the same seven-property
+ * `style` allowlist (color, background-color, font-weight, font-style,
+ * font-size, text-align, text-decoration). Jsoup's {@link Safelist} can only
+ * allow or reject the whole `style` attribute, not individual CSS
+ * *properties*, so `SAFELIST` allows it and {@link #filterStyle} does the
+ * per-property filtering by hand afterwards — the same precision the desktop
+ * sanitizer gets from the `sanitize-html` library's `allowedStyles`, applied
+ * here so Android stops losing all inline color/alignment on every message
+ * that uses it. `background-image` and every other `url(...)`-carrying
+ * property stay excluded (same read-receipt/IP-leak reason as desktop), and a
+ * same-element `color`/`background-color` match (the "hide this paragraph"
+ * trick) is stripped rather than kept.
  */
 final class InboxSanitizer {
 
@@ -33,6 +37,14 @@ final class InboxSanitizer {
             "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==";
 
     private static final Pattern HTTP_URL = Pattern.compile("^https?://", Pattern.CASE_INSENSITIVE);
+
+    /** Mirrors `ALLOWED_STYLES` in `electron/sanitizeHtml.ts` — same properties, same value patterns. */
+    private static final Pattern COLOR_VALUE = Pattern.compile("^[a-zA-Z#][a-zA-Z0-9(),.%\\s#]*$");
+    private static final Pattern FONT_WEIGHT_VALUE = Pattern.compile("^[a-zA-Z0-9]+$");
+    private static final Pattern FONT_STYLE_VALUE = Pattern.compile("^[a-zA-Z]+$");
+    private static final Pattern FONT_SIZE_VALUE = Pattern.compile("^[0-9.]+(px|pt|em|rem|%)$");
+    private static final Pattern TEXT_ALIGN_VALUE = Pattern.compile("^(left|right|center|justify)$");
+    private static final Pattern TEXT_DECORATION_VALUE = Pattern.compile("^[a-zA-Z\\s]+$");
 
     private static final Safelist SAFELIST = new Safelist()
             .addTags("a", "b", "strong", "i", "em", "u", "s", "strike", "p", "br", "hr",
@@ -47,10 +59,72 @@ final class InboxSanitizer {
             .addAttributes("table", "border", "cellpadding", "cellspacing", "width")
             .addAttributes("td", "colspan", "rowspan", "align", "valign", "width")
             .addAttributes("th", "colspan", "rowspan", "align", "valign", "width")
+            .addAttributes(":all", "style")
             .addProtocols("a", "href", "http", "https", "mailto")
             .addProtocols("img", "src", "http", "https", "data");
 
     private InboxSanitizer() {
+    }
+
+    /**
+     * Per-property `style` filtering Jsoup's {@link Safelist} cannot express —
+     * see the class header. Returns the filtered declaration list (possibly
+     * empty), joined back into a single `style` value.
+     */
+    private static String filterStyle(String rawStyle) {
+        if (rawStyle == null || rawStyle.isEmpty()) return "";
+
+        List<String> kept = new ArrayList<>();
+        String colorValue = null;
+        String bgValue = null;
+
+        for (String decl : rawStyle.split(";")) {
+            int colon = decl.indexOf(':');
+            if (colon < 0) continue;
+            String prop = decl.substring(0, colon).trim().toLowerCase();
+            String value = decl.substring(colon + 1).trim();
+            if (value.isEmpty()) continue;
+
+            boolean allowed;
+            switch (prop) {
+                case "color":
+                case "background-color":
+                    allowed = COLOR_VALUE.matcher(value).matches();
+                    break;
+                case "font-weight":
+                    allowed = FONT_WEIGHT_VALUE.matcher(value).matches();
+                    break;
+                case "font-style":
+                    allowed = FONT_STYLE_VALUE.matcher(value).matches();
+                    break;
+                case "font-size":
+                    allowed = FONT_SIZE_VALUE.matcher(value).matches();
+                    break;
+                case "text-align":
+                    allowed = TEXT_ALIGN_VALUE.matcher(value).matches();
+                    break;
+                case "text-decoration":
+                    allowed = TEXT_DECORATION_VALUE.matcher(value).matches();
+                    break;
+                default:
+                    allowed = false;
+            }
+            if (!allowed) continue;
+
+            String normalized = value.toLowerCase().replaceAll("\\s+", "");
+            if (prop.equals("color")) colorValue = normalized;
+            if (prop.equals("background-color")) bgValue = normalized;
+            kept.add(prop + ": " + value);
+        }
+
+        // Same-element "hide this paragraph" trick: color and background-color
+        // resolve to the same value. Only the same-element case — an inherited
+        // background from a parent isn't visible to this per-element pass.
+        if (colorValue != null && colorValue.equals(bgValue)) {
+            kept.removeIf(d -> d.startsWith("color:") || d.startsWith("background-color:"));
+        }
+
+        return String.join("; ", kept);
     }
 
     /**
@@ -64,6 +138,19 @@ final class InboxSanitizer {
 
         Document doc = Jsoup.parseBodyFragment(cleaned);
         List<String> remoteImages = new ArrayList<>();
+
+        // SAFELIST let the raw `style` attribute through wholesale; narrow it
+        // down to the seven-property allowlist (and strip the same-color
+        // hiding trick) before this ever reaches a WebView.
+        Elements styled = doc.select("[style]");
+        for (Element el : styled) {
+            String filtered = filterStyle(el.attr("style"));
+            if (filtered.isEmpty()) {
+                el.removeAttr("style");
+            } else {
+                el.attr("style", filtered);
+            }
+        }
 
         Elements images = doc.select("img[src]");
         for (Element img : images) {

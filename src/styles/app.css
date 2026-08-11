@@ -211,11 +211,15 @@ textarea {
   white-space: nowrap;
   transition:
     background var(--dur-fast) var(--ease),
-    color var(--dur-fast) var(--ease);
+    color var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease);
 }
 .nav__item:hover {
   background: var(--surface-hover);
   color: var(--text-1);
+}
+.nav__item:active:not(:disabled) {
+  transform: scale(0.96);
 }
 /* The selected screen.
  *
@@ -250,6 +254,14 @@ textarea {
   place-items: center;
   width: 18px;
   height: 18px;
+}
+/* Compose is the one tab that starts something rather than opening a screen
+   to look at — worth a permanent accent, not just the one every tab gets
+   while it happens to be open. The icon only, not `.nav__label`: same reason
+   the "selected" rule above keeps the accent off the text — this tab's label
+   is 16px too. */
+.nav__item[data-view="compose"] .nav__icon {
+  color: var(--accent);
 }
 .nav__label {
   flex: 1;
@@ -1237,10 +1249,14 @@ textarea {
   cursor: pointer;
   transition:
     background var(--dur-fast) var(--ease),
-    color var(--dur-fast) var(--ease);
+    color var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease);
 }
 .segmented__item:hover {
   color: var(--text-1);
+}
+.segmented__item:active:not(:disabled) {
+  transform: scale(0.96);
 }
 .segmented__item[aria-pressed="true"] {
   background: var(--surface-1);
@@ -1751,11 +1767,15 @@ textarea {
   cursor: pointer;
   transition:
     background var(--dur-fast) var(--ease),
-    color var(--dur-fast) var(--ease);
+    color var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease);
 }
 .icon-btn:hover {
   background: var(--surface-hover);
   color: var(--text-1);
+}
+.icon-btn:active:not(:disabled) {
+  transform: scale(0.9);
 }
 
 /* The sidebar's Home button, while Home is the screen you are on.
@@ -1970,15 +1990,25 @@ textarea {
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   background: var(--surface-1);
-  box-shadow: var(--shadow-sm);
+  /* No shadow — same reason `.card` has none (see that rule): the longest,
+     most-scrolled list in the app is the one place this was contradicting
+     that. A border-and-surface-step hover is the replacement affordance. */
   transition:
     border-color var(--dur) var(--ease),
-    box-shadow var(--dur) var(--ease),
-    translate var(--dur) var(--ease);
+    background var(--dur) var(--ease),
+    translate var(--dur) var(--ease),
+    transform var(--dur-fast) var(--ease);
 }
 .job:hover {
   border-color: var(--border-strong);
-  box-shadow: var(--shadow-md);
+  background: var(--surface-2);
+}
+/* Tap feedback, same idea as `.codecard__body:active` — a full row, so a
+   small scale rather than `.btn`'s translateY. Scoped off `[data-sliding]`
+   (set on the `.swipe__front` wrapper this sits inside, see `SwipeableRow`)
+   so a mid-swipe drag never also gets a press-scale fighting its translateX. */
+.swipe__front:not([data-sliding]) .job:active {
+  transform: scale(0.995);
 }
 .job[data-disabled="true"] {
   opacity: 0.62;
@@ -3393,11 +3423,15 @@ textarea {
   transition:
     background var(--dur-fast) var(--ease),
     color var(--dur-fast) var(--ease),
-    border-color var(--dur-fast) var(--ease);
+    border-color var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease);
 }
 .chip--toggle:hover {
   border-color: var(--accent);
   color: var(--text-1);
+}
+.chip--toggle:active:not(:disabled) {
+  transform: scale(0.96);
 }
 .chip--toggle[aria-pressed="true"] {
   background: var(--accent);
@@ -5366,10 +5400,39 @@ textarea {
   flex: 1;
 }
 
+/*
+ * The shape of a message, not a spinner — same reasoning as
+ * `components/Skeleton.tsx`, applied to the one place that still used a bare
+ * spin animation. Widths are fixed rather than randomised: a message that
+ * loads in under a frame never shows this at all, and one that takes longer
+ * gets a placeholder that does not visibly shuffle when the real text lands
+ * in its place.
+ */
 .reader__loading {
-  display: grid;
-  place-items: center;
-  padding: var(--sp-8) 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-5) var(--sp-2);
+}
+.reader__loading .skeleton__bar {
+  height: 1rem;
+}
+.reader__loading .skeleton__bar:first-child {
+  width: 42%;
+  height: 1.25rem;
+  margin-bottom: var(--sp-2);
+}
+.reader__loading .skeleton__bar:nth-child(2) {
+  width: 100%;
+}
+.reader__loading .skeleton__bar:nth-child(3) {
+  width: 94%;
+}
+.reader__loading .skeleton__bar:nth-child(4) {
+  width: 97%;
+}
+.reader__loading .skeleton__bar:nth-child(5) {
+  width: 68%;
 }
 
 /**
@@ -6612,22 +6675,6 @@ textarea {
   color: var(--text-2);
   white-space: nowrap;
 }
-/* Narrow-only: the full `.composetop` band (title + four controls, 36px) is
-   never used below the breakpoint that hides `.composebar`'s siblings here —
-   this is a second, lighter variant carrying only the title, so a phone still
-   answers "new or editing" without paying for the full band. Text stays at
-   `--text-sm` (14px, this app's "次要" tier) rather than the heading-sized
-   `--text-lg` the wide band uses, so the line plus its padding lands near
-   20px instead of reopening the ~36-40px already ruled out for narrow. */
-.composetop--compact {
-  padding-block: 0;
-  border-bottom: none;
-}
-.composetop--compact .composetop__title {
-  font-size: var(--text-xs);
-  line-height: 1;
-}
-
 /*
  * `flex-wrap` and not `overflow` on purpose: a second line costs a row and is
  * the right trade — the alternative is a horizontally scrolling toolbar
@@ -8153,6 +8200,36 @@ textarea {
 /* The row those seven 44px buttons sit in has to give somewhere, and it gives by
    scrolling — see the `.markup` scroll-shadow rules in the narrow compose block,
    which is where the 44px buttons and the 320px row are reconciled. */
+
+/* A touchscreen Windows/Electron window is neither narrow nor the Android
+   bridge, so it never sets `data-shell="mobile"` and was left at the small
+   sizes above — mouse-shaped buttons for a finger. `any-pointer: coarse`
+   (not `pointer: coarse`) so a touch+mouse hybrid laptop still counts: the
+   question is "can a finger land here", not "what moved the cursor last".
+   Deliberately its own query rather than folding into `data-shell="mobile"`
+   above — that attribute also switches Settings to its row-opens-dialog
+   structure and dialogs to full-screen, neither of which a touchscreen
+   desktop window asked for. Only the tap-size repeats. */
+@media (any-pointer: coarse) {
+  .tagfield__open,
+  .markup__btn,
+  .icon-btn,
+  .icon-btn--sm,
+  .chip__remove,
+  .select--compact {
+    min-width: var(--tap-min);
+    min-height: var(--tap-min);
+  }
+  .chip__remove,
+  .icon-btn,
+  .icon-btn--sm {
+    width: var(--tap-min);
+    height: var(--tap-min);
+  }
+  .select--compact {
+    height: auto;
+  }
+}
 
 /* -------------------------------------------------------------------------
    2. ADD immediately after the existing `.monthgrid__day[data-today='true']`

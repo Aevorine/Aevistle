@@ -1952,8 +1952,12 @@ export function InboxView({
             ) : null}
 
             {loadingBody ? (
-              <div className="reader__loading">
-                <span className="spinner" style={{ width: 22, height: 22, color: 'var(--accent)' }} />
+              <div className="reader__loading" aria-busy="true" aria-live="polite">
+                <div className="skeleton__bar" />
+                <div className="skeleton__bar" />
+                <div className="skeleton__bar" />
+                <div className="skeleton__bar" />
+                <div className="skeleton__bar" />
               </div>
             ) : openBody ? (
               <>
