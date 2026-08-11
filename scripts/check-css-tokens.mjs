@@ -25,15 +25,19 @@
  *
  * `--selftest` injects both faults and requires this to go red.
  */
-import { readFileSync } from 'node:fs'
+import { allStylesheets, readStylesheets } from './lib/stylesheets.mjs'
 
 const selftest = process.argv.includes('--selftest')
-const FILES = ['src/styles/theme.css', 'src/styles/app.css']
+/* Computed, not spelled. `app.css` was split into `app/*.css` this round and
+   this list still said `src/styles/app.css` — so the check went on reporting
+   "all clear" against a file that had become twenty @import lines. See
+   lib/stylesheets.mjs. */
+const FILES = allStylesheets()
 
-let sources = FILES.map((f) => ({ file: f, text: readFileSync(f, 'utf8') }))
+let sources = readStylesheets(FILES)
 if (selftest) {
   sources = sources.map((s) =>
-    s.file.endsWith('app.css')
+    s.file.endsWith('01-base.css')
       ? {
           ...s,
           text: [

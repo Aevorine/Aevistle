@@ -15,7 +15,7 @@
  *   "the one I configured" and "the one at the top" are the same thing.
  */
 
-import { endpointLadder } from '../core/transport'
+import { endpointLadder } from '../core/mail/transport'
 import { StatusChip } from './ui'
 import { IconCheck, IconAlert, IconShield } from './icons'
 import { useI18n, type TranslationKey } from '../i18n'

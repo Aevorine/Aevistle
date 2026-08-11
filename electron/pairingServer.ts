@@ -25,8 +25,8 @@ import {
   type PairingEvent,
   type PairingPayload,
   type PairMode,
-} from '../src/core/pairing'
-import { base64ToBytes } from '../src/core/pairingCrypto'
+} from '../src/core/sync/pairing'
+import { base64ToBytes } from '../src/core/sync/pairingCrypto'
 
 /** A handshake body is a token and a raw P-256 public key — nowhere near this. */
 const MAX_BODY = 64 * 1024

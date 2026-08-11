@@ -16,19 +16,19 @@ import { useMemo, useState } from 'react'
 import { Field, Segmented, Switch } from './ui'
 import { DateTimeField, TimeField } from './DateTimeField'
 import { useApp } from '../state/AppState'
-import { parseNaturalTime } from '../core/naturalTime'
-import { nextComposeStart } from '../core/composeSeed'
+import { parseNaturalTime } from '../core/schedule/naturalTime'
+import { nextComposeStart } from '../core/mail/composeSeed'
 import { useI18n, type TranslationKey } from '../i18n'
-import { applyQuietHours, computeOccurrences, summarizeRecurrence, validateCron } from '../core/schedule'
+import { applyQuietHours, computeOccurrences, summarizeRecurrence, validateCron } from '../core/schedule/schedule'
 import {
   applyWorkCalendarDetailed,
   calendarWarning,
   DEFAULT_WORK_CALENDAR,
-} from '../core/workCalendar'
-import { applyDeliveryWindows } from '../core/deliveryWindow'
-import { explainNextOccurrence, type OccurrenceExplainStep } from '../core/occurrenceExplain'
-import { validateBurst, validateRecurrence } from '../core/validate'
-import type { WorkdayPolicy } from '../core/workCalendar'
+} from '../core/schedule/workCalendar'
+import { applyDeliveryWindows } from '../core/schedule/deliveryWindow'
+import { explainNextOccurrence, type OccurrenceExplainStep } from '../core/schedule/occurrenceExplain'
+import { validateBurst, validateRecurrence } from '../core/mail/validate'
+import type { WorkdayPolicy } from '../core/schedule/workCalendar'
 import { windowsOf, type WindowedRecipient } from './deliveryPreview'
 import {
   DEFAULT_BURST,

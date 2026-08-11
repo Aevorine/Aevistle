@@ -1,0 +1,118 @@
+/* ==========================================================================
+   Job list
+   ========================================================================== */
+
+.joblist {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.job {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  /* Reads `--row-pad-y` like every other row-shaped thing, which it had never
+     done: it was a flat `--sp-4` on both axes, so the list-density control in
+     Settings moved `.log`, `.dayrow` and `.bin-row` and left the mail list —
+     the longest list in the app, and the one the control exists for —
+     unchanged. At the default that is 12px instead of 16px, so the change also
+     gives four pixels a row back to the rows themselves. */
+  padding: var(--row-pad-y) var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-1);
+  /* No shadow — same reason `.card` has none (see that rule): the longest,
+     most-scrolled list in the app is the one place this was contradicting
+     that. A border-and-surface-step hover is the replacement affordance. */
+  transition:
+    border-color var(--dur) var(--ease),
+    background var(--dur) var(--ease),
+    translate var(--dur) var(--ease),
+    transform var(--dur-fast) var(--ease);
+}
+.job:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-2);
+}
+/* Tap feedback, same idea as `.codecard__body:active` — a full row, so a
+   small scale rather than `.btn`'s translateY. Scoped off `[data-sliding]`
+   (set on the `.swipe__front` wrapper this sits inside, see `SwipeableRow`)
+   so a mid-swipe drag never also gets a press-scale fighting its translateX. */
+.swipe__front:not([data-sliding]) .job:active {
+  transform: scale(0.995);
+}
+.job[data-disabled="true"] {
+  opacity: 0.62;
+}
+/* A leading checkbox slot — the first multi-select row anywhere in this
+   codebase (see InboxView), added as a minor extension of the existing `.job`
+   flex row rather than a parallel row component. */
+.job__select {
+  flex: none;
+  width: var(--icon-md);
+  height: var(--icon-md);
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.job__pulse {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 22%, transparent);
+}
+.job__pulse[data-unread="false"] {
+  background: var(--border-strong);
+  box-shadow: none;
+}
+.job[data-disabled="true"] .job__pulse {
+  background: var(--text-3);
+  box-shadow: none;
+}
+.job[data-failed="true"] .job__pulse {
+  background: var(--danger);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 22%, transparent);
+}
+.job__body {
+  flex: 1;
+  min-width: 0;
+}
+.job__name {
+  /* 小四, not 四号. A mail subject is the row's headline, but it is one line of
+     truncated text in a list of fifty — bold is what marks it, not size. */
+  font-size: var(--text-base);
+  line-height: var(--leading-tight);
+  font-weight: 700;
+  /* One line, then the ellipsis — reversed from two. The two-line clamp read
+     more subjects in full, but it also meant a screenful of mail showed 6-8
+     rows depending on subject length, never a fixed count. The user's call:
+     a predictable ≥9 rows beats a subject that sometimes gets a second line —
+     tap the row for the rest. `-webkit-line-clamp` and the standard
+     `line-clamp` both, because the unprefixed property is the one that will
+     still be honoured and the prefixed one is what Chromium actually reads
+     today. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
+  overflow: hidden;
+}
+.job__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-3);
+  margin-top: 4px;
+  font-size: var(--text-xs);
+  color: var(--text-3);
+}
+.job__meta strong {
+  color: var(--text-2);
+  font-weight: 700;
+}
+.job__actions {
+  flex: none;
+  display: flex;
+  gap: var(--sp-1);
+}

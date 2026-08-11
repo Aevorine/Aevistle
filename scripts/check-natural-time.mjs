@@ -19,7 +19,7 @@ import { pathToFileURL } from 'node:url'
 const dir = await mkdtemp(join(tmpdir(), 'aevistle-nt-'))
 const bundle = join(dir, 'naturalTime.mjs')
 await build({
-  entryPoints: ['src/core/naturalTime.ts'],
+  entryPoints: ['src/core/schedule/naturalTime.ts'],
   bundle: true,
   format: 'esm',
   outfile: bundle,

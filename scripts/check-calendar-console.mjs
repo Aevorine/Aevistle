@@ -37,6 +37,7 @@
 process.env.TZ = 'America/Los_Angeles'
 
 import { build } from 'esbuild'
+import { concatenatedAppCss } from './lib/stylesheets.mjs'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -91,12 +92,12 @@ async function loadTogether(contents, name) {
   return import(pathToFileURL(outfile).href)
 }
 
-const cal = await load('src/core/workCalendar.ts', 'workCalendar')
-const reschedule = await load('src/core/reschedule.ts', 'reschedule')
-const conflicts = await load('src/core/conflicts.ts', 'conflicts')
-const schedule = await load('src/core/schedule.ts', 'schedule')
-const seed = await load('src/core/composeSeed.ts', 'composeSeed')
-const heat = await load('src/core/calendarLoad.ts', 'calendarLoad')
+const cal = await load('src/core/schedule/workCalendar.ts', 'workCalendar')
+const reschedule = await load('src/core/schedule/reschedule.ts', 'reschedule')
+const conflicts = await load('src/core/sync/conflicts.ts', 'conflicts')
+const schedule = await load('src/core/schedule/schedule.ts', 'schedule')
+const seed = await load('src/core/mail/composeSeed.ts', 'composeSeed')
+const heat = await load('src/core/schedule/calendarLoad.ts', 'calendarLoad')
 
 const read = (rel) => readFileSync(path.join(ROOT, rel), 'utf8')
 
@@ -480,7 +481,7 @@ if (present('seed: seedComposeDate is exported', seed.seedComposeDate)) {
 {
   const wired = await loadTogether(
     [
-      "export * from './src/core/composeSeed'",
+      "export * from './src/core/mail/composeSeed'",
       "export { nextWholeHour } from './src/components/RecurrenceEditor'",
       '',
     ].join('\n'),
@@ -536,7 +537,7 @@ if (present('heat: loadLevel is exported', heat.loadLevel)) {
   }
   ok('heat: the scale never goes backwards as the day gets busier', monotonic)
 
-  const css = read('src/styles/app.css')
+  const css = concatenatedAppCss()
   const strengths = []
   for (let level = 1; level <= heat.MAX_LOAD_LEVEL; level++) {
     const rule = new RegExp(
@@ -579,7 +580,7 @@ if (present('heat: loadLevel is exported', heat.loadLevel)) {
   const view = read('src/views/WorkCalendarView.tsx')
   const panel = read('src/components/CalendarDayPanel.tsx')
   const app = read('src/App.tsx')
-  const css = read('src/styles/app.css')
+  const css = concatenatedAppCss()
 
   ok('wiring: the grid renders each send as its own row', grid.includes('monthgrid__send'))
   ok('wiring: reading the prebuilt list rather than scanning one', grid.includes('mark?.lines'))
@@ -620,8 +621,8 @@ if (present('heat: loadLevel is exported', heat.loadLevel)) {
   // The 360px decision, asserted rather than trusted: a square that lists three
   // lines of text cannot also be 38px tall, so on a phone it does not.
   ok(
-    'layout: below 560px the square goes back to a tap target',
-    /@media \(max-width: 560px\) \{[\s\S]*?\.monthgrid__sends \{\s*display: none;/.test(css),
+    'layout: below 599.98px the square goes back to a tap target',
+    /@media \(max-width: 599.98px\) \{[\s\S]*?\.monthgrid__sends \{\s*display: none;/.test(css),
   )
   ok(
     'layout: the time in a row is never the part that gets truncated',

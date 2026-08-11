@@ -10,17 +10,17 @@
 
 import { EventEmitter } from 'node:events'
 import { existsSync } from 'node:fs'
-import { evaluateConditions, inboundKey } from '../src/core/conditions'
-import { applyJitter, computeOccurrences, rearm } from '../src/core/schedule'
+import { evaluateConditions, inboundKey } from '../src/core/schedule/conditions'
+import { applyJitter, computeOccurrences, rearm } from '../src/core/schedule/schedule'
 import {
   mintMessageId,
   resolveLedgerEntryOnRestart,
   spliceForcedResends,
   type DispatchLedgerEntry,
-} from '../src/core/dispatchLedger'
+} from '../src/core/ops/dispatchLedger'
 import { MAX_BURST_COUNT } from '../src/core/types'
 import type { MailAccount, ScheduledJob, SendResult } from '../src/core/types'
-import type { JobRun } from '../src/core/bridge'
+import type { JobRun } from '../src/core/platform/bridge'
 import { sendMail } from './mailer'
 import {
   claimLedgerEntry,
@@ -100,7 +100,7 @@ export class Scheduler extends EventEmitter {
    * guards the *next* process, after a crash, against the same thing — but
    * only for occurrences the ledger has positive proof were actually sent;
    * see `restoreDispatchLedger` for how the two meet at startup, and
-   * `src/core/dispatchLedger.ts` for why an *unconfirmed* send is deliberately
+   * `src/core/ops/dispatchLedger.ts` for why an *unconfirmed* send is deliberately
    * left out of this set instead of added to it.
    */
   private fired = new Set<string>()
@@ -467,7 +467,7 @@ export class Scheduler extends EventEmitter {
    * than once around the whole call — and `'accepted'` immediately after one
    * succeeds. `messageId` is passed into `sendMail` so the message itself
    * carries the same `Message-Id` across every attempt at this claimKey. See
-   * `src/core/dispatchLedger.ts`.
+   * `src/core/ops/dispatchLedger.ts`.
    */
   private async sendOnce(
     job: ScheduledJob,

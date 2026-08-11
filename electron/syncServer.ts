@@ -37,7 +37,7 @@ import {
   type SyncListenerStatus,
   type SyncServerRequest,
   type SyncServerResponse,
-} from '../src/core/syncLoop'
+} from '../src/core/sync/syncLoop'
 import { pickLanIPv4 } from './pairingServer'
 
 const MAX_BODY = 512 * 1024

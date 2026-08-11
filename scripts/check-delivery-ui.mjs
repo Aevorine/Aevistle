@@ -43,6 +43,7 @@
 process.env.TZ = 'Asia/Shanghai'
 
 import { build } from 'esbuild'
+import { concatenatedAppCss } from './lib/stylesheets.mjs'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -118,7 +119,7 @@ if (SELFTEST) {
   }
 }
 
-const css = await readFile(path.join(root, 'src/styles/app.css'), 'utf8')
+const css = concatenatedAppCss()
 const LOCALES = ['en', 'zh-CN', 'fr', 'es', 'ru', 'ar']
 const localeSources = new Map()
 for (const locale of LOCALES) {
@@ -611,15 +612,15 @@ try {
    *
    * `deliveryPreview.ts` is written from the (possibly broken) text held above,
    * so `--selftest` breaks the code that is *bundled*, not merely the code that
-   * is grepped. `core/deliveryWindow.ts` imports nothing at all, so the mirror
+   * is grepped. `core/schedule/deliveryWindow.ts` imports nothing at all, so the mirror
    * needs no third file — and the type-only import of `core/types` is dropped
    * by esbuild before resolution.
    */
-  await mkdir(path.join(dir, 'core'), { recursive: true })
+  await mkdir(path.join(dir, 'core', 'schedule'), { recursive: true })
   await mkdir(path.join(dir, 'components'), { recursive: true })
   await writeFile(
-    path.join(dir, 'core/deliveryWindow.ts'),
-    await readFile(path.join(root, 'src/core/deliveryWindow.ts'), 'utf8'),
+    path.join(dir, 'core/schedule/deliveryWindow.ts'),
+    await readFile(path.join(root, 'src/core/schedule/deliveryWindow.ts'), 'utf8'),
   )
   await writeFile(path.join(dir, 'components/deliveryPreview.ts'), src.preview)
 
@@ -637,7 +638,7 @@ try {
   }
 
   const ui = await load(path.join(dir, 'components/deliveryPreview.ts'), 'ui')
-  const engine = await load(path.join(root, 'src/core/deliveryWindow.ts'), 'engine')
+  const engine = await load(path.join(root, 'src/core/schedule/deliveryWindow.ts'), 'engine')
 
   const LA = 'America/Los_Angeles'
   /** Monday 2026-08-03, 09:00 in Shanghai. Sunday 18:00 where the recipient is. */

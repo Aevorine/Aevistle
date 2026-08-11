@@ -40,12 +40,12 @@ import {
   windowsForRecipients,
   worthShowing,
 } from '../components/deliveryPreview'
-import { CHAIN_STAGES, buildChain, leadLabelKey } from '../core/chain'
-import { runSendGuardian } from '../core/sendGuardian'
-import { takeEditJobSeed } from '../core/editJobSeed'
-import { SEEDED_HOUR, takeComposeDates } from '../core/composeSeed'
-import { summarizeRecurrence } from '../core/schedule'
-import { upcoming } from '../core/upcoming'
+import { CHAIN_STAGES, buildChain, leadLabelKey } from '../core/schedule/chain'
+import { runSendGuardian } from '../core/mail/sendGuardian'
+import { takeEditJobSeed } from '../core/mail/editJobSeed'
+import { SEEDED_HOUR, takeComposeDates } from '../core/mail/composeSeed'
+import { summarizeRecurrence } from '../core/schedule/schedule'
+import { upcoming } from '../core/schedule/upcoming'
 import { HealthBoard } from '../components/HealthBoard'
 import {
   RecurrenceEditor,
@@ -74,15 +74,15 @@ import {
   IconSend,
   IconSliders,
 } from '../components/icons'
-import { useNarrow } from '../components/useNarrow'
-import type { SendCondition } from '../core/conditions'
-import { hasVars, usedVars } from '../core/mergeVars'
-import { isQueueable } from '../core/outbox'
-import { accountLabel, groupAccounts } from '../core/accounts'
+import { useNarrow, useShort } from '../components/useNarrow'
+import type { SendCondition } from '../core/schedule/conditions'
+import { hasVars, usedVars } from '../core/mail/mergeVars'
+import { isQueueable } from '../core/ops/outbox'
+import { accountLabel, groupAccounts } from '../core/mail/accounts'
 import { useApp } from '../state/AppState'
 import { useI18n, type TranslationKey } from '../i18n'
-import { attachmentLimitBytes, providerById } from '../core/providers'
-import { advisoryKey } from '../core/transport'
+import { attachmentLimitBytes, providerById } from '../core/mail/providers'
+import { advisoryKey } from '../core/mail/transport'
 import {
   encodedSize,
   hasErrors,
@@ -90,7 +90,7 @@ import {
   validateBurst,
   validateDraft,
   validateRecurrence,
-} from '../core/validate'
+} from '../core/mail/validate'
 import {
   DEFAULT_BURST,
   DEFAULT_RETRY,
@@ -137,53 +137,31 @@ const BODY_HEIGHT_KEY = 'aevistle.compose.bodyHeight'
 /**
  * "Is this screen too narrow for the desktop compose form?"
  *
- * Wider than the app's shared `useNarrow` (760px), and the gap is the point: a
- * 768x1024 tablet held in two hands falls *outside* 760, so it was being given
- * the desktop form — a stacked addressing block, a dropzone and a send-time
- * row — with the message box left about a quarter of the screen. 900px is not
- * a new number: `app.css` has stacked `.compose-head` below 900 ever since the
- * three-across addressing row was introduced, for exactly the same reason.
+ * This used to be its own 900px query, deliberately wider than the shell's own
+ * 760px, because a 768x1024 tablet fell outside 760 and was being handed the
+ * desktop form — a stacked addressing block, a dropzone and a send-time row —
+ * with the message box left about a quarter of the screen.
  *
- * Never *narrower* than the shell's own answer. `useNarrow()` is OR-ed in so
- * that if `NARROW_QUERY` is ever widened past this, the compose screen follows
- * the shell rather than becoming the one place that quietly disagrees with it.
+ * The gap it was compensating for is gone. `NARROW_QUERY` is now 840px, the
+ * width at which the whole app stops being a stack, so the tablet this existed
+ * for is inside the shell's own answer and a second number would only be a
+ * second thing to keep in step. It is exactly what happened: three files each
+ * held a boundary, and they agreed only by luck.
  *
- * Width alone still isn't enough: a landscape phone or a tablet held wide can
- * clear 900px while still being a screen typed on with two thumbs, no pointer.
- * The same gap `useMobileShell` closed for Settings and the tab bar exists
- * here, so `nativeMobile` (the Android app, regardless of its current width or
- * orientation) is OR-ed in the same way — see that hook's comment for the full
- * reasoning. Without it, the 85%-floor rules below `[data-narrow]` in
- * `app.css` simply never applied on a landscape tablet, which is exactly the
- * width band where all of the addressing block, the dropzone and the
- * send-time row were rendered inline and the message box was measured back
- * down to 52–66%.
+ * Width alone is still not enough, which is the half that survives: a landscape
+ * phone or a tablet held wide clears 840px while still being a screen typed on
+ * with two thumbs and no pointer. So `nativeMobile` — the Android app,
+ * whatever its current width or orientation — is OR-ed in, exactly as
+ * `useMobileShell` does it for Settings and the tab bar. Without it the
+ * 85%-floor rules under `[data-narrow]` in `app.css` never applied on a
+ * landscape tablet, which is the precise band where the addressing block, the
+ * dropzone and the send-time row all rendered inline and the message box
+ * measured back down to 52–66%.
  */
-const BODY_FIRST_QUERY = '(max-width: 900px)'
-
 function useBodyFirst(nativeMobile: boolean): boolean {
   const narrow = useNarrow()
-  const [belowNine, setBelowNine] = useState(() =>
-    // Guarded exactly as `useNarrow` is, and wide is the safer default for the
-    // same reason: it renders every field rather than a summary line that
-    // needs JavaScript to open anything.
-    typeof window !== 'undefined' && typeof window.matchMedia === 'function'
-      ? window.matchMedia(BODY_FIRST_QUERY).matches
-      : false,
-  )
-
-  useEffect(() => {
-    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return
-    const query = window.matchMedia(BODY_FIRST_QUERY)
-    const onChange = (event: MediaQueryListEvent) => setBelowNine(event.matches)
-    // Re-read on mount as well as on change — see `useNarrow` for the rotated
-    // phone this is here for.
-    setBelowNine(query.matches)
-    query.addEventListener('change', onChange)
-    return () => query.removeEventListener('change', onChange)
-  }, [])
-
-  return narrow || belowNine || nativeMobile
+  const short = useShort()
+  return narrow || short || nativeMobile
 }
 
 /**

@@ -28,7 +28,7 @@ import { pathToFileURL } from 'node:url'
 const dir = await mkdtemp(path.join(tmpdir(), 'aevistle-upcoming-'))
 const bundle = path.join(dir, 'upcoming.mjs')
 await build({
-  entryPoints: ['src/core/upcoming.ts'],
+  entryPoints: ['src/core/schedule/upcoming.ts'],
   bundle: true,
   format: 'esm',
   outfile: bundle,

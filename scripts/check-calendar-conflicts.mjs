@@ -58,11 +58,11 @@ async function load(entry, name) {
   return import(pathToFileURL(outfile).href)
 }
 
-const conflicts = await load('src/core/conflicts.ts', 'conflicts')
-const reschedule = await load('src/core/reschedule.ts', 'reschedule')
-const presets = await load('src/core/holidayPresets.ts', 'presets')
-const cn = await load('src/core/cnHolidays.ts', 'cnHolidays')
-const cal = await load('src/core/workCalendar.ts', 'workCalendar')
+const conflicts = await load('src/core/sync/conflicts.ts', 'conflicts')
+const reschedule = await load('src/core/schedule/reschedule.ts', 'reschedule')
+const presets = await load('src/core/schedule/holidayPresets.ts', 'presets')
+const cn = await load('src/core/schedule/cnHolidays.ts', 'cnHolidays')
+const cal = await load('src/core/schedule/workCalendar.ts', 'workCalendar')
 
 const failures = []
 let checked = 0

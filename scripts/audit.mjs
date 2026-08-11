@@ -113,8 +113,8 @@ function looksLikeRealSecret(value) {
 const SECRET_ALLOWLIST = [
   // The code that *handles* passwords necessarily names them.
   'src/core/types.ts',
-  'src/core/validate.ts',
-  'src/core/bridge.ts',
+  'src/core/mail/validate.ts',
+  'src/core/platform/bridge.ts',
   'scripts/audit.mjs',
 ]
 
@@ -309,13 +309,13 @@ check('ELE-04', 'No eval or raw HTML injection in the renderer', () => {
 // ---------------------------------------------------------------------------
 
 check('MAIL-01', 'Header injection is blocked on both platforms', () => {
-  const validate = read('src/core/validate.ts') ?? ''
+  const validate = read('src/core/mail/validate.ts') ?? ''
   const mailer = read('electron/mailer.ts') ?? ''
   const android = read('android/app/src/main/java/dev/aevistle/app/MailSender.java') ?? ''
 
   const problems = []
   if (!/\\r\\n/.test(validate) && !/\\u000b/.test(validate)) {
-    problems.push('src/core/validate.ts does not reject CR/LF in header fields')
+    problems.push('src/core/mail/validate.ts does not reject CR/LF in header fields')
   }
   if (!/isHeaderSafe|assertSafeDraft/.test(mailer)) {
     problems.push('electron/mailer.ts does not re-validate headers before sending')
@@ -533,7 +533,7 @@ check('INBOX-07', "Remote-image fetch validates the server's Content-Type agains
 })
 
 check('INBOX-08', 'resolveRemoteImages re-validates the data URI before splicing into sanitized HTML', () => {
-  const placeholder = read('src/core/remoteImagePlaceholder.ts')
+  const placeholder = read('src/core/mail/remoteImagePlaceholder.ts')
   if (!placeholder) return { severity: 'info', detail: 'No inbox pipeline yet.', fix: '' }
   if (!/DATA_IMAGE_URI/.test(placeholder) || !/dataUri &&.*test\(dataUri\)/.test(placeholder)) {
     return {
@@ -568,7 +568,7 @@ check('AND-01', 'No component is needlessly exported', () => {
   }
   // CAMERA is not in this list: `PairingScanner.tsx` uses it to scan a
   // pairing QR code, purely local `getUserMedia` frames decoded on-device
-  // (`core/qrDecode.ts`) — nothing is uploaded, recorded, or stored, and the
+  // (`core/sync/qrDecode.ts`) — nothing is uploaded, recorded, or stored, and the
   // manifest declares `uses-feature android:required="false"` so a
   // camera-less device can still install the app. Pasting the code by hand
   // works without this permission at all; it is a shortcut, never load-bearing.

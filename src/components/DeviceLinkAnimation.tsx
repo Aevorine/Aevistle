@@ -22,7 +22,7 @@
 import type { ReactNode } from 'react'
 import { IconMonitor, IconSmartphone } from './icons'
 import { useI18n } from '../i18n'
-import type { PairedDevicePlatform } from '../core/pairedDevices'
+import type { PairedDevicePlatform } from '../core/sync/pairedDevices'
 
 export type DeviceLinkStatus = 'connecting' | 'connected' | 'error'
 export type DeviceLinkSize = 'inline' | 'card' | 'full'

@@ -34,7 +34,7 @@ import {
   type DeliveryWindow,
   type DeliveryWindowFault,
   type DeliveryWindowResult,
-} from '../core/deliveryWindow'
+} from '../core/schedule/deliveryWindow'
 import type { Contact } from '../core/types'
 
 /** A `To:` recipient who has a window, and what to call them on screen. */

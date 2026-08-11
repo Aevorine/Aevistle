@@ -8,7 +8,7 @@
  * from a script that fires at 3am on a laptop that was asleep.
  *
  * Neither of them touches application state. Both hand the request to the
- * window and wait — see `src/core/control.ts` for why.
+ * window and wait — see `src/core/sync/control.ts` for why.
  */
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
@@ -30,9 +30,9 @@ import {
   type ControlOp,
   type ControlRequest,
   type ControlResponse,
-} from '../src/core/control'
+} from '../src/core/sync/control'
 import type { ControlScope } from '../src/core/types'
-import { LOG_CAP_FALLBACK, LOG_CAP_MAX } from '../src/core/logRetention'
+import { LOG_CAP_FALLBACK, LOG_CAP_MAX } from '../src/core/ops/logRetention'
 
 export function homeControlDir(): string {
   return path.join(os.homedir(), HOME_CONTROL_DIR)

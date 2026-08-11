@@ -1,7 +1,7 @@
 /**
  * Does a scheduled send land inside the *recipient's* working hours?
  *
- * `core/deliveryWindow.ts` is the only module in this codebase that reasons in
+ * `core/schedule/deliveryWindow.ts` is the only module in this codebase that reasons in
  * a clock other than the sender's, and it has to do it without a time-zone
  * library. Everything below is one of the four ways that goes wrong:
  *
@@ -45,7 +45,7 @@ import { pathToFileURL } from 'node:url'
 
 const selftest = process.argv.includes('--selftest')
 
-const SOURCE = path.join(process.cwd(), 'src', 'core', 'deliveryWindow.ts')
+const SOURCE = path.join(process.cwd(), 'src', 'core', 'schedule', 'deliveryWindow.ts')
 
 /**
  * The known-bad version: resolve a wall clock with whatever offset happens to
@@ -101,7 +101,7 @@ async function load(entryPoint, name) {
 }
 
 const w = await load(entry, 'deliveryWindow')
-const sched = await load(path.join(process.cwd(), 'src', 'core', 'schedule.ts'), 'schedule')
+const sched = await load(path.join(process.cwd(), 'src', 'core', 'schedule', 'schedule.ts'), 'schedule')
 
 const failures = []
 let checked = 0

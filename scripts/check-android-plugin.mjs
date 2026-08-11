@@ -31,7 +31,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const TS_FILE = 'src/core/bridge-android.ts'
+const TS_FILE = 'src/core/platform/bridge-android.ts'
 const JAVA_FILE = 'android/app/src/main/java/dev/aevistle/app/AevistleNativePlugin.java'
 const ROOT_INTERFACE = 'AevistleNativePlugin'
 

@@ -1,0 +1,615 @@
+/* ==========================================================================
+   The narrow compose screen — the message first, everything else behind a
+   button
+
+   Measured before writing, 360x800 with an account configured: the message box
+   was ~200px of a 748px screen. Twenty-five per cent, on the one screen whose
+   entire purpose is that box. The 548px around it was not slack anyone could
+   trim — a 36px title bar, a 150-228px stack of addressing fields, a 74px
+   dropzone, a 100px send-time row, a 96px action bar, each of them a
+   reasonable size for what it holds. Trimming had already been tried (v0.1.6,
+   316→406px on a desktop window) and had run out of pixels to take: to leave
+   the body 85% of the screen the chrome would have to come to 112px, and the
+   controls alone are more than that.
+
+   So this is a different arrangement rather than a tighter one. The addressing
+   stack folds to one 40px line the moment the message takes focus; the
+   dropzone and the send-time bar move into sheets; the action bar becomes one
+   52px row holding the buttons that open them. Nothing is removed, nothing is
+   set below 小四, and every one of those controls is one tap away instead of
+   permanently on screen — the height that frees up all lands in the box that
+   grows, because it is still the only thing on the card with `flex-grow`.
+
+   Gated on `data-narrow`, written by `useBodyFirst` in `ComposeView`, rather
+   than on a `@media` query of its own. The sheets are a JavaScript decision;
+   a stylesheet that switched at a different width from the component would be
+   broken in a band a few pixels wide, which is the kind of fault that only
+   ever reproduces on someone else's screen.
+   ========================================================================== */
+
+/* The scroller's last 8px, and the card frame, both go to the message. A
+   border drawn around the whole width of a phone is not a card, it is a line
+   down each edge of the window. */
+.view--compose[data-narrow] {
+  padding-bottom: 0;
+}
+.view--compose[data-narrow] .compose-card {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.view--compose[data-narrow] .compose-card > .card__body {
+  padding: 0;
+}
+
+/**
+ * Who it is for and what it is about, on one line, in place of the block that
+ * holds five fields.
+ *
+ * A `<button>` because the whole bar is the tap target that brings them back —
+ * an affordance that is only a chevron is an affordance most people never find.
+ *
+ * Drawn as the input it stands for, which it was not before: it was a bare row
+ * with a hairline under it, and that was survivable while it only ever appeared
+ * *after* someone had typed a recipient. It is now the first thing on the screen
+ * on a phone (see `headerOpen` in `ComposeView`), so it is the only recipient
+ * field a new user sees, and a row of grey text is not a field. Same border, same
+ * radius, same 46px `--control-h` and the same 16px text as `.input`, so it reads
+ * as the thing it opens.
+ *
+ * `--tap-min` (44px), not the old 40px, which was under the floor everything
+ * tappable in this app is held to — and not `--control-h` (46px) either. That
+ * token exists so two controls *sharing a row* land on the same baseline, which
+ * is the one thing this bar never does: it is the full width of the card with
+ * nothing beside it. Measured at 360x800, those 2px are 0.3% of the message box.
+ */
+.composesummary {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  min-height: var(--tap-min);
+  padding: var(--sp-1) var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-1);
+  color: var(--text-1);
+  font: inherit;
+  font-size: var(--text-md);
+  text-align: start;
+  cursor: pointer;
+}
+.composesummary:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-2);
+}
+.composesummary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+/* Nothing typed yet. Dashed, because a dashed box is the one border convention
+   that reads as "this is waiting for you" rather than as "this is a value" —
+   the same reason `.dropzone` uses one. */
+.composesummary:has(.composesummary__to[data-empty]) {
+  border-style: dashed;
+}
+/* Both halves truncate on their own rather than the row scrolling: a bar that
+   moves sideways under a thumb is a bar that gets dragged by accident, on a
+   screen where the thumb is also how you scroll the message.
+   Weighted 3:2 rather than 1:1. At `flex: 1 1 auto` on both, a 300px bar gave
+   each half 150px and cut both mid-word — the address, which is what gets
+   checked and is the longer string, no more room than the subject, which is
+   already on screen in the message the user just wrote. */
+.composesummary__to {
+  flex: 3 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 700;
+}
+.composesummary__subject {
+  flex: 2 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-2);
+}
+/* Placeholder tone, and the weight comes off: a placeholder set in bold reads as
+   an address someone entered. `--text-3` is the tone `.input::placeholder` uses,
+   named once here rather than guessed at. */
+.composesummary__to[data-empty],
+.composesummary__subject[data-empty] {
+  color: var(--text-3);
+  font-weight: 400;
+}
+.composesummary__chev {
+  flex: 0 0 auto;
+  color: var(--text-3);
+}
+/* Solid `--accent`/`--accent-text`, the same pairing `.composeacts__badge` uses,
+   rather than the tinted `.chip` recipe — a badge that only appears while
+   editing an existing job needs to read before the eye reaches the to/subject
+   text it sits beside, not blend into the row like a tag would. */
+.composesummary__edit {
+  flex: 0 0 auto;
+  padding-inline: var(--sp-2);
+  border-radius: var(--r-full);
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  line-height: 17px;
+}
+
+/* The foot holds nothing but three closed sheets here, and a closed sheet
+   renders no element at all. `display: contents` rather than `:empty` or
+   `none`: the wrapper stops existing for layout, so the card does not charge
+   the message its 8px gap for a box with nothing in it, and the wrapper is
+   still there in the markup for the wide window that uses it. */
+.view--compose[data-narrow] .compose-foot {
+  display: contents;
+}
+
+/* Everything the other bands gave up arrives here. No floor — the box is the
+   only flexible thing on the card and a floor could only fight the basis it is
+   already being handed — and no drag handle: the handle is a pointer
+   affordance, and the height it remembers is a desktop number that would pin
+   the box on the one layout built to hand it the screen. `!important` for the
+   same reason the focus-mode rule needs it, and it is the same fault: an
+   inline `height` beats every rule in this file. `ComposeView` also clears it
+   on the way in, so this is the belt to that pair of braces. */
+.view--compose[data-narrow] .compose-layout > .field:has(.textarea--body) > .textarea--body {
+  min-height: 0;
+  height: auto !important;
+  resize: none;
+}
+
+/* --- the label line, the last band still charging the message for four rows -
+
+   Measured at 360x800 with the rest of this block in place: the body box came
+   to 476.6px of 662, which is 72%, and every one of the missing 86px was in
+   one element. `.field__labelrow` renders 129.4px here against 28.4px on a
+   desktop, because the phone layer wraps the seven 44px markup buttons onto
+   four lines — a trade the note above `.field__label` in that block spells out
+   and, at the time, defended. The 85% floor overrules it: four rows of format
+   buttons is not what the screen is for.
+
+   So the row holds its one line and the toolbar scrolls inside it. The
+   buttons stay 44px — shrinking them is what that rule exists to prevent —
+   and six of the seven are visible at 360px, all of them at 412px. The byte
+   count stays too: it is the number that explains a bounced attachment, and
+   it is data, not guidance. What goes is the word "Body" above a box that is
+   nine tenths of the screen, and it goes to `.sr-only` rather than
+   `display: none` so the textarea keeps its accessible name.
+
+   Result, measured the same way: 569.6px of 662, 86%. */
+.view--compose[data-narrow] .compose-layout > .field:has(.textarea--body) > .field__labelrow {
+  flex-wrap: nowrap;
+  gap: var(--sp-2);
+}
+.view--compose[data-narrow]
+  .compose-layout
+  > .field:has(.textarea--body)
+  > .field__labelrow
+  > .field__label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+/* `wrap`, and only here, because the formatting strip now takes a row of its
+   own when it is opened — see the fold below. Closed, which is how this row
+   arrives, there are two `flex: none` items on it (the toggle at ~70px and the
+   count at ~80px against 320px of row) and it never wraps, so the narrow
+   layout's height is unchanged by allowing it to. */
+.view--compose[data-narrow] .compose-layout > .field:has(.textarea--body) .field__tools {
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+/* "0 字 · 0 B" wrapped to two lines at 360px, and two lines of 16px text is
+   52.8px — taller than the 44px buttons beside it, so the count, not the
+   toolbar, was setting the row height. Measured: 52.8 → 44. */
+.view--compose[data-narrow] .compose-layout > .field:has(.textarea--body) .field__count {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+/**
+ * `min-width: 0` is the whole fix for the overflow: without it a nowrap flex
+ * item refuses to shrink below its content, so the row would push the count off
+ * the side of the window instead of scrolling the strip.
+ *
+ * What it did not fix is that the strip gave no sign of being a strip. Seven
+ * 44px buttons and six 3px gaps are 326px; the row is ~320px wide at 360px, so
+ * the seventh button (quote) was off the end, the scrollbar was hidden — for a
+ * good reason, a horizontal bar here takes back part of the row this block was
+ * bought to save — and the comment two hundred lines above simply conceded that
+ * "six of the seven are visible at 360px". A control nobody can see and nobody
+ * is told to scroll to is a control that is not there.
+ *
+ * The affordance is the two-layer scroll shadow, which costs no height at all:
+ * `background-attachment: local` paints the page colour over each edge and
+ * scrolls *with the content*, `scroll` pins the shadow to the box. Where there
+ * is more strip in that direction the cover has slid away and the shadow shows;
+ * at either end the cover is back over it and the edge is clean. So the hint is
+ * present exactly when it is true, on both edges, which also makes it correct
+ * in Arabic without a second rule — a `mask` fade or an `::after` would each
+ * have needed a direction, and one of the two would have been wrong.
+ *
+ * `--bg` and not `--surface-1`: the narrow compose card is transparent (top of
+ * this block), so what is behind the strip is the page.
+ */
+/*
+ * Deliberately short, and the `::after` is why that is not a shrunken target.
+ *
+ * The whole point of folding the strip was to give the message box the row
+ * back. Measured, it did not: with the toggle sized as a 44px control this row
+ * stayed exactly 44px and the box stayed at 85.5%, because the toggle had
+ * simply taken the seven buttons' place on it. The row is only as short as its
+ * tallest item, and 44px of button next to 23px of byte count is 44px of row.
+ *
+ * So the *box* is 23px — the height of the count beside it, i.e. free — and
+ * the *target* is 44px, painted nowhere and reaching past the box on all four
+ * sides. A finger still lands on a 44px area; the layout is only charged for
+ * the text. `inset` is negative rather than a `padding` because padding would
+ * put the height straight back.
+ *
+ * The expander is `::after` on a `position: relative` button, so it is clipped
+ * by nothing and stacks under nothing that matters: its only neighbour on this
+ * row is a live-region count, which is not interactive and cannot be stolen
+ * from. Measured after: row 44px -> 23.8px, box 566 -> 586.4, share 85.5% ->
+ * 88.6%.
+ */
+.view--compose[data-narrow] .compose-layout > .field:has(.textarea--body) .markup__toggle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+.view--compose[data-narrow]
+  .compose-layout
+  > .field:has(.textarea--body)
+  .markup__toggle::after {
+  content: "";
+  position: absolute;
+  /* Whatever it takes to reach 44px around a ~23px box. */
+  inset: -11px -12px;
+}
+/* Closed — which is how every visit starts. The seven buttons are not merely
+   scrolled out of sight, they are out of the layout, so nothing about them
+   contributes to this row's height or to the width the count has to share. */
+.view--compose[data-narrow]
+  .compose-layout
+  > .field:has(.textarea--body)
+  .markup__toggle[aria-expanded="false"]
+  + .markup {
+  display: none;
+}
+/* Open — a full-width row beneath the label line, which is the arrangement
+   that already worked, now paid for only while it is being used.
+   `order: 2` puts it after the count even though it precedes the count in the
+   DOM: visual order is [toggle] [count] / [strip], while tab order stays
+   toggle-then-strip, which is the order someone operating it needs. */
+.view--compose[data-narrow]
+  .compose-layout
+  > .field:has(.textarea--body)
+  .markup__toggle[aria-expanded="true"]
+  + .markup {
+  flex: 1 1 100%;
+  order: 2;
+  min-width: 0;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+  background-image:
+    linear-gradient(to right, var(--bg) 60%, transparent),
+    linear-gradient(to left, var(--bg) 60%, transparent),
+    linear-gradient(to right, color-mix(in srgb, var(--text-1) 26%, transparent), transparent),
+    linear-gradient(to left, color-mix(in srgb, var(--text-1) 26%, transparent), transparent);
+  background-position:
+    left center,
+    right center,
+    left center,
+    right center;
+  background-repeat: no-repeat;
+  background-size:
+    28px 100%,
+    28px 100%,
+    12px 100%,
+    12px 100%;
+  background-attachment: local, local, scroll, scroll;
+}
+.view--compose[data-narrow]
+  .compose-layout
+  > .field:has(.textarea--body)
+  .markup::-webkit-scrollbar {
+  display: none;
+}
+/* 4px between the summary, the message and nothing else. At `--sp-2` the two
+   gaps were 16px of the 86 this block had to find. */
+.view--compose[data-narrow] .compose-layout {
+  gap: var(--sp-1);
+}
+/* And the same 4px *inside* the message field, between the toolbar row and the
+   box. `.field` is `gap: var(--sp-2)`, so this one gap was twice the card's own
+   rhythm — the toolbar is meant to read as the top edge of the box it acts on
+   ("sharing its left edge so the two read as one control", at `.markup`), and
+   8px of air is what stopped it doing that.
+   Measured at 360x800 with the health strip suppressed: the card's height budget
+   was 46 + 4 + 44 + 8 = 102px of chrome around a 560px box, i.e. 84.6% — 0.4%
+   under a floor this screen exists to clear. The 44px summary bar above and this
+   gap are the 6px: 96px of chrome, 566px of box, 85.5%. */
+.view--compose[data-narrow] .compose-layout > .field:has(.textarea--body) {
+  gap: var(--sp-1);
+}
+
+/* --- the narrow action bar ------------------------------------------------ */
+
+/* One row, and it is the form's missing third of the screen. The wide bar
+   wraps to 96px on a phone because a two-line draft summary and two large
+   buttons do not share 360px; this holds three buttons, one sentence and Send,
+   and measures 52. */
+.actionbar[data-narrow] {
+  flex-wrap: nowrap;
+  gap: var(--sp-1);
+  padding: var(--sp-1) var(--sp-2);
+}
+/**
+ * The send-result banner sticks to the top of the action bar, and on a narrow
+ * screen it was sticking to where a *wide* action bar would have been.
+ *
+ * `.sendresult` is `bottom: var(--actionbar-h)`, and that token is 68px — what
+ * the wide bar measures with its two-line summary and its large buttons. The
+ * narrow bar is one row of 44px targets in 4px of padding. So the confirmation
+ * for the send you just made floated well clear of the bar it is meant to sit
+ * on, with the page showing through the gap.
+ *
+ * Fixed by re-pointing the token on the two elements that are the narrow pair,
+ * rather than by writing a second `bottom` somewhere else: `.sendresult` keeps
+ * its one `bottom` declaration and resolves it to whichever number is true for
+ * the bar actually on screen. `data-narrow` is written by `ComposeView` from the
+ * same `narrow` flag that decides the bar's layout, so the two cannot disagree.
+ */
+.actionbar[data-narrow],
+.sendresult[data-narrow] {
+  --actionbar-h: 53px;
+}
+.composeacts {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+/* A real target, and somewhere for the badge to sit. */
+.composeacts__btn {
+  position: relative;
+  flex: 0 0 auto;
+  min-width: var(--tap-min);
+  min-height: var(--tap-min);
+  padding-inline: 0;
+}
+/* How many files are attached, without spending a word on it — the row has no
+   width for "Files: 2". `--text-2xs` is the token fenced off for numeric
+   badges; it is not prose and the 小四 floor does not reach it. */
+.composeacts__badge {
+  position: absolute;
+  top: 3px;
+  inset-inline-end: 3px;
+  min-width: var(--icon-sm);
+  padding-inline: 3px;
+  border-radius: var(--r-full);
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: var(--text-2xs);
+  font-variant-numeric: tabular-nums;
+  line-height: 17px;
+  text-align: center;
+}
+/* The send-time sentence rides on the button that opens the send-time sheet:
+   one control's width for two, and the answer to "when does this go out?" —
+   the question this whole application exists to answer — stays on screen after
+   the bar it came from has left it. */
+.composeacts__when {
+  flex: 1 1 auto;
+  min-width: 0;
+  justify-content: flex-start;
+  gap: var(--sp-2);
+  min-height: var(--tap-min);
+  padding-inline: var(--sp-2);
+}
+.composeacts__whentext {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-2);
+}
+/* Send takes the width it needs and no more, and keeps a full touch target
+   without the 46px the wide bar gives it. */
+.actionbar[data-narrow] .btn--lg {
+  flex: 0 0 auto;
+  min-height: var(--tap-min);
+  padding-inline: var(--sp-3);
+}
+
+/* The secondary controls, in the sheet that stands in for the top bar they
+   normally live in. Full targets here: 34px is a pointer height, and this
+   sheet only ever opens on a screen being touched. */
+.composebar--sheet {
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
+}
+.composebar--sheet .btn {
+  min-height: var(--tap-min);
+}
+
+/* --- fields that are comfortable to type in ------------------------------- */
+
+.form-rows .field > .field__label {
+  min-height: var(--ctl-md);
+}
+
+/* --- lists that fill their pane ------------------------------------------- */
+
+/**
+ * One panel, the height of the screen.
+ *
+ * The rows used to sit on the raw page background, so eight log entries in a
+ * maximised window meant eight rows and then a large field of nothing. The
+ * pane is now itself a surface: it still ends where the window does, but the
+ * area below the last row reads as an empty list rather than as unused page.
+ */
+.view--list .list-pane {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+}
+/* The lists that already brought their own card must not draw a second one. */
+.view--list .list-pane > .card--flush {
+  border: 0;
+  background: none;
+}
+
+/* Rows tall enough to be a target rather than a line of text. A floor, not a
+   height: the inbox's two-line rows clear it easily and this only bites on a
+   one-line activity entry. Lowered one notch across all three densities now
+   that the text inside is a step smaller. */
+.job,
+.log {
+  min-height: var(--ctl-lg);
+}
+:root[data-list-density="compact"] .job,
+:root[data-list-density="compact"] .log {
+  min-height: var(--ctl-md);
+}
+:root[data-list-density="roomy"] .job,
+:root[data-list-density="roomy"] .log {
+  min-height: 68px;
+}
+
+/* --- codes: freshness is a mark, not a filter ----------------------------- */
+
+/**
+ * The just-arrived one, findable at a glance.
+ *
+ * Older codes used to be folded behind a "show N earlier" link — which is
+ * where they went to be lost, because the list looked empty and that control
+ * had no reason to be pressed. Everything is listed now, and this is what
+ * makes the newest obvious without hiding the rest.
+ *
+ * (No multi-column grid here: `VirtualList` positions rows by a prefix sum of
+ * measured heights, which assumes one row per line. Two cards per line would
+ * make every offset it computes wrong.)
+ */
+.codecard[data-fresh] {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  box-shadow: inset 3px 0 0 0 var(--accent);
+}
+.codecard[data-fresh] .codecard__mark {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+/* Wide windows have room for the metadata to sit beside the code rather than
+   under it, which is what stops one card per line looking sparse. */
+@media (min-width: 1200px) {
+  .codecard {
+    gap: var(--sp-4);
+    padding-inline: var(--sp-4);
+  }
+  /* The 28px `.codecard__value` that used to be here is gone. A wide window is
+     a reason for the card to lay out in two columns; it is not a reason for one
+     piece of text to be a size it is nowhere else, and 28px was larger than
+     every heading in the app including the screen titles. One code, one size,
+     at every width — see `--text-value`. */
+}
+
+/* --- start-up gave up ------------------------------------------------------
+   Deliberately plain: this renders when the bridge or the saved data could not
+   be read, so it must not depend on anything either of them provides. No
+   sidebar, no icons, no state — just the reason and what to do about it. */
+.shell--boot-error {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  padding: var(--sp-6);
+  background: var(--surface-2);
+}
+.bootfail {
+  max-width: 52ch;
+  padding: var(--sp-6);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface-1);
+  text-align: center;
+}
+.bootfail__title {
+  margin: 0 0 var(--sp-3);
+  font-size: var(--text-xl);
+  font-weight: 700;
+  color: var(--text-1);
+}
+.bootfail__detail {
+  margin: 0 0 var(--sp-3);
+  color: var(--text-2);
+  line-height: 1.6;
+}
+.bootfail__hint {
+  margin: 0;
+  font-size: var(--text-base);
+  color: var(--text-3);
+  line-height: 1.6;
+}
+
+/* A view that threw during render — see `components/ErrorBoundary.tsx`.
+   Deliberately shaped like a card in the content column rather than like
+   `.bootfail`, which owns the whole window: this failure is one screen, the
+   sidebar beside it still works, and the panel should look like something
+   that went wrong *inside* the app rather than instead of it. */
+.uifail {
+  max-width: var(--reading-max);
+  margin: var(--sp-6) auto;
+  padding: var(--sp-6);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface-1);
+}
+.uifail__title {
+  margin: 0 0 var(--sp-3);
+  font-size: var(--text-lg);
+  font-weight: 700;
+  color: var(--text-1);
+}
+.uifail__detail {
+  margin: 0 0 var(--sp-3);
+  color: var(--text-2);
+  line-height: 1.6;
+  /* A thrown message can be a single unbroken token; let it wrap rather than
+     push the panel past the column. */
+  overflow-wrap: anywhere;
+}
+.uifail__hint {
+  margin: 0 0 var(--sp-4);
+  font-size: var(--text-base);
+  color: var(--text-3);
+  line-height: 1.6;
+}
+.uifail__retry {
+  margin: 0;
+}

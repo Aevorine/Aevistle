@@ -1,0 +1,187 @@
+/* ==========================================================================
+   Short windows — a phone on its side, and the laptop screens that behave
+   like one
+
+   The first height query in this stylesheet. Before this round there were 32
+   media queries and every one of them asked about width, which is why the two
+   worst-measured screens in the app were both short rather than narrow: a
+   1024x768 laptop gave the compose message box 31% of the window, and a
+   360x800 phone turned on its side gave it 32% — while the same phone held
+   upright gave it 72%. Width was never what was wrong with either.
+
+   `useNarrow.ts` carries the structural half of this (`SHORT_QUERY`, which
+   folds attachments and the send time behind their buttons below 880px of
+   height). What is left is the furniture, and on a 360px-tall screen the
+   furniture is the problem: a 56px tab bar is 16% of everything there is.
+
+   Two steps rather than one, because 480 and 880 are answers to different
+   questions. Below 880 a *form* stops fitting. Below 480 the *chrome* stops
+   fitting, and that only happens on a phone rotated into landscape.
+   ========================================================================== */
+
+@media (max-height: 480px) {
+  /*
+   * The tab bar, cut to its icons.
+   *
+   * 56 -> 44px, and the labels go. Measured on a 360px-tall landscape phone:
+   * the bar was 15.6% of the window and the message box 32%, so the navigation
+   * cost half of what the screen was for. Icons alone are legible here because
+   * this is a rotation of a screen the same person was just reading upright —
+   * nobody meets this bar for the first time in landscape, and the labels are
+   * back the moment they turn the phone back.
+   *
+   * 44 is the pointer-target floor rather than the 48 the rest of the app
+   * holds to, and it is the one place in this stylesheet allowed under it: a
+   * tab bar is a row of five targets each a fifth of the screen wide, so the
+   * touchable area is far past the guideline in the axis that is actually
+   * short of room. 48 would be four more pixels off the message.
+   */
+  :root {
+    --nav-h: 44px;
+  }
+  .nav__label {
+    display: none;
+  }
+  .nav__item {
+    min-height: var(--nav-h);
+    gap: 0;
+  }
+  /* The badge sat above the label; with the label gone it goes on the icon. */
+  .nav__badge {
+    position: absolute;
+    top: var(--sp-1);
+    inset-inline-end: 25%;
+  }
+  .nav__item {
+    position: relative;
+  }
+
+  /*
+   * The screen title band, removed rather than shrunk.
+   *
+   * It names the screen the tab bar is already showing as selected, which is
+   * redundant at any height and unaffordable at this one. The actions that
+   * live in it are not removed — `.page-head__actions` is lifted into the
+   * card's own header below, so nothing becomes unreachable.
+   */
+  .page-head__titles {
+    display: none;
+  }
+  .page-head {
+    min-height: 0;
+    padding-block: var(--sp-1);
+  }
+
+  /* Vertical padding is what a short window has least of. Horizontal padding
+     is untouched — there is width to spare, which is the whole shape of the
+     problem. */
+  .view__inner {
+    padding-block: var(--sp-2);
+  }
+  .card__body {
+    padding-block: var(--sp-3);
+  }
+  .actionbar {
+    padding-block: var(--sp-2);
+  }
+
+  /*
+   * A rotated phone usually has its notch on one of the *sides*, and the
+   * gesture bar with it. Portrait rules only ever paid the top and bottom
+   * insets, so in landscape the tab bar ran under the camera cutout on one
+   * edge and the first tab was unreachable. Both sides are paid because the
+   * app cannot know which way the phone was turned, and on a device with no
+   * cutout at all both resolve to zero.
+   */
+  .nav,
+  .actionbar,
+  .page-head,
+  .view__inner {
+    padding-inline-start: max(var(--sp-3), env(safe-area-inset-left, 0px));
+    padding-inline-end: max(var(--sp-3), env(safe-area-inset-right, 0px));
+  }
+}
+
+/* ==========================================================================
+   The 48px floor, bound to the shell as well as to the pointer
+
+   `16-mail.css` enforces this under `@media (any-pointer: coarse)`, which is
+   the right *condition* and an untestable one: a headless browser, a desktop
+   Chrome with devtools device emulation, and a CI runner all report a fine
+   pointer, so every check of that block passes on a machine where it is not
+   applied. Measured on the compose screen at 360x800: `.markup__toggle` came
+   out 22px, less than half the guideline, and the coarse-pointer rule that was
+   supposed to fix it had simply never run.
+
+   So the floor is stated twice, against two different signals. `data-shell`
+   is a decision this app makes for itself (see `useNarrow.ts`), which means it
+   is true in a resized desktop window and therefore true anywhere it can be
+   verified. A device satisfies one, the other, or both; nothing satisfies
+   neither and needs it.
+   ========================================================================== */
+
+:root[data-shell='mobile'] :is(.health__go, .tagfield__open, .markup__btn, .icon-btn, .icon-btn--sm, .select--compact, .lightbox__btn) {
+  min-width: var(--tap-min);
+  min-height: var(--tap-min);
+}
+
+/*
+ * `.markup__toggle` gets the 48px *hit area* without the 48px *height*, which
+ * is the distinction `--tap-pad` exists for and the first place it earns its
+ * keep.
+ *
+ * Growing it like the controls above did work and cost more than it was worth:
+ * it sits in the compose body's label row, so the row grew 22 -> 48px and every
+ * one of those 26 pixels came out of the message box. `check-layout.mjs`
+ * measured the result at 84.1% of the view against the 85% floor this screen
+ * has been held to since the round that set it — a real regression, caught by a
+ * gate rather than by looking, and not one to answer by lowering the number.
+ *
+ * A full-height border box plus an equal negative margin gives both. The button
+ * is `--tap-min` tall and takes taps across all 48px of it; the negative margin
+ * removes 10px from each end again in the flow, so the row it sits in measures
+ * 28px and the message box keeps its pixels. The 10px that overhangs at each
+ * end is card padding above and the gap above the textarea below — nothing
+ * interactive is covered.
+ *
+ * `min-height`, not padding: everything here is `box-sizing: border-box`, so
+ * padding is *inside* a stated min-height rather than added to it. Writing it
+ * the other way round produced a button measuring 48x28 — the pixels were
+ * reclaimed and the hit area was not, which is the worse of the two failures
+ * because it looks fixed. `check-layout.mjs` reported that as a note on the
+ * very next run.
+ */
+:root[data-shell='mobile'] .markup__toggle {
+  min-width: var(--tap-min);
+  min-height: var(--tap-min);
+  margin-block: calc(var(--tap-pad) * -1);
+}
+
+/* ==========================================================================
+   One primary action per screen
+
+   Not a size rule, and here because it is the last word in the cascade.
+
+   A screen with two filled buttons has no primary action, it has two things
+   competing to be looked at first — and this app had three on the compose
+   screen at one point (send, schedule, and the account warning's 去处理).
+   `--btn-primary-*` is what makes a button filled and accented, so the rule is
+   simply that the second one in any container gives it up and becomes an
+   outline button. Same size, same position, same tap target: the only thing
+   that changes is which one the eye lands on.
+
+   `:has()` is Chromium 105+ and this app already depends on it throughout (see
+   the compose layout), so the engine floor is not lowered by this block. On an
+   engine without it, both buttons stay filled — which is exactly today's
+   behaviour, so the failure mode is "no improvement" rather than "broken".
+   ========================================================================== */
+
+.actionbar .btn--primary ~ .btn--primary,
+.card__actions .btn--primary ~ .btn--primary,
+.modal__footer .btn--primary ~ .btn--primary,
+.btn-row .btn--primary ~ .btn--primary {
+  background: transparent;
+  color: var(--accent);
+  border-color: var(--accent);
+  box-shadow: none;
+}

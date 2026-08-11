@@ -11,7 +11,7 @@
  */
 
 import { useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
-import { dragOffset, lockAxis, resolveSwipe, type Axis, type SwipeResult } from '../core/gestures'
+import { dragOffset, lockAxis, resolveSwipe, type Axis, type SwipeResult } from '../core/platform/gestures'
 
 export interface SwipeHandlers {
   onPointerDown: (e: ReactPointerEvent<HTMLElement>) => void

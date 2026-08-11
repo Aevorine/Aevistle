@@ -1,5 +1,5 @@
 /**
- * Adversarial corpus for `core/sendGuardian.ts`'s four pre-send heuristics.
+ * Adversarial corpus for `core/mail/sendGuardian.ts`'s four pre-send heuristics.
  *
  * The stakes here are asymmetric on purpose: a missed catch costs nothing
  * (the send just goes out the way it would have without this feature at
@@ -28,7 +28,7 @@ try {
     'npx',
     [
       'esbuild',
-      `"${join(root, 'src/core/sendGuardian.ts')}"`,
+      `"${join(root, 'src/core/mail/sendGuardian.ts')}"`,
       '--bundle',
       '--format=esm',
       `--outfile="${join(out, 'sg.mjs')}"`,

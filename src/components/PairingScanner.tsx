@@ -23,8 +23,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { Banner, Button, Segmented } from './ui'
 import { useI18n } from '../i18n'
-import { decodeQr } from '../core/qrDecode'
-import { decodePairingText, type PairingPayload } from '../core/pairing'
+import { decodeQr } from '../core/sync/qrDecode'
+import { decodePairingText, type PairingPayload } from '../core/sync/pairing'
 
 export interface PairingScannerProps {
   /** Fires once, with a payload that parsed and has not expired — the caller still has to act on it. */

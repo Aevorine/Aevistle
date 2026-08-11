@@ -1,0 +1,398 @@
+/* ==========================================================================
+   Narrow screens — phones and tablets get a bottom tab bar instead of a rail
+   ========================================================================== */
+
+@media (max-width: 839.98px) {
+  /*
+   * `position: fixed`, and this is the whole point of it.
+   *
+   * The tab bar is the `auto` row of this grid, so its distance from the
+   * bottom of the screen is whatever this box's bottom edge happens to be.
+   * As a `height: 100%` box that was `100dvh` on `#root`, i.e. the WebView's
+   * viewport — and on Android the WebView's viewport is whatever
+   * `MainActivity` last padded the content view down to. A keyboard-sized
+   * bottom padding that never came back down (the failure that file's comment
+   * now documents at length) therefore lifted the five tabs a keyboard's
+   * height off the bottom of the screen, permanently, with a band of blank
+   * app-coloured background under them.
+   *
+   * Fixed to the viewport, that cannot happen. The shell is glued to the
+   * screen the browser reports, not to the box the app was handed, so the bar
+   * is at the bottom of the visible area under every combination of the two
+   * being wrong. Nothing in the ancestor chain (`html`, `body`, `#root`) sets
+   * `transform`, `filter`, `perspective`, `contain` or `will-change`, so the
+   * containing block really is the viewport — checked, not assumed.
+   *
+   * This also costs nothing in the layout below it: the bar stays a grid row
+   * rather than becoming an overlay, so `.main` needs no compensating padding
+   * and every height measured inside it is unchanged. Taking the bar *out* of
+   * flow would have been the obvious way to pin it and would have shortened
+   * `.view--compose` by the bar's height, straight into the 85% floor
+   * `scripts/layout-probe.mjs` holds the message box to.
+   */
+  .shell,
+  .shell[data-collapsed="true"] {
+    position: fixed;
+    inset: 0;
+    grid-template-columns: 1fr;
+    grid-template-rows: 1fr auto;
+  }
+  .sidebar {
+    grid-row: 2;
+    flex-direction: row;
+    align-items: center;
+    border-inline-end: 0;
+    border-top: 1px solid var(--border);
+    padding: var(--sp-2) var(--sp-2)
+      calc(var(--sp-2) + env(safe-area-inset-bottom, 0px));
+  }
+  /*
+   * The bar stands down while the keyboard is up.
+   *
+   * Chosen deliberately over floating it above the keyboard: the five tabs are
+   * navigation, and nobody navigates mid-sentence. Giving that strip back to
+   * the message box is worth more than keeping a control on screen that the
+   * user is, by definition, not reaching for. `display: none` rather than a
+   * transform, so the grid row collapses and `.main` actually receives the
+   * space instead of the bar merely sliding off it.
+   *
+   * Scoped to this media query on purpose. A portrait tablet gets
+   * `data-shell="mobile"` but keeps the sidebar as a left rail (see
+   * `useMobileShell`), and hiding *that* whenever someone typed would take the
+   * navigation away from a screen with room to spare.
+   */
+  :root[data-kb="open"] .sidebar {
+    display: none;
+  }
+  .brand,
+  .sidebar__footer {
+    display: none;
+  }
+  .nav {
+    flex-direction: row;
+    justify-content: space-around;
+    /*
+     * Scrolls sideways rather than squeezing.
+     *
+     * There are eight tabs now. `justify-content: space-around` alone has no
+     * answer when they stop fitting: flex shrinks them below the 48dp touch
+     * target, and the named one (the active tab expands to show its label)
+     * makes the total width depend on *which* tab is selected — so the bar
+     * would be fine on some screens and clipped on others depending on where
+     * you happened to be standing.
+     *
+     * `min-width: max-content` stops the shrink; the scroller absorbs the
+     * overflow. The scrollbar is hidden because a 3px line under a tab bar is
+     * visual noise, and the pill on the active tab already says where you are.
+     */
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    scroll-behavior: smooth;
+  }
+  .nav::-webkit-scrollbar {
+    display: none;
+  }
+  /* This bar carries `MOBILE_NAV` (5 items), not the 9-item `NAV` the row
+     layout below was written for — the stale version of this comment
+     reasoned about "seven tabs" and hid every label but the active one to
+     make that many fit. Five items, stacked icon-over-label instead of
+     icon-beside-label, is a different budget: each column gets ~1/5 of the
+     bar, the label sits under its icon at the auxiliary type rank, and it
+     fits with room to spare — measured against `MOBILE_NAV`'s own "~64px
+     each" note in `core/nav.ts`. All five stay named, all the time, because
+     an icon nobody can name (🔑 for the codes tab, in the report this was
+     written for) is not a control, it is a guess. */
+  .nav__item {
+    flex: 1;
+    flex-direction: column;
+    justify-content: center;
+    gap: 2px;
+    padding: var(--sp-1) var(--sp-1);
+    min-height: var(--ctl-lg);
+    border-radius: var(--r-md);
+  }
+  .nav__item[aria-current="page"] {
+    padding-inline: var(--sp-1);
+  }
+  .nav__item[aria-current="page"]::before {
+    display: none;
+  }
+  .nav__label {
+    display: block;
+    flex: none;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-align: center;
+    font-size: var(--text-xs);
+    line-height: 1.15;
+  }
+  /* Was the row layout's third flex child, riding to the right of the
+     label — stacked under a column `.nav__item` that reads as a fourth
+     line of the button instead of a count on the icon. Pinned to the
+     icon's top-right corner instead, off the label's own flow entirely,
+     because `.nav__item` already carries the `position: relative` its
+     `[aria-current="page"]::before` bar needs. */
+  /* The only literal font-size left in this stylesheet was here — 10px, six
+     below the scale's own floor, on the one number a phone user glances at
+     most. Now on the scale like everything else, and the pill grew from 16px
+     to 20px to hold it. `--text-xs` is the auxiliary rank (14px): a count is
+     data, not prose, so it belongs at the floor rather than at body size. */
+  .nav__badge {
+    position: absolute;
+    top: 0;
+    inset-inline-end: calc(50% - 28px);
+    min-width: var(--icon-sm);
+    height: var(--icon-sm);
+    padding: 0 5px;
+    font-size: var(--text-xs);
+  }
+  .view {
+    padding: 0 var(--sp-4) var(--sp-6);
+  }
+  /*
+   * The status bar.
+   *
+   * The bottom inset was handled when the nav moved down here; the top one
+   * never was, because on a desktop window there is nothing above the client
+   * area. On a phone there is, and the page heading was being painted
+   * underneath the clock and the battery icon — legible only because the
+   * heading happens to be short.
+   *
+   * On the sticky heading rather than on `.view`, so the heading keeps its
+   * blurred band flush to the top of the screen while its *text* clears the
+   * system icons.
+   */
+  .page-head {
+    padding-top: calc(var(--sp-2) + env(safe-area-inset-top, 0px));
+  }
+  .page-head::after {
+    inset-inline: calc(-1 * var(--sp-4));
+  }
+  .actionbar {
+    padding: var(--sp-3) var(--sp-4);
+  }
+  .toasts {
+    inset-inline: var(--sp-4);
+    bottom: calc(var(--sp-4) + 64px);
+    max-width: none;
+  }
+
+  /*
+   * Explanatory prose stands down on a phone.
+   *
+   * Every one of these strings earns its place on a 2560px desktop, where it
+   * sits in the empty column beside the control it describes and costs
+   * nothing. On a 360px phone there is no empty column: the description wraps
+   * to three lines *under* the switch, so a settings panel of eight switches
+   * becomes a page of thirty-two lines of which eight are the actual controls.
+   * The screen stops being a list of things you can change and becomes an
+   * article about them, and the control you came for is four scrolls down.
+   *
+   * What is hidden is exactly the text that explains a control the user can
+   * see and operate without it:
+   *
+   *   - `.switch__desc` — the sentence under a toggle's title.
+   *   - `.field__hint` — guidance below an input. `.field__labelhint` is left
+   *     alone: it shares the label's line and costs no vertical space, which
+   *     is the whole reason it exists (see `Field` in `ui.tsx`).
+   *   - `.banner--info` — the "here is how this screen works" notes. Only this
+   *     tone. `--warning`, `--danger` and `--success` all report something
+   *     that has happened or is wrong, and a phone is *more* likely to need
+   *     those than a desktop, not less.
+   *
+   * `--keep` is the deliberate exception, for the handful of hints that are
+   * diagnostic rather than explanatory — text that is the only place a fact
+   * appears, like which LAN address a pairing code published. Hiding one of
+   * those does not remove an explanation, it removes evidence.
+   *
+   * The add-account dialog's test buttons are the case that made "evidence"
+   * the right word for it. `validateAccount` marks the from address, server
+   * and username as errors from the moment a blank form opens, so the send
+   * test button is grey before anyone has typed a character — same on every
+   * platform. A desktop reader has the per-field hints beside each empty box
+   * and can see why. Cull those same hints on a phone with no substitute and
+   * the button is just grey, permanently, for a reason nothing on screen ever
+   * states — `AccountDialog.tsx` renders that reason as a `field__hint
+   * field__hint--keep` next to the button itself (and does the same for the
+   * receive test), because "which fields are still empty" is not a
+   * description of a control the phone user can already see; it is the one
+   * fact a disabled button owes them and has nowhere else to say.
+   */
+  .switch__desc:not(.switch__desc--keep),
+  .field__hint:not(.field__hint--keep),
+  .banner--info:not(.banner--keep) {
+    display: none;
+  }
+
+  /* Confirmations and short prompts stay cards, and on a phone they take their
+     gutter out of their own width — see the `data-shell="mobile"` block below,
+     which takes the padding off the scrim.
+
+     Sized rather than margined: the base rule is `width: min(560px, 100%)`, so
+     a margin on top of it asks for 100% + 40px inside a 390px scrim, the box
+     overflows and the browser pins it to the left edge — which is the same
+     "card in the wrong place" that block is fixing, reintroduced one rule
+     further down. The scrim already centres, so taking the gutter out of the
+     width is all that is needed.
+
+     Width-based on purpose, and the only modal rule in this file that still is:
+     a 1280px tablet has room for a 560px "Delete this reminder?" and would look
+     absurd with a 1240px one. */
+  .modal {
+    width: calc(100% - 2 * var(--sp-5));
+    max-height: calc(100% - 2 * var(--sp-5));
+  }
+}
+
+/* ==========================================================================
+   Dialogs are screens here, not cards
+   ========================================================================== */
+
+/*
+ * On a desktop a dialog is a card floating over the page: scrim down each side,
+ * rounded corners, a shadow lifting it off what it covers. That vocabulary needs
+ * room either side to read as anything, and on a 390px phone there is none — so
+ * `padding: var(--sp-5)` on the scrim plus `max-height: 94vh` produced a panel
+ * with a ~20px gutter all round, corners curving away from screen edges they
+ * were almost touching, and the tab bar showing underneath through the blur. It
+ * read as a card that had failed to position itself rather than as a screen,
+ * which is the report this fixes.
+ *
+ * A phone has one honest answer: the dialog *is* the screen. Edge to edge,
+ * square corners, no shadow, covering the tab bar completely — and closed with
+ * the button in its header, which is the only way out and therefore has to be
+ * (and is) always visible.
+ *
+ * ## Why an attribute and not `@media (max-width: 760px)`
+ *
+ * This block lived inside that media query, and a tablet is not inside it. The
+ * Android app on an 800px portrait tablet got the desktop treatment — a floating
+ * card, scrim down the sides, and Settings rendered as a two-column grid of
+ * cards rather than rows that open — which is the "the pop-up card is in the
+ * wrong place, it should be full screen" report on a device that is a touch
+ * screen held in two hands and nothing like a desktop.
+ *
+ * Width alone cannot express the condition, because the condition is "phone
+ * *or* tablet *or* a narrow desktop window". CSS has no way to OR a media
+ * query with a selector — `:has()` is not it, and a custom property cannot
+ * branch arbitrary declarations without `@container style()`, which is far
+ * newer than this app's engine floor. So the OR is evaluated once in JavaScript,
+ * where both halves are cheap to ask (`matchMedia` plus `detectPlatform`), and
+ * the answer is written to the root element as `data-shell="mobile"`. See
+ * `components/useNarrow.ts` for the writer and `main.tsx` for why it is also
+ * set before the first paint.
+ *
+ * The rules are duplicated nowhere as a result: this is the single copy, and a
+ * narrow desktop window satisfies it through the same flag a phone does.
+ *
+ * Plain attribute and class selectors throughout. The obvious alternative for
+ * the scrim was `.modal-scrim:has(> .modal--wide) { padding: 0 }`, and `:has()`
+ * is Chromium 105 — so on the older Android System WebView builds this release
+ * already had to accommodate once (the toggle knobs that never moved) the
+ * selector would not match and dialogs would stay exactly as broken as they
+ * were, on exactly the devices least able to spare the space. A rule that
+ * silently does nothing on old engines is worse than no rule, because it tests
+ * fine everywhere the author looks.
+ *
+ * Sized by stretching inside the scrim rather than with `100vh`/`100dvh`. The
+ * scrim is already `position: fixed; inset: 0`, so stretching to it is exact on
+ * every engine; `100vh` is famously wrong on mobile browsers with retracting
+ * chrome, and `dvh` — which fixes that — only landed in Chromium 108.
+ */
+:root[data-shell="mobile"] .modal-scrim {
+  padding: 0;
+}
+
+:root[data-shell="mobile"] .modal--wide,
+:root[data-shell="mobile"] .modal--fullscreen {
+  margin: 0;
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  max-height: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+/*
+ * A full-height panel rises; it does not zoom.
+ *
+ * `modal-in` scales from 0.985, which on a card reads as "this came forward"
+ * and on something the size of the screen reads as the whole display flinching.
+ * The slide alone is the same gesture every mobile sheet uses.
+ */
+:root[data-shell="mobile"] .modal--wide,
+:root[data-shell="mobile"] .modal--fullscreen {
+  animation: sheet-in var(--dur-slow) var(--ease-out);
+}
+
+/*
+ * The system's own furniture, kept clear.
+ *
+ * Edge to edge means the header now sits under the status bar and the footer
+ * under the gesture bar. `.view` and `.page-head` already pay this tax for the
+ * same reason; a dialog that covers the whole screen has to pay it too, or the
+ * close button ends up beneath the clock.
+ */
+:root[data-shell="mobile"] .modal--wide .modal__header,
+:root[data-shell="mobile"] .modal--fullscreen .modal__header {
+  padding-top: calc(var(--sp-4) + env(safe-area-inset-top, 0px));
+}
+:root[data-shell="mobile"] .modal--wide .modal__body,
+:root[data-shell="mobile"] .modal--fullscreen .modal__body {
+  padding-bottom: calc(var(--sp-5) + env(safe-area-inset-bottom, 0px));
+}
+/* A footer, when there is one, is the bottom-most thing and takes the inset
+   instead. The body's own bottom padding above is harmless underneath it — it
+   just becomes ordinary spacing between the last field and the buttons, which
+   is what it looks like anyway. */
+:root[data-shell="mobile"] .modal--wide > .modal__footer,
+:root[data-shell="mobile"] .modal--fullscreen > .modal__footer {
+  padding-bottom: calc(var(--sp-4) + env(safe-area-inset-bottom, 0px));
+}
+
+/*
+ * Rise from the bottom edge. Paired with the full-screen dialog rules above.
+ *
+ * Declared outside the media query because keyframes are global anyway, and
+ * burying it inside one makes it look conditional when only its *use* is.
+ */
+@keyframes sheet-in {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/*
+ * The two boxes a thumb reaches for on `AccountDialog`'s phone layout — the
+ * email address and the password — get a bigger target than the rest of the
+ * form's inputs: taller and larger type, on the phone shell only.
+ *
+ * A class on those two inputs rather than "every input inside the first
+ * section", which is what this was. That selector also caught the display-name
+ * box sitting beside the address and, more to the point, could not reach the
+ * password at all once the credential moved into a section of its own. These
+ * are the two fields a person types by hand — one drives the whole rest of the
+ * form, the other is sixteen characters of provider-generated noise — and they
+ * are the two worth the extra 12px.
+ *
+ * Scoped to `data-shell="mobile"` rather than a `@media` width query, for the
+ * same reason as the block above: that attribute is the one place "narrow
+ * *or* native mobile platform" (`components/useNarrow.ts`) is already
+ * evaluated, and a width query here would miss the tablet case it exists to
+ * catch — a floating desktop-sized card would end up with a phone-sized
+ * address box glued to the top of it.
+ */
+[data-shell="mobile"] .input--lg {
+  min-height: var(--ctl-lg);
+  padding-block: 14px;
+  font-size: var(--text-lg);
+}

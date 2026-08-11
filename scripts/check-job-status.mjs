@@ -49,7 +49,7 @@ const check = (what, ok) => {
 const dir = await mkdtemp(path.join(tmpdir(), 'aevistle-jobrun-'))
 const bundle = path.join(dir, 'jobRun.mjs')
 await build({
-  entryPoints: ['src/core/jobRun.ts'],
+  entryPoints: ['src/core/schedule/jobRun.ts'],
   bundle: true,
   format: 'esm',
   outfile: bundle,

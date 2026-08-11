@@ -154,7 +154,7 @@ try {
     'npx',
     [
       'esbuild',
-      `"${join(root, 'src/core/codeExtract.ts')}"`,
+      `"${join(root, 'src/core/ops/codeExtract.ts')}"`,
       '--bundle',
       '--format=esm',
       `--outfile="${join(out, 'ce.mjs')}"`,

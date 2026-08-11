@@ -40,7 +40,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const selftest = process.argv.includes('--selftest')
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const SOURCE = path.join(root, 'src/core/dateExtract.ts')
+const SOURCE = path.join(root, 'src/core/schedule/dateExtract.ts')
 
 /**
  * The two known-bad versions, applied to the source text before bundling.
@@ -76,7 +76,11 @@ if (selftest) {
 const dir = await mkdtemp(path.join(tmpdir(), 'aevistle-dates-'))
 const out = path.join(dir, 'de.mjs')
 await build({
-  stdin: { contents: source, resolveDir: path.join(root, 'src/core'), loader: 'ts' },
+  // resolveDir is the module's OWN folder, so its sibling imports ('./ics')
+    // resolve exactly as they do in the app. It was 'src/core' while every core
+    // module was flat; after the split into core/<area>/ that directory no
+    // longer holds dateExtract's siblings.
+    stdin: { contents: source, resolveDir: path.join(root, 'src/core/schedule'), loader: 'ts' },
   bundle: true,
   format: 'esm',
   outfile: out,

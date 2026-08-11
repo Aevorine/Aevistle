@@ -2,7 +2,7 @@
  * Guards: the boot effect in `src/state/AppState.tsx` (the per-record `try`
  * around `migrateSkipWeekends` / `rearm` / `shapeOccurrences`, and the
  * structurally-complete placeholder it returns) plus
- * `src/core/schedule.ts:migrateSkipWeekends`.
+ * `src/core/schedule/schedule.ts:migrateSkipWeekends`.
  *
  * The bug: one stored job whose `recurrence` was missing entirely — a record
  * merged in from a paired device on a different build, or restored from an old

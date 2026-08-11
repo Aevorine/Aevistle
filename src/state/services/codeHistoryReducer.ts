@@ -11,7 +11,7 @@
  */
 
 import type { AppState } from '../../core/types'
-import { mergeHits, recordRecipients as recordRecipientUse, type NewHit } from '../../core/codeHistory'
+import { mergeHits, recordRecipients as recordRecipientUse, type NewHit } from '../../core/ops/codeHistory'
 
 /** The action shapes this domain's cases handle — see `AppState.tsx`'s `Action` union for the source of truth. */
 export type CodeHistoryAction =

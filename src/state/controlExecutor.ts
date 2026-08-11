@@ -20,7 +20,7 @@ import {
   type ControlRequest,
   type ControlResponse,
   type StatusResult,
-} from '../core/control'
+} from '../core/sync/control'
 import {
   DEFAULT_RETRY,
   defaultRecurrence,

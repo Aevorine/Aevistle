@@ -1,0 +1,407 @@
+/* ===========================================================================
+   Send conditions
+   =========================================================================== */
+
+.conditions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+.condition {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--surface-1);
+}
+.condition[data-on="true"] {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: color-mix(in srgb, var(--accent) 5%, var(--surface-1));
+}
+.condition__head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  cursor: pointer;
+}
+.condition__name {
+  flex: 1;
+  min-width: 0;
+}
+.condition__detail {
+  margin-top: var(--sp-2);
+  padding-inline-start: calc(var(--sp-4) + 2px);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.condition__effect {
+  font-size: var(--text-base);
+  color: var(--text-3);
+  line-height: var(--leading-normal);
+}
+.condition__times {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.condition__times .input {
+  width: auto;
+}
+
+/* ===========================================================================
+   Working calendar
+   =========================================================================== */
+
+.workcal__entry {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  align-items: flex-start;
+}
+.workcal__paste {
+  min-height: 4.5rem;
+  font-family: var(--font-mono);
+  font-size: var(--text-md);
+}
+.workcal__dates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+
+/* ===========================================================================
+   List controls — the filter row that stays outside the scroller
+   =========================================================================== */
+
+.listcontrols {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--sp-3);
+}
+.listcontrols .search {
+  flex: 1;
+  min-width: 12rem;
+  max-width: none;
+}
+
+/* An attachment whose file has since been moved or deleted. Only ever shown
+   when the platform actually looked — see AttachmentPicker's presence prop. */
+.attachment[data-missing] {
+  border-color: var(--danger);
+  background: var(--danger-bg);
+}
+.attachment__gone {
+  color: var(--danger);
+  margin-inline-end: var(--sp-2);
+}
+
+/* ===========================================================================
+   Keyboard shortcut list
+   =========================================================================== */
+
+.shortcuts {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.shortcuts__row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-sm);
+}
+.shortcuts__row:nth-child(odd) {
+  background: var(--surface-2);
+}
+.shortcuts__keys {
+  flex: none;
+  min-width: 9.5rem;
+  padding: 2px var(--sp-2);
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: var(--r-xs);
+  background: var(--surface-1);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-align: center;
+}
+.shortcuts__label {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ===========================================================================
+   Settings section navigation
+   =========================================================================== */
+
+.settingsnav {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  gap: var(--sp-1);
+  flex-wrap: wrap;
+  padding: var(--sp-2) 0;
+  margin-bottom: var(--sp-3);
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+.settingsnav__link {
+  padding: var(--sp-1) var(--sp-3);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-2);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.settingsnav__link:hover {
+  background: var(--surface-2);
+  color: var(--text-1);
+}
+.settingsnav__link[aria-current="true"] {
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  color: var(--accent);
+}
+/* Anchored scrolling must not tuck the heading under the sticky bar above. */
+.settings-section {
+  scroll-margin-top: 4rem;
+}
+
+/* ===========================================================================
+   Contact groups
+   =========================================================================== */
+
+.contactgroup {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-5) var(--sp-1);
+  font-size: var(--text-xs);
+  color: var(--text-3);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+}
+.contact__pin {
+  flex: none;
+  border: 0;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  padding: var(--sp-1);
+  border-radius: var(--r-xs);
+}
+.contact__pin[aria-pressed="true"] {
+  color: var(--accent);
+}
+.contact__pin:hover {
+  background: var(--surface-2);
+}
+
+/* ===========================================================================
+   Skeletons
+   ---------------------------------------------------------------------------
+   Shape, not motion. See components/Skeleton.tsx for why there is no shimmer.
+   =========================================================================== */
+
+.skeleton__head {
+  margin-bottom: var(--sp-5);
+}
+.skeleton__card {
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface-1);
+  padding: var(--sp-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+.skeleton__bar {
+  border-radius: var(--r-xs);
+  background: var(--surface-2);
+}
+.skeleton__bar--title {
+  width: 12rem;
+  height: 1.5rem;
+  margin-bottom: var(--sp-2);
+}
+.skeleton__bar--sub {
+  width: 20rem;
+  max-width: 70%;
+  height: 1rem;
+}
+.skeleton__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.skeleton__bar--label {
+  width: 6rem;
+  height: 0.875rem;
+}
+.skeleton__bar--input {
+  width: 100%;
+  height: 2.25rem;
+  border-radius: var(--r-sm);
+}
+.skeleton__row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+.skeleton__bar--dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--r-full);
+}
+.skeleton__rowbody {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.skeleton__bar--line {
+  width: 60%;
+  height: 1rem;
+}
+.skeleton__bar--short {
+  width: 35%;
+  height: 0.875rem;
+  opacity: 0.7;
+}
+
+/* ===========================================================================
+   Send details and the endpoint ladder
+   ---------------------------------------------------------------------------
+   Rungs that were never tried are drawn as absent, not as passed — see
+   components/SendDetails.tsx.
+   =========================================================================== */
+
+.senddetails {
+  margin-top: var(--sp-3);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+.senddetails__stages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+  align-items: center;
+}
+.senddetails__stage {
+  padding: 1px var(--sp-2);
+  border-radius: var(--r-xs);
+  font-size: var(--text-xs);
+  background: var(--surface-2);
+  color: var(--text-3);
+}
+.senddetails__stage[data-state="passed"] {
+  background: var(--success-bg);
+  color: var(--success);
+}
+.senddetails__stage[data-state="stopped"] {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+.senddetails__stage[data-state="notreached"] {
+  opacity: 0.5;
+}
+.senddetails__facts {
+  display: grid;
+  grid-template-columns: minmax(6rem, max-content) 1fr;
+  gap: 2px var(--sp-3);
+  margin: 0;
+  font-size: var(--text-sm);
+}
+.senddetails__facts dt {
+  color: var(--text-3);
+}
+.senddetails__facts dd {
+  margin: 0;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+.senddetails__bad {
+  color: var(--danger);
+}
+
+.ladder {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ladder__rung {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--r-xs);
+  font-size: var(--text-xs);
+  background: var(--surface-2);
+}
+.ladder__rung[data-state="ok"] {
+  background: var(--success-bg);
+  color: var(--success);
+}
+.ladder__rung[data-state="failed"] {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+.ladder__rung[data-state="skipped"] {
+  opacity: 0.55;
+}
+.ladder__marker {
+  display: inline-grid;
+  place-items: center;
+  width: 14px;
+  flex: none;
+}
+.ladder__endpoint {
+  font-family: var(--font-mono);
+}
+.ladder__note {
+  margin-inline-start: auto;
+  color: var(--text-3);
+}
+.ladder__rung[data-state="ok"] .ladder__note,
+.ladder__rung[data-state="failed"] .ladder__note {
+  color: inherit;
+  opacity: 0.8;
+}
+.ladder__adjusted {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-top: var(--sp-1);
+  font-size: var(--text-xs);
+  color: var(--text-2);
+}
+
+/* Search box that is still catching up with what was typed (see the
+   `useDeferredValue` note in InboxView). Deliberately faint: the input itself
+   is never late, so this must not read as "blocked". */
+.search-wrap[data-pending] .search__icon {
+  opacity: 0.45;
+}
+
+/* The compose form's panel for per-message rarities. Styled as a quiet row,
+   not a card: it must read as 'more of this form', not as a new section.
+
+   It is a panel and not a `<details>` any more, because the control that opens
+   it is up in the page head and the content it opens is down here in the
+   footer — one element cannot be in two bands. The summary styles that used to
+   live here went with it; the button in the head is an ordinary `Button` with
+   `aria-expanded`, which is the same affordance without a second look. */
+.moreoptions {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: var(--sp-3);
+}
+.moreoptions > .field__row + .field__row { margin-top: var(--sp-3); }

@@ -23,9 +23,9 @@
  */
 
 import { useCallback, useState } from 'react'
-import { getBridge } from '../core/bridge'
-import type { AndroidPermissionApi } from '../core/bridge-android'
-import { oauthState } from '../core/oauth'
+import { getBridge } from '../core/platform/bridge'
+import type { AndroidPermissionApi } from '../core/platform/bridge-android'
+import { oauthState } from '../core/mail/oauth'
 import {
   missingAccountFields,
   runSelfCheck,
@@ -34,7 +34,7 @@ import {
   type SelfCheckFacts,
   type SelfCheckRow,
   type SelfCheckStatus,
-} from '../core/selfcheck'
+} from '../core/ops/selfcheck'
 import { useApp } from '../state/AppState'
 import { useI18n } from '../i18n'
 import { Button, Card, CardHeader } from './ui'

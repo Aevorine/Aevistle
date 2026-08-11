@@ -120,7 +120,7 @@ check(
 const plugin = read('android/app/src/main/java/dev/aevistle/app/AevistleNativePlugin.java')
 check(
   'the JS side has a method to collect the parked share',
-  /takePendingShare/.test(plugin) && /takePendingShare/.test(read('src/core/bridge-android.ts')),
+  /takePendingShare/.test(plugin) && /takePendingShare/.test(read('src/core/platform/bridge-android.ts')),
 )
 
 // --- Windows: the OS has to be told too ------------------------------------

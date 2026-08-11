@@ -18,7 +18,7 @@ import { pathToFileURL } from 'node:url'
 const dir = await mkdtemp(path.join(tmpdir(), 'aevistle-gestures-'))
 const bundle = path.join(dir, 'gestures.mjs')
 await build({
-  entryPoints: ['src/core/gestures.ts'],
+  entryPoints: ['src/core/platform/gestures.ts'],
   bundle: true,
   format: 'esm',
   outfile: bundle,

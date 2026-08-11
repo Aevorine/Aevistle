@@ -8,7 +8,7 @@
  */
 
 import { useMemo } from 'react'
-import { collectHealth, type HealthIssue, type HealthLevel } from '../core/health'
+import { collectHealth, type HealthIssue, type HealthLevel } from '../core/ops/health'
 import { IconActivity, IconAlert, IconCheckCircle, IconClock } from './icons'
 import { useApp } from '../state/AppState'
 import { useI18n, type TranslationKey } from '../i18n'

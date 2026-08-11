@@ -1,0 +1,457 @@
+/* ==========================================================================
+   Misc
+   ========================================================================== */
+
+.accent-swatches {
+  display: flex;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.accent-swatches .swatch {
+  width: var(--icon-lg);
+  height: var(--icon-lg);
+  border-radius: var(--r-full);
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 3px;
+  background-clip: content-box;
+  transition:
+    border-color var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease);
+}
+.swatch:hover {
+  transform: scale(1.08);
+}
+.swatch[aria-pressed="true"] {
+  border-color: currentColor;
+}
+
+/* --- visual style tiles -----------------------------------------------------
+
+   Six choices that are entirely about how things look, so the control has to
+   look like the thing it sets: a name in a list would make someone try all six
+   to find out what they mean. Each tile paints a miniature of its own style
+   from the `--preview-*` set defined in theme.css beside that style's tokens —
+   its ground, its card, its border, its corner radius, its shadow.
+
+   `auto-fill` with a 116px floor rather than a fixed column count: six across
+   on a desktop settings pane, two across at 360px, and no width in between
+   where a name has to truncate. `min-height` is on the tile rather than the
+   preview so the target stays past 44px even if the label wraps to one line.
+   -------------------------------------------------------------------------- */
+
+.stylecards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(116px, 1fr));
+  gap: var(--sp-3);
+}
+.stylecard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+  min-height: var(--tap-min);
+  padding: var(--sp-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-1);
+  color: var(--text-2);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  transition:
+    border-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease);
+}
+.stylecard:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-2);
+}
+.stylecard[aria-pressed="true"] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+  color: var(--text-1);
+}
+.stylecard__preview {
+  display: flex;
+  aspect-ratio: 8 / 5;
+  padding: 7px;
+  border: 1px solid var(--preview-border);
+  border-radius: var(--r-sm);
+  background: var(--preview-bg);
+  overflow: hidden;
+}
+/* The card inside the page: this is the pair of surfaces that actually tells
+   the six styles apart at thumbnail size. */
+.stylecard__pane {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 6px;
+  border: 1px solid var(--preview-border);
+  border-radius: var(--preview-r);
+  background: var(--preview-surface);
+  box-shadow: var(--preview-shadow);
+}
+.stylecard__accent {
+  width: 40%;
+  height: 4px;
+  border-radius: var(--r-full);
+  background: var(--preview-accent);
+}
+.stylecard__line {
+  height: 3px;
+  border-radius: var(--r-full);
+  background: color-mix(in srgb, var(--preview-ink) 55%, transparent);
+}
+.stylecard__line--short {
+  width: 62%;
+  background: color-mix(in srgb, var(--preview-ink) 32%, transparent);
+}
+/* The other of the two sub-16px findings. A style's name is read, and the
+   tile is 116px wide — "Северное сияние" wraps either way. */
+.stylecard__name {
+  font-size: var(--text-base);
+  line-height: var(--leading-tight);
+  overflow-wrap: anywhere;
+}
+
+.kv {
+  display: grid;
+  grid-template-columns: minmax(120px, auto) 1fr;
+  gap: var(--sp-2) var(--sp-4);
+  font-size: var(--text-sm);
+}
+.kv__k {
+  color: var(--text-3);
+}
+.kv__v {
+  color: var(--text-1);
+  overflow-wrap: anywhere;
+}
+
+.link {
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 700;
+  cursor: pointer;
+  background: none;
+  border: 0;
+  padding: 0;
+  font-size: inherit;
+}
+.link:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* --- in-page suggestion list ----------------------------------------------
+
+   Replaces `<datalist>`, whose popup Chromium draws as browser chrome at the
+   platform's own type size — unreachable by page CSS and unmeasurable in the
+   DOM. Rendered here instead so a group name in the list is the same 16px
+   宋体 / Times New Roman as the box it drops out of. */
+
+.suggest {
+  position: relative;
+}
+.suggest__list {
+  position: absolute;
+  inset-inline: 0;
+  top: calc(100% + 4px);
+  z-index: 30;
+  margin: 0;
+  padding: var(--sp-1);
+  list-style: none;
+  max-height: 260px;
+  overflow-y: auto;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-lg);
+}
+.suggest__item {
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-sm);
+  /* Inherited rather than set: the point of this component is that the list
+     matches the rest of the interface instead of the platform's idea of it. */
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  color: var(--text-1);
+  cursor: pointer;
+  /* A group name can be long and there is no room to lose the end of it. */
+  overflow-wrap: anywhere;
+}
+.suggest__item.is-active,
+.suggest__item:hover {
+  background: var(--surface-2);
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  /* Machine strings are the one kind of text that will not wrap on its own.
+     The error a user actually reported —
+
+       1090880:error:100000f7:SSL routines:OPENSSL_internal:
+       WRONG_VERSION_NUMBER:..\..\third_party\boringssl\src\ssl\
+       tls_record.cc:127:
+
+     is a single 120-character token with no spaces in it, and normal wrapping
+     only breaks at spaces. So it ran straight out of the account dialog and
+     was clipped: that is what "the text is cut off" meant. `anywhere` rather
+     than `break-word` because only `anywhere` also lets the box shrink below
+     the token's own width, which is what a flex/grid parent needs in order to
+     stop the whole dialog from growing instead. File paths and long URLs in
+     `.mono` get the same treatment for the same reason. */
+  overflow-wrap: anywhere;
+}
+
+/* --- data folder ---------------------------------------------------------- */
+
+.path-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.path-row__value {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text-1);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: var(--sp-2) var(--sp-3);
+  /* A long path must wrap rather than push the card sideways. */
+  overflow-wrap: anywhere;
+}
+
+.diag-folders {
+  margin-block-start: var(--sp-2);
+}
+.diag-folders summary {
+  cursor: pointer;
+  font-size: var(--text-sm);
+  color: var(--text-2);
+}
+.diag-folders .diag {
+  margin-block-start: var(--sp-2);
+}
+
+.search {
+  position: relative;
+  /* Full width, matching the list it filters.
+     It was capped at 460px on the reasoning that a query is only a few words
+     long, which is true of the text and false of the box: a search field
+     stopping short above a full-width list leaves a notch of empty page at
+     the top of every list screen, and the eye reads the two as unrelated
+     controls rather than as a filter attached to its list. Aligning the edges
+     is what makes the pair read as one block. */
+}
+.search__icon {
+  position: absolute;
+  inset-inline-start: 11px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-3);
+  pointer-events: none;
+}
+.search__input {
+  padding-inline-start: 34px;
+}
+/* Chromium draws its own clear button; ours would be the second one. */
+.search__input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.btn-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+/* A labelled dropdown that sits on a row of buttons without looking like a
+   form field that wandered in — same height, same rhythm. */
+.inline-select {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-inline-end: auto;
+}
+.inline-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-sm);
+  color: var(--text-2);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.inline-check input {
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.inline-select__label {
+  font-size: var(--text-sm);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+.select--compact {
+  height: var(--ctl-sm);
+  padding-block: 0;
+  font-size: var(--text-md);
+  width: auto;
+  min-width: 8.5em;
+}
+
+/* A test button and its cancel, kept together and away from the fields above. */
+.inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-block-start: var(--sp-2);
+}
+
+/*
+ * A disabled test button and the sentence saying why, stacked as one unit.
+ *
+ * The send test's button lives in the dialog footer and the receive test's
+ * lives in `.inline-actions` beside the IMAP fields — two different flex rows
+ * that this file lays out for other reasons entirely, and neither is
+ * guaranteed to wrap at every width the way `.inline-actions` does on its
+ * own. Column-stacking the button and its reason inside their own flex item
+ * means the reason always lands directly under its button regardless of what
+ * the surrounding row does, instead of depending on a wrap point in a
+ * container this rule does not own.
+ */
+.test-action {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+
+.option-list {
+  display: grid;
+  gap: var(--sp-2);
+}
+.option {
+  display: grid;
+  gap: 2px;
+  text-align: start;
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-1);
+  color: inherit;
+  cursor: pointer;
+  transition: border-color var(--dur-fast), background var(--dur-fast);
+}
+.option:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+.option[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.option:disabled {
+  cursor: default;
+  opacity: 0.62;
+}
+/* Body rank, not secondary. This is the headline of a row the same way
+   `.job__name` and `.log__title` are, and those are both `--text-base`; at
+   `--text-sm` it came out the same 14px as the `.option__path` and
+   `.option__meta` underneath it, so the row had a bold line and two plain ones
+   and no first line. Bold plus a size step, like every other row title. */
+.option__title {
+  font-weight: 700;
+  font-size: var(--text-base);
+}
+.option__path {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text-3);
+  overflow-wrap: anywhere;
+}
+.option__meta {
+  font-size: var(--text-sm);
+  color: var(--text-3);
+}
+
+.log {
+  display: flex;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.log:last-child {
+  border-bottom: 0;
+}
+.log__dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  margin-top: 7px;
+  background: var(--text-3);
+}
+.log[data-level="info"] .log__dot { background: var(--success); }
+.log[data-level="warn"] .log__dot { background: var(--warning); }
+.log[data-level="error"] .log__dot { background: var(--danger); }
+.log__body { flex: 1; min-width: 0; }
+.log__title { font-size: var(--text-base); }
+.log__detail {
+  font-size: var(--text-base);
+  color: var(--text-3);
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+}
+.log__time {
+  flex: none;
+  font-size: var(--text-xs);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+/* The controls on a `.log` row that has any — the paired-device rows and the
+   sync-conflict rows. Its own element rather than bare buttons on the row, so
+   the ≤560px block has one thing to move onto a second line instead of trying
+   to shrink labels that are `white-space: nowrap`. */
+.log__actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.spinner {
+  width: 15px;
+  height: 15px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 620ms linear infinite;
+}
+@keyframes spin {
+  to { rotate: 360deg; }
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

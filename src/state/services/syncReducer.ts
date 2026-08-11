@@ -27,7 +27,7 @@
  */
 
 import { type AppState, type Contact, type MailAccount, type ScheduledJob, type Template } from '../../core/types'
-import { recordSyncSeq, removePairedDevice, type PairedDevice } from '../../core/pairedDevices'
+import { recordSyncSeq, removePairedDevice, type PairedDevice } from '../../core/sync/pairedDevices'
 
 /** The action shapes this domain's cases handle — see `AppState.tsx`'s `Action` union for the source of truth. */
 export type SyncAction =

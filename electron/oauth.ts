@@ -2,7 +2,7 @@
  * The desktop half of OAuth2 — the loopback consent flow, and the access
  * tokens that come out of it.
  *
- * `src/core/oauth.ts` holds everything that is only string building and maths.
+ * `src/core/mail/oauth.ts` holds everything that is only string building and maths.
  * This file is the part that needs an operating system: a socket to catch the
  * redirect on, a browser to send the user to, and a keystore to leave the
  * refresh token in.
@@ -61,7 +61,7 @@ import {
   type OAuthConsentResult,
   type OAuthProvider,
   type TokenSet,
-} from '../src/core/oauth'
+} from '../src/core/mail/oauth'
 
 // ---------------------------------------------------------------------------
 // Where the refresh token lives

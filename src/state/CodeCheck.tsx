@@ -30,12 +30,12 @@ import {
   type ReactNode,
 } from 'react'
 import { useApp } from './AppState'
-import { getCachedBody, putCachedBody } from '../core/bodyMemo'
-import { copyText } from '../core/clipboard'
-import { extractFromMessage, learnRule, linksFromSanitizedHtml } from '../core/codeExtract'
-import type { Extracted } from '../core/codeExtract'
-import type { NewHit } from '../core/codeHistory'
-import type { InboxMessageBody } from '../core/bridge'
+import { getCachedBody, putCachedBody } from '../core/mail/bodyMemo'
+import { copyText } from '../core/platform/clipboard'
+import { extractFromMessage, learnRule, linksFromSanitizedHtml } from '../core/ops/codeExtract'
+import type { Extracted } from '../core/ops/codeExtract'
+import type { NewHit } from '../core/ops/codeHistory'
+import type { InboxMessageBody } from '../core/platform/bridge'
 import type { CodeHit, InboxMessage } from '../core/types'
 
 /**

@@ -30,10 +30,10 @@ import { PinEntry } from '../components/PinEntry'
 import { SyncScopePicker } from '../components/SyncScopePicker'
 import { useApp } from '../state/AppState'
 import { useI18n } from '../i18n'
-import { accountLabel } from '../core/accounts'
-import { applyBackup, readBackup, summarise, type BackupFile, type BackupSummary } from '../core/backup'
-import { materialise, parseImport, type ParsedImport } from '../core/jobTransfer'
-import { saveGeneratedFile } from '../core/download'
+import { accountLabel } from '../core/mail/accounts'
+import { applyBackup, readBackup, summarise, type BackupFile, type BackupSummary } from '../core/ops/backup'
+import { materialise, parseImport, type ParsedImport } from '../core/schedule/jobTransfer'
+import { saveGeneratedFile } from '../core/platform/download'
 import {
   buildPairingPayload,
   decryptPairingFile,
@@ -43,9 +43,9 @@ import {
   readPairingFile,
   WrongPinError,
   type PairingFile,
-} from '../core/pairingFile'
-import { SYNC_SCOPE_KEYS, type SyncScopeKey } from '../core/syncScope'
-import { DEFAULT_WORK_CALENDAR } from '../core/workCalendar'
+} from '../core/sync/pairingFile'
+import { SYNC_SCOPE_KEYS, type SyncScopeKey } from '../core/sync/syncScope'
+import { DEFAULT_WORK_CALENDAR } from '../core/schedule/workCalendar'
 
 declare const __APP_VERSION__: string
 

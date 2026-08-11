@@ -27,7 +27,7 @@ import { pathToFileURL } from 'node:url'
 const dir = await mkdtemp(join(tmpdir(), 'aevistle-retention-'))
 const bundle = join(dir, 'retention.mjs')
 await build({
-  entryPoints: ['src/core/logRetention.ts'],
+  entryPoints: ['src/core/ops/logRetention.ts'],
   bundle: true,
   format: 'esm',
   outfile: bundle,

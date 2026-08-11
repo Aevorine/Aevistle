@@ -1,0 +1,266 @@
+/* ===========================================================================
+   The phone layer.
+
+   Everything above this point was written for a window. A 320px phone and a
+   719px tablet were being handed byte-identical CSS, and the four breakpoints
+   that did exist (620/720/760/900) each meant something different, so "it is
+   wrong on my phone" had four places to look and no place to change.
+
+   One breakpoint from here on. 560px sits above the widest phone in landscape
+   and below the narrowest real tablet, and it does not collide with the 620px
+   rule that only dresses the image viewer.
+
+   Measured before writing, at 360x800 with the default density: the compose
+   body sat at y=530 with 62px of it on screen — 7.8% of the display, on the
+   screen whose entire purpose is that box.
+   =========================================================================== */
+
+@media (max-width: 599.98px) {
+  :root {
+    /* The real measured height of a wrapped action bar. The old 68px was a
+       desktop number that `.sendresult` and `.toasts` both anchored to, so
+       both of them sat on top of the send button. */
+    --actionbar-h: 96px;
+    /* Height belongs to the content on a phone; a fixed 60px page head only
+       made some screens two rows and others one. */
+    --pagehead-h: 0px;
+  }
+
+  /* --- navigation: nine tabs, none of them off-screen ---------------------
+     Nine items at their natural width need 394-426px and the row had
+     `overflow-x: auto` with the scrollbar hidden — so on a 360px screen the
+     ninth tab (Settings) was unreachable and there was nothing to suggest it
+     existed. Dividing the row evenly is the only arrangement where every
+     destination is visible without a gesture nobody knows to make. */
+  .nav {
+    overflow-x: visible;
+  }
+  .nav__item,
+  .nav__item[aria-current='page'] {
+    flex: 1 1 0;
+    min-width: 0;
+    padding-inline: 0;
+    justify-content: center;
+  }
+  /* This used to hide the active tab's own label — written back when there
+     were nine tabs and every word was fighting a sibling off the edge. Now
+     that MOBILE_NAV is five items (see nav.ts), that math no longer applies,
+     and the rule was silently fighting the later fix that guarantees all
+     five tabs keep their text (the `max-width: 760px` block above). Removed
+     rather than left dead: same selector, so it would win ties by
+     source order and undo that fix again the next time either block moves. */
+
+  /* --- compose: give the message back its screen ------------------------- */
+
+  /* Four secondary buttons wrapped to two rows because their labels needed
+     444px. As icons they are one row, and each one grows from 34px to a
+     proper target. */
+  .composebar .btn__label {
+    display: none;
+  }
+  .composebar .btn {
+    min-width: var(--tap-min);
+    min-height: var(--tap-min);
+    padding-inline: var(--sp-2);
+  }
+
+  /* The send time and the button that opens the full rules belong on one
+     line: 200px and 84px into a 296px row. This is not the two-column split
+     that was measured as a loss three times over — that one halved the card
+     and then paid a 5.5em label gutter out of each half. */
+  .whenbar__time {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0;
+  }
+  .whenbar__text {
+    flex: 1 1 100%;
+    font-size: var(--text-base);
+  }
+
+  /* A panel indented by a label gutter that no longer exists at this width.
+     The same reset was done for `.form-rows` and for `.compose-foot > .field`
+     and this one was missed, so the options grid had 192px for a 220px track
+     and pushed 28px out of the side of the card. */
+  .compose-foot > .moreoptions {
+    margin-inline-start: 0;
+  }
+
+  /* The address bar and the byte count are the least actionable thing on the
+     screen and they were sharing a row with Send. */
+  .actionbar__meta {
+    display: none;
+  }
+  .actionbar .btn--lg {
+    min-height: var(--control-h);
+  }
+
+  /* --- list screens: let the list be most of the screen ------------------ */
+
+  /* Six bulk-action buttons, every one of them `nowrap`, needed 694px and got
+     328 — five rows of chrome above a two-and-a-half-row list. Scrolling the
+     row keeps every action reachable and costs one row instead of five. */
+  .view--list .btn-row {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: thin;
+    padding-bottom: var(--sp-1);
+  }
+  .view--list .btn-row > * {
+    flex: 0 0 auto;
+  }
+
+  /* A subtitle that restates the title, on the screen with the least room. */
+  .view--list .page-subtitle {
+    display: none;
+  }
+  /* Actions take their own row rather than squeezing the heading down to its
+     200px minimum and wrapping it. */
+  .page-head__actions {
+    flex: 1 1 100%;
+  }
+
+  /* Four 38px icon buttons pinned at `flex: none` were taking 164px of a
+     294px row, leaving the task its name in 90px — under five characters of
+     Chinese. Wrapping them onto their own line gives the name the full width
+     and the buttons a real target size. `.log` needs it for the same reason:
+     `.btn` is `white-space: nowrap`, so "Garder la mienne à la place" is ~270px
+     that cannot shrink, `.log__body` is the only flexible thing on the row, and
+     it collapsed to nothing.
+
+     Still one card per row: `VirtualList` positions rows by a prefix sum over
+     measured heights, so a taller row is fine and a second column is not.
+
+     Those five rules now live in the `max-width: 760px` band beside the swipe
+     section — they were here, at 560, which left 561-760px (a large phone in
+     landscape, a small tablet) with the desktop's rigid row and less width than
+     the desktop to lay it out in. Nothing about them changed except the query. */
+  .icon-btn {
+    width: var(--tap-min);
+    height: var(--tap-min);
+  }
+  .chip__remove {
+    width: var(--icon-md);
+    height: var(--icon-md);
+  }
+
+  /* --- calendar ---------------------------------------------------------- */
+
+  /* 36.9px cells with an absolutely positioned count badge printed over the
+     date. The badge becomes an underline: it still says "something is
+     scheduled" and it no longer sits on top of the number it refers to. */
+  .monthgrid__head,
+  .monthgrid__body {
+    gap: 3px;
+  }
+  .monthgrid__day {
+    aspect-ratio: auto;
+    min-height: var(--tap-min);
+  }
+  .monthgrid__marks {
+    inset-block-start: auto;
+    inset-block-end: 3px;
+    inset-inline: 32%;
+    min-width: 0;
+    height: 3px;
+    padding: 0;
+    font-size: 0;
+    line-height: 0;
+  }
+
+  /* --- dialogs ----------------------------------------------------------- */
+
+  .modal__footer > .btn,
+  /* The send test button, wrapped in `.test-action` once it can carry a
+     disabled reason underneath it (see that rule's own comment) — it needs
+     the same growth its bare `.btn` sibling gets here, or it reverts to
+     hugging its label while Cancel and Save fill the row around it. */
+  .modal__footer > .test-action {
+    flex: 1 1 auto;
+  }
+  .modal__footer > .test-action > .btn {
+    width: 100%;
+  }
+
+  /* --- everything you tap, measured ---------------------------------------
+     The list below is not a guess: it is what a probe walking all nine screens
+     at 360, 390 and 412 reported as under 44px. Two entries are deliberately
+     not on it and are called out at the end.
+
+     Repeated outside this block for `[data-shell="mobile"]` — see below the
+     media query. The floor is about fingers, and a width query cannot see one. */
+  .tagfield__open,
+  .markup__btn,
+  .icon-btn--sm,
+  .chip__remove {
+    min-width: var(--tap-min);
+    min-height: var(--tap-min);
+  }
+
+  /* …and the row those seven 44px buttons sit in has to give somewhere.
+     Measured at 360px: 7 × 44 + 6 × 3 gap = 326px of toolbar, plus the 64px
+     byte count and a 12px gap = 402px, on a 360px screen. It overflowed by
+     97px — real horizontal scroll on the screen this app opens on, at every
+     phone width, in every visual style.
+     The row gives by wrapping. Shrinking the buttons is what the 44px rule
+     directly above exists to prevent, and dropping the byte count loses the
+     one number that explains why a "20 MB" attachment gets bounced (base64
+     makes it 27). The comment on `.markup` says a wrap here gives back the row
+     it was moved to avoid — true, and still the right trade at 360px, where
+     the alternative is content off the side of the window. */
+  .field__label {
+    flex-wrap: wrap;
+  }
+  .field__tools {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+    justify-content: space-between;
+  }
+  .markup {
+    flex-wrap: wrap;
+  }
+  .segmented__item,
+  .settingsnav__link,
+  .chip--toggle,
+  .health__go,
+  .daypicker__day {
+    min-height: var(--tap-min);
+  }
+  /* `.accent-swatches .swatch` pins 30×30 at (0,2,0) and a media query adds no
+     specificity, so a bare `.swatch` here lost to it and the accent rows — the
+     three that are actually tapped, now that `runecircuit` adds two more of
+     them — stayed 30px on the screen this block exists to guarantee 44px on. */
+  .swatch,
+  .accent-swatches .swatch {
+    width: var(--tap-min);
+    height: var(--tap-min);
+  }
+  /* `.link` is a run of text inside a sentence — "Cc / Bcc" sits on the label
+     row of the recipient field. Padding it to 44px would push the field it
+     labels down by half a line, and an inline link is not a button. Left as
+     text on purpose. */
+
+  /* Two that cannot reach 44px and are honest about it:
+       - `.nav__item` is 36-42px wide because nine tabs divided by a 360px
+         screen is 38px. Making them wider means one goes off the edge again,
+         which is the bug this replaced. They are 52px tall, so the target
+         *area* is larger than a 44x44 square.
+       - `.monthgrid__day` is 38x44 for the same reason: seven columns, 360px.
+         A wider cell means a horizontally scrolling month. */
+
+  /* Both of these were pinned to numbers that stopped being true when the bar
+     below them learned to wrap. */
+  .toasts {
+    bottom: calc(
+      var(--sp-4) + var(--nav-h) + env(safe-area-inset-bottom, 0px) + var(--actionbar-h)
+    );
+  }
+}
+
+/* Buttons in a dialog footer may wrap at any width — three of them in a 278px
+   panel used to overflow, and the end that got cut off was Save. */
+.modal__footer {
+  flex-wrap: wrap;
+}
+
+/* --- ANCHOR:calendar-console (B1/B2) --- */

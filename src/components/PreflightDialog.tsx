@@ -16,12 +16,12 @@ import {
   isViewableImage,
   useAttachmentImages,
 } from './ImageLightbox'
-import { buildPreflight, type PreflightReport } from '../core/preflight'
+import { buildPreflight, type PreflightReport } from '../core/mail/preflight'
 import { useApp } from '../state/AppState'
 import { useI18n, type TranslationKey } from '../i18n'
-import type { SendCondition } from '../core/conditions'
+import type { SendCondition } from '../core/schedule/conditions'
 import type { MessageDraft, RetryPolicy } from '../core/types'
-import { countLabel, type Upcoming } from '../core/upcoming'
+import { countLabel, type Upcoming } from '../core/schedule/upcoming'
 
 /**
  * Which of these files are still on disk.

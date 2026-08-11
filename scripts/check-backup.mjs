@@ -21,7 +21,7 @@ import { pathToFileURL } from 'node:url'
 const dir = await mkdtemp(join(tmpdir(), 'aevistle-backup-'))
 const bundle = join(dir, 'backup.mjs')
 await build({
-  entryPoints: ['src/core/backup.ts'],
+  entryPoints: ['src/core/ops/backup.ts'],
   bundle: true,
   format: 'esm',
   outfile: bundle,

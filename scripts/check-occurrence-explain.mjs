@@ -1,7 +1,7 @@
 /**
  * Does "why this time?" ever say something the scheduler would not do?
  *
- * `core/occurrenceExplain.ts`'s whole reason to exist is that it must never
+ * `core/schedule/occurrenceExplain.ts`'s whole reason to exist is that it must never
  * drift from the real pipeline `state/AppState.tsx`'s `shapeOccurrences`
  * runs before a job is armed — working calendar, then quiet hours, then a
  * recipient's delivery window. So most of what is checked below is not "is
@@ -44,10 +44,10 @@ const entry = path.join(dir, 'entry.ts')
 await writeFile(
   entry,
   [
-    `export * from ${JSON.stringify(path.join(root, 'src/core/occurrenceExplain.ts'))};`,
-    `export * from ${JSON.stringify(path.join(root, 'src/core/schedule.ts'))};`,
-    `export * from ${JSON.stringify(path.join(root, 'src/core/workCalendar.ts'))};`,
-    `export * from ${JSON.stringify(path.join(root, 'src/core/deliveryWindow.ts'))};`,
+    `export * from ${JSON.stringify(path.join(root, 'src/core/schedule/occurrenceExplain.ts'))};`,
+    `export * from ${JSON.stringify(path.join(root, 'src/core/schedule/schedule.ts'))};`,
+    `export * from ${JSON.stringify(path.join(root, 'src/core/schedule/workCalendar.ts'))};`,
+    `export * from ${JSON.stringify(path.join(root, 'src/core/schedule/deliveryWindow.ts'))};`,
   ].join('\n'),
 )
 

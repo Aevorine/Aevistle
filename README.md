@@ -111,7 +111,7 @@ Thirty-six of these, each with the reasoning behind it →
 **[docs/FEATURES.md](docs/FEATURES.md)**
 
 What changed recently → **[Releases](https://github.com/Aevorine/Aevistle/releases)**
-(each tag has notes; older ones are also in the `release-notes-0.1.*.md` files).
+(each tag has notes; older ones are also in the `docs/release-notes/`).
 
 ## Download
 

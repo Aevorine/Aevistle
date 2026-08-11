@@ -25,7 +25,7 @@ import { pathToFileURL } from 'node:url'
 const dir = await mkdtemp(path.join(tmpdir(), 'aevistle-autoconfig-'))
 const bundle = path.join(dir, 'providers.mjs')
 await build({
-  entryPoints: ['src/core/providers.ts'],
+  entryPoints: ['src/core/mail/providers.ts'],
   bundle: true,
   format: 'esm',
   outfile: bundle,

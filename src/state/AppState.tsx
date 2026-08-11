@@ -50,12 +50,12 @@ import {
   type JobEvent,
   type JobRun,
   type PlatformBridge,
-} from '../core/bridge'
+} from '../core/platform/bridge'
 // Type-only: a value import would pull the Capacitor runtime into the desktop
 // and web bundles for the sake of three methods that do not exist there.
-import type { AndroidPermissionApi } from '../core/bridge-android'
-import type { PermissionSnapshot } from '../core/health'
-import { pruneLogs } from '../core/logRetention'
+import type { AndroidPermissionApi } from '../core/platform/bridge-android'
+import type { PermissionSnapshot } from '../core/ops/health'
+import { pruneLogs } from '../core/ops/logRetention'
 import {
   applyQuietHours,
   computeOccurrences,
@@ -63,25 +63,25 @@ import {
   migrateSkipWeekends,
   rearm,
   type QuietHours,
-} from '../core/schedule'
-import { announcementFor, newArrivals, previewLine, senderName } from '../core/newMail'
+} from '../core/schedule/schedule'
+import { announcementFor, newArrivals, previewLine, senderName } from '../core/mail/newMail'
 import {
   applyWorkCalendarDetailed,
   calendarWarning,
   DEFAULT_WORK_CALENDAR,
   type CalendarWarning,
-} from '../core/workCalendar'
-import { buildMergeMessages } from '../core/mergeVars'
-import { applyDeliveryWindows, type DeliveryWindow } from '../core/deliveryWindow'
+} from '../core/schedule/workCalendar'
+import { buildMergeMessages } from '../core/mail/mergeVars'
+import { applyDeliveryWindows, type DeliveryWindow } from '../core/schedule/deliveryWindow'
 // Not a component — a pure module that happens to live beside the one screen
 // that needed it first. Imported here so the scheduler and the compose preview
 // answer "whose window counts?" with the same code, not the same intention.
 import { windowsForRecipients, windowsOf } from '../components/deliveryPreview'
-import { buildDigest, DIGEST_JOB_ID } from '../core/digest'
-import { renderDigestBody, renderDigestSubject } from '../core/digestText'
-import { greetingYears, holidayNameMap } from '../core/greetings'
-import { captureSnapshot, type SnapshotReason } from '../core/snapshots'
-import type { NewHit } from '../core/codeHistory'
+import { buildDigest, DIGEST_JOB_ID } from '../core/mail/digest'
+import { renderDigestBody, renderDigestSubject } from '../core/mail/digestText'
+import { greetingYears, holidayNameMap } from '../core/mail/greetings'
+import { captureSnapshot, type SnapshotReason } from '../core/sync/snapshots'
+import type { NewHit } from '../core/ops/codeHistory'
 import {
   afterAttempt,
   dueItems,
@@ -89,19 +89,19 @@ import {
   probablyOnline,
   queueItem,
   type OutboxItem,
-} from '../core/outbox'
-import { evaluateConditions, inboundKey, latestInboundIndex } from '../core/conditions'
-import { applyRun } from '../core/jobRun'
-import { forTransport } from '../core/markdown'
-import { mergeRemoved, rememberRemoved, restoreRemoved, withoutRemoved } from '../core/inboxRemoval'
+} from '../core/ops/outbox'
+import { evaluateConditions, inboundKey, latestInboundIndex } from '../core/schedule/conditions'
+import { applyRun } from '../core/schedule/jobRun'
+import { forTransport } from '../core/mail/markdown'
+import { mergeRemoved, rememberRemoved, restoreRemoved, withoutRemoved } from '../core/mail/inboxRemoval'
 import { applyCodeHistoryAction } from './services/codeHistoryReducer'
 import { applyOutboxAction } from './services/outboxReducer'
 import { applyJobAction } from './services/jobReducer'
 import { executeControl } from './controlExecutor'
-import { effectiveControlScopes, type ControlRequest } from '../core/control'
+import { effectiveControlScopes, type ControlRequest } from '../core/sync/control'
 import { createI18n, detectLocale, localeMeta, useLocaleReady, type I18n, type TranslationKey } from '../i18n'
-import { findPairedDevice, recordSyncSeq, touchSynced, type PairedDevice } from '../core/pairedDevices'
-import { pushConflictSnapshots, type ConflictSnapshot } from '../core/syncConflict'
+import { findPairedDevice, recordSyncSeq, touchSynced, type PairedDevice } from '../core/sync/pairedDevices'
+import { pushConflictSnapshots, type ConflictSnapshot } from '../core/sync/syncConflict'
 import { applySyncAction } from './services/syncReducer'
 import {
   respondToSyncRequest,
@@ -111,7 +111,7 @@ import {
   type SyncListenerStatus,
   type SyncSecretTransport,
   type SyncServerRequest,
-} from '../core/syncLoop'
+} from '../core/sync/syncLoop'
 
 /** Headers only — mirrors the log cap's role of keeping `state.json` small; bodies live on disk, see `inboxStore.ts`. */
 const INBOX_MESSAGE_CAP = 1000

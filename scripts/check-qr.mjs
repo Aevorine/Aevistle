@@ -1,5 +1,5 @@
 /**
- * Prove `src/core/qr.ts` correct against the reference implementation.
+ * Prove `src/core/sync/qr.ts` correct against the reference implementation.
  *
  * A wrong QR encoder does not throw, log, or look wrong. It produces a picture
  * that is unmistakably a QR code and simply fails to scan — a bug discovered by
@@ -47,7 +47,7 @@ try {
      which is how npx ships there. */
   execFileSync(
     'npx',
-    ['esbuild', quote(join(root, 'src/core/qr.ts')), '--bundle', '--format=esm', `--outfile=${quote(join(out, 'qr.mjs'))}`, '--log-level=warning'],
+    ['esbuild', quote(join(root, 'src/core/sync/qr.ts')), '--bundle', '--format=esm', `--outfile=${quote(join(out, 'qr.mjs'))}`, '--log-level=warning'],
     { stdio: ['ignore', 'ignore', 'inherit'], shell: true },
   )
 } catch (e) {

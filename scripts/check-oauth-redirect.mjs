@@ -3,7 +3,7 @@
  * The OAuth2 redirect URI is written down in three places that cannot see each
  * other. This gate makes them agree.
  *
- *   1. `src/core/oauth.ts` — `ANDROID_REDIRECT_SCHEME` / `ANDROID_REDIRECT_URI`,
+ *   1. `src/core/mail/oauth.ts` — `ANDROID_REDIRECT_SCHEME` / `ANDROID_REDIRECT_URI`,
  *      which is what the app *asks* the provider to redirect to.
  *   2. `android/app/src/main/AndroidManifest.xml` — the `<intent-filter>` that
  *      decides which URLs Android will hand back to this app.
@@ -53,10 +53,10 @@ console.log('\n  the OAuth2 redirect agrees across TypeScript, the manifest and 
 
 // --- 1. what the app asks for ----------------------------------------------
 
-const oauthTs = read('src/core/oauth.ts')
+const oauthTs = read('src/core/mail/oauth.ts')
 
 const schemeMatch = oauthTs.match(/export const ANDROID_REDIRECT_SCHEME\s*=\s*'([^']+)'/)
-check('ANDROID_REDIRECT_SCHEME is declared in src/core/oauth.ts', Boolean(schemeMatch))
+check('ANDROID_REDIRECT_SCHEME is declared in src/core/mail/oauth.ts', Boolean(schemeMatch))
 const scheme = schemeMatch?.[1]
 
 const uriMatch = oauthTs.match(/export const ANDROID_REDIRECT_URI\s*=\s*`\$\{ANDROID_REDIRECT_SCHEME\}:\/\/([^`]+)`/)

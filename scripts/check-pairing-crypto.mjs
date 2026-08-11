@@ -1,5 +1,5 @@
 /**
- * Prove `src/core/pairingCrypto.ts` and `src/core/pairing.ts` correct.
+ * Prove `src/core/sync/pairingCrypto.ts` and `src/core/sync/pairing.ts` correct.
  *
  * Unlike `check-qr.mjs`, this is not checking the *math* against a reference —
  * ECDH, HKDF and AES-GCM are WebCrypto primitives, already implemented (and
@@ -19,7 +19,7 @@
  *     talk to the other;
  *   - an expired payload must be refused before any crypto runs at all.
  *
- * Since credentials learned to travel (`src/core/secretTransport.ts`) there is
+ * Since credentials learned to travel (`src/core/sync/secretTransport.ts`) there is
  * a second protocol here, and it needs the same treatment for a sharper
  * reason: what it moves is a mailbox password. So, below the handshake checks:
  *
@@ -57,10 +57,10 @@ const entry = join(out, 'entry.ts')
 writeFileSync(
   entry,
   [
-    `export * from ${JSON.stringify(join(root, 'src/core/pairingCrypto.ts'))};`,
-    `export * from ${JSON.stringify(join(root, 'src/core/pairing.ts'))};`,
-    `export * from ${JSON.stringify(join(root, 'src/core/secretTransport.ts'))};`,
-    `export * from ${JSON.stringify(join(root, 'src/core/syncLoop.ts'))};`,
+    `export * from ${JSON.stringify(join(root, 'src/core/sync/pairingCrypto.ts'))};`,
+    `export * from ${JSON.stringify(join(root, 'src/core/sync/pairing.ts'))};`,
+    `export * from ${JSON.stringify(join(root, 'src/core/sync/secretTransport.ts'))};`,
+    `export * from ${JSON.stringify(join(root, 'src/core/sync/syncLoop.ts'))};`,
   ].join('\n'),
 )
 
@@ -320,7 +320,7 @@ ok(
 
 // --- credential transport ----------------------------------------------------
 //
-// `src/core/secretTransport.ts`. What moves here is a mailbox password, so the
+// `src/core/sync/secretTransport.ts`. What moves here is a mailbox password, so the
 // bar is not "it round-trips" but "it round-trips and nothing else opens it".
 
 const SYNC_KEY_A = bytesToBase64(new Uint8Array(32).map((_, i) => i * 7 + 1))
@@ -452,7 +452,7 @@ const SYNC_KEY_B = bytesToBase64(new Uint8Array(32).map((_, i) => i * 11 + 3))
     `SecretTransport.java uses the same HKDF info as secretTransport.ts ('${ACCOUNT_SECRET_INFO}')`,
     java.includes(`"${ACCOUNT_SECRET_INFO}"`),
   )
-  const ts = readFileSync(join(root, 'src/core/secretTransport.ts'), 'utf8')
+  const ts = readFileSync(join(root, 'src/core/sync/secretTransport.ts'), 'utf8')
   const declaredSalt = /ACCOUNT_SECRET_SALT = '([^']+)'/.exec(ts)?.[1]
   ok('secretTransport.ts declares an HKDF salt constant', Boolean(declaredSalt))
   ok(

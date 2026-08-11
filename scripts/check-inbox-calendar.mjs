@@ -41,6 +41,7 @@
 process.env.TZ = 'America/Los_Angeles'
 
 import { build } from 'esbuild'
+import { concatenatedAppCss } from './lib/stylesheets.mjs'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -91,7 +92,7 @@ if (SELFTEST) {
   }
 }
 
-const css = await readFile(path.join(root, 'src/styles/app.css'), 'utf8')
+const css = concatenatedAppCss()
 const LOCALES = ['en', 'zh-CN', 'fr', 'es', 'ru', 'ar']
 const localeSources = new Map()
 for (const locale of LOCALES) {
@@ -162,7 +163,7 @@ function keysOf(source) {
 
 ok(
   'InboxView imports extractDates from the engine',
-  /import\s*\{[^}]*\bextractDates\b[^}]*\}\s*from\s*'\.\.\/core\/dateExtract'/.test(view),
+  /import\s*\{[^}]*\bextractDates\b[^}]*\}\s*from\s*'\.\.\/core\/schedule\/dateExtract'/.test(view),
 )
 ok('InboxView actually calls extractDates', /\bextractDates\(\s*\{/.test(view))
 
@@ -213,7 +214,7 @@ if (memo) {
 ok(
   'the view does not reimplement the extractor',
   !/const\s+MONTHS?\s*[:=]/.test(view) && !/\\d\{4\}-\\d\{2\}-\\d\{2\}/.test(view),
-  'dates are read in core/dateExtract and nowhere else',
+  'dates are read in core/schedule/dateExtract and nowhere else',
 )
 
 // ---------------------------------------------------------------------------
@@ -250,7 +251,7 @@ ok(
 
 ok(
   'the chain module is imported rather than reimplemented',
-  /import\s*\{[^}]*\bbuildChain\b[^}]*\}\s*from\s*'\.\.\/core\/chain'/.test(view),
+  /import\s*\{[^}]*\bbuildChain\b[^}]*\}\s*from\s*'\.\.\/core\/schedule\/chain'/.test(view),
 )
 ok('the lead times offered are the app-wide ones', /CHAIN_STAGES\.filter\(/.test(view))
 ok('a lead time is labelled by the shared helper', /leadLabelKey\(/.test(view))
@@ -357,7 +358,7 @@ if (start >= 0 && end > start) {
   ok('the confidence tiers are derived from existing tokens', /color-mix\(in srgb, var\(--/.test(block))
   ok('a low reading is styled differently from a confident one', /\[data-confidence='low'\]/.test(block))
   ok('the offers stack rather than sitting in columns', /flex-direction: column/.test(block))
-  ok('there is a narrow-screen arrangement', /@media \(max-width: 560px\)/.test(block))
+  ok('there is a narrow-screen arrangement', /@media \(max-width: 599.98px\)/.test(block))
 }
 
 // ---------------------------------------------------------------------------
@@ -415,8 +416,8 @@ try {
     return import(pathToFileURL(outfile).href)
   }
 
-  const { extractDates } = await load('src/core/dateExtract.ts', 'de')
-  const { buildChain, CHAIN_STAGES, leadLabelKey } = await load('src/core/chain.ts', 'chain')
+  const { extractDates } = await load('src/core/schedule/dateExtract.ts', 'de')
+  const { buildChain, CHAIN_STAGES, leadLabelKey } = await load('src/core/schedule/chain.ts', 'chain')
 
   const DAY = 86_400_000
   const RECEIVED = new Date(2026, 2, 4, 10, 0, 0).getTime()

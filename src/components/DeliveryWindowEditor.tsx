@@ -40,8 +40,8 @@ import {
   DEFAULT_DELIVERY_WINDOW,
   DELIVERY_HORIZON_DAYS,
   type DeliveryWindow,
-} from '../core/deliveryWindow'
-import { computeOccurrences } from '../core/schedule'
+} from '../core/schedule/deliveryWindow'
+import { computeOccurrences } from '../core/schedule/schedule'
 import { useI18n, type TranslationKey } from '../i18n'
 import type { ScheduledJob } from '../core/types'
 

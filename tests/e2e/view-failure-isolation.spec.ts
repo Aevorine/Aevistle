@@ -1,7 +1,7 @@
 /**
  * Guards: `src/components/ErrorBoundary.tsx` (both levels of it, and the
  * `key={view}` on the per-view one in `src/App.tsx`) and
- * `src/core/recipients.ts:buildPool`'s tolerance of a contact with no `tags`.
+ * `src/core/mail/recipients.ts:buildPool`'s tolerance of a contact with no `tags`.
  *
  * The bug, as reported: one contact record written by an older build had no
  * `tags` field. `buildPool` read `.filter` off it, threw inside `TagField`,

@@ -1,0 +1,135 @@
+/* ==========================================================================
+   Modal
+   ========================================================================== */
+
+.modal-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: var(--sp-5);
+  background: var(--scrim);
+  backdrop-filter: blur(3px);
+  animation: fade-in var(--dur) var(--ease);
+}
+.modal {
+  width: min(560px, 100%);
+  /* Measured on the account dialog at an 827px viewport: 1334px of content in
+     a 548px window, so 41% of the form was visible at once and the rest was
+     "content that does not show". The old `min(85vh, 760px)` capped the box at
+     703px and left 124px of viewport unused — a fixed pixel ceiling shrinking
+     the box on exactly the screens that had room to spare. 94vh keeps a scrim
+     margin without spending the rest of the screen on nothing. */
+  max-height: 94vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-lg);
+  animation: modal-in var(--dur-slow) var(--ease-out);
+  overflow: hidden;
+}
+.modal--wide {
+  width: min(760px, 100%);
+}
+/**
+ * Full screen means full screen.
+ *
+ * The width was `min(1160px, 96vw)`, and the 1160 bound from 1209px upward —
+ * so on the 1536px-wide window this is actually used on, a dialog labelled
+ * "full screen" covered 75.5% of it and left 188px of scrim down each side.
+ * A cap on the thing whose entire job is to be as large as possible is the
+ * bug; 1600 is here only so that a 2560px monitor does not get a 2.4k-wide
+ * line of body text, and it is a ceiling nobody reaches at the sizes this app
+ * is used at.
+ */
+.modal--fullscreen {
+  width: min(1600px, 96vw);
+  height: 92vh;
+  max-height: 92vh;
+}
+.modal--fullscreen .modal__body {
+  flex: 1;
+}
+.modal__header {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-4) var(--sp-4) var(--sp-3);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.modal__title {
+  flex: 1;
+  /* Without this, a `flex: 1` item never shrinks below its own min-content
+     size — and a block of text's min-content is the width of its single
+     longest word, not the width of the box holding it. A modal with a long
+     title and a row of action buttons past its `flex: none` neighbors was
+     landing there: the title kept every word's width in reserve and wrapped
+     one word per line rather than filling the space it was actually given.
+     `min-width: 0` lets it shrink to the row's remaining width and wrap like
+     a normal paragraph instead. */
+  min-width: 0;
+  font-size: var(--text-lg);
+  font-weight: 700;
+  letter-spacing: var(--tracking-tight);
+}
+.modal__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--sp-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+/*
+ * A flex item's automatic minimum size — the floor that normally stops a
+ * flex container from shrinking a child past its own content — is defined by
+ * spec to collapse to 0 the moment the item's own `overflow` is anything but
+ * `visible`. `.card--flush` (the account list, among others) sets
+ * `overflow: hidden`, so the moment one held more rows than `.modal__body`
+ * had room for, its default `flex-shrink: 1` let this column flex container
+ * squeeze the card down to whatever height fit — clipping the extra rows
+ * inside the card's own `overflow: hidden` — instead of the card keeping its
+ * full content height and `.modal__body`'s `overflow-y: auto` scrolling past
+ * it. Measured on the accounts screen with 20 accounts on a 390px‑wide
+ * window: `.modal__body` reported `scrollHeight === clientHeight`, i.e.
+ * nothing to scroll, while sixteen of the twenty rows were never visible or
+ * reachable by any input. `flex-shrink: 0` is the fix — the card is exactly
+ * as tall as its content wants, on every screen that opens one this way, and
+ * the scrolling happens exactly once, in the container built to do it.
+ */
+.modal__body > .card {
+  flex-shrink: 0;
+}
+.modal__footer {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+  padding: var(--sp-4) var(--sp-5);
+  border-top: 1px solid var(--border-subtle);
+  background: var(--surface-2);
+}
+.modal__footer-spacer {
+  flex: 1;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}

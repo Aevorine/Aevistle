@@ -19,7 +19,7 @@ import { pathToFileURL } from 'node:url'
 const dir = await mkdtemp(path.join(tmpdir(), 'aevistle-markup-'))
 const bundle = path.join(dir, 'markup.mjs')
 await build({
-  entryPoints: ['src/core/markup.ts'],
+  entryPoints: ['src/core/mail/markup.ts'],
   bundle: true,
   format: 'esm',
   outfile: bundle,
@@ -29,7 +29,7 @@ const { applyMarkup } = await import(pathToFileURL(bundle).href)
 
 const mdBundle = path.join(dir, 'markdown.mjs')
 await build({
-  entryPoints: ['src/core/markdown.ts'],
+  entryPoints: ['src/core/mail/markdown.ts'],
   bundle: true,
   format: 'esm',
   outfile: mdBundle,

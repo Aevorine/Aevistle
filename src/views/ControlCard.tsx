@@ -54,8 +54,8 @@ import { Banner, Button, Card, CardHeader, Switch, useToast } from '../component
 import { IconFolder, IconShield } from '../components/icons'
 import { useApp } from '../state/AppState'
 import { useI18n } from '../i18n'
-import type { ControlEndpoint } from '../core/control'
-import { copyText } from '../core/clipboard'
+import type { ControlEndpoint } from '../core/sync/control'
+import { copyText } from '../core/platform/clipboard'
 
 export function ControlCard() {
   const { state, bridge, dispatch } = useApp()

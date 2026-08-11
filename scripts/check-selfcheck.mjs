@@ -2,7 +2,7 @@
 /**
  * The self-check's own self-check.
  *
- * `core/selfcheck.ts` decides, for every layer between the compose screen and
+ * `core/ops/selfcheck.ts` decides, for every layer between the compose screen and
  * the mail server, whether it passed, warned, failed, or did not apply. Those
  * verdicts are the entire product: a user arrives at that panel having already
  * concluded the app is broken, and what they do next is whatever the first
@@ -29,7 +29,7 @@ const { build } = await import(pathToFileURL(path.join(ROOT, 'node_modules/esbui
 
 const bundle = path.join(ROOT, 'node_modules', '.cache-selfcheck.mjs')
 await build({
-  entryPoints: [path.join(ROOT, 'src/core/selfcheck.ts')],
+  entryPoints: [path.join(ROOT, 'src/core/ops/selfcheck.ts')],
   bundle: true,
   format: 'esm',
   platform: 'node',

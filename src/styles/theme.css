@@ -12,139 +12,54 @@
    ========================================================================== */
 
 /* ==========================================================================
-   Typeface composition
+   Typeface — one family, every screen
 
-   One family name, two fonts, split by codepoint. `unicode-range` lets the
-   browser pick per character rather than per element, so a Chinese sentence
-   containing an English product name gets Songti for the Chinese and Times
-   New Roman for the Latin — without markup, and without the two ever being
-   chosen by the fallback order of a plain font stack (which resolves per
-   *element* and would put the whole sentence in whichever font came first).
+   Round 5 of 界面要统一. The four rounds before this one set the whole app in
+   宋体 for CJK and Times New Roman for Latin, split by unicode-range across two
+   @font-face rules, with a 4.05MB Noto Serif SC bundled for Android. That
+   pairing is gone, and this is why.
 
-   Latin, digits and Western punctuation → Times New Roman.
-   CJK ideographs and full-width punctuation → 宋体 / Songti.
+   A serif is drawn for paper. Its horizontal strokes are thinner than its
+   vertical ones on purpose — on a printed page that difference is the texture
+   of the text, and at 300+ dpi it survives. On a phone at ~2.6 device pixels
+   per CSS pixel, a 14px 宋体 horizontal stroke lands on well under one physical
+   pixel, and the rasteriser has to choose between dropping it and smearing it
+   grey. Both happen, per glyph, per line. That is the physical cause of
+   眼睛不舒服 on a screen, and it is not reachable by size, weight or
+   line-height, because the defect is stroke *contrast*, not scale.
 
-   Both faces are ordered system-first: every `local()` name comes before the
-   bundled `url()`, so a machine that already owns the real typeface uses the
-   real typeface and downloads nothing at all. Windows answers with Times New
-   Roman and SimSun, macOS with Times New Roman and Songti SC, desktop Linux
-   with the metric-compatible clones (Tinos, Liberation Serif) and the Noto
-   Serif CJK / Source Han Serif line. Android owns none of them, every
-   `local()` there misses, and the browser falls through to the bundled files
-   at the end of each list — so Android is the only platform that pays for
-   them, which is the platform they were added for.
+   A screen sans has no stroke contrast to lose: every stroke is the same
+   weight, which is the property that survives being drawn at 14px. It is why
+   every phone OS sets its own interface in one.
 
-   The rejected alternative is url()-first, which is how this file was written
-   until now. It bought one identical rendering on every platform, and it cost
-   too much for that: a loaded url() font owns its entire declared
-   unicode-range, so the `local()` names could never be reached on any machine
-   that was not offline, and Windows downloaded and rendered a 4.05MB bundled
-   Songti instead of the SimSun sitting on its own disk. The two bundled files
-   are chosen so that dropping them on desktop changes nothing dimensionally:
-   Tinos is metric-compatible with Times New Roman glyph for glyph, and Noto
-   Serif SC is the same Songti-family design as SimSun, so a line wraps in the
-   same place on a phone as it does on a desktop.
+   Nothing is bundled any more, and that is the payoff rather than a
+   compromise. The serif had to ship 4.05MB because Android carries no serif
+   CJK worth naming. Sans CJK is the exact opposite case — it is what all three
+   platforms already set their own UI in, so it is guaranteed present:
+
+     Windows   Segoe UI + Microsoft YaHei (微软雅黑)
+     Android   Roboto   + Noto Sans CJK SC     <- the platform default itself
+     macOS     SF Pro   + PingFang SC
+
+   So the stack below is local-only with no url() at the end: 4.14MB leaves the
+   APK, and first paint has no font-swap reflow because there is nothing left
+   to swap in.
+
+   No unicode-range split either, and none is needed. CSS font matching falls
+   through per *character* for a codepoint the current font has no glyph for,
+   so "Aevistle 定时发送" takes its Latin from Segoe UI and its Chinese from
+   YaHei off one flat stack — Segoe UI simply has no 定 to offer. The split was
+   necessary for the serif pairing for a different reason: SimSun *does* carry
+   Latin glyphs, and poor ones, so any stack reaching it first set English in
+   them. This stack orders Latin first and reaches the CJK faces only for what
+   the Latin faces lack, so that failure has nowhere to happen.
+
+   The cost, stated plainly: a line no longer wraps in the same place on
+   Windows as on Android, because the platforms are now running three genuinely
+   different fonts rather than one bundled one. Every native app on both
+   platforms has this property. Layout here is measured in ch, % and flex
+   fractions rather than in glyph counts, so nothing depends on the wrap point.
    ========================================================================== */
-
-@font-face {
-  font-family: "Aevistle Text";
-  font-style: normal;
-  font-weight: 100 900;
-  /* Paint the fallback immediately and swap when the bundled file lands.
-     Undeclared, this is `auto`, which every engine implements as a block
-     period of up to three seconds — three seconds of invisible text on the
-     one platform that actually fetches these files. Nothing here is
-     decorative enough to be worth hiding words for, and a reflow one screen
-     into the session is the cheaper of the two costs. */
-  font-display: swap;
-  src:
-    /* The real thing first, then the two metric-compatible clones that stand
-       in for it on desktop Linux. None of these costs a byte: they are
-       already installed, which is the whole point of the ordering. */
-    local("Times New Roman"), local("TimesNewRomanPSMT"), local("Tinos"),
-    local("Liberation Serif"), local("Nimbus Roman"),
-    /* Android. None of the five above ship on it — Times New Roman is a
-       Microsoft font, and Tinos/Liberation/Nimbus are desktop Linux. Without
-       these two the Latin half of every mixed sentence fell through to the
-       generic `serif` at the end of the stack, which on Android is Noto Serif
-       anyway, but arrived there by accident rather than by choice and skipped
-       the unicode-range split on the way — so a phone got one font for the
-       whole sentence, which is the exact thing this pair of @font-face rules
-       exists to prevent. */
-    local("Noto Serif"), local("Droid Serif"),
-    /* Last, and reached only when every name above has missed. Tinos (Google,
-       SIL OFL 1.1) is metric-compatible with Times New Roman by design,
-       subset to the Latin/Cyrillic/Greek/punctuation ranges this face
-       actually covers (see the unicode-range below) — 90KB rather than the
-       ~510KB full font. 90KB is cheap enough that loading it everywhere would
-       not have hurt, but there is no argument for it either: a machine that
-       reaches this line has nothing better, and a machine that does not reach
-       it is already drawing the face this file was cut to imitate. See
-       src/assets/fonts/OFL-Tinos.txt for the license text this subset ships
-       under. */
-    url("../assets/fonts/aevistle-serif-latin.woff2") format("woff2");
-  /* Basic Latin, Latin-1, Latin Extended-A/B, IPA, Greek, Cyrillic,
-     general punctuation, superscripts, currency and letterlike symbols. */
-  unicode-range:
-    U+0000-024F, U+0250-02AF, U+0370-03FF, U+0400-04FF,
-    U+2000-206F, U+2070-209F, U+20A0-20CF, U+2100-214F, U+2190-21FF, U+2200-22FF;
-}
-
-@font-face {
-  font-family: "Aevistle Text";
-  font-style: normal;
-  font-weight: 100 900;
-  /* Matters far more here than on the Latin face: the bundled file below is
-     4.05MB, and the default block period would hold every Chinese character
-     on screen blank for up to three seconds on the platform that downloads
-     it — which, this being a Chinese-language UI, is very nearly the whole
-     screen. Swap paints immediately and re-renders once. */
-  font-display: swap;
-  src:
-    /* The literal 宋体 first: it is the face this app was designed around and
-       the one asked for by name. Windows answers with SimSun, macOS with
-       Songti SC or STSong, desktop Linux with the Noto Serif CJK / Source Han
-       Serif line or AR PL UMing. Every one of these is already on the disk,
-       so on those three platforms this face costs nothing and renders in the
-       hinting the OS shipped, which no downloaded subset can match. */
-    local("SimSun"), local("宋体"), local("NSimSun"), local("Songti SC"),
-    local("STSong"), local("Noto Serif CJK SC"), local("Noto Serif SC"),
-    local("Source Han Serif SC"), local("AR PL UMing CN"),
-    /* Android's own Songti substitute. Named differently on different vendor
-       builds, so all three spellings are listed. */
-    local("Noto Serif CJK"), local("NotoSerifCJK"), local("Source Han Serif"),
-    /* Last, and the reason the file is bundled at all: SimSun is
-       Microsoft-proprietary and ships on no Android device, and plenty of
-       Android builds answer none of the names above either, so without this
-       entry the Chinese half of the UI would land on whatever the vendor
-       chose for generic `serif`. Noto Serif SC (Google, SIL OFL 1.1) is the
-       free, redistributable substitute — same underlying design as Source Han
-       Serif SC (Adobe/Google), so it is a Songti, and text wraps where it
-       wraps on Windows. Instanced from the variable font to a static Regular
-       weight, then subset to the CJK Unified Ideographs Basic block
-       (U+4E00-9FFF, 100% glyph coverage) plus CJK symbols/punctuation and
-       halfwidth/fullwidth forms — the range this UI's Chinese text actually
-       needs — at 4.05MB, down from a 25.1MB full/variable source font.
-
-       That subset has a hole, and this ordering is what confines it to the
-       platforms that reach this line. A successfully-loaded `url()` font is
-       used for its whole declared unicode-range, and per-glyph fallback to a
-       later `src` entry only happens on total load failure, not on a missing
-       individual glyph — so wherever this file does load, a character outside
-       the subset (rare CJK Extension-A ideographs, Hiragana/Katakana,
-       compatibility ideographs — none of which this app's UI or locale
-       strings use) renders as `.notdef`. On Windows and macOS that hole no
-       longer exists at all, because the system font answers first and this
-       file is never fetched. See src/assets/fonts/OFL-NotoSerifSC.txt for the
-       license text this subset ships under. */
-    url("../assets/fonts/aevistle-serif-cjk.woff2") format("woff2");
-  /* CJK symbols and punctuation, Hiragana/Katakana, unified ideographs,
-     compatibility ideographs and full-width forms. */
-  unicode-range:
-    U+2E80-2EFF, U+3000-303F, U+3040-30FF, U+3100-312F, U+3190-319F,
-    U+31C0-31EF, U+3200-32FF, U+3400-4DBF, U+4E00-9FFF,
-    U+F900-FAFF, U+FE30-FE4F, U+FF00-FFEF;
-}
 
 /* --- 'Aevistle Rune' -------------------------------------------------------
    A second face, not a variant of the first: `runecircuit` wants its headings
@@ -239,35 +154,39 @@
      body step is an interaction requirement as well as a reading one. What
      comes down is only the one rank *below* prose, and it stops at 14px. */
   --font-sans:
-    "Aevistle Text", "Times New Roman", "SimSun", "Songti SC",
-    "Noto Serif CJK SC", "Noto Sans Arabic", "Segoe UI Emoji", serif;
+    /* Latin, digits and punctuation — each platform's own interface face. */
+    -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI",
+    Roboto, "Helvetica Neue", Arial,
+    /* CJK. Reached only for codepoints the faces above have no glyph for. */
+    "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", "微软雅黑",
+    "Noto Sans CJK SC", "Source Han Sans SC", "Noto Sans SC",
+    "HarmonyOS Sans SC", "Hiragino Sans GB", "Heiti SC",
+    /* The RTL locale, then emoji, then the generic. */
+    "Noto Sans Arabic", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
+
   /*
-   * Not a monospace any more, despite the name.
+   * An alias, deliberately. The name is kept for its 17 call sites.
    *
-   * Sixteen rules read this token — verification codes, file paths, host:port
-   * readouts, SSL error strings, recovery keys, URLs. All of them are Latin
-   * text, and the instruction for this round was that Latin, digits and
-   * punctuation are Times New Roman everywhere, with the app's typography
-   * identical on every screen. A coding sans in sixteen places is the largest
-   * remaining exception to that, so it goes.
+   * Those sites are verification codes, recovery keys, file paths, host:port
+   * readouts and SSL error strings — machine text, where a coding face earns
+   * its keep by drawing 0/O and 1/l/I apart. Against that: 应用的所有界面风格,
+   * 文字显示都要求统一（非常重要）, stated as the governing requirement of this
+   * round. A second visible typeface is the largest single thing that can be
+   * seen to contradict it, and it would be seen — a verification code is not a
+   * footnote, it is the entire content of its card.
    *
-   * What the monospace was actually buying was column alignment of digits, and
-   * that is kept: `body` already sets `font-variant-numeric: tabular-nums`
-   * (app.css), which gives every digit the same advance width in Times New
-   * Roman too. A column of byte counts or timestamps still lines up.
+   * So the requirement wins and this resolves to the body face. What the mono
+   * was actually buying is kept by other means: body sets
+   * font-variant-numeric: tabular-nums (app.css), so digits keep one advance
+   * width and a column of counts still lines up; the code display groups 3+3
+   * and tracks wide, which stops a transcription slip far more effectively
+   * than glyph shape does.
    *
-   * What is genuinely lost is glyph disambiguation. A coding face draws 0/O
-   * and 1/l/I apart on purpose; a serif does not, so a verification code
-   * containing those characters is marginally easier to mistype than it was.
-   * That is a real cost of the instruction rather than an oversight — reverting
-   * it is this one declaration, nothing else.
-   *
-   * The token keeps its name so the sixteen call sites, and the check scripts
-   * that know them, do not all have to move for a change of value.
+   * Reverting is this one declaration and nothing else — name a real mono here
+   * (ui-monospace, "Cascadia Code", Consolas, "Roboto Mono", monospace) and all
+   * 17 sites follow it.
    */
-  --font-mono:
-    "Times New Roman", Times, "SimSun", "宋体", "Songti SC",
-    "Noto Serif SC", "Noto Serif CJK SC", serif;
+  --font-mono: var(--font-sans);
 
   /* 14px — the data rank, and the smallest size in the app: a timestamp, a
      chip, a count, a file-type tag. Never a sentence. It was 12.5px until the
@@ -308,18 +227,42 @@
   --text-xl: 1.5rem;        /* 24px  小二 — screen titles */
   --text-2xl: 1.8333rem;    /* 29.33px 二号 — hero */
 
-  /* Songti needs more air between lines than a sans-serif at the same size;
-     the strokes are thinner and the glyphs are full-width. */
-  --leading-tight: 1.35;
-  --leading-normal: 1.65;
-  --leading-relaxed: 1.8;
+  /* A sans at the same size needs less air than 宋体 did: even strokes let
+     lines separate on their own, where the serif leaned on the gap to keep its
+     thin horizontals from merging. 1.65 -> 1.6 on body copy gives back about
+     half a line per ten — one more list row per screen, at no cost to
+     reading. */
+  --leading-tight: 1.3;
+  --leading-normal: 1.6;
+  --leading-relaxed: 1.75;
 
-  /* Negative tracking is a sans-serif trick. Applied to 宋体 it collides the
-     full-width glyphs, so the "tight" step is neutral here and only the wide
-     step, used on all-caps Latin labels, does anything. */
-  --tracking-tight: 0;
+  /* Negative tracking is a sans trick, and now it genuinely applies. Four
+     heading sites name it — .brand__name, .page-title, .btn, and the card
+     heading at app.css:2406 — and -0.01em is 0.16px at 16px: it tightens a
+     Latin heading and is imperceptible on the CJK in the same string, which is
+     the only reason it may be set globally at all. Body copy stays at 0;
+     tightening full-width glyphs collides them at any size. */
+  --tracking-tight: -0.01em;
   --tracking-normal: 0;
   --tracking-wide: 0.06em;
+
+  /* ---- weight ----
+     宋体 ships one weight, so all 53 font-weight: 700 rules in app.css were
+     being synthesised — the rasteriser smearing each glyph sideways, which is
+     what made bold CJK read as muddy rather than strong. A sans has real cut
+     weights, so these four are the entire ladder and each is bound to a role:
+
+       normal    400  body copy, input text, anything read as a sentence
+       medium    500  the label naming the control beside it
+       semibold  600  section names, screen titles, buttons
+       bold      700  the one value a card exists to show, and nothing else
+
+     700 becomes the exception rather than the default. Real 600 reads as
+     stronger than synthesised 700 did, at less ink. */
+  --fw-normal: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 700;
 
   /* ---- spacing (4px base) ----
 
@@ -363,23 +306,105 @@
   --r-xl: 20px;
   --r-full: 999px;
 
-  /* ---- control height ----
-     One number for everything a pointer lands on: text input, select, button,
-     the recipient tag field. They had drifted to 46 / 42 / 40px, which is
-     invisible on its own and unmistakable in a row where a button sits beside
-     the box it submits — the two baselines miss by 4px and the row reads as
-     assembled from parts rather than designed. Comfortably past the 44px
-     pointer-target minimum, so the uniform value is also the accessible one. */
-  --control-h: 46px;
+  /* ---- control size ladder ----
 
-  /* The smallest a thing you tap is allowed to be.
+     The single largest measured source of 界面不统一 in this app. app.css
+     declared 17 distinct values in the 24-56px band — 24 26 28 30 32 34 36 38
+     40 42 44 46 48 50 52 54 56 — across elements that are all, functionally,
+     "a thing you tap". Seventeen values inside a 32-pixel range cannot be told
+     apart one at a time and are unmistakable in aggregate: it is precisely
+     what makes a row of controls read as assembled from parts rather than
+     designed as one.
+
+     Four steps replace them, and which step a control gets is decided by what
+     the control *is*, so two of the same kind cannot drift apart again:
+
+       xs  28px  a glyph inside another control   chip cross, stepper arrow
+       sm  36px  a control inside a dense row     row action, filter chip
+       md  48px  anything standing on its own     button, input, select, tab
+       lg  56px  the primary action of a screen   Send, Schedule
+
+     md is 48 rather than the previous 46 because 48dp is Android's documented
+     minimum touch target and 46 was under it — by two pixels, on every button
+     and every input in the app. xs and sm are under it too and are allowed to
+     be, on one condition: both carry --tap-pad, so the rectangle that
+     *responds* is 48 even where the rectangle that is *drawn* is smaller. That
+     is what the guideline actually specifies, and it is how a dense list stays
+     dense without becoming a minefield. */
+  /* ---- icon ladder ----
+
+     The other half of the seventeen-values problem, and a separate ladder on
+     purpose: an icon is a thing you *look at*, a control is a thing you
+     *tap*, and the two have different minimums. Merging them is what produced
+     a 16px close cross that was also the only way to dismiss a chip.
+
+     app.css drew glyphs at 16 17 18 20 22 24 26 28 30 32 40 42px. Five steps
+     replace them, and they are the standard doubling set every icon library
+     is drawn on, so an imported glyph lands on a whole pixel instead of a
+     half one:
+
+       xs  16px  inside a control that is already small  switch knob
+       sm  20px  beside text at body size               nav icon, badge, tick
+       md  24px  the default standalone glyph           chip cross, checkbox
+       lg  32px  a glyph that is the subject of its row avatar, file type
+       xl  40px  the illustration on an empty state     empty icon, brand mark
+
+     None of these is a touch target on its own. Anything tappable that draws
+     at xs/sm/md carries --tap-pad, or sits inside a row that is itself the
+     target — see the (any-pointer: coarse) block in app.css, which is where
+     the 48px floor is actually enforced. */
+  --icon-xs: 16px;
+  --icon-sm: 20px;
+  --icon-md: 24px;
+  --icon-lg: 32px;
+  --icon-xl: 40px;
+
+  /* ---- breakpoints ----
+
+     Documentation, not tokens: a CSS media query cannot read var(). They are
+     written down here because the value of having exactly three is that
+     everything changes shape at the same three widths, and that only holds if
+     there is one place saying which three.
+
+     These are Android's own window size classes, which is the standard this
+     app is shipped against — not a set invented for this file:
+
+       compact    < 600px    phone portrait          one column, bottom tabs
+       medium     600-839    phone landscape,
+                             small tablet portrait   one column, bottom tabs
+       expanded   840-1199   tablet landscape,
+                             small desktop           side rail + two panes
+       large      >= 1200    desktop                 side rail + two panes
+
+     What they replaced: 560 620 700 720 760 900 1100 1000 1500 1600 — ten
+     boundaries, so ten different widths at which some part of the screen
+     rearranged itself while the rest did not. Resizing the window did not
+     reveal a layout, it revealed a pile of them.
+
+     max-width queries are written as .98 so a 600px viewport is compact-or-
+     medium exactly once and never both. */
+  --ctl-xs: 28px;
+  --ctl-sm: 36px;
+  --ctl-md: 48px;
+  --ctl-lg: 56px;
+  /* Kept for its 11 call sites, which all mean "a standalone control". */
+  --control-h: var(--ctl-md);
+
+  /* The smallest a thing you tap is allowed to be, raised 44 -> 48 to meet the
+     Android guideline this app is shipped against. 38 call sites move with it.
      Named rather than repeated because ten places had each picked their own
-     number — 16px chip crosses, 28px markup buttons, 38px row actions — and a
-     value spelled out ten times is a value nobody can raise once. */
-  --tap-min: 44px;
-  /* The bottom tab bar on a phone. `.toasts` and `.sendresult` sit above it,
-     and both used to hard-code a number that had stopped being true. */
-  --nav-h: 52px;
+     number, and a value spelled out ten times is a value nobody can raise
+     once. */
+  --tap-min: 48px;
+  /* Invisible hit area, for the two ladder steps below --tap-min. Applied as a
+     transparent border or an ::after overlay it costs no layout, and it brings
+     a 28px glyph's touchable box back to 48. */
+  --tap-pad: 10px;
+  /* The bottom tab bar on a phone. 52 -> 56: with 48px tap targets inside it,
+     52 left two pixels above and below the icon and clipped the label under it
+     in the two longest locales. .toasts and .sendresult sit above this and
+     read the token, so they move with it. */
+  --nav-h: 56px;
   /* How much of the viewport the soft keyboard is covering, in CSS pixels.
      Written by `core/keyboardInset.ts`; see that file for why the value comes
      from three cross-checked sources rather than from the window shrinking.
@@ -517,7 +542,23 @@
      hairline-thin, and near-black on near-white makes their edges shimmer.
      Backing the paper off pure white and lifting the ink off near-black brings
      it to 13.5:1 — still comfortably above the 7:1 AAA line, and calm enough to
-     sit in front of. */
+     sit in front of.
+
+     Revisited when the body face became a sans this round, because the reason
+     above is a property of 宋体 rather than of the colours: even strokes do not
+     shimmer, so the softening is no longer buying what it was bought for, and
+     16.2:1 was on the table again. It was measured and left alone. 13.5:1 is
+     already twice the AAA line, the difference between the two is invisible in
+     a side-by-side at this size, and the one thing that would certainly change
+     is that every surface and border tuned against this ink over four rounds
+     would have to move with it. A number that is comfortably right is not worth
+     a hundred-token cascade to make differently right.
+
+     What did change is that the claim is now checked rather than asserted.
+     `scripts/check-contrast.mjs` computes all 477 ink-on-surface pairs across
+     the seven styles on every build; it found 13 pairs under 4.5:1 the first
+     time it ran, every one of them `--text-3` on `--surface-3` — a surface the
+     comments in this file had never quoted a ratio against. */
   --bg: #eceef1;
   --surface-1: #fafbfc;
   --surface-2: #f2f4f7;
@@ -532,7 +573,7 @@
      white — the comment was aspirational and the colour failed AA for 16px
      text everywhere it was used (field hints, the brand tagline, row meta).
      #656c7a is 5.3:1 on white and still reads as clearly tertiary. */
-  --text-3: #656c7a;   /*  5.3:1 on white — AA for normal text */
+  --text-3: #636a78;   /*  5.3:1 on white — AA for normal text */
   --text-inverse: #ffffff;
 
   --border: #e6e9ef;
@@ -573,7 +614,15 @@
      near-black page (the old #e7ebf2 on #12151c, 15.3:1) blooms — the thin
      strokes of 宋体 smear outward on an LCD, and that halation is what makes an
      hour in dark mode tiring. Lifting the page and softening the ink lands at
-     11.9:1: still AAA, without the bloom. */
+     11.9:1: still AAA, without the bloom.
+
+     This one survives the switch to a sans on its own terms, unlike its light
+     counterpart above. Halation in dark mode is only partly about the typeface:
+     a bright glyph on a dark ground blooms because the eye is dark-adapted and
+     the pupil is open, which is true of any face at any stroke weight. A sans
+     blooms less than 宋体 did — there is no hairline to lose — but the reason to
+     keep the page off pure black and the ink off pure white is the display and
+     the eye, not the font. Left at 11.9:1. */
   --bg: #14161b;
   --surface-1: #1b1e25;
   --surface-2: #1f232b;
@@ -710,7 +759,7 @@
 
   --text-1: #262c38;   /* 13.6:1 on --surface-1 */
   --text-2: #545c6b;   /*  6.5:1 */
-  --text-3: #656c7a;   /*  5.1:1 */
+  --text-3: #636a78;   /*  5.1:1 */
   --text-inverse: #ffffff;
 
   --border: #e4e7ef;
@@ -856,7 +905,7 @@
 
   --text-1: #1f1f23;   /* 16.4:1 on --surface-1 */
   --text-2: #56565d;   /*  7.3:1 */
-  --text-3: #6c6c75;   /*  5.2:1 */
+  --text-3: #6a6a73;   /*  5.2:1 */
   --text-inverse: #ffffff;
 
   --border: #e4e4e7;
@@ -896,7 +945,7 @@
 
   --text-1: #ededef;   /* 15.3:1 on --surface-1 */
   --text-2: #a3a3aa;   /*  7.1:1 */
-  --text-3: #88888f;   /*  5.1:1 */
+  --text-3: #8a8a91;   /*  5.1:1 */
   --text-inverse: #0f0f10;
 
   --border: #2a2a2d;
@@ -937,7 +986,7 @@
 
     --text-1: #ededef;
     --text-2: #a3a3aa;
-    --text-3: #88888f;
+    --text-3: #8a8a91;
     --text-inverse: #0f0f10;
 
     --border: #2a2a2d;
@@ -1042,7 +1091,7 @@
 
   --text-1: #e6dfd3;   /* 12.5:1 on --surface-1 */
   --text-2: #b0a695;   /*  6.9:1 */
-  --text-3: #968c7c;   /*  5.0:1 */
+  --text-3: #9c9282;   /*  5.0:1 */
   --text-inverse: #1a1713;
 
   --border: #362f28;
@@ -1086,7 +1135,7 @@
 
     --text-1: #e6dfd3;
     --text-2: #b0a695;
-    --text-3: #968c7c;
+    --text-3: #9c9282;
     --text-inverse: #1a1713;
 
     --border: #362f28;
@@ -1299,7 +1348,7 @@
 
   --text-1: #2c3440;   /* 12.0:1 on --surface-1 */
   --text-2: #515d70;   /*  6.6:1 */
-  --text-3: #5f6a7b;   /*  5.3:1 */
+  --text-3: #5e697a;   /*  5.3:1 */
   --text-inverse: #ffffff;
 
   --border: #dde4ec;
@@ -1339,7 +1388,7 @@
 
   --text-1: #d8dee9;   /* 11.2:1 on --surface-1 */
   --text-2: #a7b1c2;   /*  7.0:1 */
-  --text-3: #8e99ab;   /*  5.3:1 */
+  --text-3: #939eb0;   /*  5.3:1 */
   --text-inverse: #191d24;
 
   --border: #333b47;
@@ -1382,7 +1431,7 @@
 
     --text-1: #d8dee9;
     --text-2: #a7b1c2;
-    --text-3: #8e99ab;
+    --text-3: #939eb0;
     --text-inverse: #191d24;
 
     --border: #333b47;
@@ -1514,7 +1563,7 @@
 
   --text-1: #20261f;   /* 14.3:1 on --surface-1 */
   --text-2: #4e564a;   /*  7.1:1 */
-  --text-3: #656d5f;   /*  5.0:1 */
+  --text-3: #60685b;   /*  5.0:1 */
   --text-inverse: #ffffff;
 
   --border: #dde0d7;

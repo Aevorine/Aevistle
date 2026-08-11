@@ -54,7 +54,7 @@ import {
   knownGroups,
   needsStoredPassword,
   orderedAccounts,
-} from '../core/accounts'
+} from '../core/mail/accounts'
 import { useReorder } from '../components/useReorder'
 import { useApp } from '../state/AppState'
 import { LOCALES, useI18n, type TranslationKey } from '../i18n'
@@ -70,18 +70,18 @@ import type {
   ThemeMode,
   VisualStyle,
 } from '../core/types'
-import { buildDigest, DIGEST_JOB_ID } from '../core/digest'
-import { renderDigestBody, renderDigestSubject } from '../core/digestText'
+import { buildDigest, DIGEST_JOB_ID } from '../core/mail/digest'
+import { renderDigestBody, renderDigestSubject } from '../core/mail/digestText'
 import {
   GREETING_COUNTRIES,
   greetingJobId,
   planGreetings,
   type GreetingOccasion,
-} from '../core/greetings'
-import { HOLIDAY_PRESETS } from '../core/holidayPresets'
-import type { AppInfo, DataFolder, DataFolderChange } from '../core/bridge'
-import { lastUpdateCheck, onUpdateCheck, runUpdateCheck } from '../core/update'
-import type { DownloadProgress, UpdateInfo } from '../core/update'
+} from '../core/mail/greetings'
+import { HOLIDAY_PRESETS } from '../core/schedule/holidayPresets'
+import type { AppInfo, DataFolder, DataFolderChange } from '../core/platform/bridge'
+import { lastUpdateCheck, onUpdateCheck, runUpdateCheck } from '../core/platform/update'
+import type { DownloadProgress, UpdateInfo } from '../core/platform/update'
 
 /**
  * The seven visual styles, in the order they are offered.

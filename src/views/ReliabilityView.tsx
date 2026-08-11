@@ -43,10 +43,10 @@ import {
   collectUnhealthyJobs,
   type AccountIssueKind,
   type JobIssueKind,
-} from '../core/reliability'
-import type { DispatchLedgerEntry } from '../core/dispatchLedger'
-import type { OAuthConnectionState } from '../core/oauth'
-import type { PairedDevicePlatform } from '../core/pairedDevices'
+} from '../core/ops/reliability'
+import type { DispatchLedgerEntry } from '../core/ops/dispatchLedger'
+import type { OAuthConnectionState } from '../core/mail/oauth'
+import type { PairedDevicePlatform } from '../core/sync/pairedDevices'
 import { useApp } from '../state/AppState'
 import { useI18n, type TranslationKey } from '../i18n'
 

@@ -25,7 +25,7 @@ import {
 } from 'electron'
 import path from 'node:path'
 import { promises as fs, readFileSync, statSync, writeFileSync } from 'node:fs'
-import { IPC, type BadgeCounts, type DesktopPrefs, type TrayCommand } from '../src/core/ipc-contract'
+import { IPC, type BadgeCounts, type DesktopPrefs, type TrayCommand } from '../src/core/platform/ipc-contract'
 import type {
   Attachment,
   ControlScope,
@@ -40,7 +40,7 @@ import type {
   SharePayload,
 } from '../src/core/types'
 import { DEFAULT_SETTINGS } from '../src/core/types'
-import type { DataFolder, DataFolderChange } from '../src/core/bridge'
+import type { DataFolder, DataFolderChange } from '../src/core/platform/bridge'
 // The translation tables, not the i18n module: that one pulls in React for the
 // context helper, and the main process has no business bundling React.
 import { en } from '../src/i18n/en'
@@ -49,7 +49,7 @@ import { fr } from '../src/i18n/fr'
 import { es } from '../src/i18n/es'
 import { ru } from '../src/i18n/ru'
 import { ar } from '../src/i18n/ar'
-import { fetchLatest, type UpdateAsset, type UpdateInfo } from '../src/core/update'
+import { fetchLatest, type UpdateAsset, type UpdateInfo } from '../src/core/platform/update'
 import {
   closeAllConnections,
   invalidateConnection,
@@ -68,21 +68,21 @@ import {
   type ControlAuditEntry,
   type ControlEndpoint,
   type ControlResponse,
-} from '../src/core/control'
+} from '../src/core/sync/control'
 import { listLanIPv4, PairingServer } from './pairingServer'
-import type { PairingPayload, PairMode } from '../src/core/pairing'
+import type { PairingPayload, PairMode } from '../src/core/sync/pairing'
 import { SyncServer } from './syncServer'
 import type {
   SealedAccountSecrets,
   SyncListenerStatus,
   SyncServerResponse,
-} from '../src/core/syncLoop'
-import type { PairingEnvelope } from '../src/core/pairingCrypto'
+} from '../src/core/sync/syncLoop'
+import type { PairingEnvelope } from '../src/core/sync/pairingCrypto'
 import {
   openAccountSecrets as openAccountSecretBundle,
   sealAccountSecrets as sealAccountSecretBundle,
   type AccountSecret,
-} from '../src/core/secretTransport'
+} from '../src/core/sync/secretTransport'
 import {
   appendControlAudit,
   dataFolderSize,
@@ -115,15 +115,15 @@ import {
   runConsent,
   useOAuthSecretStore,
 } from './oauth'
-import type { OAuthAccountStatus, OAuthConsentResult } from '../src/core/oauth'
+import type { OAuthAccountStatus, OAuthConsentResult } from '../src/core/mail/oauth'
 import { fetchMessageBody, purgeMessages, setServerSeenFlag, syncInbox, testInbox } from './imap'
 import { stopAllInboxWatchers, watchInboxes } from './imapIdle'
 import { deleteAccountInboxCache, deleteMessageCache, pruneInboxCache } from './inboxStore'
 import { clearImageCache, downloadRemoteImage } from './remoteImage'
 import { sanitizeMessageHtml } from './sanitizeHtml'
 import { fetchFeed } from './feedFetch'
-import { buildIcs, calendarToEvents } from '../src/core/ics'
-import { DEFAULT_WORK_CALENDAR, type WorkCalendar } from '../src/core/workCalendar'
+import { buildIcs, calendarToEvents } from '../src/core/schedule/ics'
+import { DEFAULT_WORK_CALENDAR, type WorkCalendar } from '../src/core/schedule/workCalendar'
 
 // Bundled to CommonJS by scripts/build-electron.mjs, so __dirname is real.
 const DIRNAME = __dirname
@@ -1622,7 +1622,7 @@ function registerIpc(): void {
   /**
    * Move mailbox passwords to a paired device without either renderer ever
    * holding one. Both halves stay on this side of the boundary — see
-   * `src/core/secretTransport.ts` and `PlatformBridge.sealAccountSecrets`.
+   * `src/core/sync/secretTransport.ts` and `PlatformBridge.sealAccountSecrets`.
    *
    * `keyRef` names a pairing, and only ever reads a `'sync'` secret with it,
    * the same narrowing `IPC.getSyncSecret` above applies for the same reason:

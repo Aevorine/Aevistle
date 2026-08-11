@@ -1,0 +1,192 @@
+/* ==========================================================================
+   Feedback: banners, toasts, empty states
+   ========================================================================== */
+
+.banner {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--r-md);
+  border: 1px solid transparent;
+  font-size: var(--text-base);
+  line-height: var(--leading-relaxed);
+}
+.banner__icon {
+  flex: none;
+  margin-top: 1px;
+}
+.banner__body {
+  flex: 1;
+  min-width: 0;
+  /* Banners are where failures are reported, and a failure's message is very
+     often a URL, a file path or `listen EADDRINUSE 0.0.0.0:47821` — one
+     unbreakable token that ran out of the banner and out of the card. Same
+     reasoning as `.mono`, which `AccountDialog` reaches for inside its own
+     Banner for exactly this. */
+  overflow-wrap: anywhere;
+}
+.banner__title {
+  font-weight: 700;
+}
+.banner--info {
+  background: var(--info-bg);
+  border-color: color-mix(in srgb, var(--info) 26%, transparent);
+  color: var(--info);
+}
+.banner--warning {
+  background: var(--warning-bg);
+  border-color: color-mix(in srgb, var(--warning) 26%, transparent);
+  color: var(--warning);
+}
+.banner--danger {
+  background: var(--danger-bg);
+  border-color: color-mix(in srgb, var(--danger) 26%, transparent);
+  color: var(--danger);
+}
+.banner--success {
+  background: var(--success-bg);
+  border-color: color-mix(in srgb, var(--success) 26%, transparent);
+  color: var(--success);
+}
+
+/* Several problems, one box. Each line is a sentence, so they read as a list
+   of things to fix rather than as a stack of separate alarms. */
+.banner__list {
+  margin: 0;
+  padding-inline-start: 1.2em;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: var(--reading-max);
+}
+.banner__list:has(> li:only-child) {
+  padding-inline-start: 0;
+  list-style: none;
+}
+
+.issues {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+/* The drag-time recipient timezone preview — a small tooltip that follows the
+   cursor while a reminder badge is being dragged across the working calendar.
+   Fixed and unclickable: it is a readout, not a control, and must never steal
+   the drop from the cell underneath it. */
+.dragtip {
+  position: fixed;
+  z-index: 250;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: min(280px, calc(100vw - var(--sp-6)));
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  background: var(--surface-1);
+  box-shadow: var(--shadow-lg);
+  font-size: var(--text-sm);
+  color: var(--text-2);
+}
+.dragtip__line {
+  white-space: normal;
+}
+
+.toasts {
+  position: fixed;
+  bottom: var(--sp-5);
+  inset-inline-end: var(--sp-5);
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  max-width: min(420px, calc(100vw - var(--sp-8)));
+  pointer-events: none;
+}
+.toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  background: var(--surface-1);
+  box-shadow: var(--shadow-lg);
+  animation: toast-in var(--dur-slow) var(--ease-out);
+}
+.toast__body {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--text-base);
+}
+.toast__title {
+  font-weight: 700;
+  color: var(--text-1);
+}
+.toast__detail {
+  color: var(--text-3);
+  font-size: var(--text-base);
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+}
+.toast--success .toast__icon {
+  color: var(--success);
+}
+.toast--error .toast__icon {
+  color: var(--danger);
+}
+.toast--info .toast__icon {
+  color: var(--info);
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  /* `.view--list .list-pane > .empty` forces `height: 100%` so an empty list
+     fills the pane instead of sitting at its natural (small) height — but
+     without this, a vertical flex box with no `justify-content` still packs
+     its children at the top, leaving the icon/title/button stuck under the
+     header with a blank band below on every list screen (tasks, contacts,
+     templates, activity, …). Centering here is safe generally: outside the
+     list pane `.empty` has no forced height, so `justify-content: center`
+     is a no-op there — the box is already exactly as tall as its content. */
+  justify-content: center;
+  gap: var(--sp-3);
+  padding: var(--sp-8) var(--sp-5);
+  text-align: center;
+  color: var(--text-3);
+}
+.empty__icon {
+  display: grid;
+  place-items: center;
+  width: var(--icon-xl);
+  height: var(--icon-xl);
+  border-radius: var(--r-lg);
+  background: var(--surface-3);
+  color: var(--text-3);
+}
+.empty__title {
+  font-size: var(--text-md);
+  font-weight: 700;
+  color: var(--text-2);
+}
+.empty__hint {
+  font-size: var(--text-base);
+  max-width: 380px;
+}

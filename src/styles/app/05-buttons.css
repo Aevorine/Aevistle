@@ -1,0 +1,311 @@
+/* ==========================================================================
+   Buttons
+   ========================================================================== */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  padding: 9px var(--sp-4);
+  min-height: var(--control-h);
+  /* Set here rather than inherited. A button placed inside a banner picked up
+     that banner's paragraph leading and came out 48.4px against the 46px every
+     other button on the screen was — measured by `scripts/ui-consistency.mjs`,
+     invisible to the eye, and exactly the kind of drift that adds up to "the
+     interface is not uniform". A control's height is a property of the
+     control, not of whatever it happens to sit in. */
+  line-height: var(--leading-tight);
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  font-size: var(--text-base);
+  font-weight: 700;
+  letter-spacing: var(--tracking-tight);
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease);
+}
+.btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn--primary {
+  background: var(--accent);
+  color: var(--accent-text);
+  box-shadow: var(--shadow-accent);
+}
+.btn--primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 88%, var(--text-1));
+}
+
+.btn--secondary {
+  background: var(--surface-1);
+  border-color: var(--border-strong);
+  color: var(--text-1);
+  box-shadow: var(--shadow-sm);
+}
+.btn--secondary:hover:not(:disabled) {
+  background: var(--surface-3);
+}
+
+.btn--ghost {
+  background: transparent;
+  color: var(--text-2);
+}
+.btn--ghost:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text-1);
+}
+
+.btn--danger {
+  background: var(--danger-bg);
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 30%, transparent);
+}
+.btn--danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+}
+
+.btn--lg {
+  min-height: var(--ctl-lg);
+  padding-inline: var(--sp-6);
+  font-size: var(--text-md);
+  /* `--r-sm`, not `--r-md`. The theme's radius ladder assigns sm to "a
+     standalone control — button, input, nav item" and md to "a grouped surface
+     — card row, toast, stat", and this rule had md. It is not a subtle miss:
+     the two buttons it draws are 立即发送 and 定时发送, the largest and most
+     looked-at controls in the app, and they were the only two carrying an
+     11px corner while every other button in every screen carried 8px. A
+     product's most prominent control being the one shape that matches nothing
+     else is the opposite of what a large primary button is for. */
+  border-radius: var(--r-sm);
+}
+/* Square, and on the same height as everything else on its row. */
+.btn--icon {
+  padding: 0;
+  width: var(--control-h);
+  min-height: var(--control-h);
+}
+.btn--block {
+  width: 100%;
+}
+
+.icon-btn {
+  display: grid;
+  place-items: center;
+  width: var(--ctl-sm);
+  height: var(--ctl-sm);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease);
+}
+.icon-btn:hover {
+  background: var(--surface-hover);
+  color: var(--text-1);
+}
+.icon-btn:active:not(:disabled) {
+  transform: scale(0.9);
+}
+
+/* The sidebar's Home button, while Home is the screen you are on.
+   `.icon-btn` and not `.nav__item` because Home is deliberately not one of the
+   nine numbered tabs — see the comment above it in `App.tsx` — but it is still
+   somewhere the user *is*, and without this it was the only way of being on a
+   screen that the sidebar did not show. Borrows the accent treatment the nav
+   tabs already use rather than inventing a second idea of "selected", so the
+   two cannot drift apart. */
+.icon-btn[aria-current="page"] {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+}
+.icon-btn[aria-current="page"]:hover {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+}
+
+/* ==========================================================================
+   The action bar — the two most important buttons in the app.
+   Pinned to the bottom of the compose view so "Send now" and "Schedule" are
+   reachable without scrolling, at any window height.
+   ========================================================================== */
+
+.actionbar {
+  position: sticky;
+  bottom: 0;
+  z-index: 15;
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  /* Tighter vertically than horizontally on purpose: this bar sits directly
+     under the compose form, and every pixel of padding here is a pixel off
+     the message box above it. The buttons keep their own 44px height, so the
+     touch target is unchanged — only the air around it. Now `--sp-2`, and the
+     bar measures 67px rather than 75 — see `--actionbar-h`, which the send
+     result banner sits on top of and which has to agree with this. */
+  padding: var(--sp-2) var(--sp-5);
+  border-top: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--surface-1) 88%, transparent);
+  backdrop-filter: blur(14px) saturate(150%);
+}
+.actionbar__summary {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.actionbar__line {
+  font-size: var(--text-base);
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* `--text-2`, not `--text-3`. The action bar is translucent over the page
+   below it, which costs the tertiary tone enough contrast to land at 3.96:1 in
+   the light theme — under AA. This line carries the sender address and the
+   provider's daily limit, which is not text to squint at. */
+.actionbar__meta {
+  font-size: var(--text-sm);
+  color: var(--text-2);
+}
+
+/* ==========================================================================
+   Attachments
+   ========================================================================== */
+
+/* One line until it is being used.
+ *
+ * A 116px dashed box is the right affordance for a screen whose job is
+ * uploading files. This screen's job is writing a message, and on an 800px
+ * window that box was buying its own prominence with vertical space the
+ * "one screen" requirement does not have to spare. It grows to the full
+ * target the moment a drag enters it — the drop area is generous exactly
+ * when someone is aiming at it. */
+.dropzone {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-4);
+  min-height: var(--ctl-md);
+  border: 1.5px dashed var(--border-strong);
+  border-radius: var(--r-md);
+  background: var(--surface-inset);
+  color: var(--text-2);
+  cursor: pointer;
+  text-align: center;
+  transition:
+    border-color var(--dur) var(--ease),
+    background var(--dur) var(--ease),
+    color var(--dur) var(--ease);
+}
+.dropzone:hover {
+  border-color: var(--accent);
+  color: var(--text-1);
+}
+.dropzone[data-dragging="true"] {
+  flex-direction: column;
+  min-height: 96px;
+  border-color: var(--accent);
+  border-style: solid;
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface-inset));
+  color: var(--accent);
+}
+.dropzone__title {
+  font-size: var(--text-base);
+  font-weight: 700;
+}
+
+.attachments {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.attachment {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+}
+.attachment__icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: var(--icon-lg);
+  height: var(--icon-lg);
+  border-radius: var(--r-xs);
+  background: var(--surface-3);
+  color: var(--text-2);
+}
+.attachment__icon--tag {
+  font-size: var(--text-2xs);
+  font-weight: 700;
+  letter-spacing: var(--tracking-wide);
+}
+.attachment__body {
+  flex: 1;
+  min-width: 0;
+}
+.attachment__name {
+  font-size: var(--text-base);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.attachment__meta {
+  font-size: var(--text-sm);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.attachment--risky .attachment__icon {
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+
+/* "Show in body" / "Attach instead" — a two-state text button rather than a
+   switch, because the two states are two different actions, not on and off. */
+.attachment__action {
+  flex: none;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-full);
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition:
+    background var(--dur) var(--ease),
+    color var(--dur) var(--ease),
+    border-color var(--dur) var(--ease);
+}
+.attachment__action:hover {
+  background: var(--surface-3);
+  color: var(--text-1);
+}
+.attachment__action[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  color: var(--accent);
+}

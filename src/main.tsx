@@ -1,9 +1,15 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import App from './App'
-import { detectPlatform } from './core/bridge'
-import { installKeyboardInset } from './core/keyboardInset'
-import { MOBILE_SHELL_ATTR, MOBILE_SHELL_VALUE, NARROW_QUERY } from './components/useNarrow'
+import { detectPlatform } from './core/platform/bridge'
+import { installKeyboardInset } from './core/platform/keyboardInset'
+import {
+  MOBILE_SHELL_ATTR,
+  MOBILE_SHELL_VALUE,
+  NARROW_QUERY,
+  SIZE_CLASS_ATTR,
+  sizeClassFor,
+} from './components/useNarrow'
 import './styles/theme.css'
 import './styles/app.css'
 
@@ -29,6 +35,18 @@ if (
 ) {
   document.documentElement.setAttribute(MOBILE_SHELL_ATTR, MOBILE_SHELL_VALUE)
 }
+
+/**
+ * The size tier, before the first paint, for the same reason and at the same
+ * cost: `innerWidth` is a number the browser is already holding.
+ *
+ * `useSizeClass` keeps it in step afterwards. Setting it here matters because
+ * the tier decides *density* — how much padding a card gets, how many columns a
+ * list takes — and a card that paints one frame at desktop padding and then
+ * snaps to phone padding is the same flinch the shell attribute above exists to
+ * prevent, on the same cold start.
+ */
+document.documentElement.setAttribute(SIZE_CLASS_ATTR, sizeClassFor(window.innerWidth))
 
 /**
  * Before the first render, for the same reason as the block above: the compose

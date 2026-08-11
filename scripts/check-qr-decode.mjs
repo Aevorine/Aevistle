@@ -1,5 +1,5 @@
 /**
- * Round-trip `core/qr.ts`'s encoder through `core/qrDecode.ts`'s decoder.
+ * Round-trip `core/sync/qr.ts`'s encoder through `core/sync/qrDecode.ts`'s decoder.
  *
  * `scripts/check-qr.mjs` proves the encoder produces exactly the matrix a
  * reference *encoder* would. That says nothing about whether a real QR
@@ -12,7 +12,7 @@
  *
  * Fixtures include an actual `aevistle-pair:{...}` payload — the pairing
  * scheme's own encode/decode round trip (`encodePairingText`/
- * `decodePairingText` in `core/pairing.ts`) is exercised elsewhere, but only
+ * `decodePairingText` in `core/sync/pairing.ts`) is exercised elsewhere, but only
  * this script proves that text actually survives being turned into pixels and
  * back, which is the step neither of those unit-level checks touches.
  */
@@ -67,8 +67,8 @@ try {
     'npx',
     [
       'esbuild',
-      quote(join(root, 'src/core/qr.ts')),
-      quote(join(root, 'src/core/qrDecode.ts')),
+      quote(join(root, 'src/core/sync/qr.ts')),
+      quote(join(root, 'src/core/sync/qrDecode.ts')),
       '--bundle',
       '--format=esm',
       '--platform=node',

@@ -1,5 +1,5 @@
 /**
- * Prove `src/core/solarTerms.ts` against published astronomical instants.
+ * Prove `src/core/schedule/solarTerms.ts` against published astronomical instants.
  *
  * The four terms with a name everyone would recognise — the two equinoxes and
  * the two solstices — are also the four for which an independent published UTC
@@ -59,7 +59,7 @@ try {
     'npx',
     [
       'esbuild',
-      quote(join(root, 'src/core/solarTerms.ts')),
+      quote(join(root, 'src/core/schedule/solarTerms.ts')),
       '--bundle',
       '--format=esm',
       `--outfile=${quote(join(out, 'solarTerms.mjs'))}`,

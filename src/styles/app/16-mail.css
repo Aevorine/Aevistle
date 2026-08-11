@@ -1,0 +1,1349 @@
+/* ==========================================================================
+   Mail self-check
+
+   A diagnostic read top to bottom, so the layout's one job is to make "which
+   row is the first bad one" answerable at a glance and without reading. The
+   status word sits in a fixed-width column at the start of every row for
+   exactly that: a ragged left edge would mean scanning the text to find the
+   failures, which is the thing somebody arrives at this screen unable to do.
+
+   The status is a word, not only a colour. Around one man in twelve cannot
+   separate the red from the green, and this is the screen where getting that
+   wrong means being told the opposite of the truth about their own mail.
+   ========================================================================== */
+.selfcheck {
+  max-width: var(--reading-max);
+}
+.selfcheck__summary {
+  margin: var(--sp-4) 0 var(--sp-2);
+  font-weight: 600;
+  color: var(--text-1);
+}
+.selfcheck__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.selfcheck__row {
+  display: flex;
+  gap: var(--sp-3);
+  align-items: flex-start;
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-1);
+}
+/* Only the rows that need attention are tinted. Tinting the passes too would
+   make a healthy report as loud as a broken one. */
+.selfcheck__row[data-status='fail'] {
+  background: var(--danger-bg);
+}
+.selfcheck__row[data-status='warn'] {
+  background: var(--warning-bg);
+}
+.selfcheck__badge {
+  flex: none;
+  /* Wide enough for the longest status word in any of the six locales — the
+     column has to stay straight in Russian and Arabic too, not only English. */
+  min-width: 7.5em;
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--text-3);
+}
+.selfcheck__badge[data-status='pass'] {
+  color: var(--success);
+}
+.selfcheck__badge[data-status='warn'] {
+  color: var(--warning);
+}
+.selfcheck__badge[data-status='fail'] {
+  color: var(--danger);
+}
+.selfcheck__body {
+  min-width: 0;
+}
+.selfcheck__label {
+  color: var(--text-1);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.selfcheck__detail {
+  margin-block-start: var(--sp-2);
+  font-size: var(--text-sm);
+  color: var(--text-2);
+  /* A server's reply can be one unbroken token, and it must wrap rather than
+     stretch the panel — this is the block most likely to be pasted into a
+     search box, so losing characters off the edge would defeat its purpose. */
+  overflow-wrap: anywhere;
+}
+.selfcheck__hint {
+  margin-block-start: var(--sp-2);
+  font-size: var(--text-base);
+  color: var(--text-3);
+  line-height: 1.6;
+}
+@media (max-width: 839.98px) {
+  /* The badge column costs too much of a 360px screen, so it goes above the
+     label instead of beside it. It is not hidden: this is the one screen where
+     the status word is the content. */
+  .selfcheck__row {
+    flex-direction: column;
+    gap: var(--sp-1);
+  }
+  .selfcheck__badge {
+    min-width: 0;
+  }
+}
+
+/* ==========================================================================
+   Pictures
+
+   Two surfaces, one job: make an image in a message something you can look at
+   rather than something you can only read the filename of.
+
+     `.imagestrip`  a row of thumbnails under the compose body, under the send
+                    preview, and in the message reader. Absent when the draft
+                    carries no pictures, so a text-only message pays nothing.
+     `.lightbox`    the full-screen viewer, with the controls the strip's
+                    thumbnails cannot offer — zoom, pan, rotate, mirror, and
+                    the rest of the message's pictures under the arrow keys.
+   ========================================================================== */
+
+.imagestrip {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  /* Never grows. It sits between the message box and the attachment row on a
+     form whose whole requirement is to fit one screen; letting it take a share
+     of the leftover height would be taking it straight off the body. */
+  flex: 0 0 auto;
+}
+.imagestrip__head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+.imagestrip__label {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-1);
+}
+.imagestrip__hint {
+  font-size: var(--text-xs);
+  color: var(--text-3);
+  min-width: 0;
+}
+/* One row that scrolls sideways rather than wrapping: eight screenshots on a
+   draft would otherwise add four rows of thumbnails and push the send button
+   off the screen. */
+.imagestrip__items {
+  display: flex;
+  gap: var(--sp-3);
+  overflow-x: auto;
+  scrollbar-width: thin;
+  padding-bottom: var(--sp-1);
+}
+.imagestrip__item {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  width: 104px;
+  padding: var(--sp-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-1);
+  cursor: pointer;
+  text-align: start;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+.imagestrip__item:hover,
+.imagestrip__item:focus-visible {
+  border-color: var(--accent);
+  box-shadow: var(--shadow-sm);
+}
+.imagestrip__thumb {
+  width: 100%;
+  height: 72px;
+  /* `contain`, not `cover`: this is the one place in the application whose
+     whole purpose is showing what the picture actually is, and cropping a
+     screenshot to a square hides the half somebody needed to see. */
+  object-fit: contain;
+  border-radius: var(--r-sm);
+  background: var(--surface-inset);
+}
+.imagestrip__name {
+  font-size: var(--text-xs);
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A thumbnail in place of the file-type tag, same box, same alignment — the
+   rows stay a uniform height whether or not the bytes have arrived. */
+.attachment__icon--thumb {
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-inset);
+  overflow: hidden;
+  cursor: pointer;
+}
+.attachment__icon--thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+/* --- the viewer ----------------------------------------------------------- */
+
+.lightbox {
+  position: fixed;
+  inset: 0;
+  /* Above the dialogs (100) and below the toasts (200): "Image copied" has to
+     be readable, and it appears while this is open. */
+  z-index: 150;
+  display: flex;
+  flex-direction: column;
+  background: rgba(8, 10, 14, 0.94);
+  color: #f2f4f7;
+  /* Its own colours on purpose. A picture is judged against what surrounds it,
+     and a light theme's surface tints everything shown on it. */
+  color-scheme: dark;
+}
+.lightbox__bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-4);
+  background: rgba(0, 0, 0, 0.35);
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+}
+.lightbox__bar--bottom {
+  justify-content: center;
+}
+/* The file name is this bar's title, and the counter and zoom beside it are its
+   metadata — so body rank here and auxiliary there, which is the same pairing
+   `.job__name` / `.job__meta` uses two screens away. The viewer is opened from a
+   message, so it is the Inbox's own type ladder it has to agree with. */
+.lightbox__title {
+  font-size: var(--text-base);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lightbox__counter,
+.lightbox__zoom {
+  font-size: var(--text-xs);
+  color: #c6ccd8;
+  font-variant-numeric: tabular-nums;
+  min-width: 4em;
+  text-align: center;
+}
+.lightbox__spacer {
+  flex: 1 1 auto;
+}
+.lightbox__sep {
+  width: 1px;
+  height: var(--icon-sm);
+  background: rgba(255, 255, 255, 0.18);
+  margin-inline: var(--sp-2);
+}
+.lightbox__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: var(--ctl-md);
+  padding: 0 var(--sp-3);
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.lightbox__btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+.lightbox__btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+/* Pressed state is a border and a fill, not a colour change: neither 宋体 nor
+   Times New Roman has a variable weight, so bolding a label here does nothing
+   at all on the two fonts this application actually ships. */
+.lightbox__btn[aria-pressed='true'] {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.lightbox__stage {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+}
+.lightbox__stage[data-dragging] {
+  cursor: grabbing;
+}
+.lightbox__image {
+  position: absolute;
+  inset-block-start: 50%;
+  inset-inline-start: 50%;
+  /* The element keeps its natural pixel size; every bit of fitting, zooming,
+     turning and mirroring is one composited transform. Resizing the element
+     instead would re-layout the page on every wheel notch. */
+  transform-origin: center center;
+  user-select: none;
+  -webkit-user-drag: none;
+  max-width: none;
+  max-height: none;
+}
+
+.lightbox__nav {
+  position: absolute;
+  inset-block-start: 50%;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  width: var(--ctl-md);
+  height: var(--ctl-lg);
+  border: 0;
+  border-radius: var(--r-md);
+  background: rgba(0, 0, 0, 0.4);
+  color: #f2f4f7;
+  cursor: pointer;
+}
+.lightbox__nav:hover {
+  background: rgba(0, 0, 0, 0.62);
+}
+.lightbox__nav--prev {
+  inset-inline-start: var(--sp-4);
+}
+.lightbox__nav--next {
+  inset-inline-end: var(--sp-4);
+}
+
+.lightbox__info {
+  position: absolute;
+  inset-block-end: var(--sp-4);
+  inset-inline-start: var(--sp-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  max-width: min(420px, calc(100% - var(--sp-8)));
+  padding: var(--sp-4);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: var(--r-md);
+  background: rgba(12, 14, 20, 0.92);
+  font-size: var(--text-sm);
+}
+.lightbox__inforow {
+  display: flex;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+.lightbox__infokey {
+  flex: 0 0 7em;
+  color: #a9b2c1;
+}
+.lightbox__infoval {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.lightbox__infoactions {
+  display: flex;
+  gap: var(--sp-2);
+  margin-top: var(--sp-1);
+}
+.lightbox__infoactions .lightbox__btn {
+  border-color: rgba(255, 255, 255, 0.24);
+}
+
+/* Phones: the toolbar is the first thing that runs out of room, so the labels
+   go and the icons stay. The nav arrows shrink rather than disappear — a
+   touch screen has no arrow keys to fall back on. */
+@media (max-width: 599.98px) {
+  .lightbox__bar {
+    padding-inline: var(--sp-2);
+  }
+  .lightbox__nav {
+    width: var(--ctl-md);
+    height: var(--ctl-lg);
+  }
+  .lightbox__info {
+    inset-inline: var(--sp-2);
+    max-width: none;
+  }
+}
+
+@media (max-width: 839.98px) {
+  .compose-foot > .field {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--sp-2);
+  }
+  .compose-foot > .field > .field__label {
+    justify-content: flex-start;
+    text-align: start;
+  }
+  /* A card header is a title-plus-hint block with its actions to the right.
+     On a phone the actions take their natural width first and leave the text
+     whatever is left — the working calendar's hint ended up in a 260px column
+     wrapping to five lines beside two arrows and a "Today" button. Stacking
+     gives the sentence the full width and puts the controls under it. */
+  .card__header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--sp-2);
+  }
+
+  /* The dropzone puts its icon and its title side by side, which is right on a
+     wide card and wrong in a 448px one — and narrower still inside the
+     attachments sheet, where a 320px screen leaves the sentence about 250px.
+     Stacking gives it the full width instead of wrapping it every three words.
+     (It used to carry a second line naming the size cap, which is where most
+     of the damage came from; that line is gone.) */
+  .dropzone {
+    flex-direction: column;
+    gap: var(--sp-1);
+  }
+  /* The action bar is a row of three buttons plus a draft indicator. At phone
+     width the last one ("Send now", the most important) was being pushed off
+     the right edge. Wrapping is better than a scroller nobody will try. */
+  .actionbar {
+    flex-wrap: wrap;
+    row-gap: var(--sp-2);
+  }
+  /* The summary takes the first row on its own; the buttons share the second
+     and split it evenly. Four buttons at their natural width do not fit 448px,
+     and the one that was falling off the end was "Send now". */
+  .actionbar > .actionbar__summary {
+    flex: 1 1 100%;
+  }
+  .actionbar > .btn {
+    flex: 1 1 0;
+    min-width: 0;
+    padding-inline: var(--sp-2);
+  }
+}
+
+/* ==========================================================================
+   Inbox recycle bin
+   ========================================================================== */
+
+/* Sits between the toolbar and the message list, above the scroller — the same
+   place every other pinned control on this screen lives, so it does not scroll
+   away while someone is looking for the message they just removed. */
+.inbox-bin {
+  flex: 0 0 auto;
+}
+.bin-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  /* Its own scroller. "Delete all" on a busy mailbox fills this with hundreds
+     of rows, and letting it push the message list off the screen would make
+     the bin harder to leave than it was to open. */
+  max-height: 40vh;
+  overflow-y: auto;
+}
+.bin-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-sm);
+  background: var(--surface-inset);
+}
+.bin-row__text {
+  flex: 1;
+  min-width: 0;
+}
+/* Both lines truncate: a subject line from a marketing mail is longer than
+   this row is wide, and wrapping would let one entry take three rows. */
+.bin-row__subject,
+.bin-row__meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bin-row__subject {
+  font-weight: 600;
+}
+/* Auxiliary, to match `.job__meta`. The recycle bin is a list of mail rows on
+   the Inbox screen and it sits four inches from the mail rows themselves: a
+   sender-and-timestamp line one rank larger there than here is the exact kind of
+   drift that reads as 界面不统一 without anyone being able to point at it. */
+.bin-row__meta {
+  font-size: var(--text-xs);
+  color: var(--text-3);
+}
+
+/* The preview frame and its failure notice share a stacking context so the
+   notice can sit over a frame that rendered nothing rather than pushing the
+   layout around when it appears. */
+.preview__wrap {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.preview__wrap > .preview__frame {
+  flex: 1;
+}
+/* A frame that never reported a load is hidden rather than left as a white
+   rectangle behind the explanation of why it is empty. */
+.preview__frame[data-state='failed'] {
+  visibility: hidden;
+}
+.preview__fallback {
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  padding: var(--sp-4);
+}
+
+/**
+ * Scope chips beside the inbox search box. Wrap under it on a narrow window
+ * rather than squeezing the input, which is the thing being typed into.
+ *
+ * That is what the comment said for a long time while `.search-wrap` had no
+ * layout rule at all — the only selector naming it in this file was the pending
+ * state at `.search-wrap[data-pending]` — so the chips sat on their own row at
+ * every width, right up to 2560px, and cost a row of height on the one screen
+ * that is nothing but a list. The row exists now: the input takes the space and
+ * the chips take what they need, and the wrap the comment promises happens when
+ * the input would drop under 320px.
+ */
+.search-wrap {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-3);
+}
+.search-wrap > .search {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+.search-scope {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+.search-wrap > .search-scope {
+  flex: 0 1 auto;
+}
+
+/* The schedule outlook in the send preview: how many, over what span, on which
+   days. Sits above the warnings because a wrong interval is a bigger problem
+   than anything the warning list reports, and it is the one thing here that
+   nothing else on the compose screen can answer. */
+.preflight__outlook {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-inset);
+}
+.preflight__outlookhead {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+.preflight__days {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+.preflight__day {
+  padding: 2px var(--sp-2);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+/* A day carrying several sends says so, rather than appearing once and
+   understating the volume — which is the mistake this panel exists to catch. */
+.preflight__daycount {
+  margin-inline-start: 4px;
+  color: var(--accent);
+  font-weight: 700;
+}
+.preflight__day--more {
+  background: transparent;
+  color: var(--text-3);
+}
+
+/* Formatting buttons directly above the body box, sharing its left edge so the
+   two read as one control rather than as a strip that happens to sit nearby. */
+/* Inline on the label line — see the note at its use site. No margin and no
+   wrapping: it shares a row with the character count and the focus toggle, and
+   a wrap here would give back the row it was moved to avoid. */
+.markup {
+  display: flex;
+  gap: 3px;
+}
+/* The wide layout has room for all seven, so the fold does not exist here: the
+   toggle is off and the group is the plain row it always was. Everything that
+   makes the fold real lives in the narrow-compose block far above. */
+.markup__toggle {
+  display: none;
+}
+.markup__group {
+  display: flex;
+  gap: 3px;
+  min-width: 0;
+}
+.markup__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--ctl-sm);
+  min-height: var(--ctl-sm);
+  padding: 0 var(--sp-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition:
+    border-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+.markup__btn:hover {
+  border-color: var(--accent);
+  color: var(--text-1);
+}
+.markup__btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* ==========================================================================
+   Swipe actions (touch)
+   ========================================================================== */
+
+/* The row slides over a fixed backdrop rather than the actions sliding in, so
+   what is about to happen is readable from the first few pixels — which is what
+   lets someone abandon a gesture they did not mean to start. */
+.swipe {
+  position: relative;
+  overflow: hidden;
+  /* `pan-y` hands vertical scrolling to the browser and keeps horizontal
+     movement for us. Without it the first few pixels of every swipe are eaten
+     by the scroller before any handler runs. */
+  touch-action: pan-y;
+}
+.swipe__behind {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-inline: var(--sp-4);
+  font-size: var(--text-sm);
+  font-weight: 700;
+}
+.swipe__action--lead {
+  color: var(--accent);
+}
+.swipe__action--trail {
+  color: var(--danger);
+}
+.swipe__front {
+  position: relative;
+  background: var(--surface-1);
+  /* Snapping back is animated; following the finger is not, or the row would
+     lag behind the thumb by the length of the transition. */
+  transition: transform var(--dur) var(--ease);
+}
+.swipe__front[data-sliding] {
+  transition: none;
+}
+
+/* Pull to refresh. The indicator is height-driven so it pushes the list down
+   rather than floating over the first row. */
+.pull {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: var(--text-sm);
+  transition: height var(--dur-fast) var(--ease);
+}
+.pull[data-armed='true'] {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .swipe__front,
+  .pull {
+    transition: none;
+  }
+}
+
+/* ==========================================================================
+   The phone mail row — the text gets the row, the actions get the gesture
+
+   Measured at 360px before this block, on one `.job` inside `.swipe`:
+
+     .job__select   18px   an always-visible checkbox
+     .job__pulse     8px   the unread dot
+     .job__actions  76px   two 38px `.icon-btn`s at `flex: none`
+     three gaps     48px   `--sp-4` between all four children
+     -------------------
+     furniture     150px   of a 360px window
+     subject       146px   ≈ nine Chinese characters before the ellipsis
+
+   None of the 150px is text. Two of the four pieces are controls that a phone
+   already has a better gesture for, and one is a checkbox for a mode nobody is
+   in: multi-select is used on a handful of messages occasionally, and it was
+   charging every row on every screen 18px plus a gap to say so.
+
+   So on a touch-width window:
+
+     · the two row buttons go into the swipe that already existed (leading =
+       mark read/unread, trailing = remove), and stay *visible* controls in two
+       places a tap reaches — the header of the opened message, and the bulk bar
+       once anything is selected. A gesture nobody can find is a regression, so
+       nothing here is only a gesture.
+     · the checkbox appears once a selection exists, and a long press is what
+       starts one (`InboxView`'s `SwipeableRow`). While a selection is live every
+       row shows its box, which is what makes "select the next four" work.
+
+   Scoped through `.swipe`, which only `InboxView` renders — Scheduled and
+   Activity use bare `.job`/`.log` rows and keep their buttons, because neither
+   has a swipe handler to move them into.
+   ========================================================================== */
+
+@media (max-width: 839.98px) {
+  .swipe .job {
+    /* 8px of furniture instead of 150: the unread dot, and nothing else. */
+    gap: var(--sp-3);
+    /* Pinned to compact's padding regardless of `--list-density`: measured
+       with `layout-probe.mjs` at 360x800, the default 12px pad was a
+       74.1px row and 8 rows to the pane; this 8px pad is 66.1px and 9,
+       which is the floor the subject clamp above was shortened to hit.
+       "Roomy" would drop under 9 too if left alone, so this overrides all
+       three settings here — the 9-row floor is not something list-density
+       gets to trade away on a phone. */
+    padding-block: var(--sp-2);
+    /* The wrap the band below gives every other row is wrong here: with the
+       actions gone there is nothing to wrap *to*, and `flex: 1 1 100%` would
+       put the unread dot on a line of its own above the subject. */
+    flex-wrap: nowrap;
+    /* A long press is a press, so the browser must not decide it was a text
+       selection or a callout instead. `pan-y` on `.swipe` already keeps the
+       horizontal axis; this keeps the press. */
+    -webkit-touch-callout: none;
+    user-select: none;
+  }
+  .swipe .job > .job__select {
+    display: none;
+  }
+  .swipe .job[data-selecting='true'] > .job__select {
+    display: block;
+  }
+  .swipe .job > .job__actions {
+    display: none;
+  }
+  /* The avatar is new furniture, and this band has none to spare — the 150px
+     breakdown above is why the checkbox and actions left. A 28px circle plus
+     its gap would put the subject right back under the 256px floor the 360px
+     check holds it to, so the avatar stays a wide-screen thing; the unread
+     dot keeps doing that job here. */
+  .swipe .job > .job__avatar {
+    display: none;
+  }
+  .swipe .job > .job__body {
+    flex: 1 1 auto;
+  }
+  /**
+   * The metadata is one line, truncated — never three.
+   *
+   * `.job__meta` is `flex-wrap: wrap`, which was harmless while the subject
+   * above it was a single 146px line and the row was ~76px. It is not harmless
+   * now: measured with the two-line subject in place, an account chip plus
+   * "Zhang Wei <zhang.wei@example.com>" plus a timestamp wrapped to three lines
+   * and the row came to 124.7px — taller than the row was *before* any of this
+   * work, and four rows to a 637px pane instead of six.
+   *
+   * A wrapped metadata line is also the thing the user asked not to happen:
+   * 压行 is exactly a row of secondary detail folding onto itself under the
+   * headline it belongs to. So the line holds, and the sender — which is the one
+   * item on it that is arbitrarily long, and which already carries `min-width: 0`
+   * and an ellipsis — is what gives way.
+   *
+   * The chip is capped rather than pinned: at `flex: none` a long account label
+   * would push the timestamp off the end, and at no cap it would take the line.
+   */
+  .swipe .job .job__meta {
+    flex-wrap: nowrap;
+    overflow: hidden;
+  }
+  /* Nothing on the line wraps *within itself* either. Measured before this: the
+     bare timestamp span is the one item on the row with no `white-space` of its
+     own, so in a nowrap container it shrank below its content and broke "2 min"
+     into "2" / "min" — 41.3px for a two-word timestamp, which made the metadata
+     line taller than the two-line subject above it. Exactly the 压行 the wrap was
+     removed to prevent, one level further down. */
+  .swipe .job .job__meta > * {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+  /* The sender is the item that gives way, because it is the only one whose
+     length is arbitrary — and it already carries an ellipsis. */
+  .swipe .job .job__meta > .job__from {
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+  /* The chip is capped rather than pinned: at `flex: none` a long account label
+     would push the timestamp off the end, and with no cap it would take the
+     line. */
+  .swipe .job .job__meta > .chip {
+    flex: 0 1 auto;
+    max-width: 38%;
+  }
+  /* 4px between rows, not 8. Each row is a bordered card with its own shadow, so
+     the border is already doing the separating that the gap was added for, and at
+     eight rows to a screen the gaps alone were 64px of the list. */
+  .joblist {
+    gap: var(--sp-1);
+  }
+}
+
+/* --- rows that wrap, 561-760px included ----------------------------------
+
+   `.job`/`.log` have wrapped their actions onto a second line since the
+   360px work, in a `max-width: 560px` block. Between 561px and 760px — a large
+   phone in landscape, a 7" tablet, the two shapes this app is most often held
+   in after a phone — they did not, so the band that had *less* room than a
+   desktop got the desktop's rigid single row: four `flex: none` buttons pinned
+   at the end and the task's name squeezed into whatever was left. Widening the
+   query is the whole fix; the rules are the ones that were already there.
+   -------------------------------------------------------------------------- */
+
+@media (max-width: 839.98px) {
+  .job {
+    flex-wrap: wrap;
+  }
+  .job__body {
+    flex: 1 1 100%;
+  }
+  .job__actions {
+    width: 100%;
+    justify-content: flex-end;
+    gap: var(--sp-2);
+  }
+  .log {
+    flex-wrap: wrap;
+  }
+  .log__actions {
+    flex: 1 1 100%;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+  }
+  /* A 32px select is under the 44px floor, and this one is on the inbox — the
+     "check every N minutes" control, which is reached for on a phone the moment
+     mail seems late. Height only: the compact width is what keeps it on the
+     same line as its label. */
+  .select--compact {
+    min-height: var(--tap-min);
+    height: auto;
+  }
+}
+
+/* --- the tap floor is about fingers, not about width ----------------------
+
+   The measured 44px floor lives in a `max-width: 560px` block, which is right
+   for a phone and blind to the case `useMobileShell` was written for: an 820px
+   Android tablet held in two hands, outside every width query in this file and
+   with no pointer anywhere near it. Measured there with
+   `scripts/layout-probe.mjs`: `.markup__btn` 28x26, and `.icon-btn` 38x38 — the
+   format buttons on the compose screen and the row actions on every list.
+
+   So the same floor, keyed on the shell instead. `main.tsx` and `useMobileShell`
+   write `data-shell="mobile"` on the root for narrow *or* a native mobile
+   platform, so this reaches the tablet and costs a desktop window nothing. Only
+   the size rules are repeated — the wrapping and layout rules in that block are
+   genuinely about width and stay there.
+   ------------------------------------------------------------------------- */
+
+:root[data-shell="mobile"] .tagfield__open,
+:root[data-shell="mobile"] .markup__btn,
+:root[data-shell="mobile"] .icon-btn,
+:root[data-shell="mobile"] .icon-btn--sm,
+:root[data-shell="mobile"] .chip__remove,
+:root[data-shell="mobile"] .select--compact,
+:root[data-shell="mobile"] .lightbox__btn {
+  min-width: var(--tap-min);
+  min-height: var(--tap-min);
+}
+/* The lightbox's bottom toolbar is 8 buttons in a row; at the 44px floor a
+   `--sp-2` (8px) gap leaves too little between adjacent targets for a
+   thumb, so it widens here alongside the height. */
+:root[data-shell="mobile"] .lightbox__bar--bottom {
+  gap: var(--sp-3);
+}
+/* `.chip__remove` is a 16px cross inside a pill and `.select--compact` is a
+   32px select; both set an explicit `width`/`height` that a `min-*` cannot beat
+   on its own, so the fixed dimension has to give way too. */
+:root[data-shell="mobile"] .chip__remove,
+:root[data-shell="mobile"] .icon-btn,
+:root[data-shell="mobile"] .icon-btn--sm {
+  width: var(--tap-min);
+  height: var(--tap-min);
+}
+:root[data-shell="mobile"] .select--compact {
+  height: auto;
+}
+/* The row those seven 44px buttons sit in has to give somewhere, and it gives by
+   scrolling — see the `.markup` scroll-shadow rules in the narrow compose block,
+   which is where the 44px buttons and the 320px row are reconciled. */
+
+/* A touchscreen Windows/Electron window is neither narrow nor the Android
+   bridge, so it never sets `data-shell="mobile"` and was left at the small
+   sizes above — mouse-shaped buttons for a finger. `any-pointer: coarse`
+   (not `pointer: coarse`) so a touch+mouse hybrid laptop still counts: the
+   question is "can a finger land here", not "what moved the cursor last".
+   Deliberately its own query rather than folding into `data-shell="mobile"`
+   above — that attribute also switches Settings to its row-opens-dialog
+   structure and dialogs to full-screen, neither of which a touchscreen
+   desktop window asked for. Only the tap-size repeats. */
+@media (any-pointer: coarse) {
+  /* `.markup__toggle` and `.health__go` are additions, and both were found by
+     walking the rendered DOM rather than by reading this list: at 360x800 the
+     toggle measured 22px tall and the health link 26px, against a 48px
+     guideline. Neither is a small control by intent — the toggle is the only
+     way to reach the formatting bar and the link is the only way out of a
+     health warning — they were simply text that had never been asked how tall
+     it was. A list of names is exactly as complete as the last person to think
+     about it, which is why `scripts/check-tap-targets.mjs` now measures the
+     real thing on every build instead of trusting this block. */
+  .tagfield__open,
+  .markup__btn,
+  .markup__toggle,
+  .health__go,
+  .icon-btn,
+  .icon-btn--sm,
+  .chip__remove,
+  .select--compact,
+  .lightbox__btn {
+    min-width: var(--tap-min);
+    min-height: var(--tap-min);
+  }
+  .chip__remove,
+  .icon-btn,
+  .icon-btn--sm {
+    width: var(--tap-min);
+    height: var(--tap-min);
+  }
+  /* Same widening as the `data-shell="mobile"` floor above, for a touchscreen
+     desktop window that never sets that attribute. */
+  .lightbox__bar--bottom {
+    gap: var(--sp-3);
+  }
+  .select--compact {
+    height: auto;
+  }
+}
+
+/* -------------------------------------------------------------------------
+   2. ADD immediately after the existing `.monthgrid__day[data-today='true']`
+      block (app.css ~line 1068).
+   ------------------------------------------------------------------------- */
+
+/* Part of a shift-click / shift-arrow span. Deliberately an inset ring rather
+   than a border colour: the cell may already be showing a holiday border, and
+   losing that while selecting would hide what you are about to overwrite. */
+.monthgrid__day[data-selected='true'] {
+  box-shadow: inset 0 0 0 2px var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface-inset));
+}
+
+/* Queued for the gap-compose batch (ctrl/cmd-click). A dashed ring in
+   `--info` rather than `--accent`'s solid one, so a square cannot be misread
+   as a shift-click range selection while both are somehow live at once. */
+.monthgrid__day[data-gap='true'] {
+  box-shadow: inset 0 0 0 2px var(--info);
+  background: color-mix(in srgb, var(--info) 12%, var(--surface-inset));
+}
+
+/* A day the conflict scan flagged. Border only, so it composes with the
+   holiday/make-up background instead of fighting it. */
+.monthgrid__day[data-conflict='warning'] {
+  border-color: var(--warning);
+}
+.monthgrid__day[data-conflict='error'] {
+  border-color: var(--danger);
+  border-width: 2px;
+}
+
+/* The week zoom: same grid, taller cells, because a week has room to show
+   more than a number. */
+.monthgrid[data-scope='week'] .monthgrid__day {
+  aspect-ratio: auto;
+  min-height: 88px;
+}
+
+/* -------------------------------------------------------------------------
+   4. ADD after the existing `.swatch--shifted` block (app.css ~line 1123).
+   ------------------------------------------------------------------------- */
+
+.swatch--conflict {
+  background: var(--danger-bg);
+  border-color: var(--danger);
+}
+
+/* -------------------------------------------------------------------------
+   6. ADD to the "Working calendar" section (app.css ~line 2891, after the
+      existing `.workcal__dates` block).
+   ------------------------------------------------------------------------- */
+
+/* The name beside a date on a chip — "2026-10-01 · National Day". Secondary
+   weight, because the date is still the identity of the entry. */
+.chip__note {
+  margin-inline-start: var(--sp-2);
+  color: var(--text-3);
+  font-weight: 400;
+}
+
+/* The bar that appears once a span is selected. */
+.rangebar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.rangebar__count {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-1);
+  margin-inline-end: auto;
+}
+
+/* --- the day zoom -------------------------------------------------------- */
+
+.dayview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+.dayview__head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+}
+.dayview__date {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-weight: 600;
+  color: var(--text-1);
+}
+.dayview__chips {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-inline-end: auto;
+}
+.dayview__empty {
+  margin: 0;
+  padding: var(--sp-5) 0;
+  text-align: center;
+  color: var(--text-3);
+}
+.dayview__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.dayview__move {
+  padding-top: var(--sp-2);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.dayrow {
+  /*
+   * A column, not the row it used to be — `.dayrow__main` below carries the
+   * horizontal line this rule used to draw directly. The expand affordance
+   * (C3), the holiday-shift suggestion (C5) and the body preview all attach
+   * *under* that line, and a flex row has nowhere honest to put a sibling
+   * that is supposed to span the whole width.
+   */
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-inset);
+  cursor: grab;
+}
+.dayrow:active {
+  cursor: grabbing;
+}
+.dayrow[data-shifted='true'] {
+  /* The calendar put this one here; it is not where the rule asked for.
+     Inline-start so the marker follows the reading direction. */
+  border-inline-start: 3px solid var(--accent);
+}
+.dayrow__main {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+.dayrow__time {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 5.5em;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+  font-size: var(--text-sm);
+}
+.dayrow__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+.dayrow__name {
+  text-align: start;
+  font-weight: 600;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+.dayrow__meta {
+  font-size: var(--text-xs);
+  color: var(--text-3);
+  overflow-wrap: anywhere;
+}
+.dayrow__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+.dayrow__chevron {
+  transition: transform 0.15s ease;
+}
+.dayrow__chevron[data-open='true'] {
+  transform: rotate(180deg);
+}
+
+/* The per-row holiday-shift suggestion (C5) — a banner already knows how to
+   hold a sentence and a couple of buttons; this just keeps it flush with the
+   row above it rather than the page gutter `.banner` assumes elsewhere. */
+.dayrow__holidaysuggest {
+  margin: 0;
+}
+
+/*
+ * The body preview (C3), opened one row at a time. Both the HTML frame and
+ * the plain-text fallback share a height budget — a message can be any
+ * length, and a day panel embedded under the month grid cannot grow to fit
+ * it without pushing the grid itself off screen.
+ */
+.dayrow__preview {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: var(--sp-2);
+}
+.dayrow__previewframe {
+  width: 100%;
+  border: 0;
+  min-height: 120px;
+  max-height: 260px;
+  background: #fff;
+}
+.dayrow__previewtext {
+  margin: 0;
+  max-height: 260px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font: inherit;
+  color: var(--text-2);
+}
+.dayrow__previewempty {
+  margin: 0;
+  color: var(--text-3);
+  font-size: var(--text-base);
+}
+
+/* --- a reminder, opened from the calendar -------------------------------- */
+
+.jobsheet {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+.jobsheet__row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  font-size: var(--text-sm);
+  color: var(--text-2);
+}
+.jobsheet__subject {
+  font-weight: 600;
+  color: var(--text-1);
+  overflow-wrap: anywhere;
+}
+.jobsheet__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.jobsheet__times {
+  margin: 0;
+  padding-inline-start: var(--sp-5);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--text-sm);
+  color: var(--text-2);
+}
+.jobsheet__stamp {
+  margin-top: var(--sp-1);
+  font-size: var(--text-xs);
+  color: var(--text-3);
+}
+
+/* The day-count field in `SeriesSheet`'s bulk-reschedule row — wide enough for
+   a signed two-digit number, not the full-width an `.input` defaults to. */
+.series-shift__input {
+  width: 6em;
+}
+
+/* --- conflicts ----------------------------------------------------------- */
+
+.conflictlist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.conflict {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-sm);
+  font-size: var(--text-base);
+  background: var(--warning-bg);
+  color: var(--text-1);
+}
+.conflict[data-severity='error'] {
+  background: var(--danger-bg);
+}
+.conflict--clear {
+  background: var(--success-bg);
+  color: var(--text-2);
+}
+.conflict__text {
+  flex: 1;
+  min-width: 0;
+  text-align: start;
+  overflow-wrap: anywhere;
+}
+.conflict__when {
+  flex-shrink: 0;
+  font-size: var(--text-xs);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- years, and the Chinese statutory tables ----------------------------- */
+
+.yearlist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.yearlist__row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-sm);
+  background: var(--surface-inset);
+}
+.yearlist__year {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  min-width: 3.5em;
+}
+.yearlist__meta {
+  font-size: var(--text-sm);
+  color: var(--text-2);
+  margin-inline-end: auto;
+}
+.yearlist__missing {
+  font-size: var(--text-base);
+  color: var(--text-3);
+  margin-inline-end: auto;
+}
+/* This is the URL the app promises to name *before* it contacts it, so it is
+   the one string on the screen that has to be legible enough to actually read
+   and check. It was `--text-2xs` (12px) — the only element in the whole
+   application below the app's own smallest text token, found by walking all
+   nine screens at six widths in six styles. `overflow-wrap: anywhere` below
+   already stops it widening the card, so the size was buying nothing. At
+   `--text-sm` it is the last element in the application under 16px cleared,
+   which makes "nothing here is smaller than 小四" a property that can be
+   checked rather than a habit. */
+.yearlist__url {
+  display: inline-block;
+  margin-top: var(--sp-1);
+  font-family: var(--font-mono);
+  font-size: var(--text-base);
+  color: var(--text-3);
+  /* A URL is one long unbreakable token; without this it widens the card. */
+  overflow-wrap: anywhere;
+  direction: ltr;
+  text-align: start;
+  unicode-bidi: embed;
+}

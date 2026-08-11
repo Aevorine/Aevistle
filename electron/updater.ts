@@ -1,7 +1,7 @@
 /**
  * Downloading a new version, on the desktop.
  *
- * The check itself is shared with Android (`src/core/update.ts`); only the
+ * The check itself is shared with Android (`src/core/platform/update.ts`); only the
  * download needs the main process, because a browser download would leave the
  * user to find the file themselves and because the integrity check has to
  * happen somewhere with a real hash implementation.
@@ -29,7 +29,7 @@ import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import path from 'node:path'
 import type { ReadableStream as WebReadableStream } from 'node:stream/web'
-import type { UpdateAsset, DownloadProgress } from '../src/core/update'
+import type { UpdateAsset, DownloadProgress } from '../src/core/platform/update'
 import { UPDATE_SIGNING_PUBLIC_KEY_SPKI_BASE64 } from './updateSigningKey'
 
 const UPDATE_SIGNING_PUBLIC_KEY = createPublicKey({

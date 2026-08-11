@@ -26,7 +26,7 @@ import { pathToFileURL } from 'node:url'
 const dir = await mkdtemp(path.join(tmpdir(), 'aevistle-transfer-'))
 const bundle = path.join(dir, 'jobTransfer.mjs')
 await build({
-  entryPoints: ['src/core/jobTransfer.ts'],
+  entryPoints: ['src/core/schedule/jobTransfer.ts'],
   bundle: true,
   format: 'esm',
   outfile: bundle,

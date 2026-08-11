@@ -37,7 +37,7 @@ try {
     'npx',
     [
       'esbuild',
-      `"${join(root, 'src/core/dispatchLedger.ts')}"`,
+      `"${join(root, 'src/core/ops/dispatchLedger.ts')}"`,
       '--bundle',
       '--format=esm',
       `--outfile="${join(out, 'dl.mjs')}"`,

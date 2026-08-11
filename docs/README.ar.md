@@ -102,7 +102,7 @@ IMAP بمزوّد بريدك أنت**، فقط للحسابات التي فعّ�
 
 آخر التغييرات ← **[Releases](https://github.com/Aevorine/Aevistle/releases)**
 (لكل إصدار ملاحظاته؛ الإصدارات الأقدم موجودة أيضًا في ملفات
-`release-notes-0.1.*.md`).
+`docs/release-notes/`).
 
 ## التنزيل
 

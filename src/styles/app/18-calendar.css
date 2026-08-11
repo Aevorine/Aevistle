@@ -1,0 +1,1025 @@
+/* ==========================================================================
+   The calendar as a scheduling console
+   ==========================================================================
+
+   Two changes to what a day square is:
+
+     1. it lists its sends — time · recipient · subject — instead of only
+        counting them, so the grid answers "what happens on the 2nd" and not
+        just "something does";
+     2. it is tinted by how many land on it, so a month answers "when am I
+        over-committed" from across the room.
+
+   ## What happens at 360px, decided and written down
+
+   Seven columns of a 360px phone is a 38px cell. That is a date **or** a line
+   of text, never both, and the honest answer is that the phone does not get
+   the list: below 560px `.monthgrid__sends` is `display: none`, the count
+   badge stays (as the 3px underline it already became at that width), and the
+   full list lives in the day panel — which on a phone is the better surface
+   for it anyway. Nothing is lost and nothing is hidden behind a gesture: the
+   badge opens the day, and the day panel prints every send in full.
+
+   The grid never scrolls sideways at any width. That was the rule that made
+   38px cells necessary in the first place and it is not being traded away for
+   this.
+
+   ## The one place text is allowed to be cut
+
+   A send row's `time` is never truncated — it is the field you scan by. The
+   recipient and subject after it are, with an ellipsis, because a subject is
+   arbitrary-length text and a calendar cell is 38–150px wide: there is no
+   width at which "show the whole subject in the square" is possible. The full
+   text is on the row's `title` and `aria-label`, and in the day panel, which
+   wraps it rather than cutting it. */
+
+/* Taller cells, and the date at the top of them rather than the middle — a
+   number centred in a square that now has three lines under it reads as
+   floating in the middle of the list. */
+.monthgrid[data-lines='true'] .monthgrid__day {
+  aspect-ratio: auto;
+  /* 100, not 96: the send rows start 24px down (1px border + 3px padding + the
+     number's own 19.2px line box) and stop 4px from the bottom, so the list
+     gets 72px — three 20.9px rows and their two gaps, with room to spare. At
+     96px the budget was 70px and a third row plus the "+N more" button did not
+     fit; see `MAX_CELL_SENDS` for the other half of that fix. */
+  min-height: 100px;
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding: 3px 5px;
+}
+.monthgrid[data-lines='true'][data-scope='week'] .monthgrid__day {
+  /* A week is seven cells across the same pane, so each one is wide enough to
+     be worth making taller. */
+  min-height: 132px;
+}
+
+/* Positioned over the day button rather than inside it: a `<button>` inside a
+   `<button>` is invalid HTML and the browser silently drops the inner one, so
+   every row here would have toggled the holiday instead of opening a reminder.
+
+   `pointer-events: none` on the container and `auto` on the rows is what keeps
+   the *gaps* between rows clickable — without it the square would stop being a
+   holiday toggle the moment anything was scheduled on it. */
+.monthgrid__sends {
+  position: absolute;
+  /* Clears the date number: 1px border + 3px padding + the 19.2px line box
+     `.monthgrid__num` now pins for exactly this reason. It was 22px against a
+     line box that tracked `--leading-normal`, so two shipped styles pushed the
+     digits into the first row. */
+  inset-block-start: 24px;
+  inset-block-end: 4px;
+  inset-inline: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.monthgrid__send {
+  pointer-events: auto;
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  padding: 1px 4px;
+  border: 0;
+  border-inline-start: 2px solid var(--accent);
+  border-radius: var(--r-xs);
+  background: color-mix(in oklab, var(--accent) 14%, transparent);
+  color: var(--text-1);
+  font-size: var(--text-xs);
+  line-height: 1.35;
+  text-align: start;
+  cursor: pointer;
+}
+.monthgrid__send:hover {
+  background: color-mix(in oklab, var(--accent) 26%, transparent);
+}
+.monthgrid__send:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.monthgrid__send[draggable='true'] {
+  cursor: grab;
+}
+.monthgrid__send[draggable='true']:active {
+  cursor: grabbing;
+}
+/* Moved here by the working calendar, not asked for. Same meaning as the
+   filled badge, said on the row it applies to. */
+.monthgrid__send[data-shifted='true'] {
+  border-inline-start-color: var(--warning);
+  background: color-mix(in oklab, var(--warning) 20%, transparent);
+}
+/* This is the send that collides with the others. Marking the square was never
+   enough on a day holding three sends: it said a problem was here and left the
+   reader to work out which of the three it was about. */
+.monthgrid__send[data-conflict='true'] {
+  border-inline-start-color: var(--danger);
+  background: color-mix(in oklab, var(--danger) 20%, transparent);
+}
+
+/* Never truncated: the time is the field the eye scans down. */
+.monthgrid__sendtime {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+/* The part that has to give. `min-width: 0` is what actually lets a flex item
+   shrink below its content — `text-overflow` alone does nothing inside a flex
+   row without it, which is how an "ellipsis" ends up overflowing instead. */
+.monthgrid__sendtext {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text-2);
+}
+.monthgrid__sendsubject {
+  color: var(--text-3);
+}
+
+.monthgrid__more {
+  pointer-events: auto;
+  align-self: flex-start;
+  padding: 0 4px;
+  border: 0;
+  border-radius: var(--r-xs);
+  background: transparent;
+  color: var(--accent);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  line-height: 1.35;
+  cursor: pointer;
+}
+.monthgrid__more:hover {
+  text-decoration: underline;
+}
+.monthgrid__more:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* --- the heatmap ---------------------------------------------------------
+
+   A ramp mixed from `--accent`, never a colour of its own: all six visual
+   styles redefine that token and a literal blue would be the one thing on the
+   screen that ignored the style the user picked.
+
+   `background-image` rather than `background-color`, deliberately. The day
+   button's colour is already spoken for — `--surface-inset` normally,
+   `--danger-bg` on a holiday, `--warning-bg` on a make-up day — and every one
+   of those means something the load must not overwrite. A gradient layer
+   composites *over* whichever of them applies, so a busy holiday still reads
+   as a holiday.
+
+   Mixed `in oklab` rather than `in srgb`: sRGB interpolation bunches the light
+   end together, and steps 1 and 2 of a five-step ramp came out very nearly the
+   same colour. The percentages stop at 34% so the conflict border and the text
+   on top of the square both keep their contrast — the scale is a background,
+   not a fill. */
+.monthgrid__day[data-load] {
+  background-image: linear-gradient(var(--load-tint), var(--load-tint));
+}
+.monthgrid__day[data-load='1'] {
+  --load-tint: color-mix(in oklab, var(--accent) 7%, transparent);
+}
+.monthgrid__day[data-load='2'] {
+  --load-tint: color-mix(in oklab, var(--accent) 13%, transparent);
+}
+.monthgrid__day[data-load='3'] {
+  --load-tint: color-mix(in oklab, var(--accent) 20%, transparent);
+}
+.monthgrid__day[data-load='4'] {
+  --load-tint: color-mix(in oklab, var(--accent) 27%, transparent);
+}
+.monthgrid__day[data-load='5'] {
+  --load-tint: color-mix(in oklab, var(--accent) 34%, transparent);
+}
+/* The ramp was checked against `--text-1` (7.8:1 at step 5) and not against the
+   override directly above it: a weekend or a holiday is `data-working='false'`,
+   which paints the date in `--text-3`, the lowest-contrast text token there is.
+   Composited under the tint that lands at 4.4:1 by step 1 and 3.0:1 by step 5 —
+   and a non-working day carrying mail is exactly the square someone is looking
+   for. `--text-2` holds 4.6:1 at the darkest step and still reads as dimmer
+   than a working day, which is all the `data-working` state was saying. */
+.monthgrid__day[data-load][data-working='false'] {
+  color: var(--text-2);
+}
+
+/* The key for it. Five unlabelled shades are decoration; the scale only
+   becomes information once the reader can find out that the darkest one means
+   eight sends or more. */
+/* Scoped to `.monthgrid__legend` on purpose: the rule that lays the legend's
+   items out is `.monthgrid__legend span`, and a bare `.monthgrid__legendscale`
+   loses to it on specificity — the tighter gap would have been dead code that
+   read exactly like live code. Wrapping, because five swatches plus a label is
+   the widest item in the legend and a 360px phone has to be able to break it. */
+.monthgrid__legend .monthgrid__legendscale {
+  flex-wrap: wrap;
+  gap: 3px;
+}
+/* The busiest step's number is read, not glanced at, so it leaves the 14px
+   its `.monthgrid__legend span` neighbours inherit and states the body rank.
+   The comment here used to say "inherits 14px ... is read, not glanced at",
+   which argued for one size and set another. */
+.monthgrid__legendmax {
+  font-size: var(--text-base);
+  margin-inline-start: 3px;
+  font-variant-numeric: tabular-nums;
+}
+.swatch--load {
+  background-color: var(--surface-inset);
+  background-image: linear-gradient(var(--load-tint), var(--load-tint));
+}
+.swatch--load[data-load='1'] {
+  --load-tint: color-mix(in oklab, var(--accent) 7%, transparent);
+}
+.swatch--load[data-load='2'] {
+  --load-tint: color-mix(in oklab, var(--accent) 13%, transparent);
+}
+.swatch--load[data-load='3'] {
+  --load-tint: color-mix(in oklab, var(--accent) 20%, transparent);
+}
+.swatch--load[data-load='4'] {
+  --load-tint: color-mix(in oklab, var(--accent) 27%, transparent);
+}
+.swatch--load[data-load='5'] {
+  --load-tint: color-mix(in oklab, var(--accent) 34%, transparent);
+}
+
+/* --- the day panel -------------------------------------------------------- */
+
+.dayview__actions {
+  flex-wrap: wrap;
+}
+.dayview__pileup {
+  align-items: flex-start;
+}
+/* The fix, beside the sentence that describes the problem. Wraps rather than
+   truncating: the button carries a number and the sentence carries a time, and
+   neither survives being cut. */
+.dayview__pileuprow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+/* Who it goes to and what it says, at full length — this panel is where the
+   text the square could only show a truncated version of gets to be complete.
+   `anywhere`, not `break-word`: a subject is often one unbroken token (an
+   order number, a URL), and only `anywhere` lets the box shrink below the
+   width of that token instead of overflowing it. */
+.dayrow__who,
+.dayrow__subject {
+  overflow-wrap: anywhere;
+}
+/* Split apart when the auxiliary rank came down to 12.5px. Who it goes to is
+   metadata and reads fine there; the subject is the sentence this panel exists
+   to show at full length — the comment above says so — and 12.5px is the rank
+   for a timestamp, not for prose. Secondary is the floor for something being
+   read rather than glanced at. */
+.dayrow__who {
+  color: var(--text-2);
+  font-size: var(--text-xs);
+}
+.dayrow__subject {
+  color: var(--text-1);
+  font-size: var(--text-base);
+}
+
+/* --- narrow ---------------------------------------------------------------
+   Below 900px a cell is under ~110px and the subject after an ellipsis is one
+   or two characters — worse than absent, because it looks like the subject is
+   "Re…". Time and recipient survive; the subject moves to the day panel. */
+@media (max-width: 839.98px) {
+  .monthgrid__sendsubject {
+    display: none;
+  }
+}
+
+/* And below 700px the list goes entirely.
+
+   700, not 560, because the row stops fitting long before the phone layer
+   starts. Measured at a 600px window: the content column is ~534px, a cell is
+   ~66px and the row's usable inner width is ~48px. "9:00 AM" at 14px tabular
+   is ~49px on its own, and the delivery-status dot added another 9px to every
+   row — so the *time* was being cut, and the time is the one field the note at
+   the top of this section promises is never truncated. At 700px the inner
+   width is ~66px and the time plus its dot fit with room left.
+
+   Below that the count badge and the day panel are what the calendar gets, and
+   the heatmap keeps working — a tinted square costs no height at all. */
+@media (max-width: 839.98px) {
+  .monthgrid__sends {
+    display: none;
+  }
+  .monthgrid[data-lines='true'] .monthgrid__day {
+    min-height: var(--tap-min);
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+  }
+  .monthgrid[data-lines='true'][data-scope='week'] .monthgrid__day {
+    min-height: 88px;
+  }
+}
+@media (max-width: 599.98px) {
+  /* The phone block above grows every `.swatch` to a 44px tap target. These
+     five are `<i>` elements in a legend — nothing taps them, and five 44px
+     squares plus a label is 300px of a 360px screen for a colour key. */
+  .swatch--load {
+    width: var(--icon-sm);
+    height: var(--icon-sm);
+  }
+}
+
+/* --- ANCHOR:calendar-marks (C1/C6/C8/C9) ---
+
+   Three small additions to the calendar console above: recipient chips inside
+   the day badge, a delivery-status dot on a listed send, and the layout for
+   the filter row and the inline quick panel. */
+
+/* The badge grows sideways to hold up to three overlapping avatars instead of
+   a bare number. `data-chips` itself is set purely by send count (three or
+   fewer) with no regard for how wide the cell actually is — three 14px chips
+   plus padding run to roughly the same width as the 38px cell this app is
+   built down to (see the "38px holds a date or a line of text" note below),
+   which at that width would sit almost edge-to-edge over the day number
+   itself. `.monthgrid__markscount` is the number, rendered alongside the
+   chips and hidden by default; the ≤560px query *after these rules* swaps
+   which of the two is display:none, so the badge shrinks back to the plain
+   count exactly where the rest of this section already sheds detail for the
+   same reason.
+
+   "After" is load-bearing. The swap used to live in the ≤560px block above,
+   at the same (0,2,0)/(0,1,0) specificity as these — and a media query adds
+   none — so these later rules simply won it back: on a phone the avatars were
+   shown, not hidden, inside a badge the phone layer has already collapsed to a
+   3px underline with `font-size: 0`. Three 14px chips overflowed it and sat on
+   top of the date. */
+.monthgrid__marks[data-chips='true'] {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  padding: 2px 4px 2px 2px;
+}
+.monthgrid__marksavatars {
+  display: inline-flex;
+}
+.monthgrid__markschip {
+  display: inline-grid;
+  place-items: center;
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  margin-inline-start: -6px;
+  border: 1px solid currentColor;
+  border-radius: var(--r-full);
+  background: var(--surface-1);
+  color: inherit;
+  /* 小五, the scale's floor, reserved for exactly this: a badge glyph. It was
+     a bare 8px — two thirds of the smallest token there is — on a mark that
+     can be a Han initial, which at that size is a smudge rather than a letter.
+     Three chips at 18px with a 6px overlap is 48px of an ≥84px cell, which is
+     the width `data-chips` survives at now that the send list bows out at
+     700px rather than 560. */
+  font-size: var(--text-2xs);
+  font-weight: 700;
+  line-height: 1;
+}
+.monthgrid__markschip:first-child {
+  margin-inline-start: 0;
+}
+.monthgrid__markscount {
+  display: none;
+}
+@media (max-width: 599.98px) {
+  /* The phone badge is a 3px underline (see `.monthgrid__marks` in the phone
+     block above). Nothing legible fits inside 3px, so the chips go and the
+     underline stands on its own — the day panel is where "who" is read. The
+     count rides along hidden either way: `font-size: 0` up there means the
+     digits would render as nothing even if this showed them. */
+  .monthgrid__marks[data-chips='true'] {
+    display: block;
+    min-width: 0;
+    padding: 0;
+  }
+  .monthgrid__marksavatars {
+    display: none;
+  }
+}
+
+/* A send's delivery status, as a dot rather than a word — there is no room for
+   a word on a 38px square. The sentence itself is folded into the row's own
+   label, both here and in the day panel, so nothing is lost to a screen
+   reader; this is decoration on top of that, not a second source of truth. */
+.sendstatus {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-inline-end: 3px;
+  border-radius: var(--r-full);
+  background: var(--text-3);
+  vertical-align: middle;
+}
+.sendstatus[data-status='delivered'] {
+  background: var(--success);
+}
+.sendstatus[data-status='failed'] {
+  background: var(--danger);
+}
+.sendstatus[data-status='retrying'] {
+  background: var(--warning);
+  animation: statuspulse 2s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sendstatus[data-status='retrying'] { animation: none; }
+}
+
+/* The account/tag/recipient filter, above the grid. `.field__row` already
+   wraps at narrow widths — see app.css's own note on it — so this reuses it
+   rather than laying out a fourth flavour of the same row. */
+.workcal__filters {
+  align-items: flex-end;
+}
+.workcal__filters .field {
+  min-width: 10em;
+}
+.workcal__filterhint {
+  font-size: var(--text-xs);
+  color: var(--text-3);
+}
+
+/* The heatmap's own switch, sitting just above the legend it controls. */
+.workcal__heatmaptoggle {
+  margin-top: var(--sp-3);
+}
+
+/* The day panel, opened inline under the grid instead of taking over the
+   screen. Bordered so it reads as a drawer rather than another card. */
+.workcal__quickpanel {
+  margin-top: var(--sp-3);
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-inset);
+  /* The per-row body preview has a height budget; the list around it did not,
+     and that is the one that decides how far the legend, the heatmap toggle
+     and the range bar get pushed down the page. Nine entries on a holiday —
+     each row ~64px, each holiday row plus a ~90px suggestion banner — is a
+     ~900px drawer wedged between the grid and everything under it. It scrolls
+     inside itself instead. Only this instance: the `scope === 'day'` panel
+     owns the whole screen and has nothing below it to push. */
+  max-height: min(50vh, 480px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.workcal__quickpanelhead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--sp-2);
+}
+
+/* --- ANCHOR:digest-greetings (B6/B8) --- */
+
+/**
+ * The digest preview.
+ *
+ * A scroll box, not a growing block: the body is as long as the schedule is
+ * busy, and a forty-line preview would push the rest of the settings screen
+ * off the bottom for anyone with a lot of reminders. `pre-wrap` because the
+ * text is composed with real newlines and must keep them, while still wrapping
+ * a long reminder name instead of running off the side.
+ */
+.digest-preview {
+  margin: 0;
+  max-height: 40vh;
+  overflow: auto;
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  color: var(--text-1);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/**
+ * The greeting plan, which is the review step and therefore has to be legible
+ * rather than compact — this list is the only thing standing between the user
+ * and mail they did not write themselves.
+ */
+.greetplan {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.greetplan__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+}
+
+/* --- ANCHOR:delivery-inbox-ics (B3/B4/B5) --- */
+
+/* --- B3 · 送达窗口 : a contact's own working day ---------------------------
+ *
+ * Three surfaces: the editor block on the contact card, the in-page zone
+ * picker it contains, and one inline marker folded into the compose screen's
+ * existing send-time sentence.
+ *
+ * Nothing here names a colour. The two states that need emphasis — a send that
+ * has been moved, and a window that is being ignored — are `color-mix` over
+ * `--accent` and `--warning`, so all six selectable styles get a treatment
+ * derived from the palette the user chose rather than one invented here.
+ *
+ * The layout rule that matters: the compose marker adds no row. It is an
+ * inline sibling of `.whenbar__rule` inside `.whenbar__text`, which already
+ * wraps and already carries a second conditional span; `.whenbar`'s height is
+ * set by its 46px `--control-h` controls, so the sentence has room to reach two
+ * lines before it costs the message box anything. The per-recipient breakdown
+ * is a `title`, which costs the layout nothing at all.
+ */
+
+.deliverwin {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+
+.deliverwin__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  min-width: 0;
+}
+
+/* Two boxes that become two rows rather than two half-width boxes. At 360px a
+   side-by-side pair leaves each one narrower than the `HH:MM` spinner Chromium
+   draws inside it, and the seconds field starts clipping. */
+.deliverwin__times {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+
+.deliverwin__time {
+  flex: 1 1 9rem;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.deliverwin__timelabel {
+  flex: none;
+  color: var(--text-2);
+  font-size: var(--text-sm);
+}
+
+.deliverwin__note {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  overflow-wrap: anywhere;
+}
+
+.deliverwin__preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+/*
+ * The sentence this whole screen exists for.
+ *
+ * Given a surface of its own rather than left as another grey hint, because a
+ * settings form that does not show its own effect is how this feature gets
+ * configured wrong and stays wrong. When something actually moves it takes the
+ * accent tint, so "I changed a number and the outcome changed" is visible
+ * without reading.
+ */
+.deliverwin__line {
+  margin: 0;
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  color: var(--text-1);
+  font-size: var(--text-base);
+  line-height: var(--leading-relaxed);
+  overflow-wrap: anywhere;
+}
+.deliverwin__line[data-moved] {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface-2));
+}
+
+.deliverwin__source {
+  margin: 0;
+  color: var(--text-3);
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  overflow-wrap: anywhere;
+}
+
+/* --- the zone picker, drawn in the page ---------------------------------- */
+
+.zonepick {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.zonepick__value {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  text-align: start;
+  cursor: pointer;
+}
+
+/* `America/Argentina/ComodRivadavia` is 33 characters with nothing a normal
+   line break can use. `break-word` is not enough here — only `anywhere` lets
+   the box shrink below the width of an unbroken token, which is the difference
+   between wrapping and a horizontal scrollbar at 360px. */
+.zonepick__id {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.zonepick__now {
+  flex: none;
+  color: var(--text-3);
+  font-size: var(--text-xs);
+  font-variant-numeric: var(--numeric);
+}
+
+/*
+ * In flow, not absolutely positioned.
+ *
+ * This lives inside `.modal__body`, which is itself the scroller — an absolute
+ * panel there would be clipped by the very element that has to scroll it into
+ * view. In flow it can never be clipped, never overlaps anything, and on a
+ * phone it simply pushes the rest of the form down while it is open.
+ */
+.zonepick__panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-1);
+  box-shadow: var(--shadow-sm);
+  min-width: 0;
+}
+
+.zonepick__searchrow {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.zonepick__searchicon {
+  position: absolute;
+  inset-inline-start: var(--sp-3);
+  color: var(--text-3);
+  pointer-events: none;
+}
+
+.zonepick__search {
+  padding-inline-start: calc(var(--sp-3) * 2 + 15px);
+}
+
+.zonepick__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  /* Pure viewport units. A fixed pixel cap shrinks the box on exactly the
+     screens that had room for it — recorded in PROJECT-BRIEF §4 after a
+     `min(85vh, 760px)` used 703px of an 827px window. */
+  max-height: 34vh;
+  overflow-y: auto;
+  min-width: 0;
+}
+
+.zonepick__row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  min-height: var(--tap-min);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-1);
+  font-size: var(--text-sm);
+  text-align: start;
+  cursor: pointer;
+}
+.zonepick__row[data-active] {
+  background: var(--surface-hover);
+  border-color: var(--border);
+}
+.zonepick__row[aria-selected='true'] {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.zonepick__tick {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-xs);
+  color: var(--accent-text);
+}
+.zonepick__tick--on {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.zonepick__rowid {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.zonepick__empty {
+  margin: 0;
+  padding: var(--sp-3);
+  color: var(--text-2);
+  font-size: var(--text-base);
+  overflow-wrap: anywhere;
+}
+
+.zonepick__more {
+  margin: 0;
+  padding-inline: var(--sp-3);
+  color: var(--text-3);
+  font-size: var(--text-base);
+}
+
+/* --- the compose marker --------------------------------------------------- */
+
+/*
+ * Folded into the send-time sentence, not given a row.
+ *
+ * Every pixel below the message box comes off the message box — six
+ * complaints, with measurements (PROJECT-BRIEF §6). So: no `display: block`,
+ * no `min-height`, no margin above or below. It is a phrase beside the phrase
+ * that is already there, and it inherits that line's height.
+ *
+ * The tight leading is the difference between costing nothing and costing two
+ * pixels. `.whenbar`'s height is set by its 46px `--control-h` controls, and
+ * `.whenbar__text` is allowed to wrap inside that budget: rule line (~20px) +
+ * the 8px row gap + this line at `--leading-tight` (~16px) is 44px, which fits.
+ * At normal leading it would be 48px, and the message box would pay 2px for a
+ * marker that is only on screen when a window is actually moving the send.
+ */
+.whenbar__window {
+  color: color-mix(in srgb, var(--accent) 78%, var(--text-1));
+  font-size: var(--text-base);
+  line-height: var(--leading-tight);
+  overflow-wrap: anywhere;
+  cursor: help;
+}
+
+/* --- end B3 · 送达窗口 ---------------------------------------------------- */
+
+/* --- B4 · 收件箱 → 日历 : the dates found in an open message ---------------
+ *
+ * The reader is a flex column whose children are all `flex: none` and whose
+ * horizontal inset is applied per element rather than to the container (see
+ * `.modal__body--reader` above). This block joins that list rather than
+ * editing it, so the offers line up with the banners and the attachment
+ * strip on every width.
+ *
+ * Nothing here names a colour. The confidence tiers are `color-mix` over the
+ * existing `--accent` / `--warning` tokens, so all six visual styles get a
+ * treatment derived from the accent they chose rather than one invented here.
+ */
+.modal__body--reader > .reader__dates {
+  margin: var(--sp-2) var(--sp-4);
+}
+
+.reader__dates {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.reader__dates .section-label {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+/**
+ * One offer.
+ *
+ * A column at every width. The alternative — the date on one side and the
+ * buttons on the other — needs about 520px to avoid squeezing the evidence
+ * line into a two-word column, and the narrowest supported width is 360px.
+ * Stacking costs one row of height and removes the breakpoint entirely.
+ */
+.datecard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-inline-start: 3px solid var(--accent);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--accent) 5%, var(--surface-2));
+}
+
+.datecard__head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+.datecard__mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: var(--icon-lg);
+  height: var(--icon-lg);
+  border-radius: var(--r-sm);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.datecard__main {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+/* The answer, first and largest — the same order `.codecard` puts it in, and
+   now the same step down: 小四 with the card's own weight carrying the rank. */
+.datecard__when {
+  font-size: var(--text-base);
+  color: var(--text-1);
+  font-variant-numeric: var(--numeric);
+  overflow-wrap: anywhere;
+}
+.datecard__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+/* A subject the sender wrote, so it wraps rather than pushing the card wide. */
+.datecard__title {
+  color: var(--text-2);
+  font-size: var(--text-base);
+  overflow-wrap: anywhere;
+}
+
+/**
+ * The sentence the date was read from.
+ *
+ * This is arbitrary text from a stranger, and the two things it does to a
+ * layout are both fixed here. `overflow-wrap: anywhere` rather than
+ * `break-word` because only `anywhere` lets the box shrink below the width of
+ * an unbroken token — a 120-character URL or a run of CJK with no spaces in it
+ * (PROJECT-BRIEF §4, recorded twice). And a clamp, because a newsletter
+ * sentence can run for a paragraph and the offer under it must stay on screen.
+ */
+.datecard__evidence {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-sm);
+  background: var(--surface-1);
+  border: 1px dashed var(--border-strong);
+}
+.datecard__evidenceLabel {
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-3);
+}
+.datecard__snippet {
+  color: var(--text-2);
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.datecard__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.datecard__leads {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.datecard__leadsLabel {
+  color: var(--text-3);
+  font-size: var(--text-xs);
+}
+/* Every lead time is a real target on a phone, not a 24px chip. */
+.datecard__lead {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-height: var(--tap-min);
+  padding-inline: var(--sp-3);
+}
+.datecard__lead[data-done] {
+  color: var(--success);
+  border-color: var(--success);
+}
+.datecard__note {
+  color: var(--text-3);
+  font-size: var(--text-sm);
+}
+
+/**
+ * A reading the extractor could not settle.
+ *
+ * Distinct three ways at once, because one is never enough: a warning-tinted
+ * card instead of an accent one, a chip that says so in words, and — in the
+ * markup, not here — no primary button anywhere on it. The colour is the
+ * difference nobody has to read; the missing primary is the one that decides
+ * what gets pressed.
+ */
+.datecard[data-confidence='low'] {
+  border-color: color-mix(in srgb, var(--warning) 45%, var(--border));
+  border-inline-start-color: var(--warning);
+  border-inline-start-style: dashed;
+  background: color-mix(in srgb, var(--warning) 7%, var(--surface-2));
+}
+.datecard[data-confidence='low'] .datecard__mark {
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 14%, transparent);
+}
+.datecard__warn {
+  color: var(--warning);
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 599.98px) {
+  /* Match the tighter inset the rest of the reader uses on a phone, so a
+     360px window spends its width on the message rather than on gutters. */
+  .modal__body--reader > .reader__dates {
+    margin: var(--sp-2) var(--sp-3);
+  }
+  /* The mark is decoration; at this width the date needs the pixels. */
+  .datecard__mark {
+    display: none;
+  }
+  /* One control per line beats two half-width ones that both wrap inside. */
+  .datecard__actions > .btn {
+    width: 100%;
+    justify-content: center;
+  }
+}
+/* --- end B4 · 收件箱 → 日历 --- */

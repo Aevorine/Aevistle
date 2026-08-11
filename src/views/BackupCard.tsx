@@ -22,8 +22,8 @@ import { useRef, useState } from 'react'
 import { Banner, Button, Card, CardHeader, Field, Modal, Switch, useToast } from '../components/ui'
 import { IconDownload, IconFolder } from '../components/icons'
 import { useApp } from '../state/AppState'
-import { saveGeneratedFile } from '../core/download'
-import { copyText } from '../core/clipboard'
+import { saveGeneratedFile } from '../core/platform/download'
+import { copyText } from '../core/platform/clipboard'
 import { useI18n } from '../i18n'
 import {
   applyBackup,
@@ -35,7 +35,7 @@ import {
   summarise,
   type BackupFile,
   type BackupSummary,
-} from '../core/backup'
+} from '../core/ops/backup'
 
 export function BackupCard() {
   const { state, dispatch, bridge } = useApp()

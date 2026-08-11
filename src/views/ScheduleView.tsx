@@ -13,9 +13,9 @@ import {
 import { IconClock, IconCopy, IconEdit, IconPause, IconPlay, IconSend, IconTrash } from '../components/icons'
 import { useApp } from '../state/AppState'
 import { useI18n, type TranslationKey } from '../i18n'
-import { summarizeRecurrence } from '../core/schedule'
-import { isFinished } from '../core/jobRun'
-import { seedEditJob } from '../core/editJobSeed'
+import { summarizeRecurrence } from '../core/schedule/schedule'
+import { isFinished } from '../core/schedule/jobRun'
+import { seedEditJob } from '../core/mail/editJobSeed'
 import { ATMOSPHERE_MOTION_MIN, type ScheduledJob } from '../core/types'
 
 /**

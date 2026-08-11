@@ -93,7 +93,7 @@ Aevistle 没有服务器。不用注册账号，不采集任何统计数据，�
 **[FEATURES.md](FEATURES.md)**
 
 最近的更新 → **[Releases](https://github.com/Aevorine/Aevistle/releases)**
-（每个版本都有说明；更早的也在 `release-notes-0.1.*.md` 文件里）。
+（每个版本都有说明；更早的也在 `docs/release-notes/` 目录里）。
 
 ## 下载
 

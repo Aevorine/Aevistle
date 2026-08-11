@@ -37,7 +37,7 @@ const read = (p) => readFileSync(path.join(ROOT, p), 'utf8')
 const dir = await mkdtemp(path.join(tmpdir(), 'aevistle-removal-'))
 const bundle = path.join(dir, 'inboxRemoval.mjs')
 await build({
-  entryPoints: ['src/core/inboxRemoval.ts'],
+  entryPoints: ['src/core/mail/inboxRemoval.ts'],
   bundle: true,
   format: 'esm',
   outfile: bundle,

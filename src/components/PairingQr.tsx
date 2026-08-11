@@ -16,8 +16,8 @@ import { Banner, Button, Field, Segmented, useToast } from './ui'
 import { IconRefresh } from './icons'
 import { DeviceLinkAnimation, type DeviceLinkStatus } from './DeviceLinkAnimation'
 import { useI18n } from '../i18n'
-import { encodeQr, qrPath } from '../core/qr'
-import { copyText } from '../core/clipboard'
+import { encodeQr, qrPath } from '../core/sync/qr'
+import { copyText } from '../core/platform/clipboard'
 import {
   encodePairingText,
   isExpired,
@@ -25,8 +25,8 @@ import {
   PAIRING_SESSION_MS,
   type PairingPayload,
   type PairMode,
-} from '../core/pairing'
-import type { PairedDevicePlatform } from '../core/pairedDevices'
+} from '../core/sync/pairing'
+import type { PairedDevicePlatform } from '../core/sync/pairedDevices'
 
 export type PairingHostStatus = 'listening' | 'connected' | 'expired' | 'error'
 

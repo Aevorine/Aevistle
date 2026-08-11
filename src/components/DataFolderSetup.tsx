@@ -16,7 +16,7 @@ import { Banner, Button, Modal } from './ui'
 import { IconFolder, IconShield } from './icons'
 import { useApp } from '../state/AppState'
 import { useI18n } from '../i18n'
-import type { DataFolder } from '../core/bridge'
+import type { DataFolder } from '../core/platform/bridge'
 
 const SEEN_KEY = 'aevistle.dataFolder.asked'
 

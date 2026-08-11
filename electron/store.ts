@@ -29,8 +29,8 @@ import { promises as fs, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import path from 'node:path'
 import { isInside } from './fsUtil'
 import type { SecretKind } from '../src/core/types'
-import { mintMessageId, type DispatchLedgerEntry } from '../src/core/dispatchLedger'
-import type { ControlAuditEntry } from '../src/core/control'
+import { mintMessageId, type DispatchLedgerEntry } from '../src/core/ops/dispatchLedger'
+import type { ControlAuditEntry } from '../src/core/sync/control'
 
 const STATE_FILE = 'state.json'
 const SECRET_FILE = 'secrets.json'
@@ -791,7 +791,7 @@ export async function flushState(): Promise<void> {
 // This file is where that gets resolved, and it replaces the old boolean
 // "fired-occurrences" claim entirely — one entry per occurrence, tracking
 // *how far* the send got (`'claimed'` -> `'sending'` -> `'accepted'`), not
-// just whether it started. See `src/core/dispatchLedger.ts` for the entry
+// just whether it started. See `src/core/ops/dispatchLedger.ts` for the entry
 // shape and `resolveLedgerEntryOnRestart`, the pure decision table restart
 // recovery is built on. It mirrors `JobStore`'s ledger on the Android side,
 // down to writing the `'sending'` transition durably before the SMTP call
@@ -933,7 +933,7 @@ export function deleteLedgerEntry(claimKey: string): Promise<void> {
 // ---------------------------------------------------------------------------
 //
 // One durable record per control-API request, granted or refused — see
-// `src/core/control.ts`'s `ControlAuditEntry`. Kept as its own file rather
+// `src/core/sync/control.ts`'s `ControlAuditEntry`. Kept as its own file rather
 // than folded into `state.json` for the same reason the dispatch ledger is:
 // a request can be refused before the renderer is even asked (a bad bearer
 // token, a scope the settings screen has not granted — see

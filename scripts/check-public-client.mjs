@@ -100,7 +100,7 @@ function stripComments(text) {
     .replace(/(^|[^:])\/\/[^\n]*/g, (m, p1) => p1 + ' '.repeat(Math.max(0, m.length - p1.length)))
 }
 
-let oauthTs = stripComments(read.get('src/core/oauth.ts') ?? '')
+let oauthTs = stripComments(read.get('src/core/mail/oauth.ts') ?? '')
 let electronOauth = stripComments(read.get('electron/oauth.ts') ?? '')
 let consentJava = stripComments(
   read.get('android/app/src/main/java/dev/aevistle/app/OAuthConsent.java') ?? '',

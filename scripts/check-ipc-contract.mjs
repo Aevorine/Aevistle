@@ -1,7 +1,7 @@
 /**
  * Do `electron/main.ts` and `electron/preload.ts` actually honour `IPC`?
  *
- * `src/core/ipc-contract.ts` looks like it is enforced by the compiler, and
+ * `src/core/platform/ipc-contract.ts` looks like it is enforced by the compiler, and
  * half of it is: preload declares `const api: DesktopApi`, so a missing method
  * or a wrong parameter type is a build error. The half TypeScript cannot see is
  * the part that carries the call. A channel name is a string on both sides —
@@ -35,7 +35,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const CONTRACT = 'src/core/ipc-contract.ts'
+const CONTRACT = 'src/core/platform/ipc-contract.ts'
 const MAIN = 'electron/main.ts'
 const PRELOAD = 'electron/preload.ts'
 

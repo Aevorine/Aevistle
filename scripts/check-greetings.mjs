@@ -66,9 +66,9 @@ async function load(entry, name) {
   return import(pathToFileURL(outfile).href)
 }
 
-const greet = await load('src/core/greetings.ts', 'greetings')
+const greet = await load('src/core/mail/greetings.ts', 'greetings')
 
-const greetSource = await readFile('src/core/greetings.ts', 'utf8')
+const greetSource = await readFile('src/core/mail/greetings.ts', 'utf8')
 const settingsView = await readFile('src/views/SettingsView.tsx', 'utf8')
 const appState = await readFile('src/state/AppState.tsx', 'utf8')
 
@@ -308,7 +308,7 @@ absent('honesty: the planner cannot write to state', greetSource, /dispatch|upse
 source(
   'wiring: the settings screen uses the planner',
   settingsView,
-  /import \{[\s\S]{0,200}?planGreetings[\s\S]{0,200}?\} from '\.\.\/core\/greetings'/,
+  /import \{[\s\S]{0,200}?planGreetings[\s\S]{0,200}?\} from '\.\.\/core\/mail\/greetings'/,
 )
 source(
   'wiring: the plan starts empty and appears only when asked for',
@@ -351,7 +351,7 @@ absent(
 source(
   'wiring: AppState imports the name map',
   appState,
-  /import \{[^}]*holidayNameMap[^}]*\} from '\.\.\/core\/greetings'/,
+  /import \{[^}]*holidayNameMap[^}]*\} from '\.\.\/core\/mail\/greetings'/,
 )
 source(
   'wiring: and hands it to the merge as holidayNames',

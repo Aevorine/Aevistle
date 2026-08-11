@@ -1,7 +1,7 @@
 /**
- * The gate on the Reliability Center's triage logic (`src/core/reliability.ts`)
+ * The gate on the Reliability Center's triage logic (`src/core/ops/reliability.ts`)
  * and the dispatch-ledger stuck-entry detection it depends on
- * (`src/core/dispatchLedger.ts`'s `isLedgerEntryStuck`/`getStuckLedgerEntries`).
+ * (`src/core/ops/dispatchLedger.ts`'s `isLedgerEntryStuck`/`getStuckLedgerEntries`).
  *
  * Adversarial on purpose, the same way `check-dispatch-ledger.mjs` is: this
  * screen exists specifically to answer "will my scheduled reminders actually
@@ -11,7 +11,7 @@
  * gets its boundary conditions and its "must NOT flag this" cases checked
  * with the same weight as its "must flag this" cases.
  *
- * `src/core/reliability.ts` imports `classifyError` from `src/core/bridge.ts`,
+ * `src/core/ops/reliability.ts` imports `classifyError` from `src/core/platform/bridge.ts`,
  * which re-exports lazily-bundled platform implementations
  * (`bridge-desktop.ts`/`bridge-android.ts`/`bridge-web.ts`) behind dynamic
  * `import()`s inside `getBridge()`. Bundling `reliability.ts` directly pulls
@@ -57,12 +57,12 @@ await writeFile(
   collectAccountIssues,
   collectDeviceSyncIssues,
   DEVICE_STALE_MS,
-} from ${JSON.stringify(path.resolve('src/core/reliability.ts'))}
+} from ${JSON.stringify(path.resolve('src/core/ops/reliability.ts'))}
 export {
   isLedgerEntryStuck,
   getStuckLedgerEntries,
   LEDGER_STUCK_THRESHOLD_MS,
-} from ${JSON.stringify(path.resolve('src/core/dispatchLedger.ts'))}
+} from ${JSON.stringify(path.resolve('src/core/ops/dispatchLedger.ts'))}
 `,
   'utf8',
 )

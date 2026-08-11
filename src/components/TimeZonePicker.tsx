@@ -27,7 +27,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { IconCheck, IconGlobe, IconSearch } from './icons'
 import { useI18n } from '../i18n'
 import { deviceZone, filterZones, wallTimeIn } from './deliveryPreview'
-import { knownTimeZones } from '../core/deliveryWindow'
+import { knownTimeZones } from '../core/schedule/deliveryWindow'
 
 export function TimeZonePicker({
   value,

@@ -105,7 +105,7 @@ Treinta y seis entradas como estas, cada una con el razonamiento detrás →
 
 Cambios recientes → **[Releases](https://github.com/Aevorine/Aevistle/releases)**
 (cada versión tiene sus notas; las más antiguas también están en los archivos
-`release-notes-0.1.*.md`).
+`docs/release-notes/`).
 
 ## Descarga
 

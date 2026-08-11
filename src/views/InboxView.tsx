@@ -85,14 +85,14 @@ import {
   useAttachmentImages,
 } from '../components/ImageLightbox'
 import { useI18n, type TranslationKey } from '../i18n'
-import { accountGroupKey, orderedAccounts } from '../core/accounts'
+import { accountGroupKey, orderedAccounts } from '../core/mail/accounts'
 import { useReorder } from '../components/useReorder'
-import { BROKEN_IMAGE, resolveRemoteImages } from '../core/remoteImagePlaceholder'
-import { resolveWithCache } from '../core/imageCache'
-import { getCachedBody, putCachedBody } from '../core/bodyMemo'
-import { CHAIN_STAGES, buildChain, leadLabelKey } from '../core/chain'
-import { extractDates, type DateHit } from '../core/dateExtract'
-import type { InboxMessageBody } from '../core/bridge'
+import { BROKEN_IMAGE, resolveRemoteImages } from '../core/mail/remoteImagePlaceholder'
+import { resolveWithCache } from '../core/mail/imageCache'
+import { getCachedBody, putCachedBody } from '../core/mail/bodyMemo'
+import { CHAIN_STAGES, buildChain, leadLabelKey } from '../core/schedule/chain'
+import { extractDates, type DateHit } from '../core/schedule/dateExtract'
+import type { InboxMessageBody } from '../core/platform/bridge'
 import {
   DEFAULT_RETRY,
   INBOX_LIST_FETCH_LIMIT,

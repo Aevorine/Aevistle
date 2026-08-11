@@ -62,8 +62,8 @@ async function load(entry, name) {
   return import(pathToFileURL(outfile).href)
 }
 
-const merge = await load('src/core/mergeVars.ts', 'merge')
-const wc = await load('src/core/workCalendar.ts', 'wc')
+const merge = await load('src/core/mail/mergeVars.ts', 'merge')
+const wc = await load('src/core/schedule/workCalendar.ts', 'wc')
 
 let failures = 0
 let checks = 0

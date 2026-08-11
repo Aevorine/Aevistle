@@ -1,0 +1,127 @@
+/* ==========================================================================
+   Aevistle — application styles
+   Tokens live in theme.css. Nothing here hard-codes a colour.
+   ========================================================================== */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+/*
+ * `100dvh`, not `100%` (which resolves to the same stale viewport value as
+ * `vh`): the Android WebView does not shrink it when the soft keyboard opens
+ * — see the note on `.recipicker__scrim` for the same bug already fixed in
+ * one popup sheet. Every height in the app cascades from this rule (`.shell`
+ * is `height: 100%` of this, `.main`/`.view` are `flex: 1` inside that), so
+ * fixing it only here is what makes the *whole* app — not just one sheet —
+ * actually shrink for the keyboard, instead of leaving the message box sized
+ * for the full screen with the keyboard covering the bottom of it.
+ */
+html,
+body,
+#root {
+  height: 100dvh;
+  margin: 0;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  color: var(--text-1);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  overscroll-behavior: none;
+  /* Neither Times New Roman nor SimSun ships a variable weight axis, so the
+     renderer has to synthesise bold. Left to itself it would also synthesise
+     oblique, which shears Chinese glyphs into something unreadable. */
+  font-synthesis: weight;
+  /* Figures line up in columns — sizes, counts, timestamps, ports. */
+  font-variant-numeric: tabular-nums;
+  /* The quarter-space between Han and Latin/digits that Chinese typesetting
+     has always used and that nobody wants to type by hand. The browser's
+     initial value is `no-autospace`, so this has to be asked for: without it
+     「收到 3 封」and「打开 Aevistle」run their scripts together. Measured at
+     16px it adds an eighth of an em per boundary.
+
+     `trim-start` is the companion rule: full-width punctuation carries its own
+     half-em of padding, so 「，」at the start of a wrapped line otherwise
+     indents it against the margin. Both are ignored by engines that have not
+     shipped them, which costs nothing. */
+  text-autospace: normal;
+  text-spacing-trim: trim-start;
+}
+
+/*
+ * Only two weights exist in practice: the regular face and a synthesised bold.
+ * Asking for 550 or 620 gets rounded to one of them anyway, so hierarchy is
+ * carried by size, colour and spacing instead, and every "semi-bold" in this
+ * file resolves to the one bold that actually renders.
+ */
+strong,
+b {
+  font-weight: 700;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+/* The one focus ring.
+ *
+ * Note what is *not* here: `border-radius`. Setting it in this rule changes
+ * the focused element's own corners — a pill button squared off to 5px the
+ * moment it was tabbed to, and a card-sized target lost its rounding. The
+ * outline already follows whatever radius the element has, so the correct
+ * amount of shape control here is none.
+ *
+ * The second, inverted ring is what keeps this visible on a surface that
+ * happens to be the accent colour (a focused primary button): two rings of
+ * opposite lightness cannot both disappear into the same background. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--bg) 92%, transparent);
+}
+/* Inputs draw their own ring inside the border, so the outline would double up. */
+.input:focus-visible,
+.textarea:focus-visible,
+.select:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent) 26%, transparent);
+}
+
+/* Scrollbars — thin and out of the way, but visible enough to grab. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: var(--r-full);
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--text-3);
+  background-clip: content-box;
+}

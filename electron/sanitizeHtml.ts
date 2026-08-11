@@ -2,7 +2,7 @@
  * Turn an attacker-authored HTML message body into something safe to render.
  *
  * This is the one place in the codebase that handles genuinely untrusted
- * markup — `src/core/validate.ts`'s `escapeHtml`/`plainToHtml` sanitize the
+ * markup — `src/core/mail/validate.ts`'s `escapeHtml`/`plainToHtml` sanitize the
  * *outbound* direction (the user's own compose text) and are not built for
  * this. Before this file, `ELE-04` in `scripts/audit.mjs` could truthfully
  * assert that no raw-markup injection exists anywhere in this codebase —
@@ -26,7 +26,7 @@
  */
 
 import sanitizeHtmlLib from 'sanitize-html'
-import { BLANK_PIXEL } from '../src/core/remoteImagePlaceholder'
+import { BLANK_PIXEL } from '../src/core/mail/remoteImagePlaceholder'
 
 export interface SanitizeResult {
   html: string
@@ -166,7 +166,7 @@ export function sanitizeMessageHtml(rawHtml: string): SanitizeResult {
 }
 
 // `resolveRemoteImages` used to live here too — it moved to
-// `src/core/remoteImagePlaceholder.ts` so the renderer's message-detail view
+// `src/core/mail/remoteImagePlaceholder.ts` so the renderer's message-detail view
 // can call it directly after fetching images via `bridge.fetchRemoteImage`,
 // without needing to reach into an Electron-main-only module.
-export { resolveRemoteImages } from '../src/core/remoteImagePlaceholder'
+export { resolveRemoteImages } from '../src/core/mail/remoteImagePlaceholder'

@@ -5,8 +5,8 @@ import { IconPaperclip, IconSearch, IconUsers, IconX } from './icons'
 import { IconButton } from './ui'
 import { RecipientPicker } from './RecipientPicker'
 import { useI18n } from '../i18n'
-import { dedupeAddresses, isValidAddress, parseAddressList, extensionOf, isRiskyAttachment } from '../core/validate'
-import { buildPool } from '../core/recipients'
+import { dedupeAddresses, isValidAddress, parseAddressList, extensionOf, isRiskyAttachment } from '../core/mail/validate'
+import { buildPool } from '../core/mail/recipients'
 import type { Attachment, Contact, RecentRecipient } from '../core/types'
 
 // ---------------------------------------------------------------------------

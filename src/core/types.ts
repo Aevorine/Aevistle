@@ -6,15 +6,15 @@
  * (sockets, keystore, file dialogs, alarms) goes through `PlatformBridge`.
  */
 
-import type { CodeRule, ReasonCode } from './codeExtract'
-import type { DeliveryWindow } from './deliveryWindow'
-import type { LinkPurpose, LinkRisk } from './linkPurpose'
-import type { SendCondition } from './conditions'
-import type { OutboxItem } from './outbox'
-import type { DraftSnapshot } from './snapshots'
-import type { CalendarWarning, WorkCalendar, WorkdayPolicy } from './workCalendar'
-import type { PairedDevice } from './pairedDevices'
-import type { ConflictSnapshot } from './syncConflict'
+import type { CodeRule, ReasonCode } from './ops/codeExtract'
+import type { DeliveryWindow } from './schedule/deliveryWindow'
+import type { LinkPurpose, LinkRisk } from './mail/linkPurpose'
+import type { SendCondition } from './schedule/conditions'
+import type { OutboxItem } from './ops/outbox'
+import type { DraftSnapshot } from './sync/snapshots'
+import type { CalendarWarning, WorkCalendar, WorkdayPolicy } from './schedule/workCalendar'
+import type { PairedDevice } from './sync/pairedDevices'
+import type { ConflictSnapshot } from './sync/syncConflict'
 
 export type Platform = 'desktop' | 'android' | 'web'
 

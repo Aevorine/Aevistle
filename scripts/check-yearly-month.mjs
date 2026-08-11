@@ -29,9 +29,9 @@ const out = path.join(dir, 'b.mjs')
 await build({
   stdin: {
     contents: `
-      export { computeOccurrences } from './src/core/schedule'
-      export { parseRRule, rruleToRecurrence, recurrenceToRRule } from './src/core/ics'
-      export { planReschedule } from './src/core/reschedule'
+      export { computeOccurrences } from './src/core/schedule/schedule'
+      export { parseRRule, rruleToRecurrence, recurrenceToRRule } from './src/core/schedule/ics'
+      export { planReschedule } from './src/core/schedule/reschedule'
     `,
     resolveDir: process.cwd(),
     loader: 'ts',

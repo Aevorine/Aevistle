@@ -1,0 +1,320 @@
+/* ==========================================================================
+   Cards & sections
+   ========================================================================== */
+
+.card {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  /* No shadow. A hairline and a surface step already separate the card from
+     the page; adding a drop shadow on top is what makes a dense settings
+     screen look busy rather than calm. */
+}
+.card--flush {
+  padding: 0;
+  overflow: hidden;
+}
+.card__body {
+  padding: var(--sp-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+.card__header {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-5) var(--sp-5) var(--sp-4);
+  border-bottom: 1px solid var(--border-subtle);
+}
+/* A body under a header lines up with the header's gutter rather than keeping
+   its own narrower one, and does not restate the padding the header already
+   put between the two. Cards that carry a header and cards that use an inline
+   `section-label` then have the same inner edge. */
+.card__header + .card__body {
+  padding: var(--sp-4) var(--sp-5) var(--sp-5);
+}
+.card__title {
+  font-size: var(--text-lg);
+  font-weight: 700;
+  line-height: var(--leading-tight);
+}
+.card__hint {
+  font-size: var(--text-base);
+  color: var(--text-3);
+}
+
+.section-label {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  /* 小四 rather than 四号. A section label is a signpost inside a card, and at
+     18.67px it competed with the screen title above it; the weight and the
+     hairline already say "this is a heading". */
+  font-size: var(--text-base);
+  font-weight: 700;
+  line-height: var(--leading-tight);
+  color: var(--text-1);
+}
+/* A hairline that runs to the edge of the card, so a heading reads as the
+   start of a group rather than as the first item in one. */
+.section-label::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border-subtle);
+}
+
+/*
+ * `AccountDialog`'s four titled blocks (address, send server, more settings,
+ * receive mail) — the same radius, hairline and surface step as `.card`
+ * above, so a form that used to be one long column of rows now reads as
+ * separate, deliberate groups with room to breathe between them.
+ */
+.account-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-4) var(--sp-5);
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+}
+.account-section__title {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  font-size: var(--text-lg);
+  font-weight: 700;
+  line-height: var(--leading-tight);
+  color: var(--text-1);
+}
+
+/*
+ * The step numeral on the three sections a working account actually needs:
+ * address, credential, server.
+ *
+ * Only three of the five blocks carry one. "More settings" and "Receive mail"
+ * are genuinely optional — everything in them is optional or warning-only per
+ * `validateAccount` — and numbering all five would have turned two things you
+ * may ignore into two more things you appear to owe the form. They get
+ * `.account-optional` instead, which says the opposite.
+ *
+ * `flex: 0 0 auto` because the title beside it wraps on a 360px screen and a
+ * shrinkable circle becomes an ellipse when it does.
+ */
+.account-step {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--icon-md);
+  height: var(--icon-md);
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: var(--text-sm);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+.account-optional {
+  display: inline-flex;
+  align-items: center;
+  margin-inline-start: var(--sp-3);
+  padding: 2px var(--sp-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-sm);
+  font-size: var(--text-sm);
+  font-weight: 400;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+/* `.section-label` is already a flex row with its own `gap`, so the margin
+   above would be spacing applied twice. */
+.section-label > .account-optional {
+  margin-inline-start: 0;
+}
+
+/*
+ * What the email address worked out — see `AutoSummary` in `AccountDialog.tsx`.
+ *
+ * A panel rather than a banner because it is a *result*, not a notice: the
+ * provider it matched and the four values it wrote, printed where they were
+ * decided instead of four boxes further down. `--guessed` is the same panel in
+ * the warning palette, and it is the one distinction on this screen worth
+ * shouting: a host guessed from `smtp.<domain>` looks exactly like one out of
+ * the preset table until the connection test fails.
+ */
+.autoconf {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  background: var(--surface-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-md);
+}
+.autoconf--guessed {
+  background: var(--warning-bg);
+  border-color: color-mix(in srgb, var(--warning) 26%, transparent);
+}
+/* Top-aligned, not centred: the note under the provider name runs to three
+   lines on a 360px screen, and centring against the pair left the glyph
+   floating opposite the middle of a sentence instead of beside the name it
+   stands for. */
+.autoconf__head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+}
+.autoconf__glyph {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--icon-xl);
+  height: var(--icon-xl);
+  border-radius: var(--r-md);
+  background: var(--accent);
+  /* Correct for the warning fill too: `--accent-text` is white in the light
+     theme and near-black in the dark one, which is exactly the polarity both
+     `--accent` and `--warning` need in each. */
+  color: var(--accent-text);
+  font-size: var(--text-lg);
+  font-weight: 700;
+  line-height: 1;
+}
+.autoconf--guessed .autoconf__glyph {
+  background: var(--warning);
+}
+/* `min-width: 0` so a long provider name or domain wraps inside the column
+   instead of pushing the panel wider than the dialog. */
+.autoconf__id {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.autoconf__name {
+  font-size: var(--text-lg);
+  font-weight: 700;
+  line-height: var(--leading-tight);
+  color: var(--text-1);
+  overflow-wrap: anywhere;
+}
+/*
+ * `anywhere` for the same reason `.autoconf__name` carries it, and it is the
+ * guessed panel that needs it: `account.autoGuessed` interpolates the domain
+ * into the middle of a sentence, and a domain is one unbreakable token. A
+ * corporate host — `mail.verylongcorporatedomain.example.co.uk` — needs ~295px
+ * against the ~182px this column gets at 360px, and with nothing to break at
+ * the text simply ran out of the panel: measured there, the overflow reached
+ * `.modal__body` and gave the whole dialog a horizontal scrollbar (405px of
+ * content in 350px). Breaking mid-domain is the ugly option; a form you have
+ * to scroll sideways to read is the worse one, and this is the only string on
+ * the screen that can contain an arbitrary-length token inside a sentence.
+ */
+.autoconf__note {
+  font-size: var(--text-base);
+  line-height: var(--leading-relaxed);
+  color: var(--text-3);
+  overflow-wrap: anywhere;
+}
+.autoconf--guessed .autoconf__note {
+  color: var(--warning);
+}
+/*
+ * Deliberately *not* the `.diag` grid, and this is the one place in the app
+ * where that difference matters.
+ *
+ * `.diag` puts the label and the value in two grid columns, which is right for
+ * a diagnostics block inside a full-width banner and wrong here. A grid column
+ * is a box, and a hostname is a single token with nothing to break at: measured
+ * at 360px, the value column comes out at ~188px and `outlook.office365.com:993`
+ * needs ~210px, so `overflow-wrap` had nowhere to put it but through the middle
+ * of the word — `outlook.office365.c` / `om:993`.
+ *
+ * One inline flow instead. The browser moves an over-long token to a fresh line
+ * before it breaks it, and a fresh line here is the full 256px of panel, which
+ * fits. `min-width` on the label keeps the values aligned as a column whenever
+ * they do sit on one line, which is every screen wider than a small phone.
+ */
+.autoconf__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--text-sm);
+}
+.autoconf__row {
+  color: var(--text-2);
+  line-height: var(--leading-tight);
+}
+.autoconf__proto {
+  display: inline-block;
+  min-width: 3.6em;
+  font-weight: 700;
+  color: var(--text-3);
+}
+/* The last resort, for a host too long even for a line of its own. */
+.autoconf__value {
+  overflow-wrap: anywhere;
+}
+.autoconf__kept {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+  padding-block-start: var(--sp-3);
+  border-block-start: 1px solid var(--border-subtle);
+  font-size: var(--text-base);
+  color: var(--text-2);
+}
+/* The sentence takes the row and the undo button sits beside it until there is
+   no room, then wraps under it whole rather than being squeezed to two words. */
+.autoconf__kept > span {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+/*
+ * `.modal__body` is a flex column, and every direct child defaults to
+ * `flex-shrink: 1`. `.modal__body > .card` above exists because a shrinkable
+ * child with its own `overflow: hidden` gets squeezed instead of the body
+ * scrolling past it; these sections do not hide overflow, but pinning them at
+ * `flex-shrink: 0` costs nothing and keeps the same guarantee if that ever
+ * changes.
+ */
+.modal__body > .account-section,
+.modal__body > .account-more {
+  flex-shrink: 0;
+}
+
+/*
+ * "More settings" — label, group, reply-to, auto-negotiate and the invalid-
+ * certificate switch. Same card chrome as `.account-section` above,
+ * `<summary>` standing in for the section title. Collapsed by default only on
+ * a phone (`AccountDialog`'s `moreOpen`, seeded from `useNarrow()`) — every
+ * field inside is optional or warning-only in `validateAccount`, bar a
+ * malformed reply-to, which that component forces this open for.
+ */
+.account-more {
+  padding: var(--sp-4) var(--sp-5);
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+}
+.account-more summary {
+  cursor: pointer;
+  font-size: var(--text-lg);
+  font-weight: 700;
+  line-height: var(--leading-tight);
+  color: var(--text-1);
+}
+.account-more[open] summary {
+  margin-block-end: var(--sp-3);
+}
+.account-more__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}

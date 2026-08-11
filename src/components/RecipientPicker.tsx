@@ -21,6 +21,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { IconCheck, IconSearch, IconStar, IconUsers, IconX } from './icons'
+import { BP_EXPANDED } from './useNarrow'
 import { useI18n } from '../i18n'
 import {
   addAll,
@@ -32,7 +33,7 @@ import {
   togglePick,
   type Pick,
   type PickSection,
-} from '../core/recipients'
+} from '../core/mail/recipients'
 
 /** Where the card sits when there is room to anchor it to the field. */
 interface Anchor {
@@ -44,8 +45,16 @@ interface Anchor {
 const CARD_MIN_WIDTH = 320
 const CARD_MAX_HEIGHT = 420
 const VIEWPORT_MARGIN = 12
-/** Below this the card becomes a bottom sheet instead of a dropdown. */
-const SHEET_BREAKPOINT = 760
+/**
+ * Below this the card becomes a bottom sheet instead of a dropdown.
+ *
+ * Imported rather than spelled: this was its own `760`, and the shell's was a
+ * different 760 in a different file, so the two only agreed by coincidence and
+ * moving one would have silently split them. `BP_EXPANDED` is the width at
+ * which the whole app stops being a stack, which is exactly the condition a
+ * dropdown needs — there has to be something beside the field to drop over.
+ */
+const SHEET_BREAKPOINT = BP_EXPANDED - 1
 
 export function RecipientPicker({
   open,

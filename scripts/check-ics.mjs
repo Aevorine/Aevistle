@@ -61,7 +61,7 @@ async function load(entry, name) {
   return import(pathToFileURL(outfile).href)
 }
 
-const ics = await load('src/core/ics.ts', 'ics')
+const ics = await load('src/core/schedule/ics.ts', 'ics')
 
 const failures = []
 let checked = 0

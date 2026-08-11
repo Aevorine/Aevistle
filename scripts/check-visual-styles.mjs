@@ -28,6 +28,7 @@
  */
 
 import { readdirSync, readFileSync } from 'node:fs'
+import { concatenatedAppCss } from './lib/stylesheets.mjs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -54,7 +55,10 @@ const check = (what, ok) => {
 
 let themeCss = read(THEME_CSS)
 let settingsTsx = read(SETTINGS_TSX)
-const appCss = read(APP_CSS)
+/* The concatenation, not the index: this check reasons about which rule
+   wins across the whole stylesheet, and after the split no single file shows
+   that. See lib/stylesheets.mjs. */
+const appCss = concatenatedAppCss()
 const typesTs = read(TYPES_TS)
 
 if (selftest) {

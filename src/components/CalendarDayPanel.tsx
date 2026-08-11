@@ -32,16 +32,16 @@ import {
 import { DRAG_TYPE, dragPayload, type SendDeliveryStatus } from './MonthGrid'
 import { MessageBodyFrame } from './MessageBodyFrame'
 import { useI18n, type TranslationKey } from '../i18n'
-import { computeOccurrences, summarizeRecurrence } from '../core/schedule'
-import { canMoveSingleOccurrence } from '../core/reschedule'
+import { computeOccurrences, summarizeRecurrence } from '../core/schedule/schedule'
+import { canMoveSingleOccurrence } from '../core/schedule/reschedule'
 import {
   shiftToWorkingDay,
   toIsoDate,
   type CalendarWarning,
   type WorkCalendar,
   type WorkdayPolicy,
-} from '../core/workCalendar'
-import type { Conflict } from '../core/conflicts'
+} from '../core/schedule/workCalendar'
+import type { Conflict } from '../core/sync/conflicts'
 import type { MessageDraft, ScheduledJob, Template } from '../core/types'
 
 /** One send, on one day. */

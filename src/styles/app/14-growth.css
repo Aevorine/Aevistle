@@ -1,0 +1,2691 @@
+/* ==========================================================================
+   Phase 5 — the screens that grew
+
+   Three things are being fixed here, and they are the same complaint stated
+   three ways: boxes too small, empty space unused, important things not in
+   important places.
+
+     1. Fill the window.  Every screen's content column stretches to the
+        viewport instead of hugging its contents and leaving a grey band under
+        it. What grows is chosen per screen — the compose body, the message
+        frame, the code list — rather than everything growing equally, which
+        is how you get a tall empty card next to a cramped one.
+     2. Give the space to the main thing.  On Compose that is the body box; on
+        the reader it is the message; on Codes it is the value itself.
+     3. Nothing may leave its box.  Long addresses, long filenames and long
+        subjects are the norm in mail, not the exception, so every flex child
+        along a text path gets `min-width: 0` and an ellipsis.
+   ========================================================================== */
+
+/* --- 1. fill the window -------------------------------------------------- */
+
+/* A non-list screen's column is at least as tall as the viewport, so the card
+   inside it has something to stretch against. `min-height` and not `height`:
+   content longer than the window must still push the page taller. */
+.view__inner {
+  min-height: 100%;
+}
+
+/* No extra bottom padding for the action bar: it is a flex sibling of `.view`
+   inside `.main`, not an overlay, so `.view` is already sized to the space
+   left above it. Reserving `--actionbar-h` here would reserve it twice and
+   put a scrollbar on a form that is required to fit without one. */
+
+/* The compose form takes every pixel the screen has left over... */
+.compose-card {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  /* The one screen on this app where the input is the whole point gets the
+     same "this matters" border+tint `.condition[data-on="true"]` already
+     uses for an active send condition — not a new visual language, the
+     existing one applied to a card that had been indistinguishable from
+     Settings or Contacts despite holding the most-used input in the app. */
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: color-mix(in srgb, var(--accent) 4%, var(--surface-1));
+}
+.compose-card > .card__body {
+  flex: 1;
+  min-height: 0;
+}
+
+/* ...and inside it, the body box is the one that grows. Everything else on
+   this form is one or two rows tall by nature; the body is the message.
+   The growth rules themselves live with the rest of the compose layout — see
+   `.compose-layout > .field:has(.textarea--body)`; there is exactly one body
+   box in the application and two sets of rules for it was one too many. */
+.form-rows {
+  display: flex;
+  flex-direction: column;
+}
+
+/* --- 2. the compose body ------------------------------------------------- */
+
+/**
+ * The single most-used input in the application, sized like it.
+ *
+ * Padding and leading only. The height is decided by one rule, in the compose
+ * layout section, because two places deciding it is how this box ended up with
+ * three `min-height` declarations and an effective value none of them stated.
+ * The drag handle still works, and the height is remembered — see
+ * `BODY_HEIGHT_KEY`.
+ */
+.textarea--body {
+  flex: 1;
+  resize: vertical;
+  padding: var(--sp-4);
+  line-height: var(--leading-relaxed);
+}
+
+/* --- 3. nothing leaves its box ------------------------------------------- */
+
+/* The text paths. Each of these is a flex child whose content is
+   user-supplied and unbounded — an address, a filename, a subject line. */
+.job__body,
+.log__body,
+.attachment__body,
+.page-head__text,
+.codecard__main {
+  min-width: 0;
+}
+
+/* `.job__name` used to be on this list and is not any more: a mail subject is
+   clamped to two lines at its own rule above, and `white-space: nowrap` here
+   silently won over that clamp (same specificity, later in the file) — which is
+   exactly the failure mode `scripts/check-css-tokens.mjs` was written for, and
+   the reason two earlier attempts at a wrapping subject "did nothing". */
+.job__from,
+.log__title,
+.codecard__subject {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.job__meta,
+.codecard__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+/* The ellipsis above only engages once the item is allowed to be narrower than
+   its own text. A `nowrap` flex item's automatic minimum size is the full
+   unwrapped string, so without this the item simply refuses to shrink and the
+   sender address runs out of the row — see `.codecard__address` and
+   `.codecard__host` for the same fix on the Codes screen. */
+.job__from {
+  min-width: 0;
+}
+
+/* A row of buttons must wrap rather than push the page sideways. */
+.page-head__actions {
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.btn-row__note {
+  align-self: center;
+  color: var(--text-2);
+  font-size: var(--text-sm);
+  font-variant-numeric: var(--numeric);
+}
+
+/* Rows breathe according to the list-density setting. */
+.job,
+.log {
+  padding-block: var(--row-pad-y);
+}
+
+/* --- verification codes -------------------------------------------------- */
+
+.codelist {
+  display: flex;
+  flex-direction: column;
+  /* The same knob `.job` and `.log` already answer to. This list was the one
+     row-shaped thing in the app that ignored the list-density setting, so
+     "compact" tightened every list except the one people scroll fastest. */
+  gap: var(--row-gap);
+  padding: var(--sp-1);
+}
+
+/**
+ * The whole card is the copy button.
+ *
+ * There is exactly one thing anyone does on this screen, so it gets the
+ * largest possible target rather than a 24px icon on the right that has to be
+ * aimed at. The nested buttons stop propagation, so "open link" still means
+ * open link.
+ */
+/* The card is now a column: the press target on top, the "why this one" panel
+   underneath it. The press target keeps every interaction style it had — what
+   moved is only which element carries them, so the panel can be opened without
+   the whole card reading as pressable while it is open. */
+.codecard {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  text-align: start;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  transition:
+    border-color var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease);
+}
+.codecard__body {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  width: 100%;
+  /* `--row-pad-y` for the same reason `.codelist` takes `--row-gap`: the block
+     axis is what the density setting is about, and the card was the only row in
+     the app deciding it privately. */
+  padding: var(--row-pad-y) var(--sp-4);
+  border-radius: var(--r-lg);
+  cursor: pointer;
+  transition: transform var(--dur-fast) var(--ease);
+}
+.codecard:hover {
+  border-color: var(--accent);
+  background: var(--surface-2);
+}
+.codecard__body:active {
+  transform: scale(0.995);
+}
+.codecard__body:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  border-radius: var(--r-lg);
+}
+.codecard[data-copied] {
+  border-color: var(--success);
+  background: var(--success-bg);
+}
+/* Already used once. Dimmed, not hidden: needing the same code twice is
+   common, and hiding it would be the app deciding that for you. */
+.codecard[data-used] .codecard__value {
+  color: var(--text-2);
+}
+
+/* Read cards recede; they are not hidden and they do not move. A code often
+   gets wanted a second time, and a list that reshuffles under the cursor is
+   the same mistake the "show N earlier" fold made — see `views/CodesView`.
+   The card keeps its full contrast on hover, so re-reading one costs nothing. */
+.codecard[data-read] {
+  background: var(--surface-2);
+  border-color: color-mix(in srgb, var(--border) 60%, transparent);
+}
+.codecard[data-read] .codecard__mark {
+  background: var(--surface-3);
+  color: var(--text-3);
+}
+.codecard[data-read]:hover {
+  background: var(--surface-1);
+  border-color: var(--border);
+}
+.codecard[data-read]:hover .codecard__mark {
+  color: var(--text-2);
+}
+/* Freshness stops shouting once the card has been dealt with — an unread
+   arrival is the only thing that should be pulling the eye. */
+.codecard[data-read][data-fresh] {
+  border-color: color-mix(in srgb, var(--border) 60%, transparent);
+  box-shadow: none;
+}
+.codecard[data-read][data-fresh] .codecard__mark {
+  background: var(--surface-3);
+  color: var(--text-3);
+}
+
+.codecard__mark {
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: var(--icon-xl);
+  height: var(--icon-xl);
+  border-radius: var(--r-full);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+}
+/* Unread state carried by a shape, not only by contrast. Sits on the icon
+   rather than in the metadata row so it reads at the same glance as the code
+   itself, and is ringed in the page background so it stays visible against
+   both the plain and the fresh (accent-filled) mark. */
+.codecard__unread {
+  position: absolute;
+  inset-block-start: -1px;
+  inset-inline-end: -1px;
+  width: 11px;
+  height: 11px;
+  border-radius: var(--r-full);
+  background: var(--accent);
+  border: 2px solid var(--surface-1);
+}
+.codecard[data-fresh] .codecard__unread {
+  background: var(--accent-text);
+  border-color: var(--accent);
+}
+.codecard[data-kind="link"] .codecard__mark {
+  background: var(--surface-3);
+  color: var(--text-2);
+}
+
+.codecard__main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/**
+ * The value, at the size the screen exists for.
+ *
+ * Tabular figures so the digits sit on a fixed grid — a code that reflows as
+ * you read it is a code you check twice. Wide tracking because six digits read
+ * as one long number otherwise; the display groups them 3+3 as well.
+ *
+ * 小三 (20px), down from 小二 (24px), which was itself down from 32px. Each step
+ * was taken for the same reason and the reason has not changed: this is a list
+ * you scan, and a card that is mostly one number is a card you fit three of on
+ * a phone. See `--text-value` for why 24px was the wrong step specifically —
+ * it is the size of a screen title — and `.codecard__value[data-kind="link"]`
+ * below for the link case, where the value is a URL and is not the headline.
+ */
+.codecard__value {
+  font-size: var(--text-value);
+  font-weight: 700;
+  line-height: 1.15;
+  font-variant-numeric: var(--numeric);
+  letter-spacing: 0.08em;
+  color: var(--text-1);
+  word-break: break-all;
+}
+.codecard__value[data-kind="link"] {
+  font-size: var(--text-base);
+  font-weight: 400;
+  letter-spacing: 0;
+  color: var(--accent);
+  /* A URL is read from the front; clip the tail rather than wrapping it over
+     three lines and pushing everything else off the card. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.codecard__sender {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  min-width: 0;
+  /* One step below the value, level with the metadata under it. Who sent it is
+     context for the code, not a second headline. */
+  font-size: var(--text-xs);
+  color: var(--text-1);
+}
+.codecard__address {
+  color: var(--text-3);
+  /* Without this the nowrap address below cannot shrink — its automatic
+     minimum size is the whole string — so the ellipsis never engages and a
+     long address runs out past the card's edge. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.codecard__meta {
+  font-size: var(--text-base);
+  color: var(--text-3);
+}
+/* Same fix, same reason. The `max-width: 42ch` that used to be here was an
+   attempt at the same thing from the wrong end: it capped the box on wide
+   windows (where there was room) and did nothing at all on narrow ones (where
+   the subject actually overflowed), because the flex minimum was the real
+   constraint. */
+.codecard__subject {
+  min-width: 0;
+}
+/**
+ * The buttons, and the reported "the sign-in link runs outside the display
+ * area" — which was never the URL text.
+ *
+ * The URL is ellipsised and always was. What overflowed is this row. It had no
+ * `flex-wrap`, it is `flex: none`, and a link card renders three or four `.btn`s
+ * that are each `white-space: nowrap`: measured at 360px, the card's content
+ * width is 286px and "Open" + "Copy link" + "Show QR" + "Why" need 460-470px of
+ * it. ~180px of horizontal overflow on a `flex: none` item does not clip and
+ * does not scroll inside the card — it makes the whole list scroll sideways,
+ * which is what the report was describing.
+ *
+ * Two fixes, because one is not enough. `wrap` stops the overflow at any width.
+ * Icons-only below 760px stops the wrap from costing a second row on the screen
+ * where a second row is a third of a card: 4 × (15px icon + 32px padding) + 3
+ * gaps = 212px, inside 286px, so the row holds. `.btn__label` is *clipped*, not
+ * `display: none` — the words stay in the accessible tree, so every button keeps
+ * the name it had, with no `aria-label` to keep in step with the visible text.
+ */
+.codecard__actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+}
+
+.codes__more {
+  align-self: center;
+  padding-block: var(--sp-2);
+}
+
+.chip--quiet {
+  background: var(--surface-3);
+  color: var(--text-3);
+}
+
+@media (max-width: 839.98px) {
+  .codecard__body {
+    flex-wrap: wrap;
+  }
+  .codecard__actions {
+    width: 100%;
+  }
+}
+
+/* Icons only, so wrapping never costs the card a second row. See the note on
+   `.codecard__actions`. The clip is the standard visually-hidden recipe rather
+   than `display: none`, which would take the button's accessible name with it. */
+@media (max-width: 839.98px) {
+  .codecard__actions .btn {
+    padding-inline: var(--sp-3);
+  }
+  .codecard__actions .btn__label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+}
+
+/* --- check-now status, link purpose, and the "why this one" panel --------- */
+
+/**
+ * The result of the last press, in one line.
+ *
+ * Deliberately not a toast. A toast is gone in four seconds, and "no new mail"
+ * is the answer you want to still be able to read while you go and ask the
+ * service to send the code again.
+ */
+.checkbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-4);
+  /* No margin: the column it sits in has a gap, and a margin on top of that is
+     the same air spent twice. */
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  font-size: var(--text-base);
+}
+.checkbar[data-tone="success"] {
+  border-color: var(--success);
+  background: var(--success-bg);
+}
+.checkbar[data-tone="error"] {
+  border-color: var(--danger);
+  background: var(--danger-bg);
+}
+.checkbar__icon {
+  flex: none;
+  display: flex;
+  color: var(--text-2);
+}
+.checkbar__text {
+  flex: 1;
+  min-width: 0;
+}
+/* The server's own words, kept monospace so they read as quoted output rather
+   than as something this app wrote. */
+.checkbar__raw {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-3);
+  word-break: break-word;
+}
+.checkbar__when,
+.checkbar__wait {
+  flex: none;
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+.checkbar__when {
+  color: var(--text-3);
+}
+/* The countdown is the one thing on this line that is still changing, so it
+   takes the accent while the rest stays quiet. */
+.checkbar__wait {
+  color: var(--accent);
+  font-variant-numeric: var(--numeric);
+}
+
+/* What the link does, above where it goes. */
+.codecard__purpose {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  min-width: 0;
+}
+/**
+ * Where it actually goes, in full, on the card.
+ *
+ * This was `.codecard__host`: the host name and nothing else, with the whole URL
+ * available only in a `title` — i.e. only on a device with a pointer, only on
+ * hover, and never on the phone. "The link content is cut off" was a correct
+ * report about a real omission; the path, the query and whatever the query
+ * carries were simply not rendered anywhere.
+ *
+ * So the card reads as two lines: what the link is for, then where it goes. The
+ * URL is the second because that is the order the question comes in, and it is
+ * mono and one rank quieter because it is a machine string being offered for
+ * checking rather than prose being read.
+ *
+ * `anywhere`, not `break-word`: a URL is one unbreakable token, and only
+ * `anywhere` lets the box shrink below it instead of overflowing. Clamped at two
+ * lines because a tracking URL can be four hundred characters and would
+ * otherwise make one card taller than the window — the tail that the clamp cuts
+ * is the part that identifies nothing, and the host, which is the part worth
+ * checking, is at the front where it cannot be cut.
+ */
+.codecard__url {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: var(--leading-tight);
+  color: var(--text-3);
+  min-width: 0;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+/*
+ * A one-time recovery key: read in full, not clamped like `.codecard__url`
+ * above — someone checking they copied it correctly needs every character
+ * on screen at once, not the first two lines of it.
+ */
+.recoverykey {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+}
+.recoverykey__value {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+/* Tinted from the live accent rather than a second stored colour, so it tracks
+   whichever of the five accents is selected without five more variables. */
+.chip--strong {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  font-weight: 600;
+}
+.chip--timer {
+  background: var(--surface-3);
+  color: var(--text-2);
+  font-variant-numeric: var(--numeric);
+}
+
+/* An expired code is dimmed and struck, never removed: knowing the code you
+   are looking at has run out is the point, and a card that vanished would just
+   look like the mail never arrived. */
+.codecard[data-expired] .codecard__value {
+  color: var(--text-3);
+  text-decoration: line-through;
+  text-decoration-thickness: 2px;
+}
+/* Found by the press you just made, as opposed to already sitting there. */
+.codecard[data-new] {
+  border-color: var(--success);
+}
+
+.codewhy {
+  padding: var(--sp-3) var(--sp-5) var(--sp-4);
+  border-top: 1px dashed var(--border);
+  font-size: var(--text-base);
+  color: var(--text-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+.codewhy__label {
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-3);
+  margin-bottom: var(--sp-1);
+}
+.codewhy__list {
+  margin: 0;
+  padding-inline-start: 1.2em;
+}
+.codewhy__alts {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+.codewhy__alts li {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.codewhy__alts code {
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--numeric);
+  /* A rejected candidate can be a forty-character tracking id. `anywhere`
+     rather than `break-word` — only `anywhere` lets the box shrink below an
+     unbroken token, which is the same fix `.datecard__snippet` carries. */
+  min-width: 0;
+  overflow-wrap: anywhere;
+  padding: 2px 6px;
+  border-radius: var(--r-sm);
+  background: var(--surface-3);
+  /* Struck-out candidates read as evidence, not as offers. */
+  color: var(--text-3);
+}
+.codewhy__alts li[data-eligible] code {
+  color: var(--text-1);
+}
+.codewhy__altReason {
+  color: var(--text-3);
+  font-size: var(--text-base);
+}
+.codewhy__foot {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+.codewhy__note {
+  color: var(--text-3);
+  font-size: var(--text-base);
+}
+
+.qrbox {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-3);
+}
+/* Fixed white plate in both themes: a camera reading an inverted code is a
+   coin flip, and this is the one surface in the app not being read by a human. */
+.qrbox__code {
+  width: min(64vw, 320px);
+  height: auto;
+  border-radius: var(--r-md);
+  background: #fff;
+}
+.qrbox__hint {
+  margin: 0;
+  color: var(--text-2);
+  text-align: center;
+}
+.qrbox__url {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-3);
+  word-break: break-all;
+  text-align: center;
+}
+
+/* --- LAN pairing (B1/B2) -------------------------------------------------- */
+
+.pairqr {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-3);
+}
+.pairqr__hint {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--text-base);
+  text-align: center;
+}
+.pairqr__frame {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+/* Fixed white plate, same reasoning as `.qrbox__code`: a camera reading an
+   inverted code is a coin flip, and this is the one surface here not being
+   read by a person. */
+.pairqr__code {
+  width: min(60vw, 280px);
+  height: auto;
+  border-radius: var(--r-md);
+  background: #fff;
+}
+.pairqr__placeholder {
+  width: min(60vw, 280px);
+  aspect-ratio: 1;
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  border: 1px dashed var(--border-strong);
+}
+/* The countdown ring sits just outside the code's own corner rather than over
+   it, so it never competes with the modules a camera is trying to read. */
+.pairqr__ring {
+  position: absolute;
+  /* Logical, not `top`/`right`, for the reason `.devlink__pulse` below states:
+     under `ar.ts`'s RTL layout the near corner of the frame is the other one,
+     and the browser should be the thing that knows that. */
+  inset-block-start: calc(-1 * var(--sp-3));
+  inset-inline-end: calc(-1 * var(--sp-3));
+  width: var(--icon-lg);
+  height: var(--icon-lg);
+  transform: rotate(-90deg);
+}
+.pairqr__ringTrack {
+  fill: none;
+  stroke: var(--border-strong);
+  stroke-width: 3;
+}
+.pairqr__ringValue {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 3;
+  stroke-linecap: round;
+  transition: stroke-dashoffset var(--dur) linear;
+}
+/* The code as text, for a device that cannot scan it — see `PairingQr.tsx`.
+   Full width where the rest of `.pairqr` is centred on its own content: the
+   string is 200-odd characters and a shrink-to-fit textarea would be one long
+   line with a scrollbar, which is unreadable on the phone this exists for. */
+.pairqr__manual {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.pairqr__manual .form-rows {
+  width: 100%;
+}
+.pairqr__status {
+  text-align: center;
+  min-height: 2.6em;
+}
+.pairqr__statusLine {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--text-sm);
+}
+.pairqr__statusLine--ok {
+  color: var(--success);
+  font-weight: 600;
+}
+.pairqr__countdown {
+  margin: var(--sp-1) 0 0;
+  color: var(--text-3);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+.pairqr__note {
+  margin: 0;
+  color: var(--text-3);
+  font-size: var(--text-base);
+  text-align: center;
+}
+
+/* --- device-link visualisation (components/DeviceLinkAnimation.tsx) ------
+   Two glyphs and a line — see the component doc for why that is the only
+   shape this app draws for "syncing". Logical (`inset-inline-start`) rather
+   than `left`, so the pulse still travels from the near device to the far one
+   under `ar.ts`'s RTL layout instead of visually running backwards. */
+.devlink {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+}
+.devlink--inline {
+  gap: var(--sp-1);
+}
+.devlink--full {
+  gap: var(--sp-4);
+}
+.devlink__glyph {
+  display: grid;
+  place-items: center;
+  flex: none;
+  color: var(--text-2);
+}
+.devlink--connected .devlink__glyph {
+  color: var(--success);
+}
+.devlink--error .devlink__glyph {
+  color: var(--text-3);
+}
+.devlink__line {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1 1 auto;
+  min-width: var(--icon-sm);
+  height: 14px;
+}
+.devlink--card .devlink__line,
+.devlink--full .devlink__line {
+  min-width: 44px;
+}
+.devlink__seg {
+  flex: 1 1 0;
+  height: 2px;
+  border-radius: var(--r-full);
+  background: var(--border-strong);
+}
+.devlink--error .devlink__seg {
+  background: var(--danger);
+  opacity: 0.5;
+}
+.devlink__seg--full {
+  position: relative;
+  overflow: hidden;
+  flex: 1 1 100%;
+}
+.devlink--connected .devlink__seg--full {
+  background: var(--success);
+}
+.devlink__break {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  color: var(--danger);
+}
+/* The travelling pulse. `--dur-pulse` (see theme.css) rather than the
+   `--dur`/`--dur-slow` family: those are tuned for a click's own reaction and
+   read as a flicker at that length looped forever. */
+.devlink__pulse {
+  position: absolute;
+  top: 50%;
+  inset-inline-start: 0;
+  width: 8px;
+  height: 8px;
+  margin-top: -4px;
+  margin-inline-start: -4px;
+  border-radius: var(--r-full);
+  background: var(--accent);
+  box-shadow: 0 0 6px 1px var(--accent);
+  animation: devlink-travel var(--dur-pulse) ease-in-out infinite;
+}
+@keyframes devlink-travel {
+  0% {
+    inset-inline-start: 0%;
+    opacity: 0;
+  }
+  12% {
+    opacity: 1;
+  }
+  88% {
+    opacity: 1;
+  }
+  100% {
+    inset-inline-start: 100%;
+    opacity: 0;
+  }
+}
+
+/* --- pairing scanner (components/PairingScanner.tsx) ---------------------- */
+.pairscan {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-3);
+}
+/* Wider than the `min(60vw, 280px)` it shared with `.pairqr__code`, because
+   the two are not the same kind of surface. The QR code is read by a camera
+   held by someone else and 280px is already more than that camera needs; this
+   is a viewfinder the user aims by hand, and it is now the first and dominant
+   thing in the join dialog (see "The camera goes first" in
+   `views/DevicesCard.tsx`). At 390px it fills the panel it is in, and the cap
+   keeps it from becoming a wall on a desktop, where the dialog is wide and the
+   webcam is not the point of the room. */
+.pairscan__frame {
+  width: min(86vw, 340px);
+  aspect-ratio: 1;
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: var(--surface-inset);
+  border: 1px solid var(--border);
+}
+.pairscan__video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* --- message reader ------------------------------------------------------ */
+
+/**
+ * Leaving full screen must not leave half a screen.
+ *
+ * The reader opens full screen and `Esc` steps out of it before it closes —
+ * that ladder was asked for explicitly and stays. What was wrong is where the
+ * step landed: without full screen the dialog fell back to plain `.modal--wide`,
+ * 760px, which on the 1536px window this app is used on is 49.5% — the reader
+ * became literally half the screen the moment you pressed `Esc` once. "Exit
+ * full screen" has to mean "a window", not "a postage stamp".
+ *
+ * So the windowed reader gets its own width: never below 1240px or 78% of the
+ * window (whichever is larger, so the step keeps up with a big monitor), never
+ * above 1500px or 94vw (so it stays visibly smaller than full screen, which is
+ * the entire point of the step). Measured against full screen it is 1034 vs
+ * 1056 at 1100, 1240 vs 1311 at 1366, 1240 vs 1474 at 1536, 1497 vs 1600 at
+ * 1920 — smaller everywhere, and never the half-screen it used to be.
+ *
+ * Hooked off `.modal__body--reader` rather than a new modifier because `Modal`
+ * belongs to another file; `:has()` is already load-bearing in this stylesheet
+ * (see the settings grid), so this adds no new requirement.
+ */
+.modal:has(> .modal__body--reader):not(.modal--fullscreen) {
+  width: min(1500px, 94vw, max(1240px, 78vw));
+  max-height: 88vh;
+}
+
+/**
+ * The reader header on a phone: the subject and its four action buttons
+ * stopped sharing a row entirely, rather than being nudged to share it more
+ * politely.
+ *
+ * `min-width: 0` above (on `.modal__title` generally) stops the worst of it —
+ * a title no longer forces one word per line — but four 38px icon buttons
+ * plus a close button is still ~215px taken off a ~320px content width
+ * before the subject gets a single character, and a subject that only ever
+ * reaches two or three words of room reads as broken even without wrapping
+ * to single words. `flex-wrap` plus `flex-basis: 100%` on the title forces
+ * it onto a line of its own — the full width of the header, every time,
+ * regardless of how long the title or how many buttons follow it — and the
+ * buttons wrap to a second line where they have the whole row to themselves.
+ * Scoped to the reader specifically, not every `.modal__header`, because
+ * every other dialog's header title is short enough that the one-row layout
+ * still reads fine at this width, and moving all of them to two rows would
+ * cost every settings dialog a line of height it does not need back.
+ */
+@media (max-width: 839.98px) {
+  .modal:has(> .modal__body--reader) .modal__header {
+    flex-wrap: wrap;
+  }
+  /*
+   * `order` swapped rather than the markup: the action row now lands on the
+   * header's first line and the subject wraps alone underneath it, not the
+   * other way around. The buttons are what someone opening the message on a
+   * phone reaches for first — closing, flagging, deleting — and the row
+   * they are on was the one thing not visible without scrolling past the
+   * subject first. Reordering with `order` leaves the DOM (and so tab order
+   * and screen-reader order) exactly as it was; only paint order moves.
+   */
+  .modal:has(> .modal__body--reader) .modal__title {
+    order: 2;
+    flex-basis: 100%;
+    font-size: var(--text-value);
+    line-height: 1.35;
+  }
+  /* Its own solo top line now, still right-aligned rather than trailing off
+     from wherever the header's own left edge happens to be. */
+  .modal:has(> .modal__body--reader) .modal__header > .btn-row {
+    order: 1;
+    margin-inline-start: auto;
+  }
+  /* The header's own close button is a sibling of `.btn-row`, not a member
+     of it — it needs the same `order` to land on the same top line, right
+     after the row it was already trailing. */
+  .modal:has(> .modal__body--reader) .modal__header > .icon-btn {
+    order: 1;
+  }
+  /*
+   * Even right-aligned and on a line of its own, five icons (flag, delete,
+   * day/night, find, full screen) plus the header's own close button is
+   * still enough to wrap to a second line on a phone — the exact crowding
+   * the rule above this one was written to get rid of. Day/night, find and
+   * full screen fold behind the single `.reader__more` trigger instead, so
+   * the row stays flag + delete + more: three icons, one line, always.
+   */
+  .reader__actionsFull {
+    display: none;
+  }
+  .reader__more {
+    display: flex;
+  }
+  /*
+   * 20px, not the app-wide 16px default: promoted to the first thing on the
+   * screen, these are now read as the primary way to act on the message
+   * rather than a row of secondary chrome, and the 44px tap target around a
+   * 16px glyph was reading as mostly empty padding. Scoped to the reader's
+   * own header buttons — `.reader__moreItem` (the opened popover's menu
+   * rows) keeps its own 16px, since those sit next to a text label and were
+   * never the thing this was about.
+   */
+  .modal:has(> .modal__body--reader) .modal__header > .btn-row .icon-btn svg,
+  .modal:has(> .modal__body--reader) .modal__header > .icon-btn svg {
+    width: var(--icon-sm);
+    height: var(--icon-sm);
+  }
+}
+
+/*
+ * The phone header's overflow menu — `.reader__actionsFull` above is the
+ * plain inline row day/night, find and full screen keep on a desktop; this
+ * is what the max-width:760px rule swaps in for it instead. Both are always
+ * in the markup, same as `.whenbar__quick`'s anchored popover on the compose
+ * screen; only the media query decides which one paints, so no JS has to
+ * know the viewport width.
+ */
+.reader__actionsFull {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.reader__more {
+  position: relative;
+  display: none;
+}
+.reader__moreMenu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + var(--sp-2));
+  inset-inline-end: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 11rem;
+  max-width: min(16rem, 80vw);
+  padding: var(--sp-2);
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-lg);
+}
+.reader__moreItem {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  padding: var(--sp-2) var(--sp-3);
+  border: 0;
+  background: none;
+  border-radius: var(--r-sm);
+  color: var(--text-1);
+  font-size: var(--text-sm);
+  text-align: start;
+  cursor: pointer;
+}
+.reader__moreItem:hover {
+  background: var(--surface-hover);
+}
+
+/* The reader's own body: no gap-driven stack, the frame does the growing. */
+.modal__body--reader {
+  padding: 0;
+  gap: 0;
+}
+.modal__body--reader > * {
+  flex: none;
+}
+.modal__body--reader > .banner,
+.modal__body--reader > .reader__meta,
+.modal__body--reader > .reader__details,
+.modal__body--reader > .reader__find,
+.modal__body--reader > .reader__attachments {
+  margin: var(--sp-2) var(--sp-4);
+}
+
+.reader__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+  font-size: var(--text-sm);
+  color: var(--text-2);
+  min-width: 0;
+}
+/* The sender line is a flex item holding a string this app did not write.
+   `first.last+tag@some-very-long-subdomain.example.coop` is one unbreakable
+   token, so the item's automatic minimum size was the whole address: it could
+   not shrink, it did not truncate, and `.modal__body` only scrolls vertically —
+   so the tail was painted outside the modal with no way to reach it. `min-width`
+   lets the item shrink and `anywhere` lets the address break; nothing is hidden,
+   because on a reader the address is the thing you check before you trust the
+   message and an ellipsis would remove exactly the half that matters. */
+.reader__meta > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+/* `.reader__hint` used to print the keyboard map ("J / K next · U unread · …")
+   in grey beside the sender. It was explanation rather than information, it
+   was on screen for every message anyone ever opened, and the shortcuts still
+   work — so the line is gone rather than merely hidden below 1100px. */
+
+/* The initial-letter badge, on the accent/accent-text pair `.composeacts__badge`
+   uses — not the softer tinted `.avatar` the recipient picker uses for an
+   anonymous list, because this one is the single sender of a message already
+   open on screen and can afford to read as solid rather than muted. */
+.reader__avatar {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: var(--icon-lg);
+  height: var(--icon-lg);
+  border-radius: var(--r-full);
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: var(--text-sm);
+  font-weight: 700;
+}
+.reader__sender {
+  display: flex;
+  flex-direction: column;
+  line-height: var(--leading-tight);
+}
+.reader__senderName {
+  font-weight: 700;
+  color: var(--text-1);
+}
+/* Only ever shown alongside a name (see the JSX), so this is the one place a
+   bare address appears twice removed from `.reader__meta`'s own `> span`
+   rule above — it needs the same shrink-and-break treatment restated here. */
+.reader__senderAddress {
+  color: var(--text-3);
+  overflow-wrap: anywhere;
+}
+.reader__chevron {
+  transition: transform 0.15s ease;
+}
+.reader__chevron[data-open='true'] {
+  transform: rotate(180deg);
+}
+.reader__details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  font-size: var(--text-sm);
+  color: var(--text-2);
+}
+.reader__details > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.reader__find {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  color: var(--text-3);
+}
+.reader__find .input {
+  flex: 1;
+}
+
+/*
+ * The shape of a message, not a spinner — same reasoning as
+ * `components/Skeleton.tsx`, applied to the one place that still used a bare
+ * spin animation. Widths are fixed rather than randomised: a message that
+ * loads in under a frame never shows this at all, and one that takes longer
+ * gets a placeholder that does not visibly shuffle when the real text lands
+ * in its place.
+ */
+.reader__loading {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-5) var(--sp-2);
+}
+.reader__loading .skeleton__bar {
+  height: 1rem;
+}
+.reader__loading .skeleton__bar:first-child {
+  width: 42%;
+  height: 1.25rem;
+  margin-bottom: var(--sp-2);
+}
+.reader__loading .skeleton__bar:nth-child(2) {
+  width: 100%;
+}
+.reader__loading .skeleton__bar:nth-child(3) {
+  width: 94%;
+}
+.reader__loading .skeleton__bar:nth-child(4) {
+  width: 97%;
+}
+.reader__loading .skeleton__bar:nth-child(5) {
+  width: 68%;
+}
+
+/**
+ * The message itself, filling everything left over.
+ *
+ * Previously `min-height: 280px; max-height: 480px` inside a dialog that was
+ * itself capped — so a long message scrolled inside a box inside a box, and
+ * two thirds of a maximised window showed nothing at all.
+ *
+ * The floor is only reachable on a short window, where it stops helping: at
+ * 320px it forced the whole dialog to scroll on a laptop in a split view. The
+ * frame is `flex: 1` and takes everything going anyway.
+ */
+.reader__frame {
+  flex: 1 1 auto;
+  min-height: 240px;
+  width: 100%;
+  border: 0;
+  border-block: 1px solid var(--border);
+  background: #fff;
+}
+
+.reader__attachments {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.reader__attachments .section-label {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+}
+/* An attachment row where the row itself opens the file. */
+.attachment--clickable {
+  padding-inline-start: 0;
+}
+.attachment__open {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex: 1;
+  min-width: 0;
+  padding: var(--sp-2) var(--sp-3);
+  background: none;
+  border: 0;
+  border-radius: var(--r-sm);
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.attachment__open:hover {
+  background: var(--surface-hover);
+}
+.attachment__open .attachment__body {
+  display: flex;
+  flex-direction: column;
+}
+
+/* --- attachment preview -------------------------------------------------- */
+
+.modal__body--preview {
+  padding: 0;
+  background: var(--surface-inset);
+}
+.preview__image {
+  margin: auto;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+.preview__frame {
+  flex: 1;
+  width: 100%;
+  border: 0;
+  background: #fff;
+}
+
+/* --- recipient picker ---------------------------------------------------- */
+
+.tagfield-wrap {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+/** The button inside the field that opens the picker card. */
+.tagfield__open {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: var(--ctl-sm);
+  height: var(--ctl-sm);
+  margin-inline-start: auto;
+  background: none;
+  border: 0;
+  border-radius: var(--r-sm);
+  color: var(--text-3);
+  cursor: pointer;
+}
+.tagfield__open:hover,
+.tagfield__open[aria-expanded='true'] {
+  background: var(--surface-hover);
+  color: var(--accent);
+}
+
+.chip--recipient {
+  max-width: 32ch;
+}
+
+/**
+ * The recipient picker card.
+ *
+ * Replaces a permanent row of quick-pick buttons that sat under the compose
+ * form, cost height on every screen, and could only ever add. Portalled to
+ * `body` and positioned from the field's own rect, because the compose header
+ * is a grid whose children scroll — an absolutely positioned panel inside it
+ * gets clipped, which is why the row it replaces had to live below the form
+ * instead of next to the field it belonged to.
+ */
+.recipicker {
+  position: fixed;
+  z-index: 120;
+  display: flex;
+  flex-direction: column;
+  min-width: 320px;
+  max-height: 420px;
+  overflow: hidden;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg);
+}
+
+.recipicker__head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-3) var(--sp-2);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.recipicker__title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-weight: 700;
+  color: var(--text-1);
+}
+.recipicker__count {
+  margin-inline-start: auto;
+  font-size: var(--text-sm);
+  color: var(--text-3);
+  font-variant-numeric: var(--numeric);
+}
+.recipicker__close {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: var(--tap-min);
+  height: var(--tap-min);
+  background: none;
+  border: 0;
+  border-radius: var(--r-sm);
+  color: var(--text-3);
+  cursor: pointer;
+}
+.recipicker__close:hover {
+  background: var(--surface-hover);
+  color: var(--text-1);
+}
+
+.recipicker__bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.recipicker__all {
+  font-variant-numeric: var(--numeric);
+}
+
+.recipicker__list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--sp-2) 0;
+}
+.recipicker__empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: var(--sp-6) var(--sp-4);
+  color: var(--text-3);
+  text-align: center;
+}
+
+.recipicker__section {
+  display: block;
+}
+.recipicker__group {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  padding: var(--sp-2) var(--sp-3);
+  background: none;
+  border: 0;
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 700;
+  text-align: start;
+  cursor: pointer;
+}
+.recipicker__group:hover {
+  background: var(--surface-hover);
+}
+.recipicker__grouptitle {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.recipicker__groupcount {
+  flex: none;
+  color: var(--text-3);
+  font-variant-numeric: var(--numeric);
+  font-weight: 400;
+}
+
+.recipicker__row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  min-height: var(--tap-min);
+  padding: var(--sp-2) var(--sp-3);
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.recipicker__row[data-active] {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.recipicker__who {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  line-height: var(--leading-tight);
+}
+.recipicker__name {
+  color: var(--text-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.recipicker__address {
+  color: var(--text-3);
+  font-size: var(--text-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.recipicker__pin {
+  flex: none;
+  color: var(--accent);
+}
+
+/* The tick box. One rule per state, never two competing on the same box. */
+.recipicker__tick {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  border: 1.5px solid var(--border-strong);
+  border-radius: var(--r-xs);
+  color: var(--accent-text);
+  background: var(--surface-1);
+}
+.recipicker__tick--on,
+.recipicker__tick--all {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.recipicker__tick--some {
+  border-color: var(--accent);
+}
+.recipicker__dash {
+  width: 10px;
+  height: 2px;
+  border-radius: var(--r-full);
+  background: var(--accent);
+}
+
+.recipicker__hint {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border-top: 1px solid var(--border-subtle);
+  font-size: var(--text-base);
+  color: var(--text-3);
+}
+
+/*
+ * On a phone the card becomes a sheet on the bottom edge.
+ *
+ * `dvh`, not `vh`: the Android WebView does not shrink `vh` when the soft
+ * keyboard comes up, and this card is opened *by* focusing a text field, so
+ * `vh` would put half of it under the keyboard every single time.
+ */
+.recipicker__scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 119;
+  background: var(--scrim);
+}
+.recipicker--sheet {
+  inset-inline: 0;
+  inset-block-end: 0;
+  top: auto;
+  width: auto;
+  min-width: 0;
+  max-height: 72dvh;
+  border-inline: 0;
+  border-block-end: 0;
+  border-start-start-radius: var(--r-lg);
+  border-start-end-radius: var(--r-lg);
+  border-end-start-radius: 0;
+  border-end-end-radius: 0;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.avatar {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: var(--icon-lg);
+  height: var(--icon-lg);
+  border-radius: var(--r-full);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
+  font-size: var(--text-sm);
+  font-weight: 700;
+}
+
+/* --- badges -------------------------------------------------------------- */
+
+/* Codes are time-critical in a way unread mail is not, so their badge is the
+   accent rather than the neutral count treatment. */
+.nav__badge--accent {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+/* --- responsive ---------------------------------------------------------- */
+
+/* Two breakpoints, not five. 1280 is the default window; below 1100 the paired
+   fields stack rather than squeezing two 300px controls into 500px. Above
+   1600 the column is already capped by `--content-max`, so the only thing
+   left to do is let paired rows spread. */
+@media (max-width: 1199.98px) {
+  /* `.field__row` is a wrapping flex row; below this width two controls at
+     their 140px floor still fit side by side but read as cramped, so stack
+     them outright rather than relying on wrap to decide. */
+  .field__row {
+    flex-direction: column;
+  }
+}
+@media (min-width: 1200px) {
+  .field__row {
+    gap: var(--sp-5);
+  }
+}
+
+/* ==========================================================================
+   Phase 6 — fill the window
+
+   Four complaints, one cause. Content was capped at 1500px by
+   `--content-max`, so every screen left a grey band down each side of a
+   maximised window; and every screen was a single column, so the room that
+   *was* used went into stretching short rows rather than showing more.
+
+   The cap is gone (see `theme.css`). What follows is what to do with the
+   space: give it to a second column where one helps, and to the field people
+   actually type into.
+   ========================================================================== */
+
+/* --- the page gutter ----------------------------------------------------- */
+
+.view {
+  padding-inline: var(--page-pad-x);
+}
+
+/* --- settings: a grid of cards, not a ribbon ------------------------------ */
+
+/**
+ * Every card is full width. The columns happen *inside* them.
+ *
+ * Two earlier attempts got this wrong in the same way, so the reasoning is
+ * worth keeping. Laying the cards out in a multi-column grid — whether by
+ * `auto-fit` or by a fixed count — makes each card a fraction of the window,
+ * and a card that is 550px wide holds a 480px field no matter how large the
+ * monitor is. Widening the window then bought nothing: `auto-fit` spent the
+ * space on *more* columns, and a fixed two-column rule split it evenly between
+ * cards that did not all need it.
+ *
+ * Full-width cards give every field the whole window to work with. What that
+ * cannot do on its own is fill the space — one switch per line across 1400px
+ * is empty on the right, which is the same complaint in a new place. So the
+ * card body below lays its own controls out in columns: the card is as wide as
+ * the window, and its contents cover that width.
+ */
+.view__inner--grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: var(--sp-4);
+}
+
+/**
+ * Controls pair up once the card is wider than one control needs.
+ *
+ * Rows that are already horizontal (`.field__row` puts two or three fields
+ * side by side) and anything that labels the card span the full width, so the
+ * card reads as sections rather than as a scatter of controls.
+ */
+/**
+ * Two columns, and only ever two.
+ *
+ * `auto-fit` was the first attempt and it repeats, one level down, exactly the
+ * trap the card grid above was rewritten to escape: measured across a real
+ * window it went 2 columns of 461px at 1280 to *3 of 338px* at 1400, so
+ * widening the window made every control narrower and squeezed the data-folder
+ * path into three wrapped lines. More columns is not more room.
+ *
+ * A fixed pair keeps the relationship the right way round — wider window,
+ * wider fields — and two is the honest maximum: at three, a label and its
+ * control stop reading as a pair and start reading as a table.
+ */
+/**
+ * …and a pair is two, or it is one that takes the whole line.
+ *
+ * The version this replaced used a real two-track grid, and a grid track is
+ * there whether anything is in it or not. Measured on a 1536px window: six
+ * rows across the settings screen held a single `.switch` or `.field` in the
+ * left track with 712px — 51% of the card — blank beside it, and it read
+ * exactly as "the right half of the page is missing", which is what was
+ * reported. It was not the sidebar, not a container cap, not the window: it
+ * was an empty grid track, at every width from 1000px up.
+ *
+ * Flex wrap instead of grid, for the one property grid does not have: an item
+ * that ends up alone on its line *grows*. Two controls beside each other still
+ * split the card down the middle (`flex-grow: 1` from a `50% - gap` basis
+ * settles both at exactly half), and the odd one out fills its line instead of
+ * leaving a hole. Nothing about the authoring rule below changes — this is the
+ * same policy, expressed in the layout mode that can honour it.
+ *
+ * The basis subtracts a whole gap rather than half of one so that two items
+ * can never round their way onto separate lines; `flex-grow` gives the slack
+ * straight back.
+ */
+@media (min-width: 840px) {
+  .view--settings .card__body {
+    flex-direction: row;
+    flex-wrap: wrap;
+    column-gap: var(--sp-6);
+    row-gap: var(--sp-3);
+    align-items: flex-start;
+  }
+
+  /* Span by default; pair up only where it is known to help.
+     The reverse — listing what must span — was tried first and is the wrong
+     way round: it puts the burden on whoever adds a control later, and the
+     failure is silent and ugly (a seven-cell day picker, or a row of date
+     chips, crushed into a 300px column). Defaulting to full width means a new
+     element is merely wide, never broken. */
+  .view--settings .card__body > * {
+    flex: 1 0 100%;
+    min-width: 0;
+  }
+  .view--settings .card__body > .switch,
+  .view--settings .card__body > .field {
+    flex: 1 1 calc(50% - var(--sp-6));
+  }
+  /* …except a field wrapping a free-text box, which wants the room. */
+  .view--settings .card__body > .field:has(.textarea) {
+    flex-basis: 100%;
+  }
+}
+
+/* The scroll anchors the section nav jumps to. Zero-height and full-width, so
+   they neither take a visible cell nor land in the middle of a row. */
+.view__inner--grid > .settings-section {
+  grid-column: 1 / -1;
+  height: 0;
+}
+
+/* Heading, nav and banners span everything above the grid. */
+.view__inner--grid > .page-head,
+.view__inner--grid > .banner,
+.view__inner--grid > .settingsnav {
+  grid-column: 1 / -1;
+}
+
+/* --- settings as a list of rows (phone layout) ---------------------------- */
+
+/**
+ * The phone counterpart to the grid above — see `components/SettingsSection.tsx`
+ * for why the structure changes rather than the styling.
+ *
+ * A plain column, not a grid: every child is either the heading, a banner, or
+ * one full-width row, and there is never a second column to place anything in.
+ */
+.view__inner--list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+/* The anchors are still emitted here (measuring scripts find sections by them)
+   but nothing scrolls to them on a phone, so they must not open a gap in a
+   list whose rows are meant to touch. */
+.view__inner--list > .settings-section {
+  height: 0;
+}
+
+.view__inner--list > .page-head,
+.view__inner--list > .banner {
+  margin-bottom: var(--sp-3);
+}
+
+/**
+ * One row of the settings list.
+ *
+ * Sized to the platform touch target rather than to its text: 56px clears
+ * both Android's 48dp minimum and iOS's 44pt with room for a fingertip that
+ * is not aimed precisely, which is the normal case for a list you are
+ * scrolling past. The chevron is not decoration — it is the only thing
+ * distinguishing "this opens something" from "this is a heading", and the
+ * rows below it look exactly like headings without it.
+ */
+.settingsrow {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  min-height: var(--ctl-lg);
+  padding: var(--sp-3) var(--sp-1);
+  border: 0;
+  /* Hairline between rows, none under the last: a trailing rule under the
+     final row reads as "there is more below", on the one screen where being
+     wrong about that means scrolling for nothing. */
+  border-bottom: 1px solid var(--border);
+  background: none;
+  color: var(--text-1);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease);
+}
+.settingsrow:last-of-type {
+  border-bottom: 0;
+}
+.settingsrow:hover,
+.settingsrow:focus-visible {
+  background: var(--surface-2);
+}
+.settingsrow:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.settingsrow__icon {
+  display: flex;
+  flex: none;
+  color: var(--text-3);
+}
+.settingsrow__label {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--text-base);
+  font-weight: 600;
+  /* Long labels in Russian and Arabic wrap rather than pushing the chevron off
+     the row — `flex: none` on the chevron alone would let this squeeze it. */
+  overflow-wrap: anywhere;
+}
+.settingsrow__chevron {
+  flex: none;
+  color: var(--text-3);
+}
+/* The chevron points the way the language reads. */
+[dir="rtl"] .settingsrow__chevron {
+  transform: scaleX(-1);
+}
+
+/* --- the phone Home hub --------------------------------------------------- */
+
+/**
+ * Five tiles, one column.
+ *
+ * A two-column grid was the first instinct and is wrong for five items: the
+ * last one sits alone on its own row looking like a mistake, and halving the
+ * width halves the room for labels that are two words in English and rather
+ * more in Russian («Рабочий календарь») and Arabic. One column also means each
+ * tile is a full-width tap target, which on the screen whose entire job is
+ * "get me to one of five places" is worth more than density.
+ */
+.hometiles {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+}
+
+.hometile {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  min-height: 64px;
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface-1);
+  color: var(--text-1);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
+}
+.hometile:hover,
+.hometile:focus-visible {
+  background: var(--surface-2);
+  border-color: var(--border-strong);
+}
+.hometile:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.hometile:active {
+  transform: translateY(1px);
+}
+.hometile__icon {
+  display: flex;
+  flex: none;
+  color: var(--accent);
+}
+.hometile__label {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--text-lg);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+/* Same shape and role as `.nav__badge`, which is what used to carry this count
+   on the schedule tab before that tab moved behind Home. Losing the count
+   entirely would have made "how many reminders are armed" a thing you could
+   only learn by opening the screen. */
+.hometile__badge {
+  flex: none;
+  min-width: var(--icon-sm);
+  padding: 2px 7px;
+  border-radius: var(--r-full);
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: var(--text-sm);
+  font-weight: 700;
+  text-align: center;
+}
+.hometile__chevron {
+  flex: none;
+  color: var(--text-3);
+}
+[dir="rtl"] .hometile__chevron {
+  transform: scaleX(-1);
+}
+
+/**
+ * A section opened from the list.
+ *
+ * The card inside has already drawn its own frame, and a dialog that draws a
+ * second one around it puts two borders and two paddings between the edge of
+ * the screen and the first control — which on a 360px phone is most of the
+ * width gone before anything useful starts.
+ */
+.modal__body--settings {
+  padding: 0;
+}
+.modal__body--settings > .card {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: none;
+}
+
+/*
+ * The section names itself once, in the dialog's header.
+ *
+ * Every row in the settings list passes the *same* translation key to
+ * `SettingsSection` that the card inside already renders as its own heading —
+ * `settings.appearance` is both the row you tapped and the first line of what
+ * opened — so the word appears twice, two rows apart, on a screen that exists
+ * to hold less.
+ *
+ * Only the heading text goes. `.card__header` is emphatically not hidden: it
+ * also carries that section's action button ("Add account" lives there), and
+ * hiding a container because of the text in it is precisely how the Home
+ * dialogs lost "New contact" and "Export CSV" a commit ago. `.section-label`
+ * is a bare text node with no such passenger, so it can go outright — but only
+ * the first one, because a card with several labelled groups is using the rest
+ * to separate them from each other, not to name the section.
+ */
+.modal__body--settings .card__title,
+.modal__body--settings > .card > .card__body > .section-label:first-child {
+  display: none;
+}
+
+/**
+ * A whole screen opened inside a dialog — the five behind Home.
+ *
+ * Those components are top-level views: each renders `.view`, which brings its
+ * own horizontal padding, and a `PageHead` that is `position: sticky` against
+ * the scroll container. Both are right on a tab and wrong here, where the
+ * dialog is already the padding and already has a title bar. So the body gives
+ * up its own padding and the screen inside gives up its heading — one title,
+ * one inset, one scroller.
+ */
+.modal__body--screen {
+  padding: 0;
+}
+.modal__body--screen > .view {
+  padding-top: 0;
+}
+/*
+ * The heading *text* goes, the heading's actions stay.
+ *
+ * This rule used to be `.page-head { display: none }`, which was wrong in a
+ * way that only shows up on a phone: `PageHead` is not just a title. Its
+ * `action` slot is where these screens keep their primary control — "New
+ * reminder", "New contact", "New template", "Export CSV". Hiding the whole
+ * element took every one of them away, so opening Contacts from Home gave you
+ * a list of contacts and no way to add one.
+ *
+ * Only the title and subtitle are redundant here: the dialog's own header
+ * already names the screen, two lines higher, and the subtitle explains a
+ * screen the user has just chosen by name. The actions are not redundant
+ * anywhere.
+ */
+.modal__body--screen .page-head__text {
+  display: none;
+}
+.modal__body--screen .page-head {
+  /*
+   * Without its text the head is just an actions row, so it gives up
+   * everything it owned as a *heading*:
+   *
+   *   - `position: sticky` pinned it against the page scroller. Inside a dialog
+   *     the scroller is the dialog body, so it hovered a row of buttons over
+   *     the content it was supposed to sit above.
+   *   - the translucent blurred background was there to let the page show
+   *     through while it was pinned. Nothing is pinned now, and against the
+   *     dialog's own surface it read as a grey band of unexplained colour.
+   *   - `min-height` reserved room for a title and subtitle that are hidden.
+   */
+  position: static;
+  min-height: 0;
+  padding: 0 0 var(--sp-3);
+  background: none;
+  backdrop-filter: none;
+}
+/*
+ * The rule under the heading goes too.
+ *
+ * It is drawn with `inset-inline: calc(-1 * var(--page-pad-x))` so that it spans the
+ * whole scroll area rather than the content column — right on a page, and
+ * visibly wrong in a dialog, where it ran past the panel's rounded edge and was
+ * clipped mid-line. There is already a border under the dialog's own header
+ * two rows up; a second one under the buttons divides nothing.
+ */
+.modal__body--screen .page-head::after {
+  display: none;
+}
+/* Nothing left to head — don't leave its padding behind as a mystery gap. */
+.modal__body--screen .page-head:not(:has(.page-head__actions)) {
+  display: none;
+}
+
+/* --- compose: three bands, message in the middle -------------------------- */
+
+/**
+ * Who it goes to, what it says, when it sends.
+ *
+ * This replaced a two-column layout (a 420px addressing column beside the
+ * message). That layout was itself a fix for a stacked form where the body got
+ * whatever height was left, and it did widen the message — but it capped it at
+ * "the window minus a column sized for a select box", and it put the two most
+ * important things on the screen, the message and the send time, in different
+ * columns competing with a subject line for the same space.
+ *
+ * The recipient and the subject are each one line of text. They never needed a
+ * column; they needed a row. Given one, the message gets the entire width of
+ * the card and all the height the other two bands do not use, and the send time
+ * gets a permanent home next to the buttons that act on it.
+ */
+.compose-layout {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-height: 0;
+}
+
+/* Labels above their controls throughout this screen — the label-beside-control
+   grid `.form-rows` applies elsewhere buys back height per field, which is the
+   right trade on a settings page of twenty fields and the wrong one here: this
+   form has four, and a 5.5em label gutter down the left of a full-width message
+   box is 5.5em taken off the message for nothing. Uniform within the screen,
+   which is what the eye actually reads as consistent. */
+.compose-layout .field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.compose-layout .field > .field__label {
+  min-height: 0;
+  justify-content: flex-start;
+  text-align: start;
+  color: var(--text-1);
+}
+
+/* --- band 1: addressing --------------------------------------------------- */
+
+/* Account, recipient, subject on one line. The recipient gets the largest
+   share because it is the one that holds chips and grows; the account select
+   is content-sized because its width is decided by the address inside it. */
+.compose-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1.2fr);
+  gap: var(--sp-4);
+  align-items: start;
+}
+.compose-head:has(> .field:nth-child(3)) {
+  grid-template-columns: minmax(180px, 0.8fr) minmax(0, 1.6fr) minmax(0, 1.2fr);
+}
+.compose-head--extra {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+/* --- band 2: the message -------------------------------------------------- */
+
+/* The one field allowed to grow, and the reason the card is a flex column. */
+.compose-layout > .field:has(.textarea--body) {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.compose-layout > .field:has(.textarea--body) > .textarea--body {
+  flex: 1 1 auto;
+  /*
+   * A floor, not a height. In the normal case the box grows well past this —
+   * it is the only thing on the card with `flex-grow`, so every pixel the
+   * other two bands do not use lands here.
+   *
+   * The number is the point at which the *form* would start to scroll, not a
+   * guess at a comfortable size. Measured with `scripts/layout-probe.mjs`: at
+   * 220px the column came to 940px against 744px of viewport on a 827px-tall
+   * window, and the first thing to go was the send button. Ten lines of
+   * Chinese at 小四 still fit here, and anything taller is space the box will
+   * have been given anyway.
+   *
+   * Doubled, from 160px to 320px, and clamped against the window so it cannot
+   * become the thing that makes the form scroll. On any window taller than
+   * ~760px the flat 320 applies — twenty lines of 小四, and twice what the box
+   * was ever guaranteed before. Below that, 42vh takes over and the floor
+   * shrinks with the window instead of pushing the send time off the screen,
+   * which is the one thing this form is not allowed to do.
+   *
+   * In the ordinary case none of this is what decides the height: the box is
+   * the only thing on the card with `flex-grow`, so it takes everything the
+   * other two bands leave, and every pixel trimmed off the chrome around it
+   * arrives here without touching this floor.
+   */
+  min-height: min(320px, 42vh);
+  height: auto;
+  resize: vertical;
+}
+
+/*
+ * The floor gives way to a banner, rather than pushing the form into scroll.
+ *
+ * A banner on this screen is 72px the configured, valid draft does not carry —
+ * an oversized attachment, mainly. Measured on a 1266x827 window: with the
+ * banner up, a 320px floor tips the column 9px past the viewport, which is
+ * the one thing this form is not allowed to do. The banner is also the only
+ * state where the box is at its floor at all: with the banner gone the box
+ * grows to 391px on that same window and this rule cannot be reached.
+ *
+ * So the floor is conditional on the banner rather than being lowered for
+ * everyone, which would hand the ordinary case a smaller guarantee to fix a
+ * state most people see once.
+ *
+ * "No account yet" used to be exactly such a banner, and this rule's `:has()`
+ * was written against it — until the duplicate "还没有发件账号" warning
+ * ComposeView rendered next to `HealthBoard`'s own copy of the same message
+ * was removed (one clear warning instead of two eating ~80px of a screen that
+ * has to fit in one). `HealthBoard` reports that condition as a `.health`
+ * strip, not a `.banner`, so the fix silently starved this rule of the only
+ * trigger the first-run case ever gave it: at 1366x768 with no account
+ * configured the strip alone pushed the form 111px past the viewport with the
+ * floor still at 320. `.health__item[data-level]` is added below for exactly
+ * that reason — any warning- or danger-level line in the strip earns the same
+ * relief a warning banner always did.
+ */
+.view--compose:has(
+    .banner--warning,
+    .banner--danger,
+    .health__item[data-level='warning'],
+    .health__item[data-level='danger']
+  )
+  .compose-layout
+  > .field:has(.textarea--body)
+  > .textarea--body {
+  min-height: min(240px, 32vh);
+}
+
+/* --- reclaiming height for the message, part 2 ---------------------------- */
+
+/*
+ * The compose heading, replaced rather than compacted.
+ *
+ * Measured before touching it (`scripts/layout-probe.mjs`, 1266x827, account
+ * configured): the message box was 281px and the chrome around it 356px —
+ * page head 64, health strip 52, addressing row 83, footer 157. The health
+ * strip is a real warning and stays; the addressing row and the footer are
+ * controls. That leaves the heading, which on this screen is a title naming
+ * the screen you are already looking at, plus a subtitle that has never told
+ * anyone anything they did not know.
+ *
+ * Trimming its padding took it to 40px and stopped there: a heading is mostly
+ * the air around the heading, and `--pagehead-h` is a shared floor the other
+ * six screens want. So this screen does not use one. `.composetop` below is
+ * the whole band — the screen's name set at body size on the left, the
+ * secondary controls on the right, and a height decided by the buttons rather
+ * than by a title. Every pixel saved lands in the body box, which is the only
+ * thing on the card with `flex-grow`.
+ */
+
+/* --- focus mode ----------------------------------------------------------- */
+
+/*
+ * Everything that is not the message, gone.
+ *
+ * Done by removing the bands above the card in the view (so they cost nothing
+ * rather than being hidden while still laid out) and by letting the card take
+ * the full column here. The addressing row and the footer stay: a message with
+ * no recipient cannot be sent, and hiding the send button inside a writing
+ * mode would be a trap.
+ *
+ * The `min-height` floor on the body is dropped to zero here on purpose. It
+ * exists to stop the *form* scrolling in the normal layout; in this one the
+ * box is the only flexible thing on screen and a floor could only fight the
+ * flex basis it is already being given.
+ */
+.view--compose[data-focus='true'] .view__inner {
+  padding-block-start: var(--sp-3);
+}
+.view--compose[data-focus='true'] .compose-card {
+  flex: 1 1 auto;
+}
+.view--compose[data-focus='true'] .compose-layout > .field:has(.textarea--body) > .textarea--body {
+  min-height: 0;
+  /* Beats the remembered drag height, which is an inline style. Without this
+     a box that had once been dragged to 220px would stay 220px in a mode whose
+     entire purpose is to be tall. */
+  height: auto !important;
+}
+
+/* --- band 3: attachments and the send time -------------------------------- */
+
+/*
+ * Stacked, and measured that way.
+ *
+ * Putting the dropzone and the send time side by side to save a row was tried
+ * and is worse: two halves of a 977px card are ~478px, and after the 5.5em
+ * label gutter the time bar had 358px for a datetime input (15em), a sentence
+ * and a button. It wrapped to three lines. The row that was supposed to cost
+ * 52px cost 148, and the message box lost 8px rather than gaining 60.
+ *
+ * Same lesson as the settings grid and the narrow left column before it: a
+ * control does not get smaller when its column does, it gets taller.
+ */
+.compose-foot {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+/*
+ * Labels beside their controls down here, above them in the two bands over
+ * this one — and that is deliberate rather than an inconsistency.
+ *
+ * A label sits above its control when the control is in a column narrow enough
+ * that a label gutter would eat it (the three-across addressing row) or wide
+ * enough that the gutter would be stealing from the thing that matters (the
+ * message). Neither is true of a dropzone and a time picker: both are single
+ * wide controls with room to spare, and a stacked label costs each of them a
+ * 36px row on a form whose whole requirement is to fit one screen. Two fields,
+ * 72px, measured — which is the difference between this form fitting an 827px
+ * window and scrolling.
+ *
+ * It also matches `.form-rows`, which is what every other form in the app uses.
+ *
+ * Undone below 720px, where the premise stops holding: 5.5em of a 448px phone
+ * is a fifth of the screen, the label overflowed the card and was clipped by
+ * the viewport, and the dropzone it was stealing from wrapped its two lines of
+ * text every three words. `.form-rows` already unwinds itself at that width
+ * for the same reason; this had been left behind.
+ */
+.compose-foot > .field {
+  display: grid;
+  grid-template-columns: 5.5em minmax(0, 1fr);
+  column-gap: var(--sp-4);
+  align-items: center;
+}
+.compose-foot > .field > .field__label {
+  grid-column: 1;
+  grid-row: 1;
+  justify-content: flex-end;
+  text-align: end;
+  color: var(--text-2);
+}
+.compose-foot > .field > *:not(.field__label) {
+  grid-column: 2;
+}
+/* The disclosure lines up with the controls, not with the label gutter. */
+.compose-foot > .moreoptions {
+  margin-inline-start: calc(5.5em + var(--sp-4));
+}
+
+/*
+ * Still one column, and this is the second time that has been measured rather
+ * than assumed.
+ *
+ * Putting the two side by side was tried again for this round, gated at 1500px
+ * of window on the theory that the earlier failure was only about a card too
+ * narrow to halve. It is not. Emulated widths, account configured, foot height
+ * against the 102px it costs stacked:
+ *
+ *   1536px window → halves 591, time bar 488 wide → wrapped, foot 108
+ *   1700px window → halves 670, time bar 567 wide → wrapped, foot 108
+ *   1820px window → halves 728, time bar 624 wide → wrapped, foot 108
+ *   1920px window → halves 776, time bar 673 wide → one line, foot  50
+ *
+ * So the row only fits from about 1880px of window, and below that the "space
+ * saving" is a 6px loss. A rule that pays out on one monitor size and charges
+ * on every other one is not worth the breakpoint; the 52px it would win at
+ * 1920 lands on the window that already has the tallest message box in the
+ * table (656px). Stacked at every width, as before.
+ */
+
+/* Time picker, what it means in words, and the way to the full rules — one
+   row, because all three are the same question. */
+.whenbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+.whenbar__time {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 15em;
+}
+.whenbar__text {
+  flex: 1 1 12em;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.whenbar__rule {
+  color: var(--text-2);
+}
+.whenbar__count {
+  color: var(--accent);
+}
+
+/* A cron expression is the rule itself; there is nothing here to edit, so this
+   is an `<output>` styled to sit in the row rather than an input pretending to
+   accept something. `anywhere` because a five-field expression has no spaces
+   worth breaking at and would otherwise widen the row past the card. */
+.whenbar__cron {
+  display: flex;
+  align-items: center;
+  font-family: var(--font-mono);
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+
+/* The quick picks hang off the field instead of taking a row of their own.
+
+   A visible chip row here measures ~40px, and every pixel below the message
+   box is taken straight off the message box — the single most-repeated
+   complaint about this screen. `position: absolute` means the open state costs
+   the layout nothing at all, so the four one-tap times are available without
+   the body paying for them. */
+.whenbar__quick {
+  position: relative;
+  flex: 0 0 auto;
+}
+.whenbar__quickbtn {
+  min-width: var(--tap-min);
+  min-height: var(--tap-min);
+}
+.whenbar__picks {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + var(--sp-2));
+  inset-inline-start: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  /* Wide enough for four chips on two rows, narrow enough not to leave the
+     card on a 360px screen. */
+  width: max-content;
+  max-width: min(19rem, 80vw);
+  padding: var(--sp-3);
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-lg);
+}
+/* Near the end of the row on a narrow screen it would otherwise open off the
+   side of the window. */
+@media (max-width: 599.98px) {
+  .whenbar__picks {
+    inset-inline-start: auto;
+    inset-inline-end: 0;
+  }
+}
+
+/* --- in-app date/time picker (`DateTimeField.tsx`) -------------------------
+
+   Replaces `<input type="time"|"date"|"datetime-local">`. The trigger reuses
+   `.select` verbatim — same box, same chevron — so it reads as one more field
+   until it is tapped. The panel reuses the anchored-popover shape
+   `.whenbar__picks` and `.reader__moreMenu` already established: absolute,
+   right below the trigger, closes on Escape or an outside pointerdown. */
+.dtfield {
+  position: relative;
+}
+.dtfield__trigger {
+  /*
+   * Longhands, not `font: inherit`, and the difference was worth two pixels on
+   * the most-used control on the compose screen.
+   *
+   * `font` is a shorthand over eight properties, and every one it does not
+   * mention is reset to its initial value — `line-height` included. So
+   * `font: inherit` here took the *parent's* line-height (the body's 25.6px
+   * paragraph leading) and overwrote the `--leading-tight` that `.select` sets
+   * for exactly this purpose, which pushed the send-time button to 50px while
+   * every input and button beside it stood at 48. It is a silent kind of wrong:
+   * nothing errors, the control looks fine on its own, and it only reads as
+   * sloppy in the row where the baselines miss.
+   *
+   * A `<button>` does need the family and size stated, which is what
+   * `font: inherit` was doing — buttons take the UA's own font otherwise.
+   */
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: var(--leading-tight);
+  text-align: start;
+  color: var(--text-1);
+}
+.dtfield__trigger:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.dtfield__panel {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + var(--sp-2));
+  inset-inline-start: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  width: max-content;
+  max-width: min(20rem, 90vw);
+  padding: var(--sp-3);
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-lg);
+}
+/* A datetime panel stacks calendar over time rather than side by side: at
+   20rem max-width there is not room for a 7-column month grid and two
+   scrolling number columns in one row without crushing both. */
+.dtfield__divider {
+  height: 1px;
+  background: var(--border);
+  margin: var(--sp-1) 0;
+}
+.dtfield__footer {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.dtfield__calhead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+.dtfield__calmonth {
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--text-1);
+}
+.dtfield__calgrid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+}
+.dtfield__calweekday {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--ctl-xs);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  color: var(--text-3);
+}
+.dtfield__calday {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--ctl-md);
+  height: var(--ctl-md);
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--text-1);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: all var(--dur-fast) var(--ease);
+}
+.dtfield__calday:hover {
+  background: var(--surface-hover);
+}
+.dtfield__calday[data-dim] {
+  color: var(--text-3);
+}
+.dtfield__calday[data-today] {
+  border-color: var(--border-strong);
+}
+.dtfield__calday[aria-pressed="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+/* Two scrolling number lists rather than a wheel: a wheel needs its own
+   gesture handling to feel right and a plain scrollable list with big tap
+   targets needs none, which matters more here than the skeuomorphism. */
+.dtfield__time {
+  display: flex;
+  gap: var(--sp-2);
+}
+.dtfield__col {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 4.5em;
+  max-height: 12rem;
+  overflow-y: auto;
+  scroll-behavior: auto;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-inset);
+}
+.dtfield__opt {
+  flex: none;
+  min-height: var(--tap-min);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--text-1);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.dtfield__opt:hover {
+  background: var(--surface-hover);
+}
+.dtfield__opt[aria-selected="true"] {
+  background: var(--accent);
+  color: var(--accent-text);
+  font-weight: 700;
+}
+
+/* The folded options are a grid rather than a stack: opened, they used to add
+   three full-width rows to a form that is required to fit one screen. */
+.moreoptions__grid {
+  display: grid;
+  /* 220px, not 280: three controls at 280 need 840px and the card is 829, so
+     they wrapped to two rows and the opened disclosure cost 152px instead of
+     76. One row is the difference between opening this and the send button
+     staying on screen. */
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--sp-3) var(--sp-4);
+  align-items: start;
+  margin-top: var(--sp-3);
+}
+
+/* Below this the top band cannot hold three controls without each of them
+   being too narrow to read an address in, so it stacks. This is the phone and
+   narrow-window layout. */
+@media (max-width: 839.98px) {
+  .compose-head,
+  .compose-head:has(> .field:nth-child(3)),
+  .compose-head--extra {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .whenbar__time {
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+/* --- reclaiming height for the message ------------------------------------ */
+
+/**
+ * Measured, not estimated. `scripts/layout-probe.mjs` on a 1266×827 window,
+ * account configured, disclosure closed:
+ *
+ *   viewport 744px = page head 72 + health strip 52 + card 552 + gaps 32
+ *                    + the scroller's own bottom padding 32
+ *   card 552px     = padding 40 + addressing 89 + body field 239 + foot 167
+ *                    + gaps 24
+ *
+ * which left the message box at **200px** — eight lines of 小四 for the one
+ * field the whole screen exists to fill, while five separate pieces of chrome
+ * around it each held on to a comfortable margin.
+ *
+ * Nothing below removes a control or shrinks any text. It takes the padding
+ * that had accumulated around a form which is required to fit one screen, and
+ * every pixel of it lands in the message box, because that box is the only
+ * thing on the card with `flex-grow`.
+ */
+
+/* The scroller's bottom padding is generous for a list that ends mid-row. This
+   form ends at a card edge with the action bar directly under it. */
+.view--compose {
+  padding-bottom: var(--sp-2);
+}
+
+/* The gap between the top bar, the health strip and the card. They are three
+   separated things already — a rule, a tinted strip and a bordered card. */
+.view--compose .view__inner {
+  gap: var(--sp-2);
+}
+
+/* The card's own breathing room. Vertically `--sp-2`: the horizontal padding
+   is what makes this read as a card, and the eight pixels off the top and
+   bottom go straight into the one box on this screen that is short of them. */
+.compose-card > .card__body {
+  padding: var(--sp-2) var(--sp-4);
+  gap: var(--sp-2);
+}
+
+/**
+ * The top bar. One band, and the only one on this screen that is not a form.
+ *
+ * The screen's name on the left, everything secondary on the right: draft
+ * history, the send preview, the "more options" panel and the focus toggle.
+ * All of them were charging the form for space — the disclosure cost 67px of
+ * the card whether or not it was ever opened, and the buttons were competing
+ * with Send for a bar that should hold Send and nothing like it.
+ *
+ * It is not a `PageHead`. That component carries `--pagehead-h`, a floor the
+ * other six screens want and this one cannot afford, and its title is set two
+ * type steps up for a word that names the screen you are already looking at.
+ * Here the name is set at the size of a field label and the height is whatever
+ * the buttons need, which is 36px against the heading's 40 — and, unlike the
+ * heading, it holds four controls that would otherwise be inside the form.
+ *
+ * The bottom rule is what makes it read as a bar rather than as a stray row of
+ * buttons floating above a card.
+ */
+.composetop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  /* Four pixels, and they are not spare: the scroller has no top padding of
+     its own, so without this the screen's name sits flush against the window
+     edge. The band still measures less than the 40px heading it replaced. */
+  padding-block: var(--sp-1);
+  border-bottom: 1px solid var(--border-subtle);
+}
+/* The screen's name, at the size and colour of a field label rather than of a
+   title: on the one screen the app opens on, the heading is the least
+   informative thing in the window. */
+.composetop__title {
+  font-size: var(--text-lg);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+/*
+ * `flex-wrap` and not `overflow` on purpose: a second line costs a row and is
+ * the right trade — the alternative is a horizontally scrolling toolbar
+ * holding the only route back to a lost draft.
+ *
+ * The band this sits in is gone below 900px, where the controls move into the
+ * options sheet instead (see the narrow-compose block further down), so the
+ * wrap is now only reached by a desktop window dragged narrow. It is also what
+ * lays the same buttons out inside that sheet.
+ */
+.composebar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  flex-wrap: wrap;
+}
+/* Quieter than the form's own controls and shorter than the 46px they use:
+   these are the things you are not doing right now. The 小四 floor still
+   applies — this trims the padding, never the type. */
+.composebar .btn {
+  min-height: var(--ctl-sm);
+  padding-block: var(--sp-1);
+  color: var(--text-2);
+}
+.composebar .btn:hover:not(:disabled) {
+  color: var(--text-1);
+}
+/* Open reads as pressed, because the panel it opens is at the other end of the
+   card and cannot be seen from here on a short window. */
+.composebar .btn[aria-expanded='true'] {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+/* Labels here are one line and always will be — nothing on this form has a
+   two-line label — so they are set at the tight leading the page title uses
+   instead of the paragraph leading meant for wrapping prose. Four labels on
+   the screen, ten pixels each. */
+.compose-layout .field > .field__label {
+  line-height: var(--leading-tight);
+}
+
+/* --- the type ranks on this screen ---------------------------------------- */
+
+/**
+ * This screen used to raise `--text-xs` to 16px for its whole subtree —
+ * `.view--compose`, `.actionbar` and `.sendresult` — on the reasoning that
+ * nothing readable here should be under 小四.
+ *
+ * Removed, and it is the single biggest reason this was the worst screen in the
+ * app for 字体太大. It did not raise one rank, it *deleted* two: every hint,
+ * every switch description, every quick-pick address, every timestamp and every
+ * rung of the send-result ladder came out at exactly the size of the sentence
+ * beside it, so a form with twenty pieces of text on it had no first thing to
+ * read. And the height it cost was taken from the one box the screen exists for
+ * — measured on this change alone at 360x800, the label row and the addressing
+ * hints gave back 44px, all of which lands in the message because the textarea
+ * is the only thing on the card with `flex-grow`.
+ *
+ * What replaces it is the global ladder in `theme.css`: prose and every input
+ * stay 16px, secondary text is 14px, auxiliary text is 12.5px. The floor that
+ * matters — 16px on anything focusable, so mobile browsers do not zoom — is
+ * carried by `--text-md` on the controls themselves, not by a subtree override.
+ * `scripts/layout-probe.mjs` asserts all three ranks separately.
+ */
+
+/* The name of a field is the name of a function — 四号, one step above the
+   value it labels. Applies to every label on the screen, so the addressing row,
+   the message and the send time are all titled the same way. */
+/* `.field__labelrow` is listed as well as the bare label, and that omission was
+   a live bug rather than a tidiness point: measured on the compose screen, four
+   of the five field labels rendered at 18.67px and 正文 rendered at 16px — the
+   same kind of text, two ranks, on one screen. The cause is that `>` is a
+   direct-child combinator and the body field is the one field that grew a tools
+   row, so its label sits at `.field > .field__labelrow > .field__label` and
+   stopped matching. Nothing errored; it simply fell back to the 16px base rule
+   forty lines up. This is exactly the failure mode 界面不统一 is made of — a
+   selector that was right when it was written and silently stopped being right
+   when the markup underneath it grew a level. */
+.view--compose .field > .field__label,
+.view--compose .field > .field__labelrow > .field__label,
+.view--compose .switch__title {
+  font-size: var(--text-lg);
+}

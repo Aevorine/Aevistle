@@ -13,13 +13,13 @@ import {
   type DesktopApi,
   type DownloadOutcome,
   type TrayCommand,
-} from '../src/core/ipc-contract'
-import type { InboxEvent, JobEvent } from '../src/core/bridge'
+} from '../src/core/platform/ipc-contract'
+import type { InboxEvent, JobEvent } from '../src/core/platform/bridge'
 import type { SharePayload } from '../src/core/types'
-import type { DownloadProgress } from '../src/core/update'
-import type { ControlRequest } from '../src/core/control'
-import type { PairingEvent } from '../src/core/pairing'
-import type { SyncServerRequest } from '../src/core/syncLoop'
+import type { DownloadProgress } from '../src/core/platform/update'
+import type { ControlRequest } from '../src/core/sync/control'
+import type { PairingEvent } from '../src/core/sync/pairing'
+import type { SyncServerRequest } from '../src/core/sync/syncLoop'
 
 /**
  * Tray commands that arrived before the page had a listener.

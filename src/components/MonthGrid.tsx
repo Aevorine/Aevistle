@@ -36,8 +36,8 @@
  */
 
 import { useEffect, useMemo, useRef } from 'react'
-import { addIsoDays, parseIsoDate, toIsoDate, type WorkCalendar } from '../core/workCalendar'
-import type { SolarTermId } from '../core/solarTerms'
+import { addIsoDays, parseIsoDate, toIsoDate, type WorkCalendar } from '../core/schedule/workCalendar'
+import type { SolarTermId } from '../core/schedule/solarTerms'
 
 /**
  * One send, as a day square shows it: time · recipient · subject.

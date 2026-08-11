@@ -23,13 +23,13 @@ import { DeliveryWindowEditor } from '../components/DeliveryWindowEditor'
 import { useApp } from '../state/AppState'
 import { SearchInput } from '../components/inputs'
 import { useI18n } from '../i18n'
-import { isValidAddress } from '../core/validate'
+import { isValidAddress } from '../core/mail/validate'
 import { newId, type Contact } from '../core/types'
 import {
   buildContactImport,
   parseContactsCsv,
   type ContactImportResult,
-} from '../core/contactImport'
+} from '../core/platform/contactImport'
 
 export function ContactsView() {
   const { state, dispatch, pushUndo, bridge } = useApp()

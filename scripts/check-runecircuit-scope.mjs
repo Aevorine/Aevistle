@@ -24,9 +24,10 @@
  */
 
 import { readFileSync } from 'node:fs'
+import { concatenatedAppCss } from './lib/stylesheets.mjs'
 
 const APP_CSS = 'src/styles/app.css'
-const text = readFileSync(APP_CSS, 'utf8')
+const text = concatenatedAppCss()
 
 // Comments blanked, newlines kept, so line numbers still point at real code —
 // same approach `check-css-tokens.mjs` uses.

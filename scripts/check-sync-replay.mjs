@@ -1,7 +1,7 @@
 /**
  * Prove replay protection on the long-lived device-sync channel
- * (`src/core/syncLoop.ts`'s `SyncExchangePayload.seq`, `assertFreshSeq`, and
- * `src/core/pairedDevices.ts`'s `outgoingSeq`/`lastAcceptedSeq`/
+ * (`src/core/sync/syncLoop.ts`'s `SyncExchangePayload.seq`, `assertFreshSeq`, and
+ * `src/core/sync/pairedDevices.ts`'s `outgoingSeq`/`lastAcceptedSeq`/
  * `recordSyncSeq`) actually holds, the same way `check-pairing-crypto.mjs`
  * proves the one-time pairing handshake's climbing counter does.
  *
@@ -37,9 +37,9 @@ const entry = join(out, 'entry.ts')
 writeFileSync(
   entry,
   [
-    `export * from ${JSON.stringify(join(root, 'src/core/pairingCrypto.ts'))};`,
-    `export * from ${JSON.stringify(join(root, 'src/core/pairedDevices.ts'))};`,
-    `export * from ${JSON.stringify(join(root, 'src/core/syncLoop.ts'))};`,
+    `export * from ${JSON.stringify(join(root, 'src/core/sync/pairingCrypto.ts'))};`,
+    `export * from ${JSON.stringify(join(root, 'src/core/sync/pairedDevices.ts'))};`,
+    `export * from ${JSON.stringify(join(root, 'src/core/sync/syncLoop.ts'))};`,
   ].join('\n'),
 )
 
@@ -101,7 +101,7 @@ function blankState(contacts = []) {
 /**
  * One side of a simulated pairing: its own state, its record of the peer,
  * and a clock it controls. `pairId` is the *shared* id both sides of a real
- * pairing agree on during the handshake (`core/pairing.ts`'s `pairId`,
+ * pairing agree on during the handshake (`core/sync/pairing.ts`'s `pairId`,
  * carried onto each side's own `PairedDevice.id` — see that field's doc) —
  * not either side's own identity, and the same string is passed for both
  * `makeSide` calls that model one pairing.

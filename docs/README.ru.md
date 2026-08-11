@@ -105,7 +105,7 @@ Aevistle прежде всего выполняет именно это обещ
 
 Последние изменения → **[Releases](https://github.com/Aevorine/Aevistle/releases)**
 (у каждого выпуска есть описание; более старые — также в файлах
-`release-notes-0.1.*.md`).
+`docs/release-notes/`).
 
 ## Загрузка
 

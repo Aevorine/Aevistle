@@ -70,9 +70,9 @@ async function load(entry, name) {
   return import(pathToFileURL(outfile).href)
 }
 
-const cal = await load('src/core/workCalendar.ts', 'workCalendar')
-const sched = await load('src/core/schedule.ts', 'schedule')
-const transfer = await load('src/core/jobTransfer.ts', 'jobTransfer')
+const cal = await load('src/core/schedule/workCalendar.ts', 'workCalendar')
+const sched = await load('src/core/schedule/schedule.ts', 'schedule')
+const transfer = await load('src/core/schedule/jobTransfer.ts', 'jobTransfer')
 const app = await load('src/state/AppState.tsx', 'appState')
 
 const failures = []

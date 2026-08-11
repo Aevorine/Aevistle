@@ -21,7 +21,7 @@
  */
 
 import { useId, useState, type ReactNode, type RefObject } from 'react'
-import { applyMarkup, type MarkupAction } from '../core/markup'
+import { applyMarkup, type MarkupAction } from '../core/mail/markup'
 import { useI18n, type TranslationKey } from '../i18n'
 import { IconChevronDown, IconLink } from './icons'
 

@@ -12,7 +12,7 @@
  */
 
 import type { AppState } from '../../core/types'
-import { OUTBOX_CAP, type OutboxItem } from '../../core/outbox'
+import { OUTBOX_CAP, type OutboxItem } from '../../core/ops/outbox'
 
 /** The action shapes this domain's cases handle — see `AppState.tsx`'s `Action` union for the source of truth. */
 export type OutboxAction =

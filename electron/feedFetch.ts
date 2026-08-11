@@ -3,7 +3,7 @@
  *
  * This lives in the main process for one reason: the renderer is forbidden to
  * open a socket (`connect-src 'self'` in `index.html`), and that restriction is
- * worth keeping. See `src/core/feeds.ts` for what "allow-listed" means and why
+ * worth keeping. See `src/core/schedule/feeds.ts` for what "allow-listed" means and why
  * the alternative — widening the policy by one line — was rejected.
  *
  * `undici`'s global `fetch` is used rather than the hardened `https.request`
@@ -15,7 +15,7 @@
  * against. `update.ts` has always fetched this way from this process.
  */
 
-import { isAllowedFeedUrl, MAX_FEED_BYTES, type FeedResponse } from '../src/core/feeds'
+import { isAllowedFeedUrl, MAX_FEED_BYTES, type FeedResponse } from '../src/core/schedule/feeds'
 
 const TIMEOUT_MS = 10_000
 

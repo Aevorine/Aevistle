@@ -27,13 +27,13 @@ async function load(entry, name) {
   return import(pathToFileURL(outfile).href)
 }
 
-const merge = await load('src/core/mergeVars.ts', 'merge')
-const cal = await load('src/core/workCalendar.ts', 'cal')
-const cond = await load('src/core/conditions.ts', 'cond')
-const snap = await load('src/core/snapshots.ts', 'snap')
-const out = await load('src/core/outbox.ts', 'outbox')
-const rcpt = await load('src/core/receipts.ts', 'receipts')
-const pre = await load('src/core/preflight.ts', 'preflight')
+const merge = await load('src/core/mail/mergeVars.ts', 'merge')
+const cal = await load('src/core/schedule/workCalendar.ts', 'cal')
+const cond = await load('src/core/schedule/conditions.ts', 'cond')
+const snap = await load('src/core/sync/snapshots.ts', 'snap')
+const out = await load('src/core/ops/outbox.ts', 'outbox')
+const rcpt = await load('src/core/mail/receipts.ts', 'receipts')
+const pre = await load('src/core/mail/preflight.ts', 'preflight')
 
 await rm(dir, { recursive: true, force: true })
 
@@ -367,7 +367,7 @@ ok('preflight: no account blocks', noAccount.blocked)
 // C7 — the remote-image cache
 // ---------------------------------------------------------------------------
 
-const img = await load('src/core/imageCache.ts', 'imageCache')
+const img = await load('src/core/mail/imageCache.ts', 'imageCache')
 
 let fetches = 0
 const fakeFetch = async (url) => {

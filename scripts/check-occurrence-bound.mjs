@@ -17,9 +17,9 @@ const out = path.join(dir, 'b.mjs')
 await build({
   stdin: {
     contents: `
-      export { computeOccurrences } from './src/core/schedule'
-      export { DEFAULT_WORK_CALENDAR } from './src/core/workCalendar'
-      export { findConflicts, CONFLICT_DAYS } from './src/core/conflicts'
+      export { computeOccurrences } from './src/core/schedule/schedule'
+      export { DEFAULT_WORK_CALENDAR } from './src/core/schedule/workCalendar'
+      export { findConflicts, CONFLICT_DAYS } from './src/core/sync/conflicts'
     `,
     resolveDir: process.cwd(), loader: 'ts',
   },

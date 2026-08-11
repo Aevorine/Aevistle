@@ -4,7 +4,7 @@
  * Two things are checked here, and they fail in different ways.
  *
  * The first is the decision itself — which arrivals are worth interrupting
- * someone for. Every rule in `core/newMail.ts` exists because of a specific way
+ * someone for. Every rule in `core/mail/newMail.ts` exists because of a specific way
  * a naive "tell me about new mail" misfires: the first sync after launch
  * discovering an entire mailbox, an account catching up after a week offline,
  * mail already read in webmail arriving here as if it were news. Those are all
@@ -48,7 +48,7 @@ try {
     'npx',
     [
       'esbuild',
-      `"${join(root, 'src/core/newMail.ts')}"`,
+      `"${join(root, 'src/core/mail/newMail.ts')}"`,
       '--bundle',
       '--format=esm',
       `--outfile="${join(out, 'nm.mjs')}"`,
@@ -173,7 +173,7 @@ check('a cut preview says it was cut', long.endsWith('…'))
 
 // --- the two implementations agree ------------------------------------------
 
-const tsSource = readFileSync(join(root, 'src/core/newMail.ts'), 'utf8')
+const tsSource = readFileSync(join(root, 'src/core/mail/newMail.ts'), 'utf8')
 let javaSource = readFileSync(
   join(root, 'android/app/src/main/java/dev/aevistle/app/InboxSyncWorker.java'),
   'utf8',
@@ -185,7 +185,7 @@ if (selftest) {
 const tsMinutes = /NEW_MAIL_WINDOW_MS\s*=\s*(\d+)\s*\*\s*60_000/.exec(tsSource)?.[1]
 const javaMinutes = /WINDOW_MS\s*=\s*(\d+)L\s*\*\s*60L\s*\*\s*1000L/.exec(javaSource)?.[1]
 
-check('src/core/newMail.ts states its window in minutes', tsMinutes !== undefined)
+check('src/core/mail/newMail.ts states its window in minutes', tsMinutes !== undefined)
 check('InboxSyncWorker.java states its window in minutes', javaMinutes !== undefined)
 check(
   `the two new-mail windows must match (TS ${tsMinutes ?? '?'}m, Java ${javaMinutes ?? '?'}m)`,

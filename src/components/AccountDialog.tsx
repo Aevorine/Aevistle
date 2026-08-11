@@ -45,12 +45,12 @@ import {
   providerForAddress,
   type AutoConfig,
   type AutoField,
-} from '../core/providers'
-import { advisoryKey } from '../core/transport'
-import { accountLabel } from '../core/accounts'
-import { hasErrors, validateAccount } from '../core/validate'
-import { getBridge } from '../core/bridge'
-import { oauthConfigProblem, requiresOAuth, supportsOAuth, type OAuthAccountStatus } from '../core/oauth'
+} from '../core/mail/providers'
+import { advisoryKey } from '../core/mail/transport'
+import { accountLabel } from '../core/mail/accounts'
+import { hasErrors, validateAccount } from '../core/mail/validate'
+import { getBridge } from '../core/platform/bridge'
+import { oauthConfigProblem, requiresOAuth, supportsOAuth, type OAuthAccountStatus } from '../core/mail/oauth'
 import {
   defaultInboxAccountState,
   newId,

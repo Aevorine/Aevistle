@@ -1,11 +1,11 @@
 /**
- * Proves `core/syncConflict.ts` — the code that decides which device's edit
+ * Proves `core/sync/syncConflict.ts` — the code that decides which device's edit
  * wins when two paired devices changed the same reminder, contact, template
  * or account since they last synced — actually does what its module doc
  * promises, with concrete before/after state at each step.
  *
  * Four things checked, each against the real functions (bundled straight out
- * of `src/core/syncConflict.ts` and `src/core/syncScope.ts`, the same
+ * of `src/core/sync/syncConflict.ts` and `src/core/sync/syncScope.ts`, the same
  * `hashRecord` the module doc says conflict detection reuses), never a
  * hand-rolled stand-in:
  *
@@ -40,8 +40,8 @@ const entry = path.join(dir, 'entry.ts')
 await writeFile(
   entry,
   [
-    `export * from ${JSON.stringify(path.join(root, 'src/core/syncConflict.ts'))};`,
-    `export * from ${JSON.stringify(path.join(root, 'src/core/syncScope.ts'))};`,
+    `export * from ${JSON.stringify(path.join(root, 'src/core/sync/syncConflict.ts'))};`,
+    `export * from ${JSON.stringify(path.join(root, 'src/core/sync/syncScope.ts'))};`,
   ].join('\n'),
 )
 

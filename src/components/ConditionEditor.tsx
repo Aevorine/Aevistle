@@ -12,7 +12,7 @@
  */
 
 import { Field, StatusChip } from './ui'
-import { CONDITION_KINDS, type ConditionKind, type SendCondition } from '../core/conditions'
+import { CONDITION_KINDS, type ConditionKind, type SendCondition } from '../core/schedule/conditions'
 import { useI18n, type TranslationKey } from '../i18n'
 
 /** Which conditions the platform doing the sending can actually answer. */

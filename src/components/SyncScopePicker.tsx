@@ -11,11 +11,11 @@
  * caller's job.
  */
 
-import { needsStoredPassword } from '../core/accounts'
+import { needsStoredPassword } from '../core/mail/accounts'
 import { Switch } from './ui'
 import { useI18n } from '../i18n'
 import type { MailAccount } from '../core/types'
-import type { SyncScopeKey } from '../core/syncScope'
+import type { SyncScopeKey } from '../core/sync/syncScope'
 
 export interface SyncScopePickerProps {
   scopes: ReadonlySet<SyncScopeKey>

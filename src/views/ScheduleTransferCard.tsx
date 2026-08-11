@@ -17,10 +17,10 @@ import { Button, Card, CardHeader, Field, StatusChip, useToast } from '../compon
 import { IconDownload, IconFolder } from '../components/icons'
 import { useApp } from '../state/AppState'
 import { useI18n } from '../i18n'
-import { accountLabel } from '../core/accounts'
-import { exportJobs, materialise, parseImport, type ParsedImport } from '../core/jobTransfer'
-import { DEFAULT_WORK_CALENDAR, mergeCalendars } from '../core/workCalendar'
-import { saveGeneratedFile } from '../core/download'
+import { accountLabel } from '../core/mail/accounts'
+import { exportJobs, materialise, parseImport, type ParsedImport } from '../core/schedule/jobTransfer'
+import { DEFAULT_WORK_CALENDAR, mergeCalendars } from '../core/schedule/workCalendar'
+import { saveGeneratedFile } from '../core/platform/download'
 
 declare const __APP_VERSION__: string
 

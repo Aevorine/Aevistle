@@ -80,9 +80,9 @@ function ok(label, condition, detail = '') {
   return false
 }
 
-const feeds = await load('src/core/feeds.ts', 'feeds')
-const cn = await load('src/core/cnHolidays.ts', 'cn')
-const update = await load('src/core/update.ts', 'update')
+const feeds = await load('src/core/schedule/feeds.ts', 'feeds')
+const cn = await load('src/core/schedule/cnHolidays.ts', 'cn')
+const update = await load('src/core/platform/update.ts', 'update')
 
 // ---------------------------------------------------------------------------
 // 1. The rule itself
@@ -150,11 +150,11 @@ for (const host of feeds.FEED_HOSTS) {
 // 3. It is wired up, and actually used
 // ---------------------------------------------------------------------------
 
-const contract = await readFile('src/core/ipc-contract.ts', 'utf8')
+const contract = await readFile('src/core/platform/ipc-contract.ts', 'utf8')
 const preload = await readFile('electron/preload.ts', 'utf8')
 const main = await readFile('electron/main.ts', 'utf8')
-const desktop = await readFile('src/core/bridge-desktop.ts', 'utf8')
-const android = await readFile('src/core/bridge-android.ts', 'utf8')
+const desktop = await readFile('src/core/platform/bridge-desktop.ts', 'utf8')
+const android = await readFile('src/core/platform/bridge-android.ts', 'utf8')
 const plugin = await readFile(
   'android/app/src/main/java/dev/aevistle/app/AevistleNativePlugin.java',
   'utf8',

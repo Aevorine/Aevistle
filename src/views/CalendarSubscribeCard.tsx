@@ -35,13 +35,13 @@ import { Banner, Button, Card, CardHeader, Switch, useToast } from '../component
 import { IconCalendar, IconDownload } from '../components/icons'
 import { useApp } from '../state/AppState'
 import { useI18n } from '../i18n'
-import type { ControlEndpoint } from '../core/control'
-import { buildIcs, calendarToEvents } from '../core/ics'
-import { statutoryNames } from '../core/cnHolidays'
-import { holidayNameFor } from '../core/holidayPresets'
-import { saveGeneratedFile } from '../core/download'
-import { copyText } from '../core/clipboard'
-import { DEFAULT_WORK_CALENDAR } from '../core/workCalendar'
+import type { ControlEndpoint } from '../core/sync/control'
+import { buildIcs, calendarToEvents } from '../core/schedule/ics'
+import { statutoryNames } from '../core/schedule/cnHolidays'
+import { holidayNameFor } from '../core/schedule/holidayPresets'
+import { saveGeneratedFile } from '../core/platform/download'
+import { copyText } from '../core/platform/clipboard'
+import { DEFAULT_WORK_CALENDAR } from '../core/schedule/workCalendar'
 
 export function CalendarSubscribeCard() {
   const { state, bridge, dispatch } = useApp()

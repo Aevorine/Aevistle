@@ -68,7 +68,7 @@ import {
 } from '../components/icons'
 import { useApp } from '../state/AppState'
 import { useI18n, type TranslationKey } from '../i18n'
-import { computeOccurrences } from '../core/schedule'
+import { computeOccurrences } from '../core/schedule/schedule'
 import {
   applyPresetRange,
   clearYear,
@@ -77,7 +77,7 @@ import {
   HOLIDAY_PRESETS,
   yearRange,
   yearsInCalendar,
-} from '../core/holidayPresets'
+} from '../core/schedule/holidayPresets'
 import {
   applyStatutoryYear,
   CN_FEED_HOST,
@@ -90,15 +90,15 @@ import {
   statutoryNames,
   statutoryToCalendarDates,
   type StatutoryYear,
-} from '../core/cnHolidays'
-import { feedFetchVia } from '../core/feeds'
-import { findConflicts, type Conflict } from '../core/conflicts'
-import { buildIcs, calendarToEvents, eventsToCalendarDates, jobsToEvents, parseIcs } from '../core/ics'
-import { dayDelta, planReschedule, planRestagger, shiftInstantByDays } from '../core/reschedule'
-import { isInsideWindow, resolveTimeZone, wallClockIn } from '../core/deliveryWindow'
-import { seedComposeDate, seedComposeDates } from '../core/composeSeed'
-import { LOAD_STEPS, loadLevel } from '../core/calendarLoad'
-import { activeSolarTermForMonth, type SolarTermId } from '../core/solarTerms'
+} from '../core/schedule/cnHolidays'
+import { feedFetchVia } from '../core/schedule/feeds'
+import { findConflicts, type Conflict } from '../core/sync/conflicts'
+import { buildIcs, calendarToEvents, eventsToCalendarDates, jobsToEvents, parseIcs } from '../core/schedule/ics'
+import { dayDelta, planReschedule, planRestagger, shiftInstantByDays } from '../core/schedule/reschedule'
+import { isInsideWindow, resolveTimeZone, wallClockIn } from '../core/schedule/deliveryWindow'
+import { seedComposeDate, seedComposeDates } from '../core/mail/composeSeed'
+import { LOAD_STEPS, loadLevel } from '../core/schedule/calendarLoad'
+import { activeSolarTermForMonth, type SolarTermId } from '../core/schedule/solarTerms'
 
 /** Every 节气 name, for the runecircuit-only line under the period heading. */
 const SOLAR_TERM_LABEL: Record<SolarTermId, TranslationKey> = {
@@ -127,10 +127,10 @@ const SOLAR_TERM_LABEL: Record<SolarTermId, TranslationKey> = {
   daxue: 'calendar.solarTerm.daxue',
   dongzhi: 'calendar.solarTerm.dongzhi',
 }
-import { saveGeneratedFile } from '../core/download'
-import { accountLabel, groupAccounts } from '../core/accounts'
+import { saveGeneratedFile } from '../core/platform/download'
+import { accountLabel, groupAccounts } from '../core/mail/accounts'
 import { DragTimezoneTip } from '../components/DragTimezoneTip'
-import type { OutboxItem } from '../core/outbox'
+import type { OutboxItem } from '../core/ops/outbox'
 import { pad2, type Contact, type LogEntry, type Recurrence, type ScheduledJob } from '../core/types'
 import {
   addIsoDays,
@@ -146,7 +146,7 @@ import {
   type IsoDate,
   type WorkCalendar,
   type WorkdayPolicy,
-} from '../core/workCalendar'
+} from '../core/schedule/workCalendar'
 
 const WEEKDAY_ORDER = [1, 2, 3, 4, 5, 6, 0]
 /** How far ahead the impact preview looks, per reminder. */

@@ -1,0 +1,428 @@
+/* ==========================================================================
+   Connection diagnostics & send outcome
+
+   Both exist for the same reason: a result the user can see and act on beats
+   a spinner that ends in silence.
+   ========================================================================== */
+
+.diag {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 3px var(--sp-4);
+  margin: var(--sp-3) 0 0;
+  font-size: var(--text-sm);
+}
+.diag dt {
+  color: var(--text-3);
+  white-space: nowrap;
+}
+.diag dd {
+  margin: 0;
+  color: var(--text-1);
+  overflow-wrap: anywhere;
+}
+
+/* Sits directly above the action bar so the confirmation and the button that
+   produced it are in the same glance. */
+.sendresult {
+  position: sticky;
+  bottom: var(--actionbar-h);
+  z-index: 14;
+  padding: 0 var(--sp-5) var(--sp-3);
+  animation: sendresult-in var(--dur-slow) var(--ease-out);
+}
+.sendresult .banner {
+  box-shadow: var(--shadow-md);
+}
+
+@keyframes sendresult-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ==========================================================================
+   Update card
+   ========================================================================== */
+
+.update-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+}
+.update-row__text {
+  flex: 1;
+  min-width: 200px;
+}
+.update-version {
+  font-size: var(--text-lg);
+  font-weight: 700;
+  line-height: var(--leading-tight);
+}
+.update-meta {
+  font-size: var(--text-base);
+  color: var(--text-3);
+  margin-top: 2px;
+}
+
+.progress {
+  height: 8px;
+  width: 100%;
+  border-radius: var(--r-full);
+  background: var(--surface-3);
+  overflow: hidden;
+}
+.progress__bar {
+  height: 100%;
+  border-radius: var(--r-full);
+  background: var(--accent);
+  transition: width var(--dur) var(--ease);
+}
+
+.update-notes {
+  max-height: 190px;
+  overflow-y: auto;
+  padding: var(--sp-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-sm);
+  background: var(--surface-inset);
+  font-size: var(--text-base);
+  line-height: var(--leading-relaxed);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* ==========================================================================
+   Activity statistics
+   ========================================================================== */
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--sp-3);
+}
+.stat {
+  padding: var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+}
+.stat__value {
+  font-size: var(--text-xl);
+  font-weight: 700;
+  line-height: var(--leading-tight);
+  font-variant-numeric: tabular-nums;
+}
+.stat__label {
+  margin-top: 2px;
+  font-size: var(--text-sm);
+  color: var(--text-3);
+}
+.stat--good .stat__value {
+  color: var(--success);
+}
+.stat--bad .stat__value {
+  color: var(--danger);
+}
+
+/* ==========================================================================
+   Health strip
+
+   Shown on Compose when something is quietly wrong, and on Scheduled when
+   nothing is. Never both, and never a permanent "all good" banner on the
+   screen people use every day — a status line that always says the same thing
+   is a status line nobody reads on the day it changes.
+   ========================================================================== */
+
+.health {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.health__item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--border);
+  border-inline-start-width: 3px;
+  border-radius: var(--r-md);
+  background: var(--surface-1);
+}
+.health__item[data-level="danger"] {
+  border-inline-start-color: var(--danger);
+  background: var(--danger-bg);
+}
+.health__item[data-level="warning"] {
+  border-inline-start-color: var(--warning);
+  background: var(--warning-bg);
+}
+.health__item[data-level="info"] {
+  border-inline-start-color: var(--info);
+}
+.health__item[data-level="ok"] {
+  border-inline-start-color: var(--success);
+}
+.health__icon {
+  flex: none;
+}
+.health__item[data-level="danger"] .health__icon { color: var(--danger); }
+.health__item[data-level="warning"] .health__icon { color: var(--warning); }
+.health__item[data-level="info"] .health__icon { color: var(--info); }
+.health__item[data-level="ok"] .health__icon { color: var(--success); }
+
+.health__text {
+  flex: 1;
+  min-width: 0;
+}
+/* A link, not a button: it navigates, and dressing navigation as a button
+   makes the row look like it has a destructive action in it. */
+.health__go {
+  flex: none;
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--accent);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.health__more {
+  color: var(--text-3);
+  padding-inline-start: var(--sp-4);
+}
+
+/* A chip used as a toggle — the chain stage picker. Pressed state has to be
+   unmistakable at a glance, because the difference between one reminder and
+   four is exactly which of these are lit. */
+.chip--toggle {
+  cursor: pointer;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-2);
+  color: var(--text-2);
+  transition:
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease);
+}
+.chip--toggle:hover {
+  border-color: var(--accent);
+  color: var(--text-1);
+}
+.chip--toggle:active:not(:disabled) {
+  transform: scale(0.96);
+}
+.chip--toggle[aria-pressed="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+  font-weight: 700;
+}
+/* A stage whose moment has already gone. Still clickable — the user may be
+   about to move the event later — but it says so rather than silently doing
+   nothing when the reminder is created. */
+.chip--toggle[data-gone="true"] {
+  opacity: 0.55;
+  text-decoration: line-through;
+}
+
+/* One-tap start times, sitting directly under the date field they fill in.
+   Wraps rather than scrolls: four short chips fit on one line on a desktop and
+   on two on a phone, and a horizontal scroller here would hide options behind
+   a gesture nobody looks for. */
+.chiprow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.chiprow__label {
+  color: var(--text-3);
+  font-size: var(--text-sm);
+  /* Matches the label gutter the fields above use, so the chips line up with
+     the input they fill in rather than with the label beside it. */
+  min-width: 5.5em;
+}
+@media (max-width: 839.98px) {
+  .chiprow__label {
+    min-width: 0;
+    flex-basis: 100%;
+  }
+}
+
+/* ==========================================================================
+   Command palette
+
+   Positioned high rather than centred: the list grows downwards as you type,
+   and a vertically centred dialog would shift under the cursor on every
+   keystroke.
+   ========================================================================== */
+
+.palette {
+  width: min(640px, calc(100vw - var(--sp-8)));
+  margin-top: 12vh;
+  max-height: 62vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+.palette__search {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-3);
+}
+.palette__input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: none;
+  outline: none;
+  color: var(--text-1);
+  font-size: var(--text-lg);
+}
+.palette__list {
+  overflow-y: auto;
+  padding: var(--sp-2);
+}
+.palette__item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  color: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+/* Driven by an attribute rather than :hover so the keyboard and the mouse
+   cannot both claim to have selected a row at the same time. */
+.palette__item[data-active="true"] {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.palette__icon {
+  flex: none;
+  color: var(--text-3);
+}
+.palette__item[data-active="true"] .palette__icon {
+  color: var(--accent);
+}
+.palette__label {
+  flex: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.palette__hint {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-3);
+  font-size: var(--text-sm);
+  text-align: end;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.palette__empty {
+  padding: var(--sp-6);
+  text-align: center;
+  color: var(--text-3);
+}
+
+/* ===========================================================================
+   Status chips
+   ---------------------------------------------------------------------------
+   The one shape a state is allowed to take. Tones map onto the existing
+   semantic tokens — no new colours enter the system through this file, which
+   is what keeps a seventh state from arriving with an eighth hue.
+   =========================================================================== */
+
+.statuschip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  padding: 2px var(--sp-2);
+  border-radius: var(--r-xs);
+  /* 小四, not 五号. These chips carry words ("已暂停", "待发送"), and the type
+     rule is that Chinese prose never drops below 16px — the 14px exceptions
+     are digits and Latin labels only. A compact-looking chip is not worth
+     breaking that for. */
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  white-space: nowrap;
+  background: var(--surface-2);
+  color: var(--text-2);
+  vertical-align: middle;
+}
+.statuschip--accent {
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  color: var(--accent);
+}
+.statuschip--success {
+  background: var(--success-bg);
+  color: var(--success);
+}
+.statuschip--warning {
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+.statuschip--danger {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+.statuschip--info {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--text-2);
+}
+.statuschip__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--r-full);
+  background: currentColor;
+  flex: none;
+}
+/* Live states pulse; settled ones do not. The distinction has to survive
+   `prefers-reduced-motion`, so the dot stays visible and only stops moving. */
+.statuschip--warning .statuschip__dot,
+.statuschip--accent .statuschip__dot {
+  animation: statuspulse 2s ease-in-out infinite;
+}
+@keyframes statuspulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .statuschip__dot { animation: none; }
+}
+.statuschip__icon {
+  display: inline-grid;
+  place-items: center;
+}
+.log__title .statuschip,
+.job__name .statuschip {
+  margin-inline-start: var(--sp-2);
+}
+
+/* --- inset section headings (grouped account list) --- */
+.section-label--inset {
+  padding: var(--sp-3) var(--sp-5) 0;
+}

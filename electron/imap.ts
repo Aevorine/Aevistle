@@ -37,8 +37,8 @@ import {
   totalBudgetMs,
   withDeadline,
   type Endpoint,
-} from '../src/core/transport'
-import { classifyError, type InboxMessageBody } from '../src/core/bridge'
+} from '../src/core/mail/transport'
+import { classifyError, type InboxMessageBody } from '../src/core/platform/bridge'
 import { accessTokenForAccount, hasOAuthGrant, noteOAuthAuthFailure } from './oauth'
 import { resolveHostCached } from './mailer'
 import { sanitizeMessageHtml } from './sanitizeHtml'

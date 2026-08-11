@@ -1,0 +1,485 @@
+/* ==========================================================================
+   Runecircuit — circuit traces, typography pairing, card grain and glow,
+   the solar-term wash, ceremonial feedback, and the two-axis accent
+
+   Everything below is scoped to `[data-style="runecircuit"]` and adds to the
+   base rules above rather than replacing them — a real `--border` still does
+   every job it did before this file existed; what changes is layered on top
+   of it with an extra `background-image` or a `color-mix()`'d `border-color`.
+   Tokens referenced here (`--circuit-trace`, `--circuit-node`,
+   `--texture-grain`, `--neon-*`, `--solarterm-*`, `--accent-classical`,
+   `--intensity`) are defined once, in the style's own block in theme.css (or,
+   for `--intensity`, at the top of `:root`), and already resolve per theme
+   without being restated here. `--intensity` and `data-atmosphere-motion` are
+   set by AppState.tsx from `Settings.themeIntensity`; see core/types.ts's
+   `ATMOSPHERE_MOTION_MIN`.
+
+   Reading surfaces are deliberately absent from every selector below — no
+   `.compose-body`, `.reader`, or list-row text container ever gains a
+   `--circuit-trace`, `--texture-grain`, `--neon-*`, or `--solarterm-*` touch.
+   That is chunk-06's A7 audit, and it is a property of the selector list
+   itself: every one of them targets `.card`, `.monthgrid`, `.nav__item`,
+   `.toast`, or `.job` — chrome, never prose. */
+
+/* --- circuit traces under the working calendar -----------------------------
+   `--circuit-trace` draws the board's grid lines, `--circuit-node` marks
+   where four cells meet. Neither one touches the day cell's own
+   `border-color` (app.css, `.monthgrid__day`) — that hairline is what a
+   keyboard user's roving tabindex and a screen reader's grid role both
+   depend on, so it stays exactly what every other style leaves it as. */
+[data-style="runecircuit"] .monthgrid {
+  /* Two layers, deliberately not one: `background-color` is the solar-term
+     wash (A6) and `background-image` is the circuit grid, so the grid stays
+     pixel-identical across a month change while only the colour underneath it
+     shifts. `--solarterm-active` is set by whichever of the 24 selectors
+     below matches this month's `data-solar-term`; `transparent` when there is
+     none yet (first paint, before `WorkCalendarView` has computed one). */
+  background-color: var(--solarterm-active, transparent);
+  background-image:
+    repeating-linear-gradient(90deg, var(--circuit-trace) 0 1px, transparent 1px 34px),
+    repeating-linear-gradient(0deg, var(--circuit-trace) 0 1px, transparent 1px 34px);
+  background-position: -1px -1px;
+}
+/* One rule per term, each doing nothing but naming which of the 24
+   `--solarterm-*` tokens (theme.css) is "the one showing" — the wash itself is
+   painted once, above, so a term never needs its own copy of the grid rule. */
+[data-style="runecircuit"] .monthgrid[data-solar-term="xiaohan"] { --solarterm-active: var(--solarterm-xiaohan); }
+[data-style="runecircuit"] .monthgrid[data-solar-term="dahan"] { --solarterm-active: var(--solarterm-dahan); }
+[data-style="runecircuit"] .monthgrid[data-solar-term="lichun"] { --solarterm-active: var(--solarterm-lichun); }
+[data-style="runecircuit"] .monthgrid[data-solar-term="yushui"] { --solarterm-active: var(--solarterm-yushui); }
+[data-style="runecircuit"] .monthgrid[data-solar-term="jingzhe"] { --solarterm-active: var(--solarterm-jingzhe); }
+[data-style="runecircuit"] .monthgrid[data-solar-term="chunfen"] { --solarterm-active: var(--solarterm-chunfen); }
+[data-style="runecircuit"] .monthgrid[data-solar-term="qingming"] { --solarterm-active: var(--solarterm-qingming); }
+[data-style="runecircuit"] .monthgrid[data-solar-term="guyu"] { --solarterm-active: var(--solarterm-guyu); }
+[data-style="runecircuit"] .monthgrid[data-solar-term="lixia"] { --solarterm-active: var(--solarterm-lixia); }
+[data-style="runecircuit"] .monthgrid[data-solar-term="xiaoman"] { --solarterm-active: var(--solarterm-xiaoman); }
+[data-style="runecircuit"] .monthgrid[data-solar-term="mangzhong"] { --solarterm-active: var(--solarterm-mangzhong); }
+[data-style="runecircuit"] .monthgrid[data-solar-term="xiazhi"] { --solarterm-active: var(--solarterm-xiazhi); }
+[data-style="runecircuit"] .monthgrid[data-solar-term="xiaoshu"] { --solarterm-active: var(--solarterm-xiaoshu); }
+[data-style="runecircuit"] .monthgrid[data-solar-term="dashu"] { --solarterm-active: var(--solarterm-dashu); }
+[data-style="runecircuit"] .monthgrid[data-solar-term="liqiu"] { --solarterm-active: var(--solarterm-liqiu); }
+[data-style="runecircuit"] .monthgrid[data-solar-term="chushu"] { --solarterm-active: var(--solarterm-chushu); }
+[data-style="runecircuit"] .monthgrid[data-solar-term="bailu"] { --solarterm-active: var(--solarterm-bailu); }
+[data-style="runecircuit"] .monthgrid[data-solar-term="qiufen"] { --solarterm-active: var(--solarterm-qiufen); }
+[data-style="runecircuit"] .monthgrid[data-solar-term="hanlu"] { --solarterm-active: var(--solarterm-hanlu); }
+[data-style="runecircuit"] .monthgrid[data-solar-term="shuangjiang"] { --solarterm-active: var(--solarterm-shuangjiang); }
+[data-style="runecircuit"] .monthgrid[data-solar-term="lidong"] { --solarterm-active: var(--solarterm-lidong); }
+[data-style="runecircuit"] .monthgrid[data-solar-term="xiaoxue"] { --solarterm-active: var(--solarterm-xiaoxue); }
+[data-style="runecircuit"] .monthgrid[data-solar-term="daxue"] { --solarterm-active: var(--solarterm-daxue); }
+[data-style="runecircuit"] .monthgrid[data-solar-term="dongzhi"] { --solarterm-active: var(--solarterm-dongzhi); }
+/* Four cells sharing a corner each paint one quarter of a via-dot, clipped to
+   their own box — the quarter that would fall outside a cell never renders,
+   so no JS or extra markup is needed to find where the grid lines cross. */
+[data-style="runecircuit"] .monthgrid__cell {
+  background-image:
+    radial-gradient(circle at 0 0, var(--circuit-node) 0 3px, transparent 3px),
+    radial-gradient(circle at 100% 0, var(--circuit-node) 0 3px, transparent 3px),
+    radial-gradient(circle at 0 100%, var(--circuit-node) 0 3px, transparent 3px),
+    radial-gradient(circle at 100% 100%, var(--circuit-node) 0 3px, transparent 3px);
+  background-repeat: no-repeat;
+}
+/* `.monthgrid__row` is deliberately `display: contents` (see the comment
+   above that rule) so ARIA gets the row and CSS grid gets the cell. A
+   `display: contents` box generates no box of its own, so it cannot paint a
+   background under any style — there is no rule to add here without
+   reintroducing the bug that comment fixed. */
+
+/* --- typography pairing: withdrawn ----------------------------------------
+ *
+ * This style used to set every section name, screen title and dialog title in
+ * 'Aevistle Rune' (楷体 for CJK, a coding monospace for Latin), pairing a
+ * calligraphic heading against the Songti body copy. It was the only place in
+ * the app where the typeface depended on which of the seven visual styles was
+ * selected.
+ *
+ * Removed on an explicit instruction that the typography must be identical on
+ * every screen and under every style — stated as the single most important
+ * requirement of the round. A pairing that exists under one style and not the
+ * six others is exactly the inconsistency that instruction rules out, however
+ * deliberate it was.
+ *
+ * What is gone is only the *typeface*. Runecircuit keeps its palette, its
+ * circuit traces, its solar-term washes and its neon edges — everything below
+ * and above this note. It is now a colour-and-texture style rather than a
+ * colour-and-type one.
+ *
+ * The 'Aevistle Rune' @font-face pair is left declared in theme.css. It is a
+ * pure `local()` face with no `url()`, so an unused declaration downloads
+ * nothing and costs nothing, and leaving it means restoring this pairing is a
+ * one-block change if the instruction is ever relaxed. */
+
+/* Numerals stay in the coding monospace `--font-mono` already draws from,
+   even under a calligraphic heading font: a verification code or a byte
+   count set in 楷体 would be unreadable at a glance, which is the one thing a
+   number like that exists to be. This is every place in app.css that reads
+   `font-variant-numeric: var(--numeric)` — the actual `--numeric` token
+   usages, not every incidental `tabular-nums`. */
+[data-style="runecircuit"] .btn-row__note,
+[data-style="runecircuit"] .codecard__value,
+[data-style="runecircuit"] .checkbar__wait,
+[data-style="runecircuit"] .chip--timer,
+[data-style="runecircuit"] .codewhy__alts code,
+[data-style="runecircuit"] .recipicker__count,
+[data-style="runecircuit"] .recipicker__all,
+[data-style="runecircuit"] .recipicker__groupcount,
+[data-style="runecircuit"] .zonepick__now,
+[data-style="runecircuit"] .datecard__when {
+  font-family: var(--font-mono);
+}
+/* A heading-adjacent numeral with nothing of its own to opt into yet — a
+   count sitting beside a `.section-label`, say. Not wired to a component in
+   this chunk; the class exists so the next one that needs it does not
+   reinvent the declaration. */
+[data-style="runecircuit"] .rune-numeral {
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--numeric);
+}
+
+/* --- grain and neon on cards ------------------------------------------------
+   `:not(.compose-card)`: the `Card` component (`components/ui.tsx`) always
+   prepends the base `card` class, so `.compose-card` — the frame around the
+   message being written — is also a `.card`. A bare `.card` selector would
+   therefore texture and glow the one surface this is explicitly not for; see
+   chunk-06's A7 audit. The reader has no `.card` in its ancestry at all, so
+   it needed no exclusion here. */
+/* `position: relative` + `isolation: isolate` exist for one reason: the grain
+   moved from a plain `background-image` on `.card` itself (its original A2
+   form) to a `::before`, below, so `opacity` could scale the grain alone by
+   `--intensity` without also fading the border and the text sitting on top of
+   it — the exact interference an element-level `opacity` on `.card` would
+   cause, which is why A2 used a background layer in the first place. Isolating
+   the stacking context is what lets that `::before` sit at `z-index: -1`
+   (painted after `.card`'s own background, before `.card__body`'s content —
+   precisely where the old single-layer background-image painted) without a
+   negative z-index escaping past sibling cards in the page.
+
+   Resting border tint now reads the *classical* half of the accent
+   (`--accent-classical`, A10) rather than a hardcoded `--neon-cyan` — a card
+   at rest is the day-scroll half of this style's duality. Hover reads
+   `--accent` (the cyber half, unchanged in meaning) — hovering is what powers
+   the trace on. Both mix percentages scale by `--intensity` (A8), same as the
+   grain's opacity. */
+[data-style="runecircuit"] .card:not(.compose-card) {
+  position: relative;
+  isolation: isolate;
+  border-color: color-mix(
+    in oklab,
+    var(--accent-classical, var(--neon-cyan)) calc(22% * var(--intensity, 1)),
+    var(--border)
+  );
+  transition:
+    border-color var(--dur) var(--ease),
+    box-shadow var(--dur) var(--ease);
+}
+[data-style="runecircuit"] .card:not(.compose-card)::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background-image: var(--texture-grain);
+  background-repeat: repeat;
+  background-size: 90px 90px;
+  opacity: var(--intensity, 1);
+  pointer-events: none;
+}
+/* Ring plus bloom, the same formula `midnight`'s `--shadow-accent` uses for
+   the same reason: a hover state needs its own light source when the surface
+   under it is dark enough that a drop shadow would fall on nothing. */
+[data-style="runecircuit"] .card:hover:not(.compose-card) {
+  border-color: color-mix(in oklab, var(--accent) calc(55% * var(--intensity, 1)), var(--border));
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--accent) calc(30% * var(--intensity, 1)), transparent),
+    0 8px 26px color-mix(in srgb, var(--accent) calc(32% * var(--intensity, 1)), transparent);
+}
+
+/* --- the active-nav underline reads the classical half too (A10) ----------
+   `--accent-classical-marker`, not `--accent-classical`: this is a 3px bar on
+   the `--surface-2` sidebar, so it is a UI component under WCAG 1.4.11's 3:1
+   rather than a fill with text on it. Three of the four bases are the same
+   colour either way; `moonwhite` in the light theme is 1.06:1 as a fill and
+   the token stands the cyber half in for it. See theme.css. */
+[data-style="runecircuit"] .nav__item[aria-current="page"]::before {
+  background: var(--accent-classical-marker, var(--accent));
+}
+
+/* --- ceremonial feedback (A5) -----------------------------------------------
+   Gated on `[data-atmosphere-motion="on"]` as well as the style itself: below
+   `ATMOSPHERE_MOTION_MIN` (core/types.ts) AppState.tsx flips that attribute to
+   `"off"`, and both rules below stop matching — the elements fall back to
+   their ordinary, non-runecircuit-specific animation (`.toast--success`
+   inherits the base `.toast`'s `toast-in`; a removed `.job` simply unmounts,
+   same as every other style) rather than playing the same keyframe scaled
+   down to where it is only technically still there. `prefers-reduced-motion`
+   (theme.css) sits underneath both regardless, same as every other animation
+   in this file. */
+[data-style="runecircuit"][data-atmosphere-motion="on"] .toast--success {
+  animation: seal-stamp var(--dur-slow) var(--ease-out);
+}
+@keyframes seal-stamp {
+  0% {
+    opacity: 0;
+    transform: translateY(12px) scale(0.9);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent-classical-marker, var(--accent)) 0%, transparent);
+  }
+  45% {
+    opacity: 1;
+    transform: translateY(0) scale(1.06);
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent-classical-marker, var(--accent)) 45%, transparent);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent-classical-marker, var(--accent)) 0%, transparent);
+  }
+}
+
+/* A row's exit, for `ScheduleView`'s `remove` — the one list-view handler in
+   this app that deletes a row from state with no removal transition at all
+   today. `data-removing="true"` is set for exactly `--dur-slow` before the
+   row is actually removed from `state.jobs` (see the component for the
+   double-fire guard: a second delete on a row already animating out is a
+   no-op, not a second timer racing the first), so the animation is what the
+   user watches rather than an instant disappearance. Radial rather than a
+   plain fade, because a fade reads as "this stopped being interested in you"
+   and this is a deletion — something spreading through the row and taking it
+   with it is closer to what actually happened. */
+[data-style="runecircuit"][data-atmosphere-motion="on"] .job[data-removing="true"] {
+  animation: ink-bloom var(--dur-slow) var(--ease-out) forwards;
+  pointer-events: none;
+}
+@keyframes ink-bloom {
+  from {
+    opacity: 1;
+    background-image: radial-gradient(
+      circle at 50% 50%,
+      color-mix(in srgb, var(--danger) 55%, transparent) 0%,
+      transparent 0%
+    );
+  }
+  to {
+    opacity: 0;
+    filter: blur(3px);
+    background-image: radial-gradient(
+      circle at 50% 50%,
+      color-mix(in srgb, var(--danger) 55%, transparent) 0%,
+      transparent 140%
+    );
+  }
+}
+/* --- end runecircuit --- */
+
+/* ==========================================================================
+   A banner that carries a button, on a screen too narrow to hold both
+   ========================================================================== */
+
+/*
+ * `.banner` is one flex row: icon, body, and — when the caller passed one — a
+ * button at the trailing edge. The button does not shrink, so on a phone it
+ * takes its ~110px out of the ~310px available and leaves the sentence a
+ * hundred-odd pixels to wrap inside. Measured on the account dialog at 360x800:
+ * "已按 Gmail 自动填好服务器、端口和加密方式 / 有 1 项是你手动改过的…" came out as six lines
+ * two or three characters wide, beside a button with empty space above and
+ * below it. That is the "crushed together" this stops — and it only became
+ * visible once that banner started being shown on a phone at all, because the
+ * `banner--info` cull had been hiding the problem along with the message.
+ *
+ * The body gets a floor rather than the button getting a wrap rule: 12em is
+ * about the width at which a sentence stops reading as a column, so the row
+ * stays a row wherever it genuinely fits — a tablet, a landscape phone — and
+ * breaks only where it does not. `margin-inline-start: auto` keeps the button at
+ * the trailing edge of whichever line it lands on, which is where it was.
+ *
+ * `Banner` adds `--stack` only when it actually has an action, so every banner
+ * without one keeps the flex sizing it has always had.
+ *
+ * The trailing-edge rule below used to live only inside the narrow media
+ * query, on the assumption that `.banner__body`'s `flex: 1` already pins the
+ * action flush right at any width that is not this cramped. It does not:
+ * `.banner__body` also carries `max-width: var(--reading-max)` (~68ch, for
+ * prose readability), and on a wide, non-modal banner — the compose screen's
+ * "还没有发件账号" strip at 1366px, the post-send result banner, the account
+ * dialog's OAuth/test-connection banners — the text stops growing at that cap
+ * while the container keeps going, leaving the button stranded next to the
+ * text with a bare gap to the actual right edge instead of sitting there
+ * itself. Unconditional `margin-inline-start: auto` fixes that at every width
+ * and costs nothing where the button was already flush (the common case on a
+ * modal narrower than the reading cap).
+ */
+.banner--stack > :last-child:not(.banner__body) {
+  margin-inline-start: auto;
+}
+@media (max-width: 839.98px) {
+  .banner--stack {
+    flex-wrap: wrap;
+  }
+  .banner--stack > .banner__body {
+    flex: 1 1 12em;
+  }
+}
+
+/* ==========================================================================
+   Reorder — the grip, the lifted row, and the line that says where it lands
+   ==========================================================================
+
+   Shared by the Settings account list (vertical rows) and the inbox account
+   tabs (a horizontal strip), because the arrangement they are editing is one
+   number on one account and the two screens have to feel like the same
+   gesture. `components/useReorder.ts` owns the behaviour; everything here is
+   the part of it the user can see.
+
+   The drop line is drawn on the row the pointer is *over*, on the side it
+   would land, rather than as a floating element positioned by script. A
+   positioned element means measuring, and measuring during a drag means
+   measuring while the list is auto-scrolling underneath — one frame of
+   staleness and the line points at the wrong gap. A pseudo-element on the
+   target cannot be stale: it is wherever the target is, including mid-scroll.
+   ========================================================================== */
+
+.reorder-handle {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  color: var(--text-3);
+  padding: 0;
+  border-radius: var(--r-xs);
+  cursor: grab;
+  /* The browser must not claim this touch for panning.
+     `touch-action` is read when the gesture starts, not when it is recognised,
+     so it cannot be switched on at the moment the row lifts — by then the page
+     has already decided it is scrolling, and the first move after the long
+     press would scroll the list and cancel the pointer instead of dragging.
+     Declaring it up front costs the ability to start a page scroll with a
+     thumb on this one 26px grip, which is the trade every drag-and-drop
+     implementation makes and the reason the grip is a separate element from
+     the row rather than the whole row being draggable. */
+  touch-action: none;
+  /* A long press over anything Android considers text raises the selection
+     handles and the paste bubble on top of the row being dragged. The JS half
+     of this is `onContextMenu` in the hook. */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  transition:
+    color var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease);
+}
+.reorder-handle:hover {
+  color: var(--text-1);
+  background: var(--surface-hover);
+}
+.reorder-handle:active {
+  cursor: grabbing;
+}
+
+/* The row is the drop target, so it is also the thing the line is drawn on. */
+.reorder-row {
+  position: relative;
+}
+
+/* Lifted, by finger or by mouse. Held rather than hidden: a row that vanishes
+   while you drag it takes the list's rhythm with it, and on a four-row phone
+   list the gap it leaves is most of the screen. */
+.reorder-row[data-reorder-active],
+.segmented__slot[data-reorder-active] {
+  opacity: 0.45;
+}
+
+/* --- the drop indicator ---------------------------------------------------
+   `inset-inline` and `inset-block` rather than left/right/top/bottom so the
+   horizontal strip's line lands on the correct side of a tab under Arabic
+   without a second rule — the hook already flips which *side* is "after", and
+   logical properties are what make that flip mean the same thing here. */
+.reorder-row[data-reorder-drop]::after,
+.segmented__slot[data-reorder-drop]::after {
+  content: '';
+  position: absolute;
+  background: var(--accent);
+  border-radius: var(--r-full);
+  pointer-events: none;
+  z-index: 1;
+}
+.reorder-row[data-reorder-drop]::after {
+  inset-inline: var(--sp-2);
+  height: 2px;
+}
+.reorder-row[data-reorder-drop='before']::after {
+  top: -1px;
+}
+.reorder-row[data-reorder-drop='after']::after {
+  bottom: -1px;
+}
+.segmented__slot[data-reorder-drop]::after {
+  inset-block: 2px;
+  width: 2px;
+}
+.segmented__slot[data-reorder-drop='before']::after {
+  inset-inline-start: -1px;
+}
+.segmented__slot[data-reorder-drop='after']::after {
+  inset-inline-end: -1px;
+}
+
+/* --- the inbox tab strip --------------------------------------------------
+   A tab is now a grip and a button inside one box. The box is the flex child
+   `.segmented__item` used to be, and takes over its `flex: 1`, so a strip of
+   three tabs still divides the width three ways.
+
+   `min-width: 0` used to sit here too, on the general reflex that a flex
+   child should get out of its container's way. It does the opposite for a
+   `white-space: nowrap` label with no `text-overflow: ellipsis` behind it:
+   a flex item's automatic minimum size — the floor that stops the item from
+   being shrunk past its own content — collapses to 0 the moment `min-width`
+   is set explicitly, so past three or four accounts `flex: 1` divided the
+   strip's width by the account count and squeezed every slot below the
+   width its own label needed. Nothing there clips or wraps that overflow, so
+   the names spilled out of their slots and over each other — measured at 20
+   accounts, a slot 48px wide holding a label that needed 108–118px, and the
+   twenty rendered as one illegible smear of Chinese characters. Leaving
+   `min-width` at its default (`auto`, i.e. "the content's own width") is
+   what makes `.segmented`'s existing `overflow-x: auto` the escape valve it
+   was built to be: few tabs still divide the width evenly exactly as before
+   — `flex-grow` is untouched — many tabs make the strip scroll sideways
+   instead of crushing every label into the next one. */
+.segmented__slot {
+  position: relative;
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--r-xs);
+}
+.reorder-handle--tab {
+  /* Tucked against the label rather than given a tap target of its own. The
+     strip is one control-height tall and a 44px square inside it would set the
+     height of the whole thing; the grip's usable area is the full height of
+     the tab because there is nothing above or below it to hit by mistake. */
+  align-self: stretch;
+  width: var(--icon-sm);
+  margin-inline-start: 4px;
+  border-radius: var(--r-xs) 0 0 var(--r-xs);
+}
+
+/* Keyboard users get told which grip they are holding. The ring is the app's
+   own — this only makes sure the grip is not clipped out of it by the row's
+   overflow, which is what happened to the first draft on the tab strip. */
+.reorder-handle:focus-visible {
+  z-index: 2;
+}
+
+@media (max-width: 839.98px) {
+  /* On a phone the grip is the *only* way to reorder — there is no mouse to
+     fall back to — so it stops being a 16px glyph and becomes something a
+     thumb can find without looking. Width only: the row already stands at
+     least `--tap-min` tall, and forcing a square here would push every
+     account row taller than it needs to be for the sake of a control most
+     people touch once. */
+  .reorder-handle {
+    min-width: var(--tap-min);
+  }
+  .reorder-handle--tab {
+    min-width: 26px;
+  }
+}

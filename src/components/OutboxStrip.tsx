@@ -10,7 +10,7 @@
 
 import { Button, IconButton, StatusChip } from './ui'
 import { IconRefresh, IconSend, IconTrash } from './icons'
-import { summarise } from '../core/outbox'
+import { summarise } from '../core/ops/outbox'
 import { useApp } from '../state/AppState'
 import { useI18n } from '../i18n'
 

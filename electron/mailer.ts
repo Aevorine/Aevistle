@@ -31,7 +31,7 @@ import type {
   TransportDiagnostics,
   TransportSecurity,
 } from '../src/core/types'
-import { classifyError } from '../src/core/bridge'
+import { classifyError } from '../src/core/platform/bridge'
 import { accessTokenForAccount, noteOAuthAuthFailure } from './oauth'
 import {
   endpointLadder,
@@ -44,8 +44,8 @@ import {
   withDeadline,
   type AttemptNote,
   type Endpoint,
-} from '../src/core/transport'
-import { isHeaderSafe, isValidAddress, plainToHtml } from '../src/core/validate'
+} from '../src/core/mail/transport'
+import { isHeaderSafe, isValidAddress, plainToHtml } from '../src/core/mail/validate'
 
 /** Hard ceiling regardless of settings — beyond this we would run the app out of memory. */
 const ABSOLUTE_MAX_BYTES = 200 * 1024 * 1024
@@ -575,7 +575,7 @@ export async function sendMail(
    * Overrides the `Message-Id` nodemailer would otherwise mint on its own.
    * Used by the scheduler's dispatch-ledger path so a resend of the same
    * occurrence carries the same id across attempts — see
-   * `src/core/dispatchLedger.ts`. Omitted by every other caller (the compose
+   * `src/core/ops/dispatchLedger.ts`. Omitted by every other caller (the compose
    * screen's "send now"), which keeps nodemailer's default behaviour. Named
    * distinctly from the `messageId` nodemailer hands back below (which, when
    * this is passed, is simply this same value echoed back) to keep the two

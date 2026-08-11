@@ -63,13 +63,13 @@ async function load(entry, name) {
   return import(pathToFileURL(outfile).href)
 }
 
-const digestMod = await load('src/core/digest.ts', 'digest')
-const textMod = await load('src/core/digestText.ts', 'digestText')
+const digestMod = await load('src/core/mail/digest.ts', 'digest')
+const textMod = await load('src/core/mail/digestText.ts', 'digestText')
 const typesMod = await load('src/core/types.ts', 'types')
 
 const appState = await readFile('src/state/AppState.tsx', 'utf8')
 const settingsView = await readFile('src/views/SettingsView.tsx', 'utf8')
-const digestSource = await readFile('src/core/digest.ts', 'utf8')
+const digestSource = await readFile('src/core/mail/digest.ts', 'utf8')
 
 const failures = []
 let checked = 0
@@ -389,12 +389,12 @@ const source = (what, haystack, re) => ok(what, re.test(haystack))
 source(
   'wiring: AppState imports the digest builder',
   appState,
-  /import \{[^}]*buildDigest[^}]*\} from '\.\.\/core\/digest'/,
+  /import \{[^}]*buildDigest[^}]*\} from '\.\.\/core\/mail\/digest'/,
 )
 source(
   'wiring: and the renderer',
   appState,
-  /import \{[^}]*renderDigestBody[^}]*\} from '\.\.\/core\/digestText'/,
+  /import \{[^}]*renderDigestBody[^}]*\} from '\.\.\/core\/mail\/digestText'/,
 )
 source(
   'wiring: the digest body is composed inside the syncJobs hand-off',
@@ -431,7 +431,7 @@ source(
 
 // The load-bearing negative: no second scheduler anywhere in this feature.
 ok(
-  'no second scheduler: core/digest.ts arms no timer of its own',
+  'no second scheduler: core/mail/digest.ts arms no timer of its own',
   !/setInterval|setTimeout/.test(digestSource),
 )
 {

@@ -565,4 +565,4 @@ from the part of the app that renders mail.
 
 **See also** — [PRIVACY.md](PRIVACY.md) for storage and what leaves the device,
 [ARCHITECTURE.md](ARCHITECTURE.md) for how the pieces fit, and the
-`release-notes-0.1.*.md` files at the repository root for what changed when.
+`docs/release-notes/` directory for what changed when.

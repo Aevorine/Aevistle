@@ -9,7 +9,7 @@
 
 import { Button, EmptyState, IconButton, Modal, StatusChip } from './ui'
 import { IconCopy, IconFileText, IconTrash } from './icons'
-import { snapshotPreview, type DraftSnapshot, type SnapshotReason } from '../core/snapshots'
+import { snapshotPreview, type DraftSnapshot, type SnapshotReason } from '../core/sync/snapshots'
 import { useApp } from '../state/AppState'
 import { useI18n, type TranslationKey } from '../i18n'
 

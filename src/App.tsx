@@ -5,7 +5,7 @@ import { I18nContext, useI18n } from './i18n'
 import { Banner, IconButton, ToastProvider, useToast } from './components/ui'
 import { ShortcutsDialog, matchShortcut } from './components/Shortcuts'
 import { HOME_SECTIONS, MOBILE_NAV, NAV, type ViewId } from './core/nav'
-import { useMobileShell, useNarrow } from './components/useNarrow'
+import { useMobileShell, useNarrow, useSizeClass } from './components/useNarrow'
 import { DataFolderSetup } from './components/DataFolderSetup'
 import {
   IconActivity,
@@ -24,11 +24,11 @@ import {
 } from './components/icons'
 import { CommandPalette, type PaletteTarget } from './components/CommandPalette'
 import { CodeCheckProvider } from './state/CodeCheck'
-import { claimStartupUpdateCheck, runUpdateCheck } from './core/update'
+import { claimStartupUpdateCheck, runUpdateCheck } from './core/platform/update'
 import brandMark from './assets/brand.png'
 import { Skeleton } from './components/Skeleton'
 import { ErrorBoundary } from './components/ErrorBoundary'
-import { actionableHits } from './core/codeHistory'
+import { actionableHits } from './core/ops/codeHistory'
 import type { MessageDraft } from './core/types'
 
 /**
@@ -156,11 +156,21 @@ function Shell() {
    * Keep `data-shell` on the root element in step for the rest of the run.
    *
    * `main.tsx` sets it before the first paint; this is what moves it when a
-   * desktop window is dragged across 760px. The return value is unused here —
-   * `SettingsView` asks the same question for itself — but the effect inside is
-   * what every full-screen dialog in the app is styled by.
+   * desktop window is dragged across the 840px shell boundary. The return value
+   * is unused here — `SettingsView` asks the same question for itself — but the
+   * effect inside is what every full-screen dialog in the app is styled by.
    */
   useMobileShell(bridge?.platform === 'android')
+
+  /**
+   * And the density tier alongside it, published as `data-size-class`.
+   *
+   * Subscribed once, here, because it is one attribute on one element and every
+   * consumer of it is a stylesheet rather than a component. Mounting it at the
+   * shell is also what makes it correct for screens that are not yet rendered:
+   * the attribute is already right when a lazy view first paints.
+   */
+  useSizeClass()
 
   /**
    * Which tab to light up.
