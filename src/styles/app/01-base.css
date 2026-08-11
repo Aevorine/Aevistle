@@ -26,6 +26,28 @@ body,
   margin: 0;
 }
 
+/*
+ * The large-text setting, and the whole of its implementation.
+ *
+ * `rem` resolves against the root element, so this one declaration moves all
+ * eight type steps and all ten spacing steps together. See `--text-scale` in
+ * theme.css for why it is a percentage rather than a pixel size, and why the
+ * control ladder deliberately does not follow.
+ *
+ * `:root` is `html`, so this sets the same element the rule above sizes — kept
+ * as a separate block because that one is about the viewport and this one is
+ * about the reader.
+ */
+html {
+  font-size: var(--text-scale);
+}
+:root[data-text-scale='large'] {
+  --text-scale: 112.5%; /* 18px */
+}
+:root[data-text-scale='larger'] {
+  --text-scale: 125%; /* 20px */
+}
+
 body {
   font-family: var(--font-sans);
   font-size: var(--text-base);

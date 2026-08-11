@@ -88,7 +88,20 @@ export function accountFields(accounts: MailAccount[]): MailAccount[] {
 /** Everything in `Settings` that is purely "how the app looks", not "how it behaves". */
 export type AppearanceSettings = Pick<
   Settings,
-  'themeMode' | 'visualStyle' | 'accent' | 'accentBase' | 'accentCyber' | 'themeIntensity' | 'density' | 'listDensity'
+  | 'themeMode'
+  | 'visualStyle'
+  | 'accent'
+  | 'accentBase'
+  | 'accentCyber'
+  | 'themeIntensity'
+  | 'density'
+  | 'listDensity'
+  // Both are "how the app looks" in the sense this scope means, and both are
+  // things a person sets once for their eyes and their hands rather than for
+  // one device — so a phone that syncs appearance should arrive with the text
+  // already at the size its owner reads at, not at the default.
+  | 'textScale'
+  | 'oneHand'
 >
 
 /**
@@ -107,6 +120,8 @@ export function appearanceSettings(settings: Settings): AppearanceSettings {
     themeIntensity: settings.themeIntensity,
     density: settings.density,
     listDensity: settings.listDensity,
+    textScale: settings.textScale,
+    oneHand: settings.oneHand,
   }
 }
 

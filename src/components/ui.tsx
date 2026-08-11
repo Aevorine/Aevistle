@@ -12,8 +12,18 @@ import {
   type ButtonHTMLAttributes,
   type ReactNode,
 } from 'react'
-import { IconAlert, IconCheckCircle, IconInfo, IconX } from './icons'
+import { IconAlert, IconCheckCircle, IconInfo, IconSearch, IconX } from './icons'
+import { useI18n } from '../i18n'
 import { newId } from '../core/types'
+
+/**
+ * How a `PageHead` opens the command palette, without every screen having to
+ * be handed a callback it does not otherwise care about.
+ *
+ * `null` is the honest default and the one a test or a storybook gets: no
+ * provider, no search button, no crash. `App` is the only provider.
+ */
+export const PaletteContext = createContext<(() => void) | null>(null)
 
 // ---------------------------------------------------------------------------
 // Button
@@ -63,10 +73,20 @@ export function Button({
 export function IconButton({
   label,
   children,
+  className,
   ...rest
 }: ButtonHTMLAttributes<HTMLButtonElement> & { label: string }) {
   return (
-    <button className="icon-btn" title={label} aria-label={label} {...rest}>
+    // `className` is destructured and merged rather than left in `rest`: the
+    // spread comes after the attribute, so a caller passing one used to
+    // silently replace `icon-btn` and lose the size, shape and 48px touch
+    // floor that go with it.
+    <button
+      className={className ? `icon-btn ${className}` : 'icon-btn'}
+      title={label}
+      aria-label={label}
+      {...rest}
+    >
       {children}
     </button>
   )
@@ -126,13 +146,41 @@ export function PageHead({
    *  left to hold and the view is better off not rendering it at all. */
   hideTitle?: boolean
 }) {
+  const openPalette = useContext(PaletteContext)
+  const { t } = useI18n()
   return (
     <div className="page-head" data-hide-title={hideTitle || undefined} aria-label={hideTitle ? title : undefined}>
       <div className="page-head__text">
         <h1 className="page-title">{title}</h1>
         {subtitle ? <p className="page-subtitle">{subtitle}</p> : null}
       </div>
-      {action ? <div className="page-head__actions">{action}</div> : null}
+      {action || openPalette ? (
+        <div className="page-head__actions">
+          {/*
+            Search, on every screen, because on a phone it was on one.
+            `Ctrl+K` opens the command palette and the only tappable way in was
+            a tile on Home — so from Compose, Codes, Inbox or Settings, four of
+            the five tabs a phone has, there was no way to reach it at all
+            without a keyboard. Nothing was broken; there was simply no door.
+
+            Rendered here rather than added to each screen's own `action` prop
+            so that a screen added later gets it without anyone remembering,
+            and hidden on a desktop window by `.page-head__search` in
+            `20-short.css` — a pointer has Ctrl+K, and the button would be a
+            tenth control on screens that already carry nine.
+          */}
+          {openPalette ? (
+            <IconButton
+              className="page-head__search"
+              label={t('palette.title')}
+              onClick={openPalette}
+            >
+              <IconSearch />
+            </IconButton>
+          ) : null}
+          {action}
+        </div>
+      ) : null}
     </div>
   )
 }

@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { ComposeView } from './views/ComposeView'
 import { AppProvider, useApp } from './state/AppState'
 import { I18nContext, useI18n } from './i18n'
-import { Banner, IconButton, ToastProvider, useToast } from './components/ui'
+import { Banner, IconButton, PaletteContext, ToastProvider, useToast } from './components/ui'
 import { ShortcutsDialog, matchShortcut } from './components/Shortcuts'
 import { HOME_SECTIONS, MOBILE_NAV, NAV, type ViewId } from './core/nav'
 import { useMobileShell, useNarrow, useSizeClass } from './components/useNarrow'
@@ -645,6 +645,11 @@ function Shell() {
   }
 
   return (
+    /* Every `PageHead` in the app reads this to draw its search button — which
+       is the only tappable way into the command palette on a phone. Provided
+       here, at the shell, because that is the single component that both owns
+       `paletteOpen` and wraps every screen. */
+    <PaletteContext.Provider value={openPalette}>
     <div className="shell" data-collapsed={collapsed}>
       <aside className="sidebar">
         <div className="brand">
@@ -845,6 +850,7 @@ function Shell() {
 
       <ShortcutsDialog open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
     </div>
+    </PaletteContext.Provider>
   )
 }
 

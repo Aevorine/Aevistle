@@ -12,6 +12,7 @@ import {
   Switch,
   useConfirm,
   useToast,
+  PageHead,
 } from '../components/ui'
 import {
   IconAlert,
@@ -318,11 +319,19 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
           to sit flush against each other as a single list rather than floating
           apart with card gaps between them. `--list` is that difference. */}
       <div className={`view__inner ${narrow ? 'view__inner--list' : 'view__inner--grid'}`}>
-        {/* No page heading: the tab already highlighted at the bottom (or
-            side) of the window says "设置" the moment this screen is open,
-            and repeating it here was the only thing this head ever held —
-            there is no action to keep, so unlike Inbox or Codes there is
-            nothing left worth rendering a `.page-head` for at all. */}
+        {/* No page *heading*: the tab already highlighted at the bottom (or
+            side) of the window says "设置" the moment this screen is open, and
+            repeating it here was the only thing this head ever held.
+
+            There is now one thing to keep, which is why the head is back with
+            `hideTitle` — the parameter written for exactly this case. On a
+            phone `PageHead` draws the search button that opens the command
+            palette, and Settings was one of two tabs with no way to reach it
+            without a keyboard. The band costs one control's height and only on
+            a phone; on a desktop the button is hidden and this collapses to
+            nothing, which is what it was before. */}
+        <PageHead title={t('nav.settings')} hideTitle />
+
 
         {/* Top of the screen, not tucked into the data card: an app that came
             up factory-fresh because its state file would not parse is
@@ -791,6 +800,35 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
                   ]}
                 />
               </Field>
+
+              {/* Above the language picker and below the two density controls
+                  deliberately: this is the third and last thing on this card
+                  that changes how much of the screen a word takes, and the
+                  three read as one group. */}
+              <Field label={t('settings.textScale')} hint={t('settings.textScaleHint')}>
+                <Segmented
+                  value={s.textScale ?? 'standard'}
+                  onChange={(v: 'standard' | 'large' | 'larger') => patch({ textScale: v })}
+                  options={[
+                    { value: 'standard', label: t('settings.textScaleStandard') },
+                    { value: 'large', label: t('settings.textScaleLarge') },
+                    { value: 'larger', label: t('settings.textScaleLarger') },
+                  ]}
+                />
+              </Field>
+
+              {/* Phone-only in effect — the stylesheet gates it on
+                  `data-shell="mobile"` — but shown on every platform rather
+                  than hidden on a desktop, because a desktop window narrow
+                  enough to be a touch shell exists and a setting that
+                  disappears is harder to find than one that says what it is
+                  for. The hint carries that. */}
+              <Switch
+                checked={s.oneHand ?? false}
+                onChange={(v) => patch({ oneHand: v })}
+                title={t('settings.oneHand')}
+                description={t('settings.oneHandHint')}
+              />
 
               <Field label={t('settings.language')}>
                 <select

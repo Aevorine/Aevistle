@@ -426,6 +426,8 @@ const APPEARANCE_KEYS: readonly (keyof Settings)[] = [
   'themeIntensity',
   'density',
   'listDensity',
+  'textScale',
+  'oneHand',
 ]
 
 /**
@@ -1976,8 +1978,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // --- theme, style, accent, density, direction --------------------------
   useEffect(() => {
     const root = document.documentElement
-    const { themeMode, visualStyle, accent, accentBase, accentCyber, themeIntensity, density, listDensity } =
-      state.settings
+    const {
+      themeMode,
+      visualStyle,
+      accent,
+      accentBase,
+      accentCyber,
+      themeIntensity,
+      density,
+      listDensity,
+      textScale,
+      oneHand,
+    } = state.settings
     if (themeMode === 'system') root.removeAttribute('data-theme')
     else root.setAttribute('data-theme', themeMode)
     root.setAttribute('data-style', visualStyle ?? 'aurora')
@@ -1997,6 +2009,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     root.setAttribute('data-atmosphere-motion', intensity >= ATMOSPHERE_MOTION_MIN ? 'on' : 'off')
     root.setAttribute('data-density', density)
     root.setAttribute('data-list-density', listDensity ?? 'standard')
+    // Read by a root `font-size` rule in theme.css, which the whole rem-based
+    // type and spacing scale then follows. Set on `:root` and not on `body`
+    // for exactly that reason: `rem` resolves against the root element.
+    root.setAttribute('data-text-scale', textScale ?? 'standard')
+    // Paired with `data-shell` in the stylesheet — see `20-short.css`. Written
+    // unconditionally here, as `data-accent-*` above are, because the selector
+    // is what gates it and a desktop window simply never matches.
+    root.setAttribute('data-reach', oneHand ? 'on' : 'off')
     const localeInfo = localeMeta(locale)
     root.setAttribute('lang', localeInfo.intlTag)
     root.setAttribute('dir', localeInfo.dir)

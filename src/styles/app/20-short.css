@@ -158,6 +158,62 @@
 }
 
 /* ==========================================================================
+   The search button in every page head — phones only
+
+   `PageHead` renders it whenever a `PaletteContext` is provided, which is
+   always. Hiding it here rather than branching in the component keeps the
+   decision in one place and keeps the component free of a shell query.
+
+   A pointer has Ctrl+K and every desktop screen already carries its own
+   actions in this row — Compose alone has four. A phone has neither: the
+   palette's only tappable entry point was a tile on Home, so from four of the
+   five tabs there was no way to search at all.
+   ========================================================================== */
+
+:root:not([data-shell='mobile']) .page-head__search {
+  display: none;
+}
+
+/* ==========================================================================
+   One-hand mode — the screen, moved down into thumb reach
+
+   A phone is held at the bottom and is taller than a thumb. This app already
+   puts what it can down there: the tab bar, and the send buttons on the screen
+   that matters most. What cannot move is a screen's own title row and the
+   actions in it, which are at the top by definition — and on a 6.7" phone the
+   top corner is a two-handed reach.
+
+   Off by default, and it costs exactly what it says: 16vh of the content
+   column, taken off the top. On the compose screen that comes out of the
+   message box, which is the one place in this app where vertical space is
+   already contested — so this is offered rather than assumed, and the settings
+   copy says so plainly instead of calling it free.
+
+   16vh rather than iOS Reachability's ~40%: this is a persistent setting, not a
+   gesture that springs back, so it has to be a shift somebody can work in all
+   day. On a 800px-tall phone it brings the page head from 126px down to 254px,
+   which is inside the arc of a thumb on a device held normally, and leaves the
+   message box at 71% of what it had.
+
+   `.main` and not `.shell`: the tab bar is `.shell`'s other child and must not
+   move — a one-hand mode that pushes the navigation off the bottom of the
+   screen has solved the wrong end of the problem.
+   ========================================================================== */
+
+:root[data-reach='on'][data-shell='mobile'] .main {
+  padding-top: 16vh;
+  /* The band above the content is not dead space to a screen reader — it is
+     nothing at all, which is correct. It is also not tappable, so a stray
+     touch there does not land on whatever the shift moved out from under it. */
+  transition: padding-top var(--dur-slow) var(--ease-out);
+}
+@media (prefers-reduced-motion: reduce) {
+  :root[data-reach='on'][data-shell='mobile'] .main {
+    transition: none;
+  }
+}
+
+/* ==========================================================================
    One primary action per screen
 
    Not a size rule, and here because it is the last word in the cascade.

@@ -45,6 +45,17 @@ const SIZES = [
   { name: 'phone landscape', width: 800, height: 360, touch: true },
   { name: 'tablet portrait', width: 768, height: 1024, touch: true },
   { name: 'laptop', width: 1024, height: 768, touch: false },
+  /*
+   * The large-text setting, on the size that has least room for it.
+   *
+   * `textScale: larger` moves the root font-size to 125%, and the whole type
+   * and spacing scale is in `rem`, so every control on this screen grows at
+   * once. That is the intent — but it is also exactly the condition under
+   * which a row that fitted stops fitting, and the setting has no other guard.
+   * Measured here rather than assumed: a 48px button becomes 50px and stops,
+   * which is what the four-height ceiling below is checking.
+   */
+  { name: 'phone, largest text', width: 360, height: 800, touch: true, textScale: 'larger' },
 ]
 
 const MIN_TAP = 44
@@ -76,6 +87,7 @@ const MEASURE = () => {
   }
   return {
     shell: document.documentElement.getAttribute('data-shell'),
+    rootFontSize: getComputedStyle(document.documentElement).fontSize,
     sizeClass: document.documentElement.getAttribute('data-size-class'),
     controls: rows,
     kinds: [
@@ -100,6 +112,12 @@ for (const size of SIZES) {
   await page.goto(TARGET, { waitUntil: 'networkidle' })
   // The shell writes data-shell / data-size-class in an effect; wait for it.
   await page.waitForFunction(() => document.documentElement.hasAttribute('data-size-class'), null, { timeout: 5000 })
+  if (size.textScale) {
+    // Set directly rather than through Settings: this is a check of the
+    // stylesheet's behaviour at that scale, not of the switch that sets it.
+    await page.evaluate((v) => document.documentElement.setAttribute('data-text-scale', v), size.textScale)
+    await page.waitForTimeout(120)
+  }
   const m = await page.evaluate(MEASURE)
 
   const heights = new Map()
@@ -115,7 +133,7 @@ for (const size of SIZES) {
   const distinct = [...heights.keys()].filter((h) => h <= 120).sort((a, b) => a - b)
 
   report.push(`  ${size.name.padEnd(16)} ${String(size.width + 'x' + size.height).padEnd(10)} ` +
-    `shell=${String(m.shell ?? '-').padEnd(7)} class=${String(m.sizeClass).padEnd(9)} ` +
+    `shell=${String(m.shell ?? '-').padEnd(7)} class=${String(m.sizeClass).padEnd(9)} root=${String(m.rootFontSize).padEnd(5)} ` +
     `heights: ${distinct.join(' ')}`)
 
   if (m.shell === 'mobile' && tooSmall.length) {

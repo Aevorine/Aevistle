@@ -882,6 +882,47 @@ export interface Settings {
    */
   listDensity?: 'compact' | 'standard' | 'roomy'
   /**
+   * How large the text is, everywhere.
+   *
+   * Implemented as a root `font-size` rather than as a second type scale,
+   * because the whole scale is already in `rem` — `--text-xs` through
+   * `--text-2xl` and every `--sp-*` step. Changing the root moves all of them
+   * together and in proportion, which is the difference between "large text"
+   * and "the same layout with bigger letters in it": the gaps grow with the
+   * words, so a paragraph at 125% reads like a paragraph rather than like a
+   * cramped one.
+   *
+   * The control ladder (`--ctl-*`) stays in px on purpose. A button does not
+   * need to be 25% taller because its label is; it needs to be *at least* as
+   * tall as its label, which `min-height` plus a grown line box already gives
+   * — measured, a 48px button becomes 50px at `larger` and stops there. Making
+   * the ladder scale too would push the tab bar and every row height up with
+   * it and cost a list row per screen for nothing.
+   *
+   * Not the same thing as the system font-size setting, and not a replacement
+   * for it: Android's own text scaling still applies on top of this, because
+   * nothing here pins the root size in px.
+   */
+  textScale?: 'standard' | 'large' | 'larger'
+  /**
+   * Move the screen down into thumb reach on a phone.
+   *
+   * A phone is held at the bottom and the screen is taller than a thumb. The
+   * app already puts what it can down there — the tab bar, the send buttons —
+   * but a screen's own title row and its actions are at the top by definition,
+   * and on a 6.7" phone the top corner is a two-handed reach.
+   *
+   * Off by default, and it costs what it says: the content column loses the
+   * band it is pushed down by. On the compose screen that band comes out of
+   * the message box, which is the one place in this app where height is
+   * already contested — so this is offered rather than assumed, and the
+   * settings copy says so.
+   *
+   * Phone only. `data-shell="mobile"` gates it in the stylesheet: on a desktop
+   * window there is a pointer and nothing to reach for.
+   */
+  oneHand?: boolean
+  /**
    * When any `AppearanceSettings` field (`core/backup.ts`) last changed on
    * *this* device. Same last-write-wins role as `workCalendarUpdatedAt` — see
    * its doc — but for the "match my theme" scope instead of the calendar.
@@ -999,6 +1040,8 @@ export const DEFAULT_SETTINGS: Settings = {
   autoCopyCode: true,
   codeRules: [],
   listDensity: 'standard',
+  textScale: 'standard',
+  oneHand: false,
   imagePolicyChosen: false,
   digestEnabled: false,
   digestTime: '08:00',

@@ -413,6 +413,28 @@
      the token is defined. */
   --kb: 0px;
 
+  /* ---- text size ----
+
+     Set on the root element, and it is the *only* thing the large-text setting
+     does. Everything that has to grow is already in `rem` — the eight type
+     steps and all ten spacing steps — so moving the root moves the whole scale
+     in proportion and nothing has to be restated per size. That proportion is
+     the point: text that grows while its gaps do not is a cramped layout at a
+     larger size, not a larger layout.
+
+     Deliberately a percentage, not a px value. A percentage is relative to the
+     browser's own default size, so a phone whose owner has already raised the
+     system text size gets that *and* this, rather than this overriding that.
+     Pinning `font-size: 20px` here would silently cancel an Android
+     accessibility setting, which is the opposite of what the control is for.
+
+     Three steps and no slider. 100 / 112.5 / 125% is 16 / 18 / 20px, each a
+     step people can actually tell apart; a slider would offer forty values,
+     thirty-seven of which nobody can distinguish and all forty of which have
+     to lay out correctly. Measured at 125%: a 48px button becomes 50px as its
+     line box outgrows the padding, and nothing on any screen overflows. */
+  --text-scale: 100%;
+
   /* ---- focus ----
      One ring, named once.
 
