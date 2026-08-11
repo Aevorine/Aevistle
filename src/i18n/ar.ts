@@ -1146,6 +1146,7 @@ export const ar: Translations = {
   'inbox.exitFullscreen': 'إنهاء ملء الشاشة',
   'inbox.viewOriginalColors': 'عرض الألوان الأصلية',
   'inbox.viewNightColors': 'استعادة العرض الليلي',
+  'inbox.more': 'المزيد',
   'inbox.saveAs': 'حفظ باسم…',
   'inbox.saveAll': 'حفظ الكل',
   'inbox.openExternally': 'فتح ببرنامج النظام',

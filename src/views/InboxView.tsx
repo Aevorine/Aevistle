@@ -65,6 +65,7 @@ import {
   IconMaximize,
   IconMinimize,
   IconMoon,
+  IconMore,
   IconRefresh,
   IconSearch,
   IconSun,
@@ -274,6 +275,10 @@ export function InboxView({
   /** Reading starts full-screen; Escape steps out before it closes. */
   const [immersive, setImmersive] = useState(true)
   const [findOpen, setFindOpen] = useState(false)
+  /** The phone header's overflow menu — see the max-width:760px rule in
+      app.css that hides this behind a single "more" icon instead of the
+      day/night, find and fullscreen buttons it collapses. */
+  const [moreOpen, setMoreOpen] = useState(false)
   /** Per-message escape hatch from the night filter below — reset in `openDetail`. */
   const [rawStyle, setRawStyle] = useState(false)
   /** Recipient + precise timestamp, folded away by default — reset in `openDetail`. */
@@ -1087,15 +1092,41 @@ export function InboxView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openMessage, step])
 
+  /** The phone header's overflow menu closes on Escape and on a click that
+      lands anywhere outside it — the same rule the compose screen's quick-
+      times popover (`whenbar__quick`) uses for the same kind of anchored
+      panel. */
+  useEffect(() => {
+    if (!moreOpen) return
+    const close = (e: Event) => {
+      if (e instanceof KeyboardEvent && e.key !== 'Escape') return
+      if (e.type === 'pointerdown') {
+        const target = e.target as HTMLElement | null
+        if (target?.closest('.reader__more')) return
+      }
+      setMoreOpen(false)
+    }
+    document.addEventListener('keydown', close)
+    document.addEventListener('pointerdown', close)
+    return () => {
+      document.removeEventListener('keydown', close)
+      document.removeEventListener('pointerdown', close)
+    }
+  }, [moreOpen])
+
   /**
-   * Escape has two jobs here, in order: leave full screen, then close.
+   * Escape has three jobs here, in order: close the overflow menu, leave full
+   * screen, then close.
    *
    * A single-stage Escape on a full-screen reader throws the whole message
    * away when the user only wanted the window back — and there is no undo for
-   * "I lost my place".
+   * "I lost my place". The overflow menu goes first because it is the most
+   * recently opened, most transient layer — the same reason `preview` (the
+   * image lightbox) still comes before it here.
    */
   const handleEscape = () => {
     if (preview) setPreview(null)
+    else if (moreOpen) setMoreOpen(false)
     else if (findOpen) setFindOpen(false)
     else if (immersive) setImmersive(false)
     else setOpenMessage(null)
@@ -1767,23 +1798,93 @@ export function InboxView({
                 <IconTrash size={16} />
               </IconButton>
             ) : null}
-            {openMessage && readerIsDark ? (
-              <IconButton
-                label={rawStyle ? t('inbox.viewNightColors') : t('inbox.viewOriginalColors')}
-                onClick={() => setRawStyle((v) => !v)}
-              >
-                {rawStyle ? <IconMoon size={16} /> : <IconSun size={16} />}
+
+            {/*
+              Day/night, find and full screen — desktop's own three buttons,
+              inline exactly as before. `.reader__actionsFull` is plain
+              `display: flex` above 760px, so nothing here changes on a
+              desktop; the max-width:760px rule in app.css is what switches
+              this off and `.reader__more` below on, never any JS state.
+            */}
+            <div className="reader__actionsFull">
+              {openMessage && readerIsDark ? (
+                <IconButton
+                  label={rawStyle ? t('inbox.viewNightColors') : t('inbox.viewOriginalColors')}
+                  onClick={() => setRawStyle((v) => !v)}
+                >
+                  {rawStyle ? <IconMoon size={16} /> : <IconSun size={16} />}
+                </IconButton>
+              ) : null}
+              <IconButton label={t('inbox.find')} onClick={() => setFindOpen((v) => !v)}>
+                <IconSearch size={16} />
               </IconButton>
-            ) : null}
-            <IconButton label={t('inbox.find')} onClick={() => setFindOpen((v) => !v)}>
-              <IconSearch size={16} />
-            </IconButton>
-            <IconButton
-              label={immersive ? t('inbox.exitFullscreen') : t('inbox.fullscreen')}
-              onClick={() => setImmersive((v) => !v)}
-            >
-              {immersive ? <IconMinimize size={16} /> : <IconMaximize size={16} />}
-            </IconButton>
+              <IconButton
+                label={immersive ? t('inbox.exitFullscreen') : t('inbox.fullscreen')}
+                onClick={() => setImmersive((v) => !v)}
+              >
+                {immersive ? <IconMinimize size={16} /> : <IconMaximize size={16} />}
+              </IconButton>
+            </div>
+
+            {/*
+              Same three actions, collapsed behind one icon — a phone only
+              ever showed this row wrapped to a second line, never fewer
+              icons, and wrapping is what "keep the header to one line" asked
+              to be rid of. Anchored popover modelled on the compose screen's
+              `whenbar__quick`: closed costs nothing, open closes itself on
+              Escape or a click outside (see the effect above).
+            */}
+            <div className="reader__more">
+              <IconButton
+                label={t('inbox.more')}
+                aria-expanded={moreOpen}
+                onClick={() => setMoreOpen((v) => !v)}
+              >
+                <IconMore size={16} />
+              </IconButton>
+              {moreOpen ? (
+                <div className="popover reader__moreMenu" role="menu" aria-label={t('inbox.more')}>
+                  {openMessage && readerIsDark ? (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="reader__moreItem"
+                      onClick={() => {
+                        setRawStyle((v) => !v)
+                        setMoreOpen(false)
+                      }}
+                    >
+                      {rawStyle ? <IconMoon size={16} /> : <IconSun size={16} />}
+                      <span>{rawStyle ? t('inbox.viewNightColors') : t('inbox.viewOriginalColors')}</span>
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="reader__moreItem"
+                    onClick={() => {
+                      setFindOpen((v) => !v)
+                      setMoreOpen(false)
+                    }}
+                  >
+                    <IconSearch size={16} />
+                    <span>{t('inbox.find')}</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="reader__moreItem"
+                    onClick={() => {
+                      setImmersive((v) => !v)
+                      setMoreOpen(false)
+                    }}
+                  >
+                    {immersive ? <IconMinimize size={16} /> : <IconMaximize size={16} />}
+                    <span>{immersive ? t('inbox.exitFullscreen') : t('inbox.fullscreen')}</span>
+                  </button>
+                </div>
+              ) : null}
+            </div>
           </div>
         }
       >

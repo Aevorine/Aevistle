@@ -5197,6 +5197,71 @@ textarea {
   .modal:has(> .modal__body--reader) .modal__header > .btn-row {
     margin-inline-start: auto;
   }
+  /*
+   * Even right-aligned and on a line of its own, five icons (flag, delete,
+   * day/night, find, full screen) plus the header's own close button is
+   * still enough to wrap to a second line on a phone — the exact crowding
+   * the rule above this one was written to get rid of. Day/night, find and
+   * full screen fold behind the single `.reader__more` trigger instead, so
+   * the row stays flag + delete + more: three icons, one line, always.
+   */
+  .reader__actionsFull {
+    display: none;
+  }
+  .reader__more {
+    display: flex;
+  }
+}
+
+/*
+ * The phone header's overflow menu — `.reader__actionsFull` above is the
+ * plain inline row day/night, find and full screen keep on a desktop; this
+ * is what the max-width:760px rule swaps in for it instead. Both are always
+ * in the markup, same as `.whenbar__quick`'s anchored popover on the compose
+ * screen; only the media query decides which one paints, so no JS has to
+ * know the viewport width.
+ */
+.reader__actionsFull {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.reader__more {
+  position: relative;
+  display: none;
+}
+.reader__moreMenu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + var(--sp-2));
+  inset-inline-end: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 11rem;
+  max-width: min(16rem, 80vw);
+  padding: var(--sp-2);
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-lg);
+}
+.reader__moreItem {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  padding: var(--sp-2) var(--sp-3);
+  border: 0;
+  background: none;
+  border-radius: var(--r-sm);
+  color: var(--text-1);
+  font-size: var(--text-sm);
+  text-align: start;
+  cursor: pointer;
+}
+.reader__moreItem:hover {
+  background: var(--surface-hover);
 }
 
 /* The reader's own body: no gap-driven stack, the frame does the growing. */
@@ -6546,6 +6611,21 @@ textarea {
   font-size: var(--text-lg);
   color: var(--text-2);
   white-space: nowrap;
+}
+/* Narrow-only: the full `.composetop` band (title + four controls, 36px) is
+   never used below the breakpoint that hides `.composebar`'s siblings here —
+   this is a second, lighter variant carrying only the title, so a phone still
+   answers "new or editing" without paying for the full band. Text stays at
+   `--text-sm` (14px, this app's "次要" tier) rather than the heading-sized
+   `--text-lg` the wide band uses, so the line plus its padding lands near
+   20px instead of reopening the ~36-40px already ruled out for narrow. */
+.composetop--compact {
+  padding-block: 0;
+  border-bottom: none;
+}
+.composetop--compact .composetop__title {
+  font-size: var(--text-xs);
+  line-height: 1;
 }
 
 /*
@@ -8496,12 +8576,13 @@ textarea {
     padding-inline: 0;
     justify-content: center;
   }
-  /* The active tab is already named by the page heading directly above it and
-     coloured differently from the rest; the word as well costs a third of the
-     row and pushes a sibling off the edge. */
-  .nav__item[aria-current='page'] .nav__label {
-    display: none;
-  }
+  /* This used to hide the active tab's own label — written back when there
+     were nine tabs and every word was fighting a sibling off the edge. Now
+     that MOBILE_NAV is five items (see nav.ts), that math no longer applies,
+     and the rule was silently fighting the later fix that guarantees all
+     five tabs keep their text (the `max-width: 760px` block above). Removed
+     rather than left dead: same selector, so it would win ties by
+     source order and undo that fix again the next time either block moves. */
 
   /* --- compose: give the message back its screen ------------------------- */
 

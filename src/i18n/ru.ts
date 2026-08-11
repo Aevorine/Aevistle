@@ -1150,6 +1150,7 @@ export const ru: Translations = {
   'inbox.exitFullscreen': 'Выйти из полноэкранного режима',
   'inbox.viewOriginalColors': 'Исходные цвета',
   'inbox.viewNightColors': 'Вернуть ночной режим',
+  'inbox.more': 'Ещё',
   'inbox.saveAs': 'Сохранить как…',
   'inbox.saveAll': 'Сохранить всё',
   'inbox.openExternally': 'Открыть системной программой',

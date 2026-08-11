@@ -1163,6 +1163,7 @@ export const en = {
   'inbox.exitFullscreen': 'Leave full screen',
   'inbox.viewOriginalColors': 'View original colors',
   'inbox.viewNightColors': 'Restore night colors',
+  'inbox.more': 'More',
   'inbox.saveAs': 'Save as…',
   'inbox.saveAll': 'Save all',
   'inbox.openExternally': 'Open with system app',

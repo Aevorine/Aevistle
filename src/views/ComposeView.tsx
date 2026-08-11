@@ -891,6 +891,24 @@ export function ComposeView({
   const scheduleSummary = useMemo(() => summarizeRecurrence(recurrence), [recurrence])
 
   /**
+   * The rule as text — except a one-off send, where "the rule" (`recur.
+   * summary.once`, a fixed "仅一次"/"Once" with no `{time}` slot) says only
+   * that it will not repeat and never the one thing this screen exists to
+   * answer: when. Every other `kind` already names something concrete
+   * ("每天" and friends), so this only swaps in the formatted `startAt` for
+   * `'once'` rather than touching `summarizeRecurrence` itself, which other
+   * screens (the recurrence editor's one-sentence description) still read
+   * as the shorter, repeat-focused summary.
+   */
+  const scheduleRuleText = useMemo(
+    () =>
+      recurrence.kind === 'once'
+        ? formatDateTime(recurrence.startAt)
+        : t(scheduleSummary.key as TranslationKey, scheduleSummary.values),
+    [recurrence, scheduleSummary, t, formatDateTime],
+  )
+
+  /**
    * B3 · 送达窗口 — the time in the box is not always the time it goes out.
    *
    * If someone in `To:` carries a delivery window, the scheduler will move this
@@ -979,7 +997,7 @@ export function ComposeView({
    * marker and all, with the same per-recipient breakdown hanging off `title`.
    */
   const whenLine = useMemo(() => {
-    const rule = t(scheduleSummary.key as TranslationKey, scheduleSummary.values)
+    const rule = scheduleRuleText
     if (!delivery) return rule
     const marker = delivery.impossible
       ? t('deliver.composeImpossible')
@@ -990,7 +1008,7 @@ export function ComposeView({
           })
         : t('deliver.composeSplitShort')
     return `${rule} · ${marker}`
-  }, [scheduleSummary, delivery, t, formatDateTime])
+  }, [scheduleRuleText, delivery, t, formatDateTime])
 
   /**
    * Rules whose fire time is `timeOfDay`, not `startAt`.
@@ -1252,13 +1270,28 @@ export function ComposeView({
                 a heading is mostly the space around the heading. A bar sized
                 by its buttons has no such floor.
 
-                Absent entirely on a narrow screen. 36px is 5% of a 360x800
-                phone spent on a title that repeats the tab already highlighted
-                at the bottom of the window, plus four controls that are not
-                what anybody opened this screen to do; the four move into the
-                options sheet, which the action bar has a button for.
+                This full band — title plus the four secondary controls — is
+                skipped on a narrow screen: 36px is 5% of a 360x800 phone
+                spent on controls that are not what anybody opened this
+                screen to do, and they move into the options sheet, which
+                the action bar has a button for.
+
+                What is not skipped is the title text itself. Without it a
+                narrow screen had no answer to "new mail or editing an
+                existing one" from the top of the screen at all — the only
+                signal left was `.composesummary__edit`'s small "编辑中"
+                badge, easy to miss and only present once there is
+                something to fold. `.composetop--compact` below is that one
+                line reinstated on its own, sized and padded to stay near
+                20px rather than reopening the 36px band this replaced.
               */}
-              {narrow ? null : (
+              {narrow ? (
+                <div className="composetop composetop--compact">
+                  <span className="composetop__title">
+                    {editingJob ? t('compose.titleEditing') : t('compose.title')}
+                  </span>
+                </div>
+              ) : (
                 <div className="composetop">
                   <span className="composetop__title">
                     {editingJob ? t('compose.titleEditing') : t('compose.title')}
@@ -1772,9 +1805,7 @@ export function ComposeView({
                       )}
 
                       <div className="whenbar__text">
-                        <span className="whenbar__rule">
-                          {t(scheduleSummary.key as TranslationKey, scheduleSummary.values)}
-                        </span>
+                        <span className="whenbar__rule">{scheduleRuleText}</span>
                         {plannedStages.length > 1 ? (
                           <span className="whenbar__count">
                             {t('chain.willCreate', { n: plannedStages.length })}

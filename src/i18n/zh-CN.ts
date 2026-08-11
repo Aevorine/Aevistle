@@ -1140,6 +1140,7 @@ export const zhCN: Translations = {
   'inbox.exitFullscreen': '退出全屏',
   'inbox.viewOriginalColors': '查看原始颜色',
   'inbox.viewNightColors': '恢复夜间显示',
+  'inbox.more': '更多',
   'inbox.saveAs': '另存为…',
   'inbox.saveAll': '全部保存',
   'inbox.openExternally': '用系统程序打开',

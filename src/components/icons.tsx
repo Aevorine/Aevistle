@@ -478,3 +478,15 @@ export const IconGrip = (p: IconProps) => (
     <circle cx="15" cy="18" r="1.1" fill="currentColor" stroke="none" />
   </Svg>
 )
+
+/** Three dots in a row — "more", the overflow trigger for actions a narrow
+    header has no room to show on their own. Horizontal and three, not
+    `IconGrip`'s six-dot grid, so the two never read as the same affordance:
+    that one means "drag me", this one means "there is more here". */
+export const IconMore = (p: IconProps) => (
+  <Svg {...p}>
+    <circle cx="5" cy="12" r="1.4" fill="currentColor" stroke="none" />
+    <circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none" />
+    <circle cx="19" cy="12" r="1.4" fill="currentColor" stroke="none" />
+  </Svg>
+)

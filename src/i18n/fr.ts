@@ -1151,6 +1151,7 @@ export const fr: Translations = {
   'inbox.exitFullscreen': 'Quitter le plein écran',
   'inbox.viewOriginalColors': 'Voir les couleurs d’origine',
   'inbox.viewNightColors': 'Rétablir l’affichage nocturne',
+  'inbox.more': 'Plus',
   'inbox.saveAs': 'Enregistrer sous…',
   'inbox.saveAll': 'Tout enregistrer',
   'inbox.openExternally': 'Ouvrir avec l’application système',
