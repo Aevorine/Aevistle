@@ -413,6 +413,19 @@
      the token is defined. */
   --kb: 0px;
 
+  /* ---- focus ----
+     One ring, named once.
+
+     Thirteen rules had already converged on `2px solid var(--accent)` by hand,
+     which is thirteen chances for the fourteenth to be written differently —
+     and the focus ring is the one piece of chrome a keyboard user navigates
+     entirely by, so a ring that changes shape between screens is not a
+     cosmetic drift. `--ring-offset` is separate because a control sitting
+     flush inside a group needs the ring outside its own border, and that is a
+     per-site decision rather than a per-ring one. */
+  --ring: 2px solid var(--accent);
+  --ring-offset: 2px;
+
   /* ---- motion ----
      Short and eased-out. Anything longer than 220ms on a click feels like lag
      rather than polish. */

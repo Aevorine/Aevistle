@@ -85,7 +85,7 @@
   background: var(--surface-2);
 }
 .composesummary:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: var(--ring);
   outline-offset: -2px;
 }
 /* Nothing typed yet. Dashed, because a dashed box is the one border convention

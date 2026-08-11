@@ -87,7 +87,7 @@ textarea {
  * happens to be the accent colour (a focused primary button): two rings of
  * opposite lightness cannot both disappear into the same background. */
 :focus-visible {
-  outline: 2px solid var(--accent);
+  outline: var(--ring);
   outline-offset: 2px;
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--bg) 92%, transparent);
 }

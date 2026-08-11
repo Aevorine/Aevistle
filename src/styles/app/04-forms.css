@@ -50,7 +50,7 @@
   color: var(--text-1);
 }
 .linkbtn:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: var(--ring);
   outline-offset: 2px;
   border-radius: 2px;
 }
@@ -419,7 +419,7 @@
   transform: translateX(-16px);
 }
 .switch input:focus-visible + .switch__control {
-  outline: 2px solid var(--accent);
+  outline: var(--ring);
   outline-offset: 2px;
 }
 /* Both children are spans, so without this the label and its explanation run
@@ -714,7 +714,7 @@
    focused cell must be unmistakable — it is the only thing telling a keyboard
    user where they are in a 42-cell grid. */
 .monthgrid__day:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: var(--ring);
   outline-offset: 2px;
   z-index: 1;
 }
@@ -737,7 +737,7 @@
   color: var(--text-1);
 }
 .monthgrid__day[data-today='true'] {
-  outline: 2px solid var(--accent);
+  outline: var(--ring);
   outline-offset: -2px;
 }
 .monthgrid__num {
@@ -791,7 +791,7 @@
   transform: scale(1.12);
 }
 .monthgrid__marks:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: var(--ring);
   outline-offset: 1px;
 }
 .monthgrid__marks[draggable='true'] {

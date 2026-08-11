@@ -276,7 +276,7 @@
   background: rgba(255, 255, 255, 0.12);
 }
 .lightbox__btn:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: var(--ring);
   outline-offset: 1px;
 }
 /* Pressed state is a border and a fill, not a colour change: neither 宋体 nor
@@ -635,7 +635,7 @@
   color: var(--text-1);
 }
 .markup__btn:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: var(--ring);
   outline-offset: 1px;
 }
 

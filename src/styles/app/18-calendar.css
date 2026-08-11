@@ -99,7 +99,7 @@
   background: color-mix(in oklab, var(--accent) 26%, transparent);
 }
 .monthgrid__send:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: var(--ring);
   outline-offset: 1px;
 }
 .monthgrid__send[draggable='true'] {
@@ -160,7 +160,7 @@
   text-decoration: underline;
 }
 .monthgrid__more:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: var(--ring);
   outline-offset: 1px;
 }
 
