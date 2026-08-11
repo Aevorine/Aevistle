@@ -9,10 +9,20 @@
   box-sizing: border-box;
 }
 
+/*
+ * `100dvh`, not `100%` (which resolves to the same stale viewport value as
+ * `vh`): the Android WebView does not shrink it when the soft keyboard opens
+ * — see the note on `.recipicker__scrim` for the same bug already fixed in
+ * one popup sheet. Every height in the app cascades from this rule (`.shell`
+ * is `height: 100%` of this, `.main`/`.view` are `flex: 1` inside that), so
+ * fixing it only here is what makes the *whole* app — not just one sheet —
+ * actually shrink for the keyboard, instead of leaving the message box sized
+ * for the full screen with the keyboard covering the bottom of it.
+ */
 html,
 body,
 #root {
-  height: 100%;
+  height: 100dvh;
   margin: 0;
 }
 
