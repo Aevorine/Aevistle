@@ -113,13 +113,21 @@ export function PageHead({
   title,
   subtitle,
   action,
+  hideTitle,
 }: {
   title: string
   subtitle?: string
   action?: ReactNode
+  /** Keeps the `action` row (and the accessible name via `aria-label`) while
+   *  dropping the visible heading — for a screen whose name is already said
+   *  elsewhere (a highlighted tab, a modal's own title bar) and does not
+   *  need to say it a second time at the top of its own content. Only worth
+   *  reaching for when `action` is set: without one, the head has nothing
+   *  left to hold and the view is better off not rendering it at all. */
+  hideTitle?: boolean
 }) {
   return (
-    <div className="page-head">
+    <div className="page-head" data-hide-title={hideTitle || undefined} aria-label={hideTitle ? title : undefined}>
       <div className="page-head__text">
         <h1 className="page-title">{title}</h1>
         {subtitle ? <p className="page-subtitle">{subtitle}</p> : null}

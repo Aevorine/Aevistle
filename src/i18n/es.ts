@@ -51,8 +51,6 @@ export const es: Translations = {
     'Hay tareas activadas, pero ninguna tiene un próximo envío. Suele ser una fecha de fin ya pasada, o un calendario laboral que excluye todos los días restantes.',
   'selfcheck.outbox': 'Bandeja de salida',
   'selfcheck.outboxHint': 'Hay mensajes que se rindieron tras agotar todos sus reintentos.',
-
-  'home.title': 'Inicio',
   'home.subtitle': 'Programaciones, contactos, plantillas, el calendario laboral y el registro de envíos.',
   'nav.inbox': 'Recibidos',
   'nav.schedule': 'Programados',
@@ -330,8 +328,6 @@ export const es: Translations = {
   'logs.export': 'Exportar',
   'logs.recipients': 'Destinatarios: {n}',
   'logs.duration': '{ms} ms',
-
-  'settings.title': 'Ajustes',
 
   'settings.devices': 'Dispositivos emparejados',
   'settings.appearance': 'Apariencia',
@@ -807,6 +803,19 @@ export const es: Translations = {
   "backup.merge": "Combinar con lo actual",
   "backup.replace": "Reemplazar todo",
   "backup.modeHint": "Combinar conserva lo que ya tienes y añade el resto. Reemplazar lo descarta. Ninguno afecta tus preferencias locales.",
+  "backup.includePasswords": "Incluir contraseñas de las cuentas (cifradas)",
+  "backup.includePasswordsHint": "Genera una clave de recuperación de un solo uso y cifra todas las contraseñas con ella. Introduce esa clave al restaurar y se importan automáticamente, sin volver a escribir cada contraseña.",
+  "backup.recoveryKeyTitle": "Guarda esta clave de recuperación",
+  "backup.recoveryKeyHint": "Es lo que desbloquea las contraseñas de esta copia de seguridad. Se muestra una sola vez — la aplicación nunca la guarda. Consérvala en un lugar distinto del archivo de la copia; perder ambos a la vez es el verdadero riesgo, y guardarlos por separado lo evita.",
+  "backup.recoveryKeyCopy": "Copiar",
+  "backup.recoveryKeyCopied": "Copiado",
+  "backup.recoveryKeyDone": "Ya la guardé, cerrar",
+  "backup.recoveryKeyInputLabel": "Clave de recuperación (opcional)",
+  "backup.recoveryKeyInputHint": "Si esta copia tiene contraseñas cifradas, pega la clave de recuperación que se mostró al exportarla y se importarán automáticamente. Déjalo en blanco para omitirlo — esas cuentas necesitarán su contraseña escrita de nuevo a mano.",
+  "backup.securedPasswordsTitle": "{n} cuenta(s) tienen una contraseña cifrada en esta copia",
+  "backup.securedPasswordsHint": "Pega la clave de recuperación abajo — al confirmar la restauración se descifra e importa automáticamente, sin volver a escribirla.",
+  "backup.passwordsRestored": "{n} contraseña(s) de cuenta importadas automáticamente",
+  "backup.passwordsWrongKey": "Esa clave de recuperación no coincidió — no se importó ninguna contraseña, y esas cuentas aún necesitan su contraseña escrita a mano",
 
   // --- command palette ---
   "palette.title": "Paleta de comandos",

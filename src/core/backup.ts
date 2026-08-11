@@ -9,11 +9,21 @@
  * ---------------------------------------------------------------------------
  * What is deliberately not in it
  * ---------------------------------------------------------------------------
- * **Passwords.** They are never in application state to begin with — they live
- * in the OS keystore, encrypted against your user account, and are useless on
- * another machine even if copied. So a backup restores an account complete
- * except for its password, and says so rather than restoring something that
- * looks configured and fails at 3am.
+ * **Passwords, unless you ask for them.** They are never in application state
+ * to begin with — they live in the OS keystore, encrypted against your user
+ * account, and are useless on another machine even if copied. A plain backup
+ * restores an account complete except for its password, and says so rather
+ * than restoring something that looks configured and fails at 3am.
+ *
+ * Opting in seals them instead of leaving them out: `sealBackupSecrets` asks
+ * the trusted main-process/native layer to encrypt every account's password
+ * under a freshly generated, one-time "recovery key" — 256 random bits this
+ * file never sees in the clear, shown to the user exactly once and never
+ * written to disk by this app. `openBackupSecrets` is the same trip in
+ * reverse: given that key back, the trusted layer decrypts and writes
+ * straight to the new machine's keystore. Neither function, nor this file,
+ * nor the renderer at any point holds a plaintext password — see
+ * `core/secretTransport.ts`, which both reuse rather than duplicate.
  *
  * **Cached mail.** Received messages are a cache of what is on the server;
  * they can be re-fetched, they are the biggest thing in the file by an order
@@ -31,6 +41,7 @@
 import {
   DEFAULT_SETTINGS,
   SCHEMA_VERSION,
+  newId,
   type AppState,
   type Contact,
   type MailAccount,
@@ -38,6 +49,21 @@ import {
   type Settings,
   type Template,
 } from './types'
+import { bytesToBase64, randomToken, type PairingEnvelope } from './pairingCrypto'
+import type { SealedAccountSecrets } from './syncLoop'
+
+/**
+ * The narrow slice of `PlatformBridge` sealing and opening backup secrets
+ * needs — declared here rather than importing the whole interface from
+ * `core/bridge`, which would pull the desktop/Android bridge machinery into
+ * every module that only ever wants to build or read a `BackupFile`.
+ */
+export interface BackupSecretBridge {
+  setSecret(accountId: string, secret: string, kind?: 'smtp' | 'imap' | 'sync'): Promise<void>
+  deleteSecret(accountId: string, kind?: 'smtp' | 'imap' | 'sync'): Promise<void>
+  sealAccountSecrets?(keyRef: string, accountIds: string[]): Promise<SealedAccountSecrets | null>
+  openAccountSecrets?(keyRef: string, envelope: PairingEnvelope): Promise<string[]>
+}
 
 export const BACKUP_KIND = 'aevistle.backup'
 export const BACKUP_VERSION = 1
@@ -96,6 +122,16 @@ export interface BackupFile {
   templates: Template[]
   settings: Settings
   schemaVersion: number
+  /**
+   * Present only when the person exporting chose to include passwords.
+   * `envelope` opens to nothing without the recovery key shown once at
+   * export time — this file carries no key material of its own. See
+   * `sealBackupSecrets`/`openBackupSecrets` below.
+   */
+  secrets?: {
+    accountIds: string[]
+    envelope: PairingEnvelope
+  }
 }
 
 export interface BackupSummary {
@@ -103,8 +139,11 @@ export interface BackupSummary {
   jobs: number
   contacts: number
   templates: number
-  /** Accounts that will need their password entering again. */
+  /** Accounts that will need their password entering again even with the
+   *  right recovery key — everyone else's is covered by `securedPasswords`. */
   needPassword: number
+  /** Accounts whose password travels sealed in this file, pending the recovery key. */
+  securedPasswords: number
   /** Reminders whose attachments are referenced by path, not carried. */
   jobsWithAttachments: number
   createdAt: number
@@ -127,15 +166,95 @@ export function buildBackup(state: AppState, appVersion: string): BackupFile {
 }
 
 export function summarise(backup: BackupFile): BackupSummary {
+  const securedPasswords = backup.secrets?.accountIds.length ?? 0
   return {
     accounts: backup.accounts.length,
     jobs: backup.jobs.length,
     contacts: backup.contacts.length,
     templates: backup.templates.length,
-    needPassword: backup.accounts.length,
+    needPassword: backup.accounts.length - securedPasswords,
+    securedPasswords,
     jobsWithAttachments: backup.jobs.filter((job) => job.draft.attachments.length > 0).length,
     createdAt: backup.createdAt,
     app: backup.app,
+  }
+}
+
+/**
+ * Generate a fresh, one-time recovery key — 256 random bits, base64-encoded.
+ *
+ * Not derived from anything the user typed: there is no password here to
+ * strengthen against guessing (see the long comment at the top of this
+ * file), so the key just *is* the entropy, the same shape `pairingCrypto
+ * .ts`'s own long-lived pairing key already takes. Shown to the user once,
+ * at export time, and never stored by this app anywhere — losing it makes
+ * the sealed passwords in that one backup file unrecoverable, same as losing
+ * any other recovery key.
+ */
+export function generateRecoveryKey(): string {
+  return bytesToBase64(randomToken())
+}
+
+/** Strips everything but the exact characters a recovery key can contain — the
+ *  copy-paste whitespace and the display grouping both add, and a stray
+ *  dash or newline should not turn a correct key into a wrong one. */
+export function normalizeRecoveryKey(input: string): string {
+  return input.replace(/[^A-Za-z0-9+/=]/g, '')
+}
+
+/**
+ * Seal every account with a saved password under a fresh recovery key.
+ *
+ * The key is stashed in the OS keystore just long enough for the trusted
+ * layer to read it back and use it — `setSecret`/`deleteSecret` are the same
+ * two calls `DevicesCard.tsx` already uses to hand a pairing key across this
+ * boundary, so this adds no new privileged surface, only a new caller of it.
+ * `finally` deletes the stash even if sealing throws, so a failed export
+ * never leaves a stray key sitting in the keystore under a throwaway id.
+ *
+ * Resolves `null` when the platform has no `sealAccountSecrets` (the web
+ * build) or nothing came back sealed (no account here has a saved password).
+ */
+export async function sealBackupSecrets(
+  bridge: BackupSecretBridge,
+  accountIds: string[],
+): Promise<{ recoveryKey: string; secrets: BackupFile['secrets'] } | null> {
+  if (!bridge.sealAccountSecrets || accountIds.length === 0) return null
+  const recoveryKey = generateRecoveryKey()
+  const tempRef = `backup-export:${newId()}`
+  await bridge.setSecret(tempRef, recoveryKey, 'sync')
+  try {
+    const sealed = await bridge.sealAccountSecrets(tempRef, accountIds)
+    if (!sealed) return null
+    return {
+      recoveryKey,
+      secrets: { accountIds: sealed.accountIds, envelope: sealed.envelope },
+    }
+  } finally {
+    await bridge.deleteSecret(tempRef, 'sync')
+  }
+}
+
+/**
+ * The restore-side trip: open what `sealBackupSecrets` sealed and write it
+ * straight to this machine's keystore, given the same recovery key back.
+ *
+ * Returns which account ids actually got a password written — never a
+ * secret itself, the same posture `PlatformBridge.openAccountSecrets`
+ * documents for the pairing path this reuses.
+ */
+export async function openBackupSecrets(
+  bridge: BackupSecretBridge,
+  recoveryKey: string,
+  secrets: NonNullable<BackupFile['secrets']>,
+): Promise<string[]> {
+  if (!bridge.openAccountSecrets) return []
+  const tempRef = `backup-import:${newId()}`
+  await bridge.setSecret(tempRef, normalizeRecoveryKey(recoveryKey), 'sync')
+  try {
+    return await bridge.openAccountSecrets(tempRef, secrets.envelope)
+  } finally {
+    await bridge.deleteSecret(tempRef, 'sync')
   }
 }
 
@@ -182,6 +301,30 @@ export function readBackup(text: string): BackupFile {
     // restores with that setting at its default rather than `undefined`.
     settings: { ...DEFAULT_SETTINGS, ...(candidate.settings ?? {}) },
     schemaVersion: typeof candidate.schemaVersion === 'number' ? candidate.schemaVersion : 1,
+    secrets: readSecrets(candidate.secrets),
+  }
+}
+
+/** Malformed rather than absent is treated the same as absent: a backup with
+ *  a broken `secrets` block should still restore everything else, just
+ *  without offering a recovery-key prompt for the part that did not parse. */
+function readSecrets(value: unknown): BackupFile['secrets'] {
+  if (!value || typeof value !== 'object') return undefined
+  const candidate = value as Partial<NonNullable<BackupFile['secrets']>>
+  const envelope = candidate.envelope
+  if (
+    !Array.isArray(candidate.accountIds) ||
+    candidate.accountIds.length === 0 ||
+    !envelope ||
+    typeof envelope !== 'object' ||
+    typeof (envelope as Partial<PairingEnvelope>).iv !== 'string' ||
+    typeof (envelope as Partial<PairingEnvelope>).ciphertext !== 'string'
+  ) {
+    return undefined
+  }
+  return {
+    accountIds: candidate.accountIds.filter((id): id is string => typeof id === 'string'),
+    envelope: envelope as PairingEnvelope,
   }
 }
 

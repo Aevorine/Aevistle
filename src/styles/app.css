@@ -426,6 +426,15 @@ textarea {
   height: 1px;
   background: var(--border-subtle);
 }
+/* `PageHead`'s `hideTitle` — Inbox and Codes, whose tab already names the
+   screen. The row keeps its sticky position, its dividing rule and its
+   `action` children; only the `h1`/subtitle block goes, the same way
+   `.modal__body--screen` already drops it for a view reused inside a
+   dialog. Settings and Home have no `action` to keep, so those two views
+   do not render `PageHead` at all rather than reach for this. */
+.page-head[data-hide-title] .page-head__text {
+  display: none;
+}
 /* On a list screen the heading is a label, not a band. `--pagehead-h` sizes
    the head on the form screens, where it holds a title, a subtitle and a row
    of actions; here the subtitle is gone and the actions already carry their
@@ -4820,6 +4829,29 @@ textarea {
   line-clamp: 2;
   overflow: hidden;
 }
+/*
+ * A one-time recovery key: read in full, not clamped like `.codecard__url`
+ * above — someone checking they copied it correctly needs every character
+ * on screen at once, not the first two lines of it.
+ */
+.recoverykey {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+}
+.recoverykey__value {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  overflow-wrap: anywhere;
+  user-select: all;
+}
 /* Tinted from the live accent rather than a second stored colour, so it tracks
    whichever of the five accents is selected without five more variables. */
 .chip--strong {
@@ -5220,16 +5252,32 @@ textarea {
   .modal:has(> .modal__body--reader) .modal__header {
     flex-wrap: wrap;
   }
+  /*
+   * `order` swapped rather than the markup: the action row now lands on the
+   * header's first line and the subject wraps alone underneath it, not the
+   * other way around. The buttons are what someone opening the message on a
+   * phone reaches for first — closing, flagging, deleting — and the row
+   * they are on was the one thing not visible without scrolling past the
+   * subject first. Reordering with `order` leaves the DOM (and so tab order
+   * and screen-reader order) exactly as it was; only paint order moves.
+   */
   .modal:has(> .modal__body--reader) .modal__title {
+    order: 2;
     flex-basis: 100%;
     font-size: var(--text-value);
     line-height: 1.35;
   }
-  /* Pushed to the end of the now-solo second line, so the buttons read as
-     a right-aligned toolbar under the title rather than trailing off from
-     wherever the header's own left edge happens to be. */
+  /* Its own solo top line now, still right-aligned rather than trailing off
+     from wherever the header's own left edge happens to be. */
   .modal:has(> .modal__body--reader) .modal__header > .btn-row {
+    order: 1;
     margin-inline-start: auto;
+  }
+  /* The header's own close button is a sibling of `.btn-row`, not a member
+     of it — it needs the same `order` to land on the same top line, right
+     after the row it was already trailing. */
+  .modal:has(> .modal__body--reader) .modal__header > .icon-btn {
+    order: 1;
   }
   /*
    * Even right-aligned and on a line of its own, five icons (flag, delete,
@@ -5244,6 +5292,20 @@ textarea {
   }
   .reader__more {
     display: flex;
+  }
+  /*
+   * 20px, not the app-wide 16px default: promoted to the first thing on the
+   * screen, these are now read as the primary way to act on the message
+   * rather than a row of secondary chrome, and the 44px tap target around a
+   * 16px glyph was reading as mostly empty padding. Scoped to the reader's
+   * own header buttons — `.reader__moreItem` (the opened popover's menu
+   * rows) keeps its own 16px, since those sit next to a text label and were
+   * never the thing this was about.
+   */
+  .modal:has(> .modal__body--reader) .modal__header > .btn-row .icon-btn svg,
+  .modal:has(> .modal__body--reader) .modal__header > .icon-btn svg {
+    width: 20px;
+    height: 20px;
   }
 }
 

@@ -1352,7 +1352,8 @@ export function InboxView({
       // mail bridge — every automated run — actually lands on.
       <div className="view view--list" data-screen="inbox">
         <div className="view__inner">
-          <PageHead title={t('inbox.title')} />
+          {/* No heading here either: the highlighted Inbox tab already names
+              the screen, and this branch has no action to keep a head for. */}
           <div className="list-pane">
             <EmptyState
               icon={<IconInbox size={24} />}
@@ -1432,11 +1433,12 @@ export function InboxView({
   return (
     <div className="view view--list" data-screen="inbox">
       <div className="view__inner">
-        {/* No subtitle. It said either "{n} unread" — which the nav badge
-            already shows — or a sentence describing what an inbox is, on the
-            screen you are looking at. Both were a grey line of prose between
-            the heading and the mail. */}
-        <PageHead title={t('inbox.title')} action={bulkAction} />
+        {/* No subtitle, and now no heading either: the highlighted Inbox tab
+            already names the screen. `bulkAction` is why this still renders
+            `PageHead` rather than nothing — `hideTitle` keeps that row (and
+            the screen's accessible name, moved onto `.page-head` itself)
+            while dropping the visible "收件箱" text. */}
+        <PageHead title={t('inbox.title')} action={bulkAction} hideTitle />
 
         {enabledInboxes.length === 0 ? (
           <Banner tone="info">{t('inbox.noAccountsHint')}</Banner>

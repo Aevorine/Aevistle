@@ -46,8 +46,6 @@ export const zhCN: Translations = {
     '任务是开启的，但没有一个有下一次发送时间。通常是结束日期已过，或者工作日历把剩下的每一天都排除了。',
   'selfcheck.outbox': '发件箱',
   'selfcheck.outboxHint': '有邮件用完了全部重试次数后放弃了。',
-
-  'home.title': '主页',
   'home.subtitle': '定时任务、联系人、模块、工作日历和发送记录。',
   'nav.inbox': '收件箱',
   'nav.schedule': '定时任务',
@@ -324,8 +322,6 @@ export const zhCN: Translations = {
   'logs.export': '导出',
   'logs.recipients': '{n} 个收件人',
   'logs.duration': '{ms} 毫秒',
-
-  'settings.title': '设置',
 
   'settings.devices': '已配对的设备',
   'settings.appearance': '外观',
@@ -798,6 +794,19 @@ export const zhCN: Translations = {
   "backup.merge": "合并到现有数据",
   "backup.replace": "全部替换",
   "backup.modeHint": "合并保留现有内容并补齐其余；替换会丢弃现有内容。均不影响本机偏好设置。",
+  "backup.includePasswords": "同时导出账号密码（加密）",
+  "backup.includePasswordsHint": "生成一个一次性恢复密钥，用它加密所有密码。恢复时输入这个密钥就能自动导入，不用逐个账号重新输入密码。",
+  "backup.recoveryKeyTitle": "保存好这份恢复密钥",
+  "backup.recoveryKeyHint": "这是刚才这份备份的解密钥匙，只显示这一次，本应用不会保存它。建议单独存好（比如网盘或U盘），别和备份文件放在一起——两个都丢才是真正的风险，分开存更安全。",
+  "backup.recoveryKeyCopy": "复制",
+  "backup.recoveryKeyCopied": "已复制",
+  "backup.recoveryKeyDone": "我已保存，关闭",
+  "backup.recoveryKeyInputLabel": "恢复密钥（可选）",
+  "backup.recoveryKeyInputHint": "如果这份备份加密了密码，粘贴导出时给你的那串恢复密钥，账号密码会自动导入；不填的话这些账号仍需手动重新输入密码。",
+  "backup.securedPasswordsTitle": "有 {n} 个账号的密码已加密在这份备份里",
+  "backup.securedPasswordsHint": "在下面粘贴恢复密钥，确认恢复后会自动解密导入，不用手动重新输入。",
+  "backup.passwordsRestored": "已自动导入 {n} 个账号的密码",
+  "backup.passwordsWrongKey": "恢复密钥不对，密码没能导入，这些账号仍需手动输入密码",
 
   // --- command palette ---
   "palette.title": "命令面板",

@@ -66,7 +66,7 @@
  */
 
 import { lazy, Suspense, useState, type ReactElement } from 'react'
-import { Modal, PageHead } from '../components/ui'
+import { Modal } from '../components/ui'
 import { Skeleton } from '../components/Skeleton'
 import { useI18n } from '../i18n'
 import { HOME_FEATURES, HOME_SECTIONS, NAV, type HomeFeatureId, type ViewId } from '../core/nav'
@@ -77,6 +77,7 @@ import {
   IconClock,
   IconFileText,
   IconLink,
+  IconShield,
   IconStar,
   IconUsers,
 } from '../components/icons'
@@ -121,6 +122,10 @@ const GreetingsCard = lazy(() =>
 const SelfCheckPanel = lazy(() =>
   import('../components/SelfCheckPanel').then((m) => ({ default: m.SelfCheckPanel })),
 )
+/** Already a self-contained file of its own, like `DevicesCard`/`CalendarSubscribeCard` above. */
+const ReliabilityView = lazy(() =>
+  import('./ReliabilityView').then((m) => ({ default: m.ReliabilityView })),
+)
 
 /** Icons for the five `HOME_SECTIONS` tiles, keyed by the same ids. */
 const TILE_ICONS: Partial<Record<ViewId, (p: { size?: number }) => ReactElement>> = {
@@ -137,6 +142,7 @@ const FEATURE_ICONS: Record<HomeFeatureId, (p: { size?: number }) => ReactElemen
   greetings: IconStar,
   calendarsub: IconCalendar,
   pairing: IconLink,
+  reliability: IconShield,
   selfcheck: IconActivity,
 }
 
@@ -190,7 +196,8 @@ export function HomeView({
   return (
     <div className="view view--home">
       <div className="view__inner">
-        <PageHead title={t('home.title')} />
+        {/* No page heading: the highlighted Home tab already says where you
+            are, and this screen has no action to keep a `.page-head` for. */}
 
         <div className="hometiles">
           {narrow
@@ -260,6 +267,7 @@ export function HomeView({
             {open === 'greetings' ? <GreetingsCard /> : null}
             {open === 'calendarsub' ? <CalendarSubscribeCard /> : null}
             {open === 'pairing' ? <DevicesCard /> : null}
+            {open === 'reliability' ? <ReliabilityView /> : null}
             {open === 'selfcheck' ? <SelfCheckPanel /> : null}
           </Suspense>
         </Modal>

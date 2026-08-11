@@ -51,8 +51,6 @@ export const fr: Translations = {
     'Des tâches sont activées mais aucune n’a de prochain envoi. Le plus souvent une date de fin dépassée, ou un calendrier de travail qui exclut tous les jours restants.',
   'selfcheck.outbox': 'Boîte d’envoi',
   'selfcheck.outboxHint': 'Des messages ont abandonné après avoir épuisé toutes leurs tentatives.',
-
-  'home.title': 'Accueil',
   'home.subtitle': 'Planifications, contacts, modèles, le calendrier de travail et le journal d’envoi.',
   'nav.inbox': 'Réception',
   'nav.schedule': 'Programmés',
@@ -330,8 +328,6 @@ export const fr: Translations = {
   'logs.export': 'Exporter',
   'logs.recipients': 'Destinataires : {n}',
   'logs.duration': '{ms} ms',
-
-  'settings.title': 'Paramètres',
 
   'settings.devices': 'Appareils appairés',
   'settings.appearance': 'Apparence',
@@ -807,6 +803,19 @@ export const fr: Translations = {
   "backup.merge": "Fusionner avec l’existant",
   "backup.replace": "Tout remplacer",
   "backup.modeHint": "La fusion conserve l’existant et ajoute le reste. Le remplacement l’efface. Aucun des deux ne touche vos préférences locales.",
+  "backup.includePasswords": "Inclure les mots de passe des comptes (chiffrés)",
+  "backup.includePasswordsHint": "Génère une clé de récupération à usage unique et chiffre tous les mots de passe avec elle. Saisissez cette clé lors de la restauration pour les importer automatiquement, sans ressaisir chaque mot de passe.",
+  "backup.recoveryKeyTitle": "Enregistrez cette clé de récupération",
+  "backup.recoveryKeyHint": "C'est elle qui déverrouille les mots de passe de cette sauvegarde. Affichée une seule fois — l'application ne la conserve jamais. Gardez-la séparément du fichier de sauvegarde ; perdre les deux à la fois est le vrai risque, les garder séparés l'évite.",
+  "backup.recoveryKeyCopy": "Copier",
+  "backup.recoveryKeyCopied": "Copié",
+  "backup.recoveryKeyDone": "Je l'ai enregistrée, fermer",
+  "backup.recoveryKeyInputLabel": "Clé de récupération (facultatif)",
+  "backup.recoveryKeyInputHint": "Si cette sauvegarde contient des mots de passe chiffrés, collez la clé de récupération affichée lors de l'export pour les importer automatiquement. Laissez vide pour ignorer — ces comptes devront être ressaisis à la main.",
+  "backup.securedPasswordsTitle": "{n} compte(s) ont un mot de passe chiffré dans cette sauvegarde",
+  "backup.securedPasswordsHint": "Collez la clé de récupération ci-dessous — confirmer la restauration la déchiffre et l'importe automatiquement, sans ressaisie.",
+  "backup.passwordsRestored": "{n} mot(s) de passe de compte importé(s) automatiquement",
+  "backup.passwordsWrongKey": "Cette clé de récupération ne correspond pas — aucun mot de passe importé, ces comptes ont toujours besoin d'une saisie manuelle",
 
   // --- command palette ---
   "palette.title": "Palette de commandes",

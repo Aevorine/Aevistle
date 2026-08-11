@@ -256,13 +256,13 @@ export function CodesView({ onGoToInbox }: { onGoToInbox?: () => void }) {
        Same reason `.nav__item` carries `data-view`. */
     <div className="view view--list" data-screen="codes">
       <div className="view__inner">
-        {/* No subtitle. It ranked unread over fresh over a sentence describing
-            the screen — three grey lines of prose for one number the nav badge
-            already carries, above the codes themselves. "Still to deal with" is
-            now said by the unread dot on each card and by the "mark all read"
-            button appearing at all. */}
+        {/* No subtitle, and now no heading either — the highlighted tab
+            already names the screen. `hideTitle` keeps this `action` row
+            (the reason `PageHead` is still called here at all) while
+            dropping the visible "验证码 / 登录链接" text. */}
         <PageHead
           title={t('codes.title')}
+          hideTitle
           action={
             <>
               {/* The reason anyone opens this screen while waiting. First

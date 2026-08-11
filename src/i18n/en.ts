@@ -6,7 +6,6 @@
 export const en = {
   'nav.compose': 'Compose',
   'nav.home': 'Home',
-  'home.title': 'Home',
   'home.subtitle': 'Schedules, contacts, templates, the working calendar and the send log.',
 
   // Self-check. Layer names, not friendly names: the point of this panel is to
@@ -354,8 +353,6 @@ export const en = {
   'logs.statFailed': 'Failed',
   'logs.statRate': 'Success rate',
   'logs.statLatency': 'Median time',
-
-  'settings.title': 'Settings',
 
   'settings.devices': 'Paired devices',
   'settings.appearance': 'Appearance',
@@ -817,6 +814,19 @@ export const en = {
   "backup.merge": "Merge into what is here",
   "backup.replace": "Replace everything",
   "backup.modeHint": "Merging keeps what you have and adds the rest. Replacing discards it. Neither touches your preferences on this machine.",
+  "backup.includePasswords": "Include account passwords (encrypted)",
+  "backup.includePasswordsHint": "Generates a one-time recovery key and encrypts every password with it. Enter that key when restoring and they import automatically — no retyping each account's password.",
+  "backup.recoveryKeyTitle": "Save this recovery key",
+  "backup.recoveryKeyHint": "This is what unlocks the passwords in the backup you just made. Shown once — this app never stores it. Keep it somewhere separate from the backup file itself; losing both at once is the real risk, and keeping them apart avoids that.",
+  "backup.recoveryKeyCopy": "Copy",
+  "backup.recoveryKeyCopied": "Copied",
+  "backup.recoveryKeyDone": "I've saved it, close",
+  "backup.recoveryKeyInputLabel": "Recovery key (optional)",
+  "backup.recoveryKeyInputHint": "If this backup has encrypted passwords, paste the recovery key you were shown at export time and they import automatically. Leave it blank to skip — those accounts will need their password re-entered by hand instead.",
+  "backup.securedPasswordsTitle": "{n} account(s) have a password encrypted in this backup",
+  "backup.securedPasswordsHint": "Paste the recovery key below — confirming the restore decrypts and imports it automatically, no manual retyping.",
+  "backup.passwordsRestored": "{n} account password(s) imported automatically",
+  "backup.passwordsWrongKey": "That recovery key did not match — no passwords were imported, and those accounts still need their password entered by hand",
 
   // --- command palette ---
   "palette.title": "Command palette",
