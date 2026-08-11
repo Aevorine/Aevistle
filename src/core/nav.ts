@@ -129,7 +129,13 @@ export const HOME_SECTIONS: ViewId[] = [
  * Home tile, on a phone and a desktop alike, so they get a narrower id of
  * their own instead.
  */
-export type HomeFeatureId = 'digest' | 'greetings' | 'calendarsub' | 'pairing' | 'selfcheck'
+export type HomeFeatureId =
+  | 'digest'
+  | 'greetings'
+  | 'calendarsub'
+  | 'pairing'
+  | 'reliability'
+  | 'selfcheck'
 
 export interface HomeFeatureItem {
   id: HomeFeatureId
@@ -151,6 +157,15 @@ export const HOME_FEATURES: HomeFeatureItem[] = [
   { id: 'greetings', labelKey: 'settings.greetings' },
   { id: 'calendarsub', labelKey: 'cal.subscribe.toggle' },
   { id: 'pairing', labelKey: 'devices.title' },
+  /*
+   * Second-to-last, and on Home rather than buried in Settings, for the same
+   * reason `selfcheck` below is: this is not a feature with settings, it is a
+   * standing question — "will my scheduled reminders actually go out?" —
+   * answered from facts the app already has, without the user hunting across
+   * the schedule, the log, Settings and the devices card to piece the answer
+   * together themselves. See `views/ReliabilityView.tsx`.
+   */
+  { id: 'reliability', labelKey: 'reliability.title' },
   /*
    * Last, and on Home rather than buried in Settings.
    *

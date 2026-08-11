@@ -7,7 +7,8 @@
  * the UI run in a plain browser during development.
  */
 
-import type { ControlEndpoint, ControlRequest, ControlResponse } from './control'
+import type { ControlAuditEntry, ControlEndpoint, ControlRequest, ControlResponse } from './control'
+import type { DispatchLedgerEntry } from './dispatchLedger'
 import type { FeedResponse } from './feeds'
 import type { OAuthAccountStatus, OAuthConsentResult } from './oauth'
 import type { PairingEvent, PairingPayload, PairMode } from './pairing'
@@ -21,6 +22,7 @@ import type {
 import type {
   AppState,
   Attachment,
+  ControlScope,
   InboxAccountState,
   InboxTag,
   LocaleId,
@@ -294,9 +296,13 @@ export interface PlatformBridge {
     enabled: boolean
     allowSending: boolean
     calendarSubscribeEnabled: boolean
+    /** Raw, un-normalized — see `DesktopApi.applyControl`'s doc in `ipc-contract.ts`. */
+    controlScopes?: ControlScope[]
   }): Promise<ControlEndpoint | null>
   onControlRequest?(handler: (request: ControlRequest) => void): () => void
   respondToControl?(response: ControlResponse): Promise<void>
+  /** Every durable control-audit entry on disk, oldest first. Desktop only, same as the rest of this group. */
+  getControlAudit?(): Promise<ControlAuditEntry[]>
 
   // --- LAN pairing (device-to-device, end-to-end encrypted) ---------------
   // See `src/core/pairing.ts`. HOST is desktop-only — only Electron main can
@@ -513,6 +519,20 @@ export interface PlatformBridge {
    * data, and in the browser there is no scheduler to report anything.
    */
   pullJobRuns?(): Promise<Array<JobRun & { jobId: string }>>
+  /**
+   * Every entry currently sitting in the durable dispatch ledger, whatever
+   * state it is in — see `core/dispatchLedger.ts`. Desktop only, since that
+   * ledger (`electron/store.ts`'s `LEDGER_FILE`) only exists there; Android
+   * keeps its own equivalent (`JobStore`'s ledger, see `scheduler.ts`'s module
+   * doc) but does not expose it over the bridge today.
+   *
+   * Read fresh on every call rather than pushed as an event — the ledger
+   * empties itself the instant a send finishes, so "reasonably current" from
+   * a poll on demand (the Reliability Center's own screen, opened when
+   * someone actually wants to know) is worth more than a live subscription
+   * nothing else needs.
+   */
+  getDispatchLedgerStatus?(): Promise<DispatchLedgerEntry[]>
 
   // --- inbox (receiving) ---------------------------------------------------
   // All optional: only the desktop has IMAP wired up so far. The Android

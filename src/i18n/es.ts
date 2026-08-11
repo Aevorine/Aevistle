@@ -141,7 +141,6 @@ export const es: Translations = {
   'schedule.pause': 'Pausar',
   'schedule.resume': 'Reanudar',
   'schedule.runNow': 'Enviar ahora',
-  'schedule.upcoming': 'Próximos',
   'schedule.noMoreRuns': 'No habrá más envíos',
   'schedule.name': 'Nombre de la programación',
   'schedule.namePlaceholder': 'Informe semanal',
@@ -424,6 +423,16 @@ export const es: Translations = {
   'validate.attachmentNameInjection': 'El nombre de archivo {name} contiene un carácter no permitido',
   'validate.attachmentRisky': '{name} es un archivo .{ext} — muchos servidores de correo los bloquean',
   'validate.attachmentDeceptive': '{name} esconde un ejecutable tras una extensión de documento',
+
+  // Send Guardian — comprobaciones no bloqueantes antes de enviar. Ver core/sendGuardian.ts.
+  'sendGuardian.title': 'Antes de enviar',
+  'sendGuardian.missingAttachment': 'El mensaje menciona un archivo adjunto, pero no hay ninguno adjunto.',
+  'sendGuardian.staleDate':
+    'El mensaje dice algo como «mañana», pero este envío está programado para dentro de unos {days} días — comprueba que el texto siga teniendo sentido.',
+  'sendGuardian.typoDomain':
+    '«{typo}» parece un error de escritura de «{suggestion}», un dominio al que escribes a menudo.',
+  'sendGuardian.massTo':
+    '{n} destinatarios están todos en Para — todos verán la dirección de los demás. Considera usar Cco o el envío individual.',
   'validate.accountNoLabel': 'Ponle un nombre a la cuenta para distinguirlas',
   'validate.accountBadFrom': 'La dirección del remitente no es válida',
   'validate.accountBadReplyTo': 'La dirección de respuesta no es válida',
@@ -1025,7 +1034,20 @@ export const es: Translations = {
   'describe.endAfter': '{n} veces en total',
   'describe.endOn': 'hasta {when}',
   'describe.burst': '{n} copias cada vez',
-  'describe.shifted': 'Algunas fechas se movieron por el calendario laboral o el horario silencioso.',
+  'describe.shifted': 'Algunas fechas se movieron por el calendario laboral, el horario silencioso o la ventana de entrega de un destinatario.',
+
+  // --- schedule simulator + "why this time?" (RecurrenceEditor) ---
+  'sim.title': 'Simulador de programación',
+  'sim.hint': 'Las horas exactas en las que esta regla realmente enviará — ya con el calendario laboral, el horario de silencio y cualquier ventana de entrega aplicados.',
+  'explain.title': '¿Por qué esta hora?',
+  'explain.unchanged': 'Se envía exactamente a las {when} — nada lo ajusta.',
+  'explain.original': 'La regla calcula las {when}.',
+  'explain.workCalendarMoved': 'El calendario laboral lo mueve fuera de un día no laborable, a las {when}.',
+  'explain.quietHoursMoved': 'El horario silencioso lo retiene hasta las {when}.',
+  'explain.deliveryWindowMoved': 'La ventana de entrega de {name} lo mueve a las {when}, su hora.',
+  'explain.finalTime': 'Se enviará a las {when}.',
+  'explain.jitterNote': 'Luego hasta {n} s más de retraso aleatorio antes de enviarse de verdad.',
+  'explain.recipientFallback': 'un destinatario',
 
   // --- one vocabulary for state, used by StatusChip everywhere ---
   'status.armed': 'programado',
@@ -1613,4 +1635,46 @@ export const es: Translations = {
   'sync.conflict.keptNewer': 'Se conservó la versión más reciente en lugar de «{theirs}»',
   'sync.conflict.keepMineInstead': 'Usar la mía en su lugar',
   'sync.conflict.restored': 'Se restauró tu versión',
+
+  'reliability.title': 'Centro de fiabilidad',
+  'reliability.intro':
+    'Todo lo que podría impedir que un recordatorio programado se envíe, reunido a partir de lo que la aplicación ya sabe — nada aquí se conecta a tu servidor de correo.',
+  'reliability.refresh': 'Actualizar',
+  'reliability.ledgerUnavailable':
+    'El registro de envíos solo se guarda en la aplicación de escritorio, así que los envíos atascados no se pueden comprobar desde aquí.',
+  'reliability.statJobs': 'Recordatorios que necesitan atención',
+  'reliability.statLedger': 'Envíos atascados',
+  'reliability.statAccounts': 'Cuentas que necesitan atención',
+  'reliability.statDevices': 'Dispositivos desincronizados',
+  'reliability.emptyNoJobs': 'Todavía no hay nada programado, así que no hay nada que comprobar.',
+  'reliability.allClear': 'Todo lo comprobado aquí parece estar bien.',
+  'reliability.sectionJobs': 'Recordatorios',
+  'reliability.job.paused': 'En pausa',
+  'reliability.job.failing': 'Falló la última ejecución',
+  'reliability.job.retrying': 'Enviando ahora',
+  'reliability.job.stuckSend': 'El envío parece atascado',
+  'reliability.job.executorUnsynced': 'El dispositivo asignado no se ha sincronizado',
+  'reliability.executorLastSynced': 'Configurado para enviarse desde {device}, sincronizado por última vez {when}',
+  'reliability.executorNeverSynced':
+    'Configurado para enviarse desde {device}, que nunca se ha sincronizado con este dispositivo',
+  'reliability.unknownDevice': 'un dispositivo no reconocido',
+  'reliability.retryNow': 'Reintentar ahora',
+  'reliability.sectionLedger': 'Registro de envíos',
+  'reliability.ledgerDetail': '{state}, sin cambios desde hace {minutes} min ({attempts} intento(s) hasta ahora)',
+  'reliability.ledgerState.claimed': 'Reclamado',
+  'reliability.ledgerState.sending': 'Enviando',
+  'reliability.ledgerState.accepted': 'Aceptado',
+  'reliability.sectionAccounts': 'Cuentas',
+  'reliability.account.noSecret': 'No hay contraseña guardada',
+  'reliability.account.oauthDisconnected': 'Nunca se ha iniciado sesión',
+  'reliability.account.oauthNeedsConsent': 'El inicio de sesión debe renovarse',
+  'reliability.account.oauthUnconfigured': 'El inicio de sesión no está configurado en esta versión',
+  'reliability.account.authFailure': 'El último envío parecía un fallo de inicio de sesión',
+  'reliability.reconnect': 'Reconectar',
+  'reliability.reconnected': 'Reconectado',
+  'reliability.reconnectFailed': 'No se pudo reconectar',
+  'reliability.sectionDevices': 'Dispositivos vinculados',
+  'reliability.deviceStale': 'Sincronizado por última vez {when}',
+  'reliability.deviceNeverSynced': 'Nunca ha completado una sincronización',
+  'reliability.sectionAndroid': 'Este dispositivo',
 }

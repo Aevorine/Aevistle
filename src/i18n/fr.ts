@@ -141,7 +141,6 @@ export const fr: Translations = {
   'schedule.pause': 'Suspendre',
   'schedule.resume': 'Reprendre',
   'schedule.runNow': 'Envoyer maintenant',
-  'schedule.upcoming': 'À venir',
   'schedule.noMoreRuns': 'Plus aucun envoi prévu',
   'schedule.name': 'Nom de la programmation',
   'schedule.namePlaceholder': 'Rapport hebdomadaire',
@@ -424,6 +423,16 @@ export const fr: Translations = {
   'validate.attachmentNameInjection': 'Le nom de fichier {name} contient un caractère interdit',
   'validate.attachmentRisky': '{name} est un fichier .{ext} — beaucoup de serveurs les bloquent',
   'validate.attachmentDeceptive': '{name} dissimule un exécutable derrière une extension de document',
+
+  // Send Guardian — vérifications non bloquantes avant l’envoi. Voir core/sendGuardian.ts.
+  'sendGuardian.title': 'Avant d’envoyer',
+  'sendGuardian.missingAttachment': 'Le message mentionne une pièce jointe, mais aucune n’est jointe.',
+  'sendGuardian.staleDate':
+    'Le message dit quelque chose comme « demain », mais cet envoi est prévu dans environ {days} jours — vérifiez que la formulation tient toujours.',
+  'sendGuardian.typoDomain':
+    '« {typo} » ressemble à une faute de frappe pour « {suggestion} », un domaine auquel vous écrivez souvent.',
+  'sendGuardian.massTo':
+    '{n} destinataires sont tous en À — chacun verra l’adresse de tous les autres. Pensez au Cci ou à l’envoi individuel.',
   'validate.accountNoLabel': 'Donnez un nom au compte pour les distinguer',
   'validate.accountBadFrom': 'L’adresse d’expéditeur est invalide',
   'validate.accountBadReplyTo': 'L’adresse de réponse est invalide',
@@ -1025,7 +1034,20 @@ export const fr: Translations = {
   'describe.endAfter': '{n} fois au total',
   'describe.endOn': 'jusqu’au {when}',
   'describe.burst': '{n} copies à chaque fois',
-  'describe.shifted': 'Certaines dates ont été déplacées par le calendrier ou les heures calmes.',
+  'describe.shifted': 'Certaines dates ont été déplacées par le calendrier de travail, les heures calmes, ou la fenêtre de livraison d’un destinataire.',
+
+  // --- schedule simulator + "why this time?" (RecurrenceEditor) ---
+  'sim.title': 'Simulateur de planification',
+  'sim.hint': 'Les heures exactes auxquelles cette règle enverra réellement — calendrier de travail, heures calmes et toute fenêtre de livraison déjà appliqués.',
+  'explain.title': 'Pourquoi cette heure ?',
+  'explain.unchanged': 'Envoi exactement à {when} — rien ne le modifie.',
+  'explain.original': 'La règle calcule {when}.',
+  'explain.workCalendarMoved': 'Le calendrier de travail le déplace hors d’un jour chômé, à {when}.',
+  'explain.quietHoursMoved': 'Les heures calmes le retiennent jusqu’à {when}.',
+  'explain.deliveryWindowMoved': 'La fenêtre de livraison de {name} le déplace à {when}, dans son fuseau horaire.',
+  'explain.finalTime': 'Sera envoyé à {when}.',
+  'explain.jitterNote': 'Puis jusqu’à {n} s de délai aléatoire supplémentaire avant l’envoi réel.',
+  'explain.recipientFallback': 'un destinataire',
 
   // --- one vocabulary for state, used by StatusChip everywhere ---
   'status.armed': 'armé',
@@ -1613,4 +1635,46 @@ export const fr: Translations = {
   'sync.conflict.keptNewer': 'Version la plus récente conservée plutôt que « {theirs} »',
   'sync.conflict.keepMineInstead': 'Garder la mienne à la place',
   'sync.conflict.restored': 'Votre version a été restaurée',
+
+  'reliability.title': 'Centre de fiabilité',
+  'reliability.intro':
+    "Tout ce qui pourrait empêcher un rappel programmé de partir, rassemblé à partir de ce que l'application sait déjà — rien ici ne se connecte à votre serveur de messagerie.",
+  'reliability.refresh': 'Actualiser',
+  'reliability.ledgerUnavailable':
+    "Le registre d'envoi n'est suivi que sur l'application de bureau, donc les envois bloqués ne peuvent pas être vérifiés depuis ici.",
+  'reliability.statJobs': 'Rappels à surveiller',
+  'reliability.statLedger': 'Envois bloqués',
+  'reliability.statAccounts': 'Comptes à surveiller',
+  'reliability.statDevices': 'Appareils désynchronisés',
+  'reliability.emptyNoJobs': "Rien n'est encore programmé, il n'y a donc rien à vérifier.",
+  'reliability.allClear': 'Tout ce qui est vérifié ici semble en bon état.',
+  'reliability.sectionJobs': 'Rappels',
+  'reliability.job.paused': 'En pause',
+  'reliability.job.failing': 'Échec du dernier envoi',
+  'reliability.job.retrying': 'Envoi en cours',
+  'reliability.job.stuckSend': "L'envoi semble bloqué",
+  'reliability.job.executorUnsynced': "L'appareil assigné ne s'est pas synchronisé",
+  'reliability.executorLastSynced': 'Doit être envoyé depuis {device}, synchronisé {when}',
+  'reliability.executorNeverSynced':
+    "Doit être envoyé depuis {device}, qui ne s'est jamais synchronisé avec cet appareil",
+  'reliability.unknownDevice': 'un appareil non reconnu',
+  'reliability.retryNow': 'Réessayer maintenant',
+  'reliability.sectionLedger': "Registre d'envoi",
+  'reliability.ledgerDetail': "{state}, sans changement depuis {minutes} min ({attempts} tentative(s) jusqu'ici)",
+  'reliability.ledgerState.claimed': 'Réservé',
+  'reliability.ledgerState.sending': 'Envoi en cours',
+  'reliability.ledgerState.accepted': 'Accepté',
+  'reliability.sectionAccounts': 'Comptes',
+  'reliability.account.noSecret': 'Aucun mot de passe enregistré',
+  'reliability.account.oauthDisconnected': 'Jamais connecté',
+  'reliability.account.oauthNeedsConsent': 'La connexion doit être renouvelée',
+  'reliability.account.oauthUnconfigured': "La connexion n'est pas configurée dans cette version",
+  'reliability.account.authFailure': 'Le dernier envoi ressemblait à un échec de connexion',
+  'reliability.reconnect': 'Se reconnecter',
+  'reliability.reconnected': 'Reconnecté',
+  'reliability.reconnectFailed': 'Impossible de se reconnecter',
+  'reliability.sectionDevices': 'Appareils associés',
+  'reliability.deviceStale': 'Synchronisé {when}',
+  'reliability.deviceNeverSynced': "N'a jamais terminé de synchronisation",
+  'reliability.sectionAndroid': 'Cet appareil',
 }

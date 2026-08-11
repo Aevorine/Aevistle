@@ -24,8 +24,11 @@ import {
   calendarWarning,
   DEFAULT_WORK_CALENDAR,
 } from '../core/workCalendar'
+import { applyDeliveryWindows } from '../core/deliveryWindow'
+import { explainNextOccurrence, type OccurrenceExplainStep } from '../core/occurrenceExplain'
 import { validateBurst, validateRecurrence } from '../core/validate'
 import type { WorkdayPolicy } from '../core/workCalendar'
+import { windowsOf, type WindowedRecipient } from './deliveryPreview'
 import {
   DEFAULT_BURST,
   MAX_BURST_COUNT,
@@ -35,6 +38,15 @@ import {
   type RecurrenceKind,
   type RetryPolicy,
 } from '../core/types'
+
+/**
+ * How many resolved fire times the schedule simulator shows.
+ *
+ * Ten, not the four the old single-purpose preview used: this panel is now
+ * the answer to "will this actually go the way I think", and four instances
+ * of a monthly rule is four months away from the pattern being obvious.
+ */
+const SIMULATOR_COUNT = 10
 
 /**
  * Exported because the compose screen sets a send time inline now, and a
@@ -178,6 +190,7 @@ export function RecurrenceEditor({
   burst,
   onBurstChange,
   runsSoFar = 0,
+  recipientWindows = [],
 }: {
   recurrence: Recurrence
   onChange: (r: Recurrence) => void
@@ -186,6 +199,13 @@ export function RecurrenceEditor({
   burst?: BurstPolicy
   onBurstChange: (b: BurstPolicy) => void
   runsSoFar?: number
+  /**
+   * The `To:` recipients' delivery windows, in `To:` order — the same list
+   * `windowsForDraft` in `AppState.tsx` would build from this draft. Absent
+   * (or empty) simply means none of them apply, which is true for most
+   * drafts and for every screen that has not wired this through yet.
+   */
+  recipientWindows?: WindowedRecipient[]
 }) {
   const { t, formatDateTime } = useI18n()
   const { state } = useApp()
@@ -203,58 +223,87 @@ export function RecurrenceEditor({
     () => [...validateRecurrence(recurrence), ...validateBurst(burst)],
     [recurrence, burst],
   )
+  /** The `To:` recipients' windows, in the shape the delivery-window engine wants. */
+  const windows = useMemo(() => windowsOf(recipientWindows), [recipientWindows])
+
   /**
-   * The times this rule will *actually* produce.
+   * The times this rule will *actually* produce — the schedule simulator.
    *
-   * Shaped by the working calendar and quiet hours before being shown, because
-   * those two rewrite the occurrence list downstream (see `AppState`'s
-   * `shapeOccurrences`). A preview that skipped them would list 02:00 on a
-   * public holiday and then deliver at 07:00 the following Monday — the one
-   * kind of mistake a preview exists to prevent.
+   * Run through the same rewrites `AppState`'s `shapeOccurrences` applies
+   * before a job is armed — the working calendar, quiet hours and (when a
+   * recipient has one) their delivery window, in that order — using the real
+   * functions rather than a description of what they do. A preview that
+   * skipped any of them would list a time the app would never actually use:
+   * 02:00 on a public holiday shown as-is, when it would really deliver at
+   * 07:00 the following Monday, or a recipient's own morning ignored
+   * entirely.
    */
   const rawPreview = useMemo(
-    () => computeOccurrences(recurrence, { runsSoFar, count: 4 }),
+    () => computeOccurrences(recurrence, { runsSoFar, count: SIMULATOR_COUNT }),
     [recurrence, runsSoFar],
   )
   const calendar = settings.workCalendar ?? DEFAULT_WORK_CALENDAR
+  const quiet = {
+    enabled: settings.quietHoursEnabled,
+    start: settings.quietStart,
+    end: settings.quietEnd,
+  }
   /**
    * The preview, and what it cost.
    *
    * `applyWorkCalendarDetailed` rather than `applyWorkCalendar`, because the
    * plain one throws away the half of the answer that matters here: a fire time
    * the calendar had **no working day to move to** simply vanishes from the
-   * list, and a preview showing three dates instead of four with no explanation
+   * list, and a preview showing three dates instead of ten with no explanation
    * is exactly how a reminder disappears in silence. The detailed call reports
    * it; the block below prints it.
+   *
+   * `Date.now()` passed as the floor, matching `shapeOccurrences` and
+   * `upcoming()`: without it a `workdayPolicy: 'before'` shift that lands in
+   * the past is silently accepted here and then filtered out below as
+   * "already happened", so the simulator would show fewer sends than the
+   * rule really has left with no explanation — precisely the bug
+   * `applyWorkCalendarDetailed`'s own doc comment on `notBefore` describes.
    */
   const { preview, warning } = useMemo(() => {
     const detailed = applyWorkCalendarDetailed(
       rawPreview,
       recurrence.workdayPolicy ?? 'off',
       calendar,
+      Date.now(),
     )
-    const quieted = applyQuietHours(detailed.occurrences, {
-      enabled: settings.quietHoursEnabled,
-      start: settings.quietStart,
-      end: settings.quietEnd,
-    })
+    const quieted = applyQuietHours(detailed.occurrences, quiet)
+    const delivered =
+      windows.length === 0 ? quieted : quieted.map((at) => applyDeliveryWindows(at, windows).at)
     return {
-      preview: quieted.slice(0, 4),
+      preview: delivered.slice(0, SIMULATOR_COUNT),
       warning: calendarWarning(detailed.adjustment),
     }
-  }, [rawPreview, recurrence.workdayPolicy, calendar, settings])
+    // `quiet` is not listed below: it is built fresh from `settings` on every
+    // render, and `settings` is already a dependency.
+  }, [rawPreview, recurrence.workdayPolicy, calendar, settings, windows])
 
-  /** Did the calendar or the quiet window move anything? Worth saying if so. */
+  /** Did the calendar, quiet hours or a delivery window move anything? Worth saying if so. */
   const shifted = preview.length !== rawPreview.length || preview.some((t, i) => t !== rawPreview[i])
+
+  /**
+   * The single next occurrence, with the chain of adjustments that produced
+   * it — "why this time?", right below the simulator's list of times.
+   */
+  const explanation = useMemo(
+    // `quiet` is not listed below for the same reason as the preview above.
+    () => explainNextOccurrence(recurrence, { runsSoFar, calendar, quiet, windows }),
+    [recurrence, runsSoFar, calendar, settings, windows],
+  )
 
   const summary = summarizeRecurrence(recurrence)
 
   /**
    * The rule as one sentence.
    *
-   * The list of dates below answers "when", and only for the next four. This
+   * The simulator below answers "when", and only for the next ten. This
    * answers "what did I just set up", including the parts with no visible
-   * consequence in four entries: an end condition twelve runs away, a jitter
+   * consequence in ten entries: an end condition twelve runs away, a jitter
    * window, a holiday policy that will not bite until October.
    */
   const clauses: string[] = [t(summary.key as 'recur.summary.once', summary.values)]
@@ -288,6 +337,62 @@ export function RecurrenceEditor({
   if (effectiveBurst.enabled && effectiveBurst.count > 1) {
     clauses.push(t('describe.burst', { n: effectiveBurst.count }))
   }
+
+  /**
+   * One line of the "why this time?" chain for a single adjustment step.
+   *
+   * `jitter` is handled here too, even though the caller below only ever
+   * reaches it through the separate `jitterStep` branch — a `switch` over
+   * `ExplainStepKind` that silently dropped a case the type still allows
+   * would be exactly the kind of gap this codebase's own doc comments keep
+   * warning about.
+   */
+  const explainStepLine = (step: OccurrenceExplainStep): string => {
+    switch (step.kind) {
+      case 'workCalendar':
+        return t('explain.workCalendarMoved', { when: formatDateTime(step.to) })
+      case 'quietHours':
+        return t('explain.quietHoursMoved', { when: formatDateTime(step.to) })
+      case 'deliveryWindow': {
+        const name =
+          step.recipientIndex !== undefined ? recipientWindows[step.recipientIndex]?.name : undefined
+        return t('explain.deliveryWindowMoved', {
+          name: name ?? t('explain.recipientFallback'),
+          when: formatDateTime(step.to),
+        })
+      }
+      case 'jitter':
+        return t('explain.jitterNote', { n: step.jitterSeconds ?? 0 })
+    }
+  }
+
+  /**
+   * "Why this time?", as lines rather than an empty chain of no-ops.
+   *
+   * `null` means there is no next occurrence to explain at all (`schedule.
+   * noMoreRuns` covers that in the render below). Otherwise: one line if
+   * nothing about the deterministic time moved (jitter is never
+   * "deterministic" — see `occurrenceExplain.ts`'s header comment on why it
+   * gets its own trailing note instead of a chain step), or the original
+   * time, one line per rule that moved it, and the final time if something
+   * did.
+   */
+  const explainLines: string[] | null = !explanation.hasNext
+    ? null
+    : (() => {
+        const deterministic = explanation.steps.filter((s) => s.kind !== 'jitter')
+        const jitterStep = explanation.steps.find((s) => s.kind === 'jitter')
+        const lines =
+          deterministic.length === 0
+            ? [t('explain.unchanged', { when: formatDateTime(explanation.finalAt) })]
+            : [
+                t('explain.original', { when: formatDateTime(explanation.originalAt) }),
+                ...deterministic.map(explainStepLine),
+                t('explain.finalTime', { when: formatDateTime(explanation.finalAt) }),
+              ]
+        if (jitterStep) lines.push(explainStepLine(jitterStep))
+        return lines
+      })()
 
   const cronCheck = recurrence.kind === 'cron' ? validateCron(recurrence.cron ?? '') : null
 
@@ -521,15 +626,20 @@ export function RecurrenceEditor({
         </div>
       ) : null}
 
-      {/* --- preview ------------------------------------------------------- */}
+      {/* --- schedule simulator --------------------------------------------- */}
 
       <div
         className="card"
         style={{ background: 'var(--surface-inset)', boxShadow: 'none' }}
       >
         <div style={{ padding: 'var(--sp-3) var(--sp-4)' }}>
-          <div className="section-label" style={{ marginBottom: 'var(--sp-2)' }}>
-            {t('schedule.upcoming')}
+          <div className="section-label" style={{ marginBottom: 'var(--sp-1)' }}>
+            {t('sim.title')}
+          </div>
+          <div
+            style={{ marginBottom: 'var(--sp-2)', fontSize: 'var(--text-xs)', color: 'var(--text-3)' }}
+          >
+            {t('sim.hint')}
           </div>
           {/* The rule in one sentence, above the dates it produces. */}
           <div
@@ -591,6 +701,44 @@ export function RecurrenceEditor({
             >
               {preview.map((ms) => (
                 <li key={ms}>{formatDateTime(ms)}</li>
+              ))}
+            </ol>
+          )}
+        </div>
+      </div>
+
+      {/* --- "why this time?" ------------------------------------------------
+          Plain-language adjustment chain for the *next* occurrence only —
+          the simulator above already lists ten resolved times; this answers
+          why the first of them is what it is, one step per rule that
+          actually moved it. See `core/occurrenceExplain.ts`. */}
+
+      <div
+        className="card"
+        style={{ background: 'var(--surface-inset)', boxShadow: 'none' }}
+      >
+        <div style={{ padding: 'var(--sp-3) var(--sp-4)' }}>
+          <div className="section-label" style={{ marginBottom: 'var(--sp-2)' }}>
+            {t('explain.title')}
+          </div>
+          {explainLines === null ? (
+            <div style={{ color: 'var(--text-3)', fontSize: 'var(--text-sm)' }}>
+              {t('schedule.noMoreRuns')}
+            </div>
+          ) : (
+            <ol
+              style={{
+                margin: 0,
+                paddingInlineStart: 'var(--sp-5)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 2,
+                fontSize: 'var(--text-sm)',
+                color: 'var(--text-2)',
+              }}
+            >
+              {explainLines.map((line, i) => (
+                <li key={i}>{line}</li>
               ))}
             </ol>
           )}

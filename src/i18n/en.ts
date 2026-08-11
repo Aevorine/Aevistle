@@ -147,7 +147,6 @@ export const en = {
   'schedule.pause': 'Pause',
   'schedule.resume': 'Resume',
   'schedule.runNow': 'Send now',
-  'schedule.upcoming': 'Upcoming',
   'schedule.noMoreRuns': 'No further runs',
   'schedule.name': 'Schedule name',
   'schedule.namePlaceholder': 'Weekly status report',
@@ -485,6 +484,16 @@ export const en = {
   'validate.attachmentNameInjection': 'The file name of {name} contains an illegal character',
   'validate.attachmentRisky': '{name} is a .{ext} file — many mail servers block these',
   'validate.attachmentDeceptive': '{name} hides an executable behind a document extension',
+
+  // Send Guardian — non-blocking pre-send sanity checks. See core/sendGuardian.ts.
+  'sendGuardian.title': 'Before you send',
+  'sendGuardian.missingAttachment': 'The message mentions an attachment, but nothing is attached.',
+  'sendGuardian.staleDate':
+    'The message says something like “tomorrow”, but this is scheduled to go out in about {days} days — check the wording still makes sense.',
+  'sendGuardian.typoDomain': '“{typo}” looks like it could be a typo of “{suggestion}”, a domain you send to often.',
+  'sendGuardian.massTo':
+    '{n} recipients are all in To — everyone will see everyone else’s address. Consider Bcc or individual delivery.',
+
   'validate.accountNoLabel': 'Give the account a name so you can tell them apart',
   'validate.accountBadFrom': 'The from address is not valid',
   'validate.accountBadReplyTo': 'The reply-to address is not valid',
@@ -1038,7 +1047,20 @@ export const en = {
   'describe.endAfter': '{n} times in total',
   'describe.endOn': 'until {when}',
   'describe.burst': '{n} copies each time',
-  'describe.shifted': 'Some of these were moved by the working calendar or quiet hours.',
+  'describe.shifted': 'Some of these were moved by the working calendar, quiet hours, or a recipient’s delivery window.',
+
+  // --- schedule simulator + "why this time?" (RecurrenceEditor) ---
+  'sim.title': 'Schedule simulator',
+  'sim.hint': 'The exact times this rule will actually fire — calendar, quiet hours and any delivery window already applied.',
+  'explain.title': 'Why this time?',
+  'explain.unchanged': 'Sends exactly at {when} — nothing adjusts it.',
+  'explain.original': 'The rule computes {when}.',
+  'explain.workCalendarMoved': 'The working calendar moves it off a day off, to {when}.',
+  'explain.quietHoursMoved': 'Quiet hours hold it until {when}.',
+  'explain.deliveryWindowMoved': '{name}’s delivery window moves it to {when}, their time.',
+  'explain.finalTime': 'Goes out at {when}.',
+  'explain.jitterNote': 'Then up to {n}s more of random delay before it actually sends.',
+  'explain.recipientFallback': 'a recipient',
 
   // --- one vocabulary for state, used by StatusChip everywhere ---
   'status.armed': 'armed',
@@ -1634,6 +1656,51 @@ export const en = {
   'sync.conflict.keptNewer': 'Kept the newer version over "{theirs}"',
   'sync.conflict.keepMineInstead': 'Keep mine instead',
   'sync.conflict.restored': 'Restored your version',
+
+  // Reliability Center — "will my scheduled reminders actually go out?" in
+  // one screen. Section labels name the *source* of the fact (jobs, the
+  // dispatch ledger, accounts, paired devices) rather than a mood, so a
+  // nonzero number always points at something concrete to open next.
+  'reliability.title': 'Reliability Center',
+  'reliability.intro':
+    'Everything that could stop a scheduled reminder from going out, gathered from what the app already knows — nothing here connects to your mail server.',
+  'reliability.refresh': 'Refresh',
+  'reliability.ledgerUnavailable':
+    'The dispatch ledger is only tracked on the desktop app, so stuck sends cannot be checked from here.',
+  'reliability.statJobs': 'Reminders needing attention',
+  'reliability.statLedger': 'Stuck sends',
+  'reliability.statAccounts': 'Accounts needing attention',
+  'reliability.statDevices': 'Devices out of sync',
+  'reliability.emptyNoJobs': 'Nothing is scheduled yet, so there is nothing to check.',
+  'reliability.allClear': 'Everything checked here looks healthy.',
+  'reliability.sectionJobs': 'Reminders',
+  'reliability.job.paused': 'Paused',
+  'reliability.job.failing': 'Failed last run',
+  'reliability.job.retrying': 'Sending now',
+  'reliability.job.stuckSend': 'Send looks stuck',
+  'reliability.job.executorUnsynced': "Assigned device hasn't synced",
+  'reliability.executorLastSynced': 'Set to send from {device}, last synced {when}',
+  'reliability.executorNeverSynced': 'Set to send from {device}, which has never synced with this device',
+  'reliability.unknownDevice': 'an unrecognised device',
+  'reliability.retryNow': 'Retry now',
+  'reliability.sectionLedger': 'Dispatch ledger',
+  'reliability.ledgerDetail': '{state}, unchanged for {minutes} min ({attempts} attempt(s) so far)',
+  'reliability.ledgerState.claimed': 'Claimed',
+  'reliability.ledgerState.sending': 'Sending',
+  'reliability.ledgerState.accepted': 'Accepted',
+  'reliability.sectionAccounts': 'Accounts',
+  'reliability.account.noSecret': 'No password saved',
+  'reliability.account.oauthDisconnected': 'Never signed in',
+  'reliability.account.oauthNeedsConsent': 'Sign-in needs to be renewed',
+  'reliability.account.oauthUnconfigured': "Sign-in isn't set up in this build",
+  'reliability.account.authFailure': 'Last send looked like a sign-in failure',
+  'reliability.reconnect': 'Reconnect',
+  'reliability.reconnected': 'Reconnected',
+  'reliability.reconnectFailed': 'Could not reconnect',
+  'reliability.sectionDevices': 'Paired devices',
+  'reliability.deviceStale': 'Last synced {when}',
+  'reliability.deviceNeverSynced': 'Has never completed a sync',
+  'reliability.sectionAndroid': 'This device',
 } as const
 
 export type TranslationKey = keyof typeof en

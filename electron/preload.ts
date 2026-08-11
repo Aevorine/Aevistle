@@ -128,6 +128,7 @@ const api: DesktopApi = {
     ipcRenderer.on(IPC.jobEvent, listener)
     return () => ipcRenderer.removeListener(IPC.jobEvent, listener)
   },
+  getDispatchLedgerStatus: () => ipcRenderer.invoke(IPC.getDispatchLedgerStatus),
 
   syncInbox: (config) => ipcRenderer.invoke(IPC.syncInbox, config),
   testInbox: (config, secret) => ipcRenderer.invoke(IPC.testInbox, config, secret),
@@ -219,6 +220,7 @@ const api: DesktopApi = {
     ipcRenderer.on(IPC.controlRequest, listener)
     return () => ipcRenderer.removeListener(IPC.controlRequest, listener)
   },
+  getControlAudit: () => ipcRenderer.invoke(IPC.getControlAudit),
 
   startPairingHost: (mode, pairId, host) =>
     ipcRenderer.invoke(IPC.startPairingHost, mode, pairId, host),

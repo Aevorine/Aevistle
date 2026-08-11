@@ -162,3 +162,55 @@ export function spliceForcedResends(
   }
   return next
 }
+
+// ---------------------------------------------------------------------------
+// Stuck-entry detection — the Reliability Center's view onto this file
+// ---------------------------------------------------------------------------
+
+/**
+ * How long a ledger entry may sit in a non-terminal state before it counts as
+ * "stuck" rather than "an attempt still under way".
+ *
+ * Generous on purpose. `electron/scheduler.ts`'s `sendOnce` caps each retry
+ * wait at 3600s, and the default policy (`DEFAULT_RETRY`) finishes its three
+ * attempts in a couple of minutes — but a user-configured `RetryPolicy` with a
+ * high `maxAttempts` can legitimately chain several one-hour backoffs before
+ * giving up. Two hours comfortably outlasts every retry chain this app's own
+ * policy limits allow for in practice, while still catching the failure this
+ * constant exists to catch: a process that died mid-send and left the entry
+ * orphaned, with nothing left to transition or delete it. See
+ * `getStuckLedgerEntries`.
+ */
+export const LEDGER_STUCK_THRESHOLD_MS = 2 * 60 * 60 * 1000
+
+/** When this entry last moved — the instant a "how long has it sat here" clock reads from. */
+function ledgerEntrySince(entry: DispatchLedgerEntry): number {
+  return entry.state === 'sending' ? (entry.sendingAt ?? entry.claimedAt) : entry.claimedAt
+}
+
+/**
+ * Has this entry been sitting in a non-terminal state longer than is
+ * plausible for an attempt genuinely still in progress?
+ *
+ * Every entry the ledger holds is non-terminal by construction — see the
+ * module doc's "there is no `'committed'` state" — so age is the only signal
+ * left to tell "still working on it" apart from "nobody is coming back to
+ * this". `now` is a parameter rather than `Date.now()` so this stays testable
+ * without a clock to fake.
+ */
+export function isLedgerEntryStuck(
+  entry: DispatchLedgerEntry,
+  now = Date.now(),
+  thresholdMs = LEDGER_STUCK_THRESHOLD_MS,
+): boolean {
+  return now - ledgerEntrySince(entry) >= thresholdMs
+}
+
+/** Every entry old enough to be worth surfacing as "this send looks wedged". */
+export function getStuckLedgerEntries(
+  entries: DispatchLedgerEntry[],
+  now = Date.now(),
+  thresholdMs = LEDGER_STUCK_THRESHOLD_MS,
+): DispatchLedgerEntry[] {
+  return entries.filter((e) => isLedgerEntryStuck(e, now, thresholdMs))
+}

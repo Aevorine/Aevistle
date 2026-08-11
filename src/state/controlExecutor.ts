@@ -16,6 +16,7 @@
 
 import {
   parseWhen,
+  scopeRefusal,
   type ControlRequest,
   type ControlResponse,
   type StatusResult,
@@ -26,6 +27,7 @@ import {
   emptyDraft,
   newId,
   type AppState,
+  type ControlScope,
   type MessageDraft,
   type Recurrence,
   type ScheduledJob,
@@ -37,6 +39,17 @@ export interface ControlDeps {
   state: AppState
   appVersion: string
   allowSending: boolean
+  /**
+   * The scopes granted to the (single, shared) control token right now —
+   * normally `effectiveControlScopes(state.settings)`, computed by the
+   * caller. Re-validated here regardless of what shape it actually arrives
+   * in (see the guard at the top of `executeControl`): this function is the
+   * one place every doorway — HTTP, the drop folder and, per `ControlRequest.via`,
+   * a future direct caller — ends up funnelled through, so it is where scope
+   * enforcement has to hold even if an earlier gate (`electron/controlServer.ts`)
+   * is ever bypassed or gets it wrong.
+   */
+  scopes: ControlScope[]
   scheduleDraft(job: ScheduledJob): Promise<void>
   sendDraftNow(draft: MessageDraft): Promise<SendResult>
   toggleJob(id: string, enabled: boolean): Promise<void>
@@ -109,6 +122,15 @@ export async function executeControl(
   const params = request.params ?? {}
   const limit = Math.min(Number(params.limit) || 50, 500)
   const ok = (result: unknown): ControlResponse => ({ id: request.id, ok: true, result })
+
+  // Fail closed on anything that is not an honest-to-goodness array: a
+  // malformed `deps.scopes` (wrong type, missing) must refuse every op, never
+  // fall through to "no scopes recorded, so allow" — see `scopeRefusal` and
+  // `normalizeControlScopes` in `core/control.ts`, whose fail-closed contract
+  // this mirrors rather than re-derives, so both stay in sync by construction.
+  const grantedScopes = Array.isArray(deps.scopes) ? deps.scopes : []
+  const refusal = scopeRefusal(request.op, grantedScopes)
+  if (refusal) return { id: request.id, ok: false, error: refusal }
 
   try {
     switch (request.op) {

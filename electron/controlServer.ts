@@ -22,11 +22,16 @@ import {
   ENDPOINT_FILE,
   HOME_CONTROL_DIR,
   SENDING_OPS,
+  auditContext,
+  requiredScope,
+  scopeRefusal,
+  type ControlAuditEntry,
   type ControlEndpoint,
   type ControlOp,
   type ControlRequest,
   type ControlResponse,
 } from '../src/core/control'
+import type { ControlScope } from '../src/core/types'
 
 export function homeControlDir(): string {
   return path.join(os.homedir(), HOME_CONTROL_DIR)
@@ -38,8 +43,22 @@ const MAX_BODY = 2 * 1024 * 1024
 export interface ControlHooks {
   /** Hand a request to the renderer and resolve with its answer. */
   execute(request: ControlRequest): Promise<ControlResponse>
-  /** Current settings. Read per request so a toggle takes effect immediately. */
-  permissions(): { enabled: boolean; allowSending: boolean }
+  /**
+   * Current settings. Read per request so a toggle takes effect immediately.
+   *
+   * `scopes` is already resolved — `effectiveControlScopes(settings)`, with
+   * `send.immediate` folded in from `allowSending` — so nothing on this side
+   * of the boundary needs to know that rule exists.
+   */
+  permissions(): { enabled: boolean; allowSending: boolean; scopes: ControlScope[] }
+  /**
+   * Durably record what became of one request, granted or refused. Awaited
+   * before the caller answers — see `electron/store.ts`'s
+   * `appendControlAudit`, which this is expected to call and which never
+   * rejects on its own, so a disk hiccup here cannot be the reason a request
+   * that actually succeeded gets reported as failed.
+   */
+  audit(entry: ControlAuditEntry): Promise<void>
   /** Where `control/` and `drop/` live. */
   dataRoot(): string
   log(level: 'info' | 'warn' | 'error', message: string, detail?: string): void
@@ -288,19 +307,49 @@ export class ControlServer {
         return
       }
       if (!this.authorised(req)) {
+        await this.audit({
+          via: 'http',
+          op: null,
+          scope: null,
+          granted: false,
+          reason: 'bad or missing bearer token',
+        })
         send(401, { ok: false, error: 'bad or missing bearer token' })
         return
       }
 
-      const body = await readJson(req)
+      // Its own try/catch, not the outer one: a malformed body is a request
+      // that *reached* `/control` authenticated, and belongs in the audit
+      // trail the same as any other refusal — the outer catch also covers
+      // failures that have nothing to do with a control request at all (a
+      // thrown `buildCalendarIcs`, a bad URL), which must not be recorded as
+      // one.
+      let body: Record<string, unknown>
+      try {
+        body = await readJson(req)
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error)
+        await this.audit({ via: 'http', op: null, scope: null, granted: false, reason })
+        send(400, { ok: false, error: reason })
+        return
+      }
       const op = body.op as ControlOp
       if (!OPS.has(op)) {
-        send(400, { ok: false, error: `unknown op: ${String(body.op)}` })
+        const reason = `unknown op: ${String(body.op)}`
+        await this.audit({
+          via: 'http',
+          op: body.op === undefined || body.op === null ? null : String(body.op),
+          scope: null,
+          granted: false,
+          reason,
+        })
+        send(400, { ok: false, error: reason })
         return
       }
 
       const refusal = this.refuse(op)
       if (refusal) {
+        await this.audit({ via: 'http', op, scope: requiredScope(op), granted: false, reason: refusal })
         send(403, { ok: false, error: refusal })
         return
       }
@@ -311,20 +360,56 @@ export class ControlServer {
         params: (body.params as Record<string, unknown>) ?? {},
         via: 'http',
       })
+      await this.audit({
+        via: 'http',
+        op,
+        scope: requiredScope(op),
+        granted: response.ok,
+        reason: response.ok ? undefined : response.error,
+        context: auditContext(op, response),
+      })
       send(response.ok ? 200 : 400, response)
     } catch (error) {
       send(400, { ok: false, error: error instanceof Error ? error.message : String(error) })
     }
   }
 
-  /** Returns why an operation is not allowed, or null if it is. */
+  /**
+   * Returns why an operation is not allowed, or null if it is.
+   *
+   * Scope is checked last and separately from the two switches above it —
+   * `enabled`/`allowSending` gate the *doorway*, the scope check gates the
+   * *action*, and keeping them as distinct `if`s (rather than folding the
+   * scope check into `SENDING_OPS`'s condition) is what lets `runDropped`
+   * reuse the exact same `scopeRefusal` call below even though it
+   * deliberately does not go through this method — see its own comment on
+   * why the doorway checks and the action checks are not the same list.
+   */
   private refuse(op: ControlOp): string | null {
-    const { enabled, allowSending } = this.hooks.permissions()
+    const { enabled, allowSending, scopes } = this.hooks.permissions()
     if (!enabled) return 'the control interface is switched off in Settings'
     if (SENDING_OPS.includes(op) && !allowSending) {
       return 'sending through the control interface is switched off in Settings'
     }
-    return null
+    return scopeRefusal(op, scopes)
+  }
+
+  /**
+   * Append one durable audit entry. Fire-and-forget from the caller's point of
+   * view is deliberately not offered — every call site `await`s this, so the
+   * record is on disk before the caller answers the request it describes.
+   */
+  private audit(entry: {
+    via: ControlRequest['via']
+    op: string | null
+    scope: ControlScope | null
+    granted: boolean
+    reason?: string
+    context?: string
+  }): Promise<void> {
+    return this.hooks
+      .audit({ id: randomBytes(8).toString('hex'), at: Date.now(), ...entry })
+      .catch(() => {})
   }
 
   // -------------------------------------------------------------------------
@@ -359,6 +444,12 @@ export class ControlServer {
   }
 
   private async runDropped(claimed: string, name: string): Promise<void> {
+    // Set as soon as the body is parseable enough to read `.op` off it, so
+    // even a request naming an unrecognised op is audited as what it
+    // actually asked for — see `ControlAuditEntry.op`'s doc. Stays `null` for
+    // a file that was not valid JSON at all.
+    let auditOp: string | null = null
+
     const finish = async (response: ControlResponse) => {
       // Move first, report after — and report what actually happened, not
       // what the op reported before the move was attempted. This used to
@@ -396,6 +487,14 @@ export class ControlServer {
           `${name}: ${writeError instanceof Error ? writeError.message : String(writeError)}`,
         )
       })
+      await this.audit({
+        via: 'drop',
+        op: auditOp,
+        scope: auditOp ? requiredScope(auditOp) : null,
+        granted: effective.ok,
+        reason: effective.ok ? undefined : effective.error,
+        context: auditOp ? auditContext(auditOp, effective) : undefined,
+      })
       this.hooks.log(
         effective.ok ? 'info' : 'warn',
         effective.ok ? 'control.drop.ok' : 'control.drop.failed',
@@ -406,14 +505,22 @@ export class ControlServer {
     try {
       const raw = await fs.readFile(claimed, 'utf8')
       const body = JSON.parse(raw) as { op?: string; params?: Record<string, unknown> }
+      auditOp = typeof body.op === 'string' ? body.op : null
       const op = body.op as ControlOp
       if (!OPS.has(op)) throw new Error(`unknown op: ${String(body.op)}`)
 
       // The port's off-switch does not gate the drop folder, but the sending
-      // switch does: it is about the action, not about the doorway.
+      // switch — and every other scope — does: it is about the action, not
+      // about the doorway. The explicit sending check stays alongside the
+      // general scope check rather than being folded into it, the same
+      // defense-in-depth `controlExecutor.ts`'s `send_now` case keeps for
+      // itself: two independent readers of "is sending actually allowed"
+      // agreeing is what makes one of them being wrong someday survivable.
       if (SENDING_OPS.includes(op) && !this.hooks.permissions().allowSending) {
         throw new Error('sending through the control interface is switched off in Settings')
       }
+      const refusal = scopeRefusal(op, this.hooks.permissions().scopes)
+      if (refusal) throw new Error(refusal)
 
       const response = await this.hooks.execute({
         id: randomBytes(8).toString('hex'),

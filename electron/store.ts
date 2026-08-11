@@ -30,12 +30,15 @@ import path from 'node:path'
 import { isInside } from './fsUtil'
 import type { SecretKind } from '../src/core/types'
 import { mintMessageId, type DispatchLedgerEntry } from '../src/core/dispatchLedger'
+import type { ControlAuditEntry } from '../src/core/control'
 
 const STATE_FILE = 'state.json'
 const SECRET_FILE = 'secrets.json'
 const POINTER_FILE = 'location.json'
 /** Durable per-occurrence send state — see the "Dispatch ledger" section below. Follows the data folder like everything else the jobs it describes move with. */
 const LEDGER_FILE = 'dispatch-ledger.json'
+/** Durable control-API request log — see the "Control audit log" section below. */
+const CONTROL_AUDIT_FILE = 'control-audit.json'
 const ATTACHMENTS_DIR = 'attachments'
 /** Images pasted from the clipboard straight into a compose body. */
 const PASTED_DIR = 'pasted'
@@ -43,7 +46,14 @@ const PASTED_DIR = 'pasted'
 const PATH_HINT_FILE = 'datapath.txt'
 
 /** What follows the user when the data folder moves. */
-const MOVABLE = [STATE_FILE, SECRET_FILE, LEDGER_FILE, ATTACHMENTS_DIR, PASTED_DIR] as const
+const MOVABLE = [
+  STATE_FILE,
+  SECRET_FILE,
+  LEDGER_FILE,
+  CONTROL_AUDIT_FILE,
+  ATTACHMENTS_DIR,
+  PASTED_DIR,
+] as const
 
 /**
  * Rebuildable on demand, so it is discarded at the old location rather than
@@ -916,6 +926,63 @@ export function deleteLedgerEntry(claimKey: string): Promise<void> {
     delete map[claimKey]
     await writeLedger(map)
   })
+}
+
+// ---------------------------------------------------------------------------
+// Control audit log
+// ---------------------------------------------------------------------------
+//
+// One durable record per control-API request, granted or refused — see
+// `src/core/control.ts`'s `ControlAuditEntry`. Kept as its own file rather
+// than folded into `state.json` for the same reason the dispatch ledger is:
+// a request can be refused before the renderer is even asked (a bad bearer
+// token, a scope the settings screen has not granted — see
+// `electron/controlServer.ts`), so anything that waited for a round trip
+// through application state, on its 350ms debounce, would simply never
+// record that refusal. `electron/controlServer.ts` is the only writer; it
+// sees every request on every doorway (HTTP, the drop folder) and appends
+// exactly once per request, whatever became of it.
+
+/** Oldest entries fall off once the file holds this many — a bearer token that never rotates could otherwise grow this file for the life of the install. Matches `Settings.logMaxEntries`'s default, which the same install already treats as "big enough to matter, small enough to not think about". */
+const AUDIT_MAX_ENTRIES = 500
+
+async function readAuditLog(): Promise<ControlAuditEntry[]> {
+  return (await readJson<ControlAuditEntry[]>(CONTROL_AUDIT_FILE)) ?? []
+}
+
+/** One write at a time, same reasoning as `enqueueLedgerWrite`: two requests landing in the same tick must not read-modify-write this file concurrently and have the loser's entry vanish. */
+let auditQueue: Promise<unknown> = Promise.resolve()
+
+function enqueueAuditWrite<T>(job: () => Promise<T>): Promise<T> {
+  const next = auditQueue.catch(() => {}).then(job)
+  auditQueue = next.catch(() => {})
+  return next
+}
+
+/**
+ * Append one entry and trim to `AUDIT_MAX_ENTRIES`, oldest first out.
+ *
+ * Never rejects into the caller's request handling — `electron/controlServer.ts`
+ * awaits this before answering, and a disk hiccup writing the audit trail must
+ * not be the reason a legitimate request also fails to get an answer. Logged
+ * to the console instead, the same fallback `hooks.log` already uses for
+ * every other control-server event.
+ */
+export async function appendControlAudit(entry: ControlAuditEntry): Promise<void> {
+  await enqueueAuditWrite(async () => {
+    const list = await readAuditLog()
+    list.push(entry)
+    const trimmed = list.length > AUDIT_MAX_ENTRIES ? list.slice(list.length - AUDIT_MAX_ENTRIES) : list
+    await writeAtomic(CONTROL_AUDIT_FILE, JSON.stringify(trimmed))
+  }).catch((e) => {
+    // eslint-disable-next-line no-console
+    console.error('[control] failed to write audit log entry', e)
+  })
+}
+
+/** Every entry currently on disk, oldest first — for the Settings screen. */
+export async function loadControlAudit(): Promise<ControlAuditEntry[]> {
+  return readAuditLog()
 }
 
 // ---------------------------------------------------------------------------

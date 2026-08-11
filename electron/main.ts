@@ -28,6 +28,7 @@ import { promises as fs, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { IPC, type DesktopPrefs, type TrayCommand } from '../src/core/ipc-contract'
 import type {
   Attachment,
+  ControlScope,
   InboxAccountState,
   InboxTag,
   LocaleId,
@@ -62,6 +63,8 @@ import { ControlServer } from './controlServer'
 import {
   CONTROL_DIR,
   ENDPOINT_FILE,
+  effectiveControlScopes,
+  type ControlAuditEntry,
   type ControlEndpoint,
   type ControlResponse,
 } from '../src/core/control'
@@ -80,6 +83,7 @@ import {
   type AccountSecret,
 } from '../src/core/secretTransport'
 import {
+  appendControlAudit,
   dataFolderSize,
   dataLocation,
   defaultDataRoot,
@@ -89,6 +93,8 @@ import {
   initDataRoot,
   isDefaultLocation,
   flushState,
+  loadControlAudit,
+  loadDispatchLedger,
   loadState,
   pruneSnapshots,
   recoveredFrom,
@@ -175,7 +181,18 @@ const scheduler = new Scheduler()
 // it means something is actually wrong.
 // ---------------------------------------------------------------------------
 
-let controlSettings = { enabled: false, allowSending: false, calendarSubscribeEnabled: false }
+/**
+ * `scopes` is already resolved through `effectiveControlScopes` at the one
+ * place it is set (`IPC.applyControl`'s handler below) — nothing that reads
+ * `controlSettings.scopes` has to know `send.immediate` comes from
+ * `allowSending` rather than from the settings screen's checkboxes.
+ */
+let controlSettings: {
+  enabled: boolean
+  allowSending: boolean
+  calendarSubscribeEnabled: boolean
+  scopes: ControlScope[]
+} = { enabled: false, allowSending: false, calendarSubscribeEnabled: false, scopes: [] }
 const pendingControl = new Map<string, (response: ControlResponse) => void>()
 
 /**
@@ -203,6 +220,7 @@ async function buildCalendarIcsText(): Promise<string | null> {
 
 const controlServer = new ControlServer({
   permissions: () => controlSettings,
+  audit: (entry) => appendControlAudit(entry),
   dataRoot: () => dataLocation(),
   log: (level, message, detail) => {
     // eslint-disable-next-line no-console
@@ -1847,6 +1865,13 @@ function registerIpc(): void {
     },
   )
 
+  // Read straight off disk rather than off `scheduler`'s in-memory recovery
+  // maps — the Reliability Center wants "what is actually on the ledger right
+  // now", and `loadDispatchLedger` (`electron/store.ts`) is the same read
+  // `Scheduler.restoreDispatchLedger` uses at startup, just called again on
+  // demand instead of once.
+  ipcMain.handle(IPC.getDispatchLedgerStatus, () => loadDispatchLedger())
+
   // --- inbox (receiving) ---------------------------------------------------
 
   /**
@@ -1990,12 +2015,32 @@ function registerIpc(): void {
     IPC.applyControl,
     async (
       _e,
-      settings: { enabled: boolean; allowSending: boolean; calendarSubscribeEnabled: boolean },
+      settings: {
+        enabled: boolean
+        allowSending: boolean
+        calendarSubscribeEnabled: boolean
+        /** Raw, un-normalized — `effectiveControlScopes` below does that work. */
+        controlScopes?: ControlScope[]
+      },
     ): Promise<ControlEndpoint | null> => {
-      controlSettings = settings
+      controlSettings = {
+        enabled: settings.enabled,
+        allowSending: settings.allowSending,
+        calendarSubscribeEnabled: settings.calendarSubscribeEnabled,
+        scopes: effectiveControlScopes({
+          controlScopes: settings.controlScopes,
+          controlAllowSending: settings.allowSending,
+        }),
+      }
       await controlServer.apply()
       return readEndpoint()
     },
+  )
+
+  /** Read-only, for the audit list in Settings. See `electron/store.ts`'s `loadControlAudit`. */
+  ipcMain.handle(
+    IPC.getControlAudit,
+    (): Promise<ControlAuditEntry[]> => loadControlAudit(),
   )
 
   ipcMain.handle(IPC.controlResponse, (_e, response: ControlResponse) => {

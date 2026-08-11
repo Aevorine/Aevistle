@@ -32,6 +32,7 @@ export function createDesktopBridge(): PlatformBridge {
     applyControl: (settings) => api.applyControl(settings),
     onControlRequest: (handler) => api.onControlRequest(handler),
     respondToControl: (response) => api.respondToControl(response),
+    getControlAudit: () => api.getControlAudit(),
 
     startPairingHost: (mode, pairId, host) => api.startPairingHost(mode, pairId, host),
     lanAddresses: () => api.lanAddresses(),
@@ -64,6 +65,7 @@ export function createDesktopBridge(): PlatformBridge {
     // reported every scheduled `noReplySince` undecidable.
     syncJobs: (jobs, accounts, headless) => api.syncJobs(jobs, accounts, headless),
     onJobEvent: (handler) => api.onJobEvent(handler),
+    getDispatchLedgerStatus: () => api.getDispatchLedgerStatus(),
 
     syncInbox: (config) => api.syncInbox(config),
     testInbox: (config, secret) => api.testInbox(config, secret),

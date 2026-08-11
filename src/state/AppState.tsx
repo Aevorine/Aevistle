@@ -98,7 +98,7 @@ import { applyCodeHistoryAction } from './services/codeHistoryReducer'
 import { applyOutboxAction } from './services/outboxReducer'
 import { applyJobAction } from './services/jobReducer'
 import { executeControl } from './controlExecutor'
-import type { ControlRequest } from '../core/control'
+import { effectiveControlScopes, type ControlRequest } from '../core/control'
 import { createI18n, detectLocale, localeMeta, type I18n, type TranslationKey } from '../i18n'
 import { findPairedDevice, recordSyncSeq, touchSynced, type PairedDevice } from '../core/pairedDevices'
 import { pushConflictSnapshots, type ConflictSnapshot } from '../core/syncConflict'
@@ -3132,6 +3132,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       state,
       appVersion: __APP_VERSION__,
       allowSending: state.settings.controlAllowSending === true,
+      scopes: effectiveControlScopes(state.settings),
       scheduleDraft,
       sendDraftNow,
       toggleJob,

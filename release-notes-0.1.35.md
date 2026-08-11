@@ -1,5 +1,17 @@
 # Aevistle 0.1.35
 
+## Every screen — a blank strip that could stick to the bottom of the app
+
+0.1.34's keyboard-inset fix trusted `ime().bottom`'s raw value on every insets
+pass. Some devices/keyboards don't reliably deliver a last "the keyboard is
+now closed" pass with that value back at zero, so on those devices the
+padding it had reserved for the keyboard could get stuck — showing up as a
+permanent gap between the last row of content and the bottom nav bar on
+every screen, not just the one where the keyboard had been open, until the
+app was restarted. `MainActivity`'s inset listener now only counts
+`ime().bottom` when `isVisible(ime())` is true, so a stale non-zero reading
+after the keyboard has actually closed no longer counts toward the padding.
+
 ## Compose — the real fix for the small message box
 
 0.1.34 fixed the wrong half of this. `MainActivity`'s inset listener was

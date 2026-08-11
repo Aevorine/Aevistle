@@ -619,6 +619,42 @@ export type LocaleId = 'en' | 'zh-CN' | 'fr' | 'es' | 'ru' | 'ar'
  */
 export type LocalePreference = LocaleId | 'system'
 
+/**
+ * A grantable slice of what the control interface (`core/control.ts`) can do.
+ *
+ * Defined here rather than in `core/control.ts` even though every other
+ * control-protocol type lives there, because `control.ts` already imports
+ * from this file (`InboxTag`, `Recurrence`) and `Settings.controlScopes`
+ * below needs the type — importing it back the other way would make the two
+ * files depend on each other. `control.ts` imports `ControlScope` from here
+ * instead, the same as its other two imports.
+ *
+ * `write.contacts` has no operation behind it yet — `controlExecutor.ts` has
+ * no control op that writes a contact — so it is a defined-but-unused scope,
+ * kept so the type is ready the day one is added rather than being extended
+ * (and every existing token silently regranted) at that point. It is also
+ * why the Settings screen shows no checkbox for it: a switch that flips and
+ * changes nothing is worse than no switch (see `DesktopPrefs`'s doc in
+ * `core/bridge.ts` for the same call made about `notifyOnFailure` once).
+ */
+export type ControlScope =
+  | 'read.schedule'
+  | 'read.inbox'
+  | 'read.contacts'
+  | 'write.schedule'
+  | 'write.contacts'
+  | 'send.immediate'
+
+/** Every scope that exists, for validating what a settings file claims to grant. */
+export const ALL_CONTROL_SCOPES: readonly ControlScope[] = [
+  'read.schedule',
+  'read.inbox',
+  'read.contacts',
+  'write.schedule',
+  'write.contacts',
+  'send.immediate',
+]
+
 export interface Settings {
   themeMode: ThemeMode
   /**
@@ -728,8 +764,31 @@ export interface Settings {
    * Additionally let those callers send mail immediately. Separate from the
    * switch above on purpose: reading state and queuing a reminder can be
    * undone, and mail that has left cannot.
+   *
+   * Doubles as the grant for the `send.immediate` scope below — see
+   * `effectiveControlScopes` in `core/control.ts`. Kept as its own field
+   * rather than folded into `controlScopes` so this one master switch stays
+   * exactly as legible and as easy to audit at a glance as it always was.
    */
   controlAllowSending?: boolean
+  /**
+   * Fine-grained permissions for the control interface, narrowing what
+   * `controlEnabled` alone used to grant unconditionally. See `ControlScope`
+   * and `OP_SCOPES` in `core/control.ts` for which operation needs which
+   * scope.
+   *
+   * Optional so an install written before this field existed reads as every
+   * scope granted — `normalizeControlScopes(undefined)` — which is exactly
+   * what flipping `controlEnabled` on used to mean, so nobody's already-
+   * working automation silently stops on upgrade. A fresh install starts the
+   * same way (see `DEFAULT_SETTINGS`) and the settings screen is where a user
+   * narrows it down from there.
+   *
+   * `send.immediate` is deliberately never read from here — see
+   * `controlAllowSending`'s doc — so this array only needs to carry the other
+   * five.
+   */
+  controlScopes?: ControlScope[]
   /**
    * Serve the working calendar as a live `.ics` address on the same loopback
    * server the control interface uses, so a desktop calendar app can subscribe
@@ -926,6 +985,10 @@ export const DEFAULT_SETTINGS: Settings = {
   updateCheckOnStart: true,
   controlEnabled: false,
   controlAllowSending: false,
+  // Every scope but `send.immediate` (governed by `controlAllowSending`
+  // alone — see that field's doc). Matches what `controlEnabled` used to
+  // grant unconditionally, before scopes existed to narrow it.
+  controlScopes: ALL_CONTROL_SCOPES.filter((s) => s !== 'send.immediate'),
   calendarSubscribeEnabled: false,
   inboxCacheMaxMb: 500,
   inboxCacheRetentionDays: 90,

@@ -352,6 +352,17 @@ public class MainActivity extends BridgeActivity {
      * space back. Folding `ime()` into the bottom padding here, capped to
      * never go *below* the system-bar floor when the keyboard is closed, is
      * what makes the window really shrink again.
+     *
+     * `ime.bottom` is read only when `isVisible(ime())` is true, not trusted
+     * on its own. Android is known to occasionally deliver one more insets
+     * pass mid-close-animation (or, on some OEM keyboards, to skip the final
+     * settle pass altogether) where `ime().bottom` still reports a stale
+     * non-zero height even though the keyboard is no longer up. Without this
+     * guard that stale value becomes permanent padding — nothing later ever
+     * lowers it again — leaving every screen with a blank strip at the
+     * bottom for the rest of the session. `isVisible()` reflects the
+     * keyboard's actual settled state rather than an in-flight animation
+     * value, so it is what decides whether `ime.bottom` counts at all.
      */
     private void applyWindowInsets() {
         View root = findViewById(android.R.id.content);
@@ -359,8 +370,9 @@ public class MainActivity extends BridgeActivity {
         ViewCompat.setOnApplyWindowInsetsListener(root, (view, windowInsets) -> {
             Insets bars = windowInsets.getInsets(
                     WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.displayCutout());
-            Insets ime = windowInsets.getInsets(WindowInsetsCompat.Type.ime());
-            view.setPadding(bars.left, bars.top, bars.right, Math.max(bars.bottom, ime.bottom));
+            boolean imeVisible = windowInsets.isVisible(WindowInsetsCompat.Type.ime());
+            int imeBottom = imeVisible ? windowInsets.getInsets(WindowInsetsCompat.Type.ime()).bottom : 0;
+            view.setPadding(bars.left, bars.top, bars.right, Math.max(bars.bottom, imeBottom));
             // Consumed: nothing below this view needs to inset itself again,
             // and letting the insets through would double the padding on the
             // WebView's own scrolling container.

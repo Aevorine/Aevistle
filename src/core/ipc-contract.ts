@@ -15,6 +15,7 @@
 import type {
   AppState,
   Attachment,
+  ControlScope,
   InboxAccountState,
   InboxTag,
   LocaleId,
@@ -33,8 +34,9 @@ import type {
   InboxMessageBody,
   JobEvent,
 } from './bridge'
+import type { DispatchLedgerEntry } from './dispatchLedger'
 import type { DownloadProgress, UpdateAsset, UpdateInfo } from './update'
-import type { ControlEndpoint, ControlRequest, ControlResponse } from './control'
+import type { ControlAuditEntry, ControlEndpoint, ControlRequest, ControlResponse } from './control'
 import type { FeedResponse } from './feeds'
 import type { OAuthAccountStatus, OAuthConsentResult } from './oauth'
 import type { PairingEvent, PairingPayload, PairMode } from './pairing'
@@ -222,6 +224,8 @@ export interface DesktopApi {
     },
   ): Promise<void>
   onJobEvent(handler: (event: JobEvent) => void): () => void
+  /** See `PlatformBridge.getDispatchLedgerStatus`'s doc in `bridge.ts`. */
+  getDispatchLedgerStatus(): Promise<DispatchLedgerEntry[]>
 
   syncInbox(config: InboxAccountState): Promise<InboxAccountState>
   testInbox(config: InboxAccountState, secret?: string): Promise<SendResult>
@@ -320,11 +324,20 @@ export interface DesktopApi {
     allowSending: boolean
     /** Serves `GET /calendar.ics` on the same server. See `core/types.ts`. */
     calendarSubscribeEnabled: boolean
+    /**
+     * Raw, un-normalized — main computes `effectiveControlScopes` itself
+     * (`core/control.ts`) rather than trusting a pre-resolved array, so a
+     * bad shape here fails closed the same way it would if it came straight
+     * off disk.
+     */
+    controlScopes?: ControlScope[]
   }): Promise<ControlEndpoint | null>
   /** Requests arriving from HTTP, the drop folder or the CLI. */
   onControlRequest(handler: (request: ControlRequest) => void): () => void
   /** The answer to one of those, keyed by `request.id`. */
   respondToControl(response: ControlResponse): Promise<void>
+  /** Every durable control-audit entry on disk, oldest first. See `electron/store.ts`'s `loadControlAudit`. */
+  getControlAudit(): Promise<ControlAuditEntry[]>
 
   // --- LAN pairing (device-to-device, end-to-end encrypted) --------------
   // See `src/core/pairing.ts` for the handshake and `electron/pairingServer.ts`
@@ -416,6 +429,7 @@ export const IPC = {
   checkFiles: 'aevistle:check-files',
   attachPaths: 'aevistle:attach-paths',
   syncJobs: 'aevistle:sync-jobs',
+  getDispatchLedgerStatus: 'aevistle:get-dispatch-ledger-status',
   syncInbox: 'aevistle:sync-inbox',
   testInbox: 'aevistle:test-inbox',
   watchInbox: 'aevistle:watch-inbox',
@@ -445,6 +459,7 @@ export const IPC = {
   applyControl: 'aevistle:apply-control',
   controlRequest: 'aevistle:control-request',
   controlResponse: 'aevistle:control-response',
+  getControlAudit: 'aevistle:get-control-audit',
   startPairingHost: 'aevistle:start-pairing-host',
   lanAddresses: 'aevistle:lan-addresses',
   stopPairingHost: 'aevistle:stop-pairing-host',
