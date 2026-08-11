@@ -66,7 +66,7 @@
  */
 
 import { lazy, Suspense, useState, type ReactElement } from 'react'
-import { Modal } from '../components/ui'
+import { IconButton, Modal, PageHead } from '../components/ui'
 import { Skeleton } from '../components/Skeleton'
 import { useI18n } from '../i18n'
 import { HOME_FEATURES, HOME_SECTIONS, NAV, type HomeFeatureId, type ViewId } from '../core/nav'
@@ -77,6 +77,7 @@ import {
   IconClock,
   IconFileText,
   IconLink,
+  IconSearch,
   IconShield,
   IconStar,
   IconUsers,
@@ -150,6 +151,7 @@ export function HomeView({
   onCompose,
   armedCount,
   narrow,
+  onOpenPalette,
 }: {
   /**
    * Both the schedule and the calendar can start a new reminder, and both then
@@ -171,6 +173,18 @@ export function HomeView({
    * way, since they are the actual reason a desktop needed this screen.
    */
   narrow: boolean
+  /**
+   * Opens the Ctrl+K command palette.
+   *
+   * The shortcut itself is unreachable on Android — there is no keyboard —
+   * which left the one platform whose home screen folds five other screens
+   * behind this hub with no way to search any of them. Drawn only when
+   * `narrow` is true, next to the five `HOME_SECTIONS` tiles it exists
+   * for: a desktop already has Ctrl+K on a real keyboard, so a second,
+   * on-screen door to the same dialog there would be a button with nothing
+   * to add.
+   */
+  onOpenPalette: () => void
 }) {
   const { t } = useI18n()
   const [open, setOpen] = useState<ViewId | HomeFeatureId | null>(null)
@@ -196,8 +210,22 @@ export function HomeView({
   return (
     <div className="view view--home">
       <div className="view__inner">
-        {/* No page heading: the highlighted Home tab already says where you
-            are, and this screen has no action to keep a `.page-head` for. */}
+        {/* Still no visible heading — the highlighted Home tab already says
+            where you are — but a phone now has one action worth a head for:
+            reaching the command palette without a keyboard. `hideTitle` drops
+            only the `h1`/subtitle block; the `PageHead` itself is skipped
+            entirely on a desktop, where this action does not exist. */}
+        {narrow ? (
+          <PageHead
+            title={t('nav.home')}
+            hideTitle
+            action={
+              <IconButton label={t('palette.open')} onClick={onOpenPalette}>
+                <IconSearch size={17} />
+              </IconButton>
+            }
+          />
+        ) : null}
 
         <div className="hometiles">
           {narrow

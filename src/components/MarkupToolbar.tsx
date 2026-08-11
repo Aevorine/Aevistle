@@ -20,15 +20,20 @@
  *   back into the box.
  */
 
-import type { RefObject } from 'react'
+import type { ReactNode, RefObject } from 'react'
 import { applyMarkup, type MarkupAction } from '../core/markup'
 import { useI18n, type TranslationKey } from '../i18n'
+import { IconLink } from './icons'
 
-const ACTIONS: Array<{ action: MarkupAction; glyph: string; labelKey: TranslationKey }> = [
+const ACTIONS: Array<{ action: MarkupAction; glyph: ReactNode; labelKey: TranslationKey }> = [
   { action: 'bold', glyph: 'B', labelKey: 'markup.bold' },
   { action: 'italic', glyph: 'I', labelKey: 'markup.italic' },
   { action: 'code', glyph: '</>', labelKey: 'markup.code' },
-  { action: 'link', glyph: '🔗', labelKey: 'markup.link' },
+  // Every other button here is a drawn glyph that matches the app's flat,
+  // monochrome, currentColor-stroked icon set; a raw 🔗 emoji is a colourful
+  // rendered-by-the-OS pictograph that neither respects `currentColor` nor
+  // sits at the same visual weight as its six neighbours.
+  { action: 'link', glyph: <IconLink size={14} />, labelKey: 'markup.link' },
   { action: 'bullet', glyph: '•', labelKey: 'markup.bullet' },
   { action: 'number', glyph: '1.', labelKey: 'markup.number' },
   { action: 'quote', glyph: '❝', labelKey: 'markup.quote' },

@@ -1042,6 +1042,22 @@ export interface InboxMessage {
   bodyCached: boolean
 }
 
+/**
+ * How many of a folder's most recent messages `electron/imap.ts`'s
+ * `runSync` populates the list with, per account, per sync.
+ *
+ * Shared rather than redeclared: `runSync` is the only place that enforces
+ * it, but the UI needs the identical number to tell the user honestly what
+ * they are looking at (`InboxView.tsx`'s "showing the most recent N"
+ * banner) — a copy typed separately in each file is exactly the kind of
+ * number that quietly drifts apart from what the code actually does. There
+ * is no pagination yet: a folder with more than this many messages on the
+ * server has the rest sitting there, unseen by this app, until a load-older
+ * page is built. See `InboxFolder.totalCount`, which is where the gap
+ * between "on the server" and "in this list" becomes visible.
+ */
+export const INBOX_LIST_FETCH_LIMIT = 50
+
 export interface InboxFolder {
   id: string
   accountId: string
@@ -1054,6 +1070,13 @@ export interface InboxFolder {
    */
   uidValidity: number
   unreadCount: number
+  /**
+   * The folder's true size on the server (IMAP `EXISTS`), not how many of its
+   * messages made it into `InboxAccountState.messages` — that list is capped
+   * at `INBOX_LIST_FETCH_LIMIT`. The two agreeing is the common case; the two
+   * disagreeing is the fact `InboxView.tsx`'s recent-mail banner exists to
+   * surface rather than leave silent.
+   */
   totalCount: number
 }
 

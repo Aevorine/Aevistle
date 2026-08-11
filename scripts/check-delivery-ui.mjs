@@ -402,7 +402,17 @@ if (textBlock) {
   )
   ok(
     'the existing rule sentence is untouched',
-    /className="whenbar__rule"/.test(textBlock) && /scheduleSummary\.key/.test(textBlock),
+    /className="whenbar__rule"/.test(textBlock) &&
+      // Either the rule reads scheduleSummary.key directly, or it goes through
+      // a scheduleRuleText memo that itself is derived from scheduleSummary.key
+      // (added so the once-recurrence case can show the real send time instead
+      // of the generic "仅一次" label — see the memo's own doc comment).
+      (/scheduleSummary\.key/.test(textBlock) ||
+        (/\{scheduleRuleText\}/.test(textBlock) &&
+          (() => {
+            const at = src.compose.indexOf('const scheduleRuleText = useMemo(')
+            return at >= 0 && /scheduleSummary\.key/.test(src.compose.slice(at, at + 400))
+          })())),
   )
 }
 

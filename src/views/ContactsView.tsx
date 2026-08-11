@@ -1,6 +1,7 @@
-import { useDeferredValue, useMemo, useState } from 'react'
+import { useDeferredValue, useMemo, useRef, useState } from 'react'
 import { VirtualList } from '../components/VirtualList'
 import {
+  Banner,
   Button,
   EmptyState,
   Field,
@@ -8,22 +9,131 @@ import {
   Modal,
   PageHead,
   useConfirm,
+  useToast,
 } from '../components/ui'
-import { IconFlag, IconPlus, IconTrash, IconUsers } from '../components/icons'
+import {
+  IconFlag,
+  IconFolder,
+  IconPlus,
+  IconSmartphone,
+  IconTrash,
+  IconUsers,
+} from '../components/icons'
 import { DeliveryWindowEditor } from '../components/DeliveryWindowEditor'
 import { useApp } from '../state/AppState'
 import { SearchInput } from '../components/inputs'
 import { useI18n } from '../i18n'
 import { isValidAddress } from '../core/validate'
 import { newId, type Contact } from '../core/types'
+import {
+  buildContactImport,
+  parseContactsCsv,
+  type ContactImportResult,
+} from '../core/contactImport'
 
 export function ContactsView() {
-  const { state, dispatch, pushUndo } = useApp()
+  const { state, dispatch, pushUndo, bridge } = useApp()
   const { t } = useI18n()
   const { confirm, confirmElement } = useConfirm()
+  const toast = useToast()
 
   const [query, setQuery] = useState('')
   const [editing, setEditing] = useState<Contact | null>(null)
+
+  // --- bulk import ----------------------------------------------------------
+  //
+  // Desktop: pick a CSV off disk, parse it, show what would happen, then
+  // commit on confirm — same three-step shape as `BackupCard`'s restore.
+  // Android: `bridge.pickContact` hands back one contact at a time from the
+  // system picker (see its doc on `PlatformBridge` for why only one), so
+  // there is no preview step there — each pick is small enough that the
+  // result toast *is* the summary.
+  const csvInput = useRef<HTMLInputElement>(null)
+  const [csvError, setCsvError] = useState('')
+  const [importPreview, setImportPreview] = useState<ContactImportResult | null>(null)
+  const [pickingContact, setPickingContact] = useState(false)
+
+  const skipCounts = useMemo(() => {
+    if (!importPreview) return null
+    const counts = { invalid: 0, existing: 0, inFile: 0, noAddress: 0 }
+    for (const row of importPreview.skipped) {
+      if (row.reason === 'invalid-address') counts.invalid++
+      else if (row.reason === 'duplicate-existing') counts.existing++
+      else if (row.reason === 'duplicate-in-file') counts.inFile++
+      else counts.noAddress++
+    }
+    return counts
+  }, [importPreview])
+
+  const pickCsv = async (file: File) => {
+    setCsvError('')
+    let text: string
+    try {
+      text = await file.text()
+    } catch (e) {
+      setCsvError(e instanceof Error ? e.message : String(e))
+      return
+    }
+    const { rows, malformed } = parseContactsCsv(text)
+    if (rows.length === 0 && malformed.length === 0) {
+      setCsvError(t('contacts.importEmptyFile'))
+      return
+    }
+    setImportPreview(buildContactImport(rows, state.contacts))
+  }
+
+  const confirmCsvImport = () => {
+    if (!importPreview) return
+    const { toAdd } = importPreview
+    if (toAdd.length > 0) {
+      for (const contact of toAdd) dispatch({ type: 'upsertContact', contact })
+      // The whole batch undoes in one step — removing every id just written,
+      // not restoring a snapshot, so an unrelated edit made in between (there
+      // is a confirm step, so time passes) is never touched by the undo.
+      pushUndo(
+        t('contacts.importUndoLabel', { n: toAdd.length }),
+        toAdd.map((c) => ({ type: 'removeContact' as const, id: c.id })),
+      )
+    }
+    toast.push({
+      tone: toAdd.length > 0 ? 'success' : 'info',
+      title: t('contacts.importDone', { added: toAdd.length, skipped: importPreview.skipped.length }),
+    })
+    setImportPreview(null)
+  }
+
+  const pickAndroidContact = async () => {
+    if (!bridge?.pickContact || pickingContact) return
+    setPickingContact(true)
+    try {
+      const picked = await bridge.pickContact()
+      if (picked.cancelled) return
+      const address = picked.addresses[0] ?? ''
+      const result = buildContactImport(
+        [{ line: 1, name: picked.name, address, tags: [], note: undefined }],
+        state.contacts,
+      )
+      const [added] = result.toAdd
+      if (added) {
+        dispatch({ type: 'upsertContact', contact: added })
+        pushUndo(added.name || added.address, [{ type: 'removeContact', id: added.id }])
+        toast.push({ tone: 'success', title: t('contacts.importAndroidAdded', { name: added.name || added.address }) })
+        return
+      }
+      const reason = result.skipped[0]?.reason
+      const key =
+        reason === 'no-address'
+          ? 'contacts.importAndroidNoEmail'
+          : reason === 'invalid-address'
+            ? 'contacts.importAndroidInvalid'
+            : 'contacts.importAndroidDuplicate'
+      toast.push({ tone: 'info', title: t(key) })
+    } catch (e) {
+      toast.push({ tone: 'error', title: t('contacts.importAndroidFailed'), detail: e instanceof Error ? e.message : String(e) })
+    } finally {
+      setPickingContact(false)
+    }
+  }
 
   /**
    * Pinned first, then grouped by the contact's first tag.
@@ -110,11 +220,52 @@ export function ContactsView() {
         <PageHead
           title={t('contacts.title')}
           action={
-            <Button variant="primary" icon={<IconPlus size={16} />} onClick={startNew}>
-              {t('contacts.add')}
-            </Button>
+            <div className="btn-row">
+              {/* Android: no file system to browse for a CSV, but the system
+                  contacts picker needs no new permission — see `bridge.pickContact`'s
+                  doc for why it is one contact per tap rather than a multi-select. */}
+              {bridge?.pickContact ? (
+                <Button
+                  variant="secondary"
+                  icon={<IconSmartphone size={15} />}
+                  disabled={pickingContact}
+                  onClick={() => void pickAndroidContact()}
+                >
+                  {t('contacts.importAndroid')}
+                </Button>
+              ) : (
+                <Button
+                  variant="secondary"
+                  icon={<IconFolder size={15} />}
+                  onClick={() => csvInput.current?.click()}
+                >
+                  {t('contacts.importCsv')}
+                </Button>
+              )}
+              <input
+                ref={csvInput}
+                type="file"
+                accept=".csv,text/csv"
+                hidden
+                onChange={(e) => {
+                  const file = e.target.files?.[0]
+                  // Cleared so picking the same file twice in a row still fires.
+                  e.target.value = ''
+                  if (file) void pickCsv(file)
+                }}
+              />
+              <Button variant="primary" icon={<IconPlus size={16} />} onClick={startNew}>
+                {t('contacts.add')}
+              </Button>
+            </div>
           }
         />
+
+        {csvError ? (
+          <Banner tone="danger" title={t('contacts.importCannotRead')}>
+            {csvError}
+          </Banner>
+        ) : null}
 
         {state.contacts.length > 0 ? (
           <SearchInput value={query} onChange={setQuery} placeholder={t('common.search')} />
@@ -257,6 +408,58 @@ export function ContactsView() {
               jobs={state.jobs}
               onChange={(deliveryWindow) => setEditing({ ...editing, deliveryWindow })}
             />
+          </>
+        ) : null}
+      </Modal>
+
+      {/* CSV import summary — shown before anything is written, same reasoning
+          as `BackupCard`'s restore preview: "would add N, skip M" is what
+          tells someone they picked the wrong file, before it is too late to
+          matter. */}
+      <Modal
+        open={importPreview !== null}
+        title={t('contacts.importPreviewTitle')}
+        onClose={() => setImportPreview(null)}
+        closeLabel={t('common.cancel')}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setImportPreview(null)}>
+              {t('common.cancel')}
+            </Button>
+            <Button
+              variant="primary"
+              disabled={!importPreview || importPreview.toAdd.length === 0}
+              onClick={confirmCsvImport}
+            >
+              {t('contacts.importConfirm', { n: importPreview?.toAdd.length ?? 0 })}
+            </Button>
+          </>
+        }
+      >
+        {importPreview && skipCounts ? (
+          <>
+            <p className="log__detail">
+              {t('contacts.importWillAdd', { n: importPreview.toAdd.length })}
+            </p>
+            {importPreview.skipped.length > 0 ? (
+              <ul className="prose">
+                {skipCounts.existing > 0 ? (
+                  <li>{t('contacts.importSkipExisting', { n: skipCounts.existing })}</li>
+                ) : null}
+                {skipCounts.inFile > 0 ? (
+                  <li>{t('contacts.importSkipInFile', { n: skipCounts.inFile })}</li>
+                ) : null}
+                {skipCounts.invalid > 0 ? (
+                  <li>{t('contacts.importSkipInvalid', { n: skipCounts.invalid })}</li>
+                ) : null}
+                {skipCounts.noAddress > 0 ? (
+                  <li>{t('contacts.importSkipNoAddress', { n: skipCounts.noAddress })}</li>
+                ) : null}
+              </ul>
+            ) : null}
+            {importPreview.toAdd.length === 0 ? (
+              <Banner tone="warning" title={t('contacts.importNothingToAdd')} />
+            ) : null}
           </>
         ) : null}
       </Modal>

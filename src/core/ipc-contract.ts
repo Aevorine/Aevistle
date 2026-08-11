@@ -93,6 +93,12 @@ export interface DesktopPrefs {
   notifyOnFailure: boolean
 }
 
+/** The two numbers a taskbar overlay badge is drawn from — see `setBadgeCounts`. */
+export interface BadgeCounts {
+  unread: number
+  armed: number
+}
+
 /** The result of a `<a download>` the main process took responsibility for. */
 export interface DownloadOutcome {
   /** True only when a file is on disk under `path`. */
@@ -154,6 +160,17 @@ export interface DesktopApi {
    * they are pushed across here whenever they change.
    */
   setDesktopPrefs(prefs: DesktopPrefs): Promise<void>
+  /**
+   * Unread mail and armed reminders, so the taskbar icon can carry a badge
+   * while the window is minimised or hidden in the tray — the one signal a
+   * mainstream mail client shows that this app did not.
+   *
+   * Both counts travel rather than a pre-combined total: the main process
+   * decides how to draw and describe the badge (see `applyBadgeCounts` in
+   * `electron/main.ts`), and a renderer-side sum would bake that decision in
+   * on the wrong side of the privilege boundary for no benefit.
+   */
+  setBadgeCounts(counts: BadgeCounts): Promise<void>
   /** Menu items that need the window to do something. Returns an unsubscribe. */
   onTrayCommand(handler: (command: TrayCommand) => void): () => void
   /**
@@ -416,6 +433,7 @@ export const IPC = {
   prewarm: 'aevistle:prewarm',
   setUiLocale: 'aevistle:set-ui-locale',
   setDesktopPrefs: 'aevistle:set-desktop-prefs',
+  setBadgeCounts: 'aevistle:set-badge-counts',
   trayCommand: 'aevistle:tray-command',
   downloadDone: 'aevistle:download-done',
   pickFiles: 'aevistle:pick-files',

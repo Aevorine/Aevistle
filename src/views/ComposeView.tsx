@@ -56,6 +56,7 @@ import {
   toLocalInput,
 } from '../components/RecurrenceEditor'
 import { ConditionEditor } from '../components/ConditionEditor'
+import { DateTimeField, TimeField } from '../components/DateTimeField'
 import { DraftHistory } from '../components/DraftHistory'
 import { OutboxStrip } from '../components/OutboxStrip'
 import { MarkupToolbar } from '../components/MarkupToolbar'
@@ -243,10 +244,8 @@ function seedRecurrence(now = Date.now()): Recurrence {
 }
 
 export function ComposeView({
-  onGoToAccounts,
   onNavigate,
 }: {
-  onGoToAccounts: () => void
   /** Where the health strip sends you to fix what it found. */
   onNavigate?: (where: 'schedule' | 'settings' | 'compose' | 'logs') => void
 }) {
@@ -1260,7 +1259,10 @@ export function ComposeView({
         icon={<IconSearch size={16} />}
         disabled={!started}
         onClick={() => setPreflightOpen(true)}
-        title={t('preflight.button')}
+        // Every other disabled control in the app says what is missing —
+        // test-connection's blocked-fields hint, the send button's banner —
+        // this one used to just repeat its own name back.
+        title={started ? t('preflight.button') : t('preflight.buttonDisabled')}
       >
         {t('preflight.button')}
       </Button>
@@ -1359,18 +1361,6 @@ export function ComposeView({
               <OutboxStrip />
             </>
           )}
-
-          {state.accounts.length === 0 ? (
-            <Banner
-              tone="warning"
-              title={t('compose.noAccount')}
-              action={
-                <Button variant="primary" onClick={onGoToAccounts}>
-                  {t('compose.addAccount')}
-                </Button>
-              }
-            />
-          ) : null}
 
           {/*
             One card, three bands: who it goes to, what it says, and when.
@@ -1758,13 +1748,11 @@ export function ComposeView({
                           {recurrence.cron || '—'}
                         </output>
                       ) : firesAtTimeOfDay ? (
-                        <input
+                        <TimeField
                           id={whenId}
-                          className="input whenbar__time"
-                          type="time"
+                          className="whenbar__time"
                           value={recurrence.timeOfDay}
-                          onChange={(e) => {
-                            const value = e.target.value
+                          onChange={(value) => {
                             if (!value) return
                             setRecurrence((r) => ({
                               ...r,
@@ -1782,17 +1770,13 @@ export function ComposeView({
                           }}
                         />
                       ) : (
-                        <input
+                        <DateTimeField
                           id={whenId}
-                          className="input whenbar__time"
-                          type="datetime-local"
+                          className="whenbar__time"
                           /* Seeded, not blank. See `seedRecurrence`. */
-                          value={toLocalInput(recurrence.startAt)}
-                          onChange={(e) => {
-                            setRecurrence((r) => {
-                              const at = fromLocalInput(e.target.value, r.startAt)
-                              return { ...r, startAt: at, timeOfDay: hhmm(at) }
-                            })
+                          value={recurrence.startAt}
+                          onChange={(at) => {
+                            setRecurrence((r) => ({ ...r, startAt: at, timeOfDay: hhmm(at) }))
                             setScheduleSet(true)
                           }}
                         />

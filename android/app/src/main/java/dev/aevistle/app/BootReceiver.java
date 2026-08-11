@@ -9,9 +9,9 @@ import android.os.Build;
 /**
  * Alarms do not survive a reboot, so every schedule has to be armed again.
  *
- * Also listens for the two "your app was updated / restored" broadcasts, which
- * clear alarms in exactly the same way and are easy to forget about — the
- * symptom is a reminder that quietly stops firing after a Play Store update.
+ * Also listens for the "your app was updated" broadcast, which clears alarms
+ * in exactly the same way and is easy to forget about — the symptom is a
+ * reminder that quietly stops firing after an update.
  *
  * And for the moment the user grants "Alarms &amp; reminders". Every alarm
  * armed before that point was set with {@code setAndAllowWhileIdle} — Doze is
@@ -20,6 +20,11 @@ import android.os.Build;
  * the app happened to be opened, and the user would reasonably conclude the
  * setting does not work. Android sends this broadcast to manifest receivers
  * specifically so an app can do this.
+ *
+ * Not registered for {@code LOCKED_BOOT_COMPLETED} — see the manifest's
+ * comment beside this receiver's declaration for why that broadcast, which
+ * only reaches a component explicitly marked {@code directBootAware}, would
+ * never have fired here regardless of what any intent-filter claimed.
  */
 public class BootReceiver extends BroadcastReceiver {
 
@@ -29,8 +34,7 @@ public class BootReceiver extends BroadcastReceiver {
         if (action == null) return;
 
         if (Intent.ACTION_BOOT_COMPLETED.equals(action)
-                || Intent.ACTION_MY_PACKAGE_REPLACED.equals(action)
-                || Intent.ACTION_LOCKED_BOOT_COMPLETED.equals(action)) {
+                || Intent.ACTION_MY_PACKAGE_REPLACED.equals(action)) {
             AevistleScheduler.rearmAll(context);
             return;
         }

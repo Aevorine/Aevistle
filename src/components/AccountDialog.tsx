@@ -50,7 +50,7 @@ import { advisoryKey } from '../core/transport'
 import { accountLabel } from '../core/accounts'
 import { hasErrors, validateAccount } from '../core/validate'
 import { getBridge } from '../core/bridge'
-import { requiresOAuth, supportsOAuth, type OAuthAccountStatus } from '../core/oauth'
+import { oauthConfigProblem, requiresOAuth, supportsOAuth, type OAuthAccountStatus } from '../core/oauth'
 import {
   defaultInboxAccountState,
   newId,
@@ -525,6 +525,23 @@ export function AccountDialog({
 
   const oauthAvailable = supportsOAuth(account.providerId)
   const isOauth = account.authMethod === 'oauth2'
+
+  /**
+   * "No client id in this build" and "this preset has no consent flow at
+   * all" are both facts about the *executable*, knowable the instant a
+   * provider is picked — `oauthConfigProblem` reads a table already loaded
+   * into this bundle, no keystore or IPC round trip involved. Computed here
+   * so `OAuthPanel` below can say so on the very first render, rather than
+   * showing "checking…" for the round trip to `bridge.oauthStatus` only to
+   * land on an answer this line already had. That round trip still runs —
+   * it is the only way to learn the other three states — this just means an
+   * Outlook/Hotmail address never has to wait on it to be told the one
+   * outcome that was never in question.
+   */
+  const oauthConfigIssue = useMemo(
+    () => oauthConfigProblem(account.providerId),
+    [account.providerId],
+  )
 
   const refreshOauthStatus = useMemo(
     () => async (accountId: string, providerId: string | undefined) => {
@@ -1377,6 +1394,7 @@ export function AccountDialog({
         {isOauth ? (
           <OAuthPanel
             status={oauthStatus}
+            configIssue={oauthConfigIssue}
             busy={oauthBusy}
             error={oauthError}
             fallbackAddress={account.username || account.fromAddress}
@@ -1854,9 +1872,18 @@ function AutoSummary({
  * `status === null` is the fifth case and is deliberately not one of the four:
  * it means the answer has not come back yet, and showing "not connected" while
  * it is in flight would send someone to redo a consent they already completed.
+ *
+ * Except when `configIssue` already answers it. `unsupported` and
+ * `unconfigured` are facts about the build, not about any account's stored
+ * grant, so they are knowable before `status` ever resolves — see
+ * `oauthConfigIssue` at the call site. Using it here is what lets someone who
+ * has just typed an @outlook.com address see "this build cannot sign in to
+ * Microsoft" on the first paint of this panel, not after a round trip to the
+ * main process that was only ever going to agree.
  */
 function OAuthPanel({
   status,
+  configIssue,
   busy,
   error,
   fallbackAddress,
@@ -1864,6 +1891,8 @@ function OAuthPanel({
   onDisconnect,
 }: {
   status: OAuthAccountStatus | null
+  /** The synchronous half of `status.state` — see the comment above. */
+  configIssue: 'unsupported' | 'unconfigured' | undefined
   busy: boolean
   error: string | null
   /** Shown as the connected mailbox when the provider did not name one. */
@@ -1872,7 +1901,7 @@ function OAuthPanel({
   onDisconnect: () => void
 }) {
   const { t } = useI18n()
-  const state = status?.state
+  const state = status?.state ?? configIssue
   const connected = state === 'connected'
   // No button for a build with no client id, and none while the answer is
   // still on its way — both would be a control that cannot do anything.

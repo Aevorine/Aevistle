@@ -235,6 +235,14 @@ export const en = {
   'weekday.5': 'Fri',
   'weekday.6': 'Sat',
 
+  'dtfield.prevMonth': 'Previous month',
+  'dtfield.nextMonth': 'Next month',
+  'dtfield.hour': 'Hour',
+  'dtfield.minute': 'Minute',
+  'dtfield.pickTime': 'Pick a time',
+  'dtfield.pickDate': 'Pick a date',
+  'dtfield.pickDateTime': 'Pick a date and time',
+
   'account.title': 'Mail accounts',
   'account.add': 'Add account',
   'account.edit': 'Edit account',
@@ -330,6 +338,25 @@ export const en = {
   'contacts.tags': 'Tags',
   'contacts.note': 'Note',
   'contacts.empty': 'No contacts yet',
+  'contacts.importCsv': 'Import CSV',
+  'contacts.importAndroid': 'Add from phone',
+  'contacts.importCannotRead': 'Could not read that file',
+  'contacts.importEmptyFile': 'That file has no contacts in it.',
+  'contacts.importPreviewTitle': 'Import contacts',
+  'contacts.importWillAdd': '{n} contacts will be added.',
+  'contacts.importSkipExisting': '{n} already in your contacts',
+  'contacts.importSkipInFile': '{n} repeated in the file',
+  'contacts.importSkipInvalid': '{n} with an invalid email address',
+  'contacts.importSkipNoAddress': '{n} with no email address',
+  'contacts.importNothingToAdd': 'Nothing to add — every row was skipped.',
+  'contacts.importConfirm': 'Add {n}',
+  'contacts.importDone': '{added} added, {skipped} skipped',
+  'contacts.importUndoLabel': 'Import ({n})',
+  'contacts.importAndroidAdded': 'Added {name}',
+  'contacts.importAndroidNoEmail': 'That contact has no email address on file',
+  'contacts.importAndroidInvalid': "That contact's email address isn't valid",
+  'contacts.importAndroidDuplicate': 'That contact is already in your list',
+  'contacts.importAndroidFailed': 'Could not open the contacts picker',
 
   'templates.title': 'Templates',
   'templates.add': 'New template',
@@ -636,6 +663,8 @@ export const en = {
   'inbox.unavailableTitle': 'Inbox is not available here',
   'inbox.unavailableHint': 'Receiving mail needs the desktop build — install it to use this screen.',
   'inbox.noAccountsHint': 'No account is set up to receive mail yet. Open an account in Settings and turn on “Also receive mail from this account”.',
+  'inbox.recentLimitNote':
+    'Showing the most recent {limit} of {total} messages on this mailbox. Older mail is still on the server — it is just not fetched here yet.',
   'inbox.noAccountsEmpty': 'No account is receiving mail yet',
   'inbox.empty': 'Nothing here',
   'inbox.noBody': 'This message has no readable content.',
@@ -865,6 +894,7 @@ export const en = {
   'preflight.waitMinutes': '{n} min',
   'preflight.waitHours': '{n} h',
   'preflight.button': 'Preview',
+  'preflight.buttonDisabled': 'Add some content first, then you can preview it',
   'preflight.messages': 'messages',
   'preflight.recipients': 'recipients',
   'preflight.onTheWire': 'on the wire',
@@ -1112,6 +1142,11 @@ export const en = {
   'codes.sourceBody': 'from body',
   'codes.sourceLink': 'from link',
   'codes.notifyTitle': 'Verification code {code}',
+  // Android's WorkManager will not run periodic background work more often
+  // than every 15 minutes — see InboxSyncWorker.java. Desktop has no such
+  // floor, so this only ever shows on the Android build.
+  'codes.androidBackgroundDelay':
+    'On Android, mail is checked at most every 15 minutes while Aevistle is in the background — keep it in the foreground for codes to arrive faster.',
 
   'codes.checkNow': 'Check now',
   'codes.checking': 'Checking…',
@@ -1229,6 +1264,7 @@ export const en = {
   'settings.androidPermissions': 'Android permissions',
   'settings.permNotifications': 'Notifications',
   'settings.permExactAlarms': 'Alarms & reminders',
+  'settings.permBatteryOptimization': 'Battery optimization',
   'settings.permGranted': 'Allowed',
   'settings.permNotAsked': 'Not asked yet',
   'settings.permBlocked': 'Blocked — only system settings can change this',

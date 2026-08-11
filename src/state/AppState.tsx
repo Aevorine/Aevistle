@@ -99,7 +99,7 @@ import { applyOutboxAction } from './services/outboxReducer'
 import { applyJobAction } from './services/jobReducer'
 import { executeControl } from './controlExecutor'
 import { effectiveControlScopes, type ControlRequest } from '../core/control'
-import { createI18n, detectLocale, localeMeta, type I18n, type TranslationKey } from '../i18n'
+import { createI18n, detectLocale, localeMeta, useLocaleReady, type I18n, type TranslationKey } from '../i18n'
 import { findPairedDevice, recordSyncSeq, touchSynced, type PairedDevice } from '../core/pairedDevices'
 import { pushConflictSnapshots, type ConflictSnapshot } from '../core/syncConflict'
 import { applySyncAction } from './services/syncReducer'
@@ -1229,7 +1229,11 @@ export interface AppApi {
   permissions: PermissionSnapshot | null
   /** Raise the notification dialog, or open the settings screen for it. */
   fixPermission: (
-    what: 'requestNotifications' | 'openNotificationSettings' | 'openExactAlarmSettings',
+    what:
+      | 'requestNotifications'
+      | 'openNotificationSettings'
+      | 'openExactAlarmSettings'
+      | 'openBatteryOptimizationSettings',
   ) => Promise<void>
 
   addLog: (entry: Omit<LogEntry, 'id' | 'at'>) => void
@@ -1384,7 +1388,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
     () => (state.settings.locale === 'system' ? detectLocale() : state.settings.locale),
     [state.settings.locale],
   )
-  const i18n = useMemo(() => createI18n(locale), [locale])
+  /**
+   * Every locale but English is its own chunk (see `src/i18n/index.ts`), so
+   * this one starts fetching it and flips from `false` to `true` once it
+   * lands. Until then `createI18n` below already reads whichever table is in
+   * memory — English — so the screen never shows a blank or a raw key, just
+   * the fallback language for what is normally a frame or two.
+   *
+   * `localeReady` has to sit in the `i18n` memo's own dependency array, not
+   * just be called for its re-render side effect: several screens read
+   * `useI18n()` through a memoized component, and a memoized consumer only
+   * re-renders on a Context value it can tell changed. Recomputing `i18n`
+   * with a new object identity once the table lands is what actually reaches
+   * those; re-rendering `AppState` alone left every memoized child showing
+   * English forever, because the `I18nContext.Provider` value it received
+   * was — by reference — the exact same object as before.
+   */
+  const localeReady = useLocaleReady(locale)
+  const i18n = useMemo(() => createI18n(locale), [locale, localeReady])
   /**
    * The translator, reachable from long-lived subscriptions — same mechanism
    * and same reason as `liveRef` above.
@@ -1995,8 +2016,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
         head.insertBefore(tag, head.querySelector('meta[name="theme-color"]'))
       }
       tag.setAttribute('content', bg)
+
+      // Android's status bar is the same "window chrome the page cannot
+      // reach" as the meta tag just above, so it is kept in step off the
+      // same live value. `bridge` is undefined until boot resolves and the
+      // method is undefined on every platform but Android — both are no-ops
+      // through the optional chain, not a branch to maintain here.
+      const dark =
+        themeMode === 'dark' ||
+        (themeMode === 'system' &&
+          window.matchMedia?.('(prefers-color-scheme: dark)').matches === true)
+      void bridge?.syncStatusBar?.({ dark, background: bg })
     }
-  }, [state.settings, locale])
+  }, [state.settings, locale, bridge])
 
   // --- events from the platform scheduler --------------------------------
   const addLog = useCallback((entry: Omit<LogEntry, 'id' | 'at'>) => {
@@ -2622,7 +2654,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [bridge])
 
   const fixPermission = useCallback(
-    async (what: 'requestNotifications' | 'openNotificationSettings' | 'openExactAlarmSettings') => {
+    async (
+      what:
+        | 'requestNotifications'
+        | 'openNotificationSettings'
+        | 'openExactAlarmSettings'
+        | 'openBatteryOptimizationSettings',
+    ) => {
       const android = bridge as Partial<AndroidPermissionApi> | null
       if (!android) return
       try {
@@ -2631,10 +2669,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
           if (after) setPermissions(after)
           return
         }
-        // The two settings screens answer nothing themselves — the result
+        // The settings/dialog routes answer nothing themselves — the result
         // arrives via the visibility listener above, when the user comes back.
         if (what === 'openNotificationSettings') await android.openNotificationSettings?.()
-        else await android.openExactAlarmSettings?.()
+        else if (what === 'openExactAlarmSettings') await android.openExactAlarmSettings?.()
+        else await android.openBatteryOptimizationSettings?.()
       } catch {
         // Same reasoning as the read: an OEM build with no such screen is not
         // something to throw a dialog about.
@@ -2784,7 +2823,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
           // interrupting for, so it leads; the snippet follows only when
           // there is one, rather than leaving a trailing separator.
           preview ? `${subject} — ${preview}` : subject,
-          { messageId: newest.id },
+          {
+            messageId: newest.id,
+            accountId,
+            // Android's Mark-as-read notification action; ignored on every
+            // other platform. Reuses the same label the Inbox row's own
+            // context-menu action already carries — one word, one key,
+            // rather than a near-duplicate translation for a button that
+            // does exactly the same thing.
+            markReadLabel: i18n.t('inbox.markRead'),
+          },
         )
         .catch(() => {
           /* A refused notification must not take the sync down with it. */

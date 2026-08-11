@@ -59,7 +59,7 @@ public class InboxSyncWorker extends Worker {
                  * both outcomes. This way a notification failure costs one
                  * notification, not the mail.
                  */
-                announce(context, config, updated);
+                announce(AppSettingsSignal.localizedContext(context), config, updated);
                 // And tell an app that is open, which `onInboxEvent` promised
                 // and nothing delivered: the web layer treats this as "re-read
                 // that account", so mail this pass found shows up at once
@@ -163,11 +163,15 @@ public class InboxSyncWorker extends Worker {
             if (subject.isEmpty()) subject = context.getString(R.string.notify_no_subject);
             String snippet = newest.optString("snippet", "").replaceAll("\\s+", " ").trim();
             String body = snippet.isEmpty() ? subject : subject + " — " + snippet;
+            // Which account's cache the "Mark as read" action should update —
+            // the same account this whole sync ran against.
+            String accountId = after.optString("accountId", "");
+            String markReadLabel = context.getString(R.string.notify_mark_read);
 
             if (arrivals.size() == 1) {
                 Notifier.mail(context, newest.optString("id", ""),
                         context.getString(R.string.notify_new_mail_one, from),
-                        body, newest.optString("id", ""));
+                        body, newest.optString("id", ""), accountId, markReadLabel);
                 return;
             }
 
@@ -177,10 +181,14 @@ public class InboxSyncWorker extends Worker {
              * Android shows a summary with no children as an empty group
              * heading, which is a notification that says a number and nothing
              * else.
+             *
+             * The action still only ever marks `newest` — the one message this
+             * notification is actually about and the same one its tap target
+             * opens — not every arrival in the batch.
              */
             Notifier.mail(context, newest.optString("id", ""),
                     context.getString(R.string.notify_new_mail_many, arrivals.size(), from),
-                    body, newest.optString("id", ""));
+                    body, newest.optString("id", ""), accountId, markReadLabel);
             Notifier.mailSummary(context,
                     context.getString(R.string.notify_new_mail_summary, arrivals.size()),
                     context.getString(R.string.notify_new_mail_one, from));

@@ -5,4 +5,14 @@
     <string name="notify_new_mail_many">%1$d nouveaux messages · le dernier de %2$s</string>
     <string name="notify_new_mail_summary">%1$d nouveaux messages</string>
     <string name="notify_no_subject">(sans objet)</string>
+    <string name="notify_mark_read">Marquer comme lu</string>
+    <string name="notify_retry_now">Réessayer maintenant</string>
+    <string name="shortcut_compose_short">Nouveau</string>
+    <string name="shortcut_compose_long">Nouveau message programmé</string>
+    <string name="shortcut_codes_short">Codes</string>
+    <string name="shortcut_codes_long">Vérifier les codes</string>
+    <string name="widget_label">Aevistle — prochain envoi</string>
+    <string name="widget_description">Affiche l\'heure du prochain envoi programmé.</string>
+    <string name="widget_next_at">Prochain :</string>
+    <string name="widget_nothing_due">Rien de programmé</string>
 </resources>

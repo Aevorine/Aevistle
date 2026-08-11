@@ -2264,6 +2264,15 @@ textarea {
   display: flex;
   flex-direction: column;
   align-items: center;
+  /* `.view--list .list-pane > .empty` forces `height: 100%` so an empty list
+     fills the pane instead of sitting at its natural (small) height — but
+     without this, a vertical flex box with no `justify-content` still packs
+     its children at the top, leaving the icon/title/button stuck under the
+     header with a blank band below on every list screen (tasks, contacts,
+     templates, activity, …). Centering here is safe generally: outside the
+     list pane `.empty` has no forced height, so `justify-content: center`
+     is a no-op there — the box is already exactly as tall as its content. */
+  justify-content: center;
   gap: var(--sp-3);
   padding: var(--sp-8) var(--sp-5);
   text-align: center;
@@ -6404,18 +6413,34 @@ textarea {
  * The floor gives way to a banner, rather than pushing the form into scroll.
  *
  * A banner on this screen is 72px the configured, valid draft does not carry —
- * "no account yet" on first run, an oversized attachment later. Measured on a
- * 1266x827 window: with the banner up, a 320px floor tips the column 9px past
- * the viewport, which is the one thing this form is not allowed to do. The
- * banner is also the only state where the box is at its floor at all: with the
- * banner gone the box grows to 391px on that same window and this rule cannot
- * be reached.
+ * an oversized attachment, mainly. Measured on a 1266x827 window: with the
+ * banner up, a 320px floor tips the column 9px past the viewport, which is
+ * the one thing this form is not allowed to do. The banner is also the only
+ * state where the box is at its floor at all: with the banner gone the box
+ * grows to 391px on that same window and this rule cannot be reached.
  *
  * So the floor is conditional on the banner rather than being lowered for
  * everyone, which would hand the ordinary case a smaller guarantee to fix a
  * state most people see once.
+ *
+ * "No account yet" used to be exactly such a banner, and this rule's `:has()`
+ * was written against it — until the duplicate "还没有发件账号" warning
+ * ComposeView rendered next to `HealthBoard`'s own copy of the same message
+ * was removed (one clear warning instead of two eating ~80px of a screen that
+ * has to fit in one). `HealthBoard` reports that condition as a `.health`
+ * strip, not a `.banner`, so the fix silently starved this rule of the only
+ * trigger the first-run case ever gave it: at 1366x768 with no account
+ * configured the strip alone pushed the form 111px past the viewport with the
+ * floor still at 320. `.health__item[data-level]` is added below for exactly
+ * that reason — any warning- or danger-level line in the strip earns the same
+ * relief a warning banner always did.
  */
-.view--compose:has(.banner--warning, .banner--danger)
+.view--compose:has(
+    .banner--warning,
+    .banner--danger,
+    .health__item[data-level='warning'],
+    .health__item[data-level='danger']
+  )
   .compose-layout
   > .field:has(.textarea--body)
   > .textarea--body {
@@ -6637,6 +6662,148 @@ textarea {
     inset-inline-start: auto;
     inset-inline-end: 0;
   }
+}
+
+/* --- in-app date/time picker (`DateTimeField.tsx`) -------------------------
+
+   Replaces `<input type="time"|"date"|"datetime-local">`. The trigger reuses
+   `.select` verbatim — same box, same chevron — so it reads as one more field
+   until it is tapped. The panel reuses the anchored-popover shape
+   `.whenbar__picks` and `.reader__moreMenu` already established: absolute,
+   right below the trigger, closes on Escape or an outside pointerdown. */
+.dtfield {
+  position: relative;
+}
+.dtfield__trigger {
+  font: inherit;
+  text-align: start;
+  color: var(--text-1);
+}
+.dtfield__trigger:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.dtfield__panel {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + var(--sp-2));
+  inset-inline-start: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  width: max-content;
+  max-width: min(20rem, 90vw);
+  padding: var(--sp-3);
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-lg);
+}
+/* A datetime panel stacks calendar over time rather than side by side: at
+   20rem max-width there is not room for a 7-column month grid and two
+   scrolling number columns in one row without crushing both. */
+.dtfield__divider {
+  height: 1px;
+  background: var(--border);
+  margin: var(--sp-1) 0;
+}
+.dtfield__footer {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.dtfield__calhead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+.dtfield__calmonth {
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--text-1);
+}
+.dtfield__calgrid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+}
+.dtfield__calweekday {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  font-size: var(--text-xs);
+  font-weight: 700;
+  color: var(--text-3);
+}
+.dtfield__calday {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--text-1);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: all var(--dur-fast) var(--ease);
+}
+.dtfield__calday:hover {
+  background: var(--surface-hover);
+}
+.dtfield__calday[data-dim] {
+  color: var(--text-3);
+}
+.dtfield__calday[data-today] {
+  border-color: var(--border-strong);
+}
+.dtfield__calday[aria-pressed="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+/* Two scrolling number lists rather than a wheel: a wheel needs its own
+   gesture handling to feel right and a plain scrollable list with big tap
+   targets needs none, which matters more here than the skeuomorphism. */
+.dtfield__time {
+  display: flex;
+  gap: var(--sp-2);
+}
+.dtfield__col {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 4.5em;
+  max-height: 12rem;
+  overflow-y: auto;
+  scroll-behavior: auto;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-inset);
+}
+.dtfield__opt {
+  flex: none;
+  min-height: var(--tap-min);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--text-1);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.dtfield__opt:hover {
+  background: var(--surface-hover);
+}
+.dtfield__opt[aria-selected="true"] {
+  background: var(--accent);
+  color: var(--accent-text);
+  font-weight: 700;
 }
 
 /* The folded options are a grid rather than a stack: opened, they used to add
@@ -7973,6 +8140,9 @@ textarea {
   gap: 3px;
 }
 .markup__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-width: 28px;
   min-height: 26px;
   padding: 0 var(--sp-2);
@@ -8253,9 +8423,16 @@ textarea {
 :root[data-shell="mobile"] .icon-btn,
 :root[data-shell="mobile"] .icon-btn--sm,
 :root[data-shell="mobile"] .chip__remove,
-:root[data-shell="mobile"] .select--compact {
+:root[data-shell="mobile"] .select--compact,
+:root[data-shell="mobile"] .lightbox__btn {
   min-width: var(--tap-min);
   min-height: var(--tap-min);
+}
+/* The lightbox's bottom toolbar is 8 buttons in a row; at the 44px floor a
+   `--sp-2` (8px) gap leaves too little between adjacent targets for a
+   thumb, so it widens here alongside the height. */
+:root[data-shell="mobile"] .lightbox__bar--bottom {
+  gap: var(--sp-3);
 }
 /* `.chip__remove` is a 16px cross inside a pill and `.select--compact` is a
    32px select; both set an explicit `width`/`height` that a `min-*` cannot beat
@@ -8288,7 +8465,8 @@ textarea {
   .icon-btn,
   .icon-btn--sm,
   .chip__remove,
-  .select--compact {
+  .select--compact,
+  .lightbox__btn {
     min-width: var(--tap-min);
     min-height: var(--tap-min);
   }
@@ -8297,6 +8475,11 @@ textarea {
   .icon-btn--sm {
     width: var(--tap-min);
     height: var(--tap-min);
+  }
+  /* Same widening as the `data-shell="mobile"` floor above, for a touchscreen
+     desktop window that never sets that attribute. */
+  .lightbox__bar--bottom {
+    gap: var(--sp-3);
   }
   .select--compact {
     height: auto;
@@ -10270,16 +10453,29 @@ textarea {
  *
  * `Banner` adds `--stack` only when it actually has an action, so every banner
  * without one keeps the flex sizing it has always had.
+ *
+ * The trailing-edge rule below used to live only inside the narrow media
+ * query, on the assumption that `.banner__body`'s `flex: 1` already pins the
+ * action flush right at any width that is not this cramped. It does not:
+ * `.banner__body` also carries `max-width: var(--reading-max)` (~68ch, for
+ * prose readability), and on a wide, non-modal banner — the compose screen's
+ * "还没有发件账号" strip at 1366px, the post-send result banner, the account
+ * dialog's OAuth/test-connection banners — the text stops growing at that cap
+ * while the container keeps going, leaving the button stranded next to the
+ * text with a bare gap to the actual right edge instead of sitting there
+ * itself. Unconditional `margin-inline-start: auto` fixes that at every width
+ * and costs nothing where the button was already flush (the common case on a
+ * modal narrower than the reading cap).
  */
+.banner--stack > :last-child:not(.banner__body) {
+  margin-inline-start: auto;
+}
 @media (max-width: 760px) {
   .banner--stack {
     flex-wrap: wrap;
   }
   .banner--stack > .banner__body {
     flex: 1 1 12em;
-  }
-  .banner--stack > :last-child:not(.banner__body) {
-    margin-inline-start: auto;
   }
 }
 

@@ -52,6 +52,8 @@ export interface HealthIssue {
 export interface PermissionSnapshot {
   notifications: 'granted' | 'prompt' | 'blocked'
   exactAlarms: 'granted' | 'denied' | 'not-required'
+  /** `'granted'` means *exempt* from battery optimization — see `bridge-android.ts`. */
+  batteryOptimized: 'granted' | 'denied' | 'not-required'
   canAskNotifications: boolean
 }
 

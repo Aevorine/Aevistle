@@ -26,7 +26,7 @@
  */
 
 import { useDeferredValue, useEffect, useMemo, useState } from 'react'
-import { Button, EmptyState, Modal, PageHead, Segmented, useConfirm, useToast } from '../components/ui'
+import { Banner, Button, EmptyState, Modal, PageHead, Segmented, useConfirm, useToast } from '../components/ui'
 import { SearchInput } from '../components/inputs'
 import {
   IconAlert,
@@ -308,6 +308,19 @@ export function CodesView({ onGoToInbox }: { onGoToInbox?: () => void }) {
             </>
           }
         />
+
+        {/* Android's background sync runs on a system-owned 15-minute floor
+            (see InboxSyncWorker.java) that this screen's "Check now" button
+            cannot shorten. Desktop has no such floor, so this only shows on
+            the Android build, and only once there is an inbox account to
+            wait on. `keep` survives the phone's cull of info banners —
+            unlike most of them, this one is reporting something, not
+            explaining the screen. */}
+        {bridge?.platform === 'android' && hasAnyInbox ? (
+          <Banner tone="info" keep>
+            {t('codes.androidBackgroundDelay')}
+          </Banner>
+        ) : null}
 
         {/* D5 — what the last press actually did. Six sentences, not "failed". */}
         {check.lastOutcome ? (

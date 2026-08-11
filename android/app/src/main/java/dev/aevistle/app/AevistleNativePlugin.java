@@ -11,6 +11,7 @@ import android.content.pm.SigningInfo;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
+import android.provider.ContactsContract;
 import android.provider.OpenableColumns;
 import android.util.Log;
 
@@ -1602,6 +1603,92 @@ public class AevistleNativePlugin extends Plugin {
     }
 
     // -----------------------------------------------------------------------
+    // Contacts
+    //
+    // `ACTION_PICK` on `ContactsContract.Contacts.CONTENT_URI` hands the whole
+    // picking UI to the system Contacts app and this plugin only ever learns
+    // about the one contact the user tapped — deliberately, because that is
+    // the one contact flow that needs no `READ_CONTACTS` runtime permission:
+    // the picker activity belongs to the Contacts app (which already holds
+    // that permission), and the URI it returns carries its own temporary
+    // read grant, scoped to just that contact. Querying the global
+    // `CommonDataKinds.Email.CONTENT_URI` table would need `READ_CONTACTS`
+    // even after a pick; querying `<contactUri>/data` does not, because that
+    // path inherits the grant the picker's result already carries — see
+    // `contactPicked` below for the query this makes possible without the
+    // manifest declaring anything new. One contact per call rather than a
+    // multi-select is the tradeoff for that: `ACTION_PICK` only ever returns
+    // one, so "bulk" import on Android means pressing the button once per
+    // contact — annoying above a handful, but the alternative
+    // (`ACTION_GET_CONTENT` with `EXTRA_ALLOW_MULTIPLE`, or holding
+    // `READ_CONTACTS` outright) both need the runtime permission this avoids.
+    // -----------------------------------------------------------------------
+
+    @PluginMethod
+    public void pickContact(PluginCall call) {
+        Intent intent = new Intent(Intent.ACTION_PICK, ContactsContract.Contacts.CONTENT_URI);
+        startActivityForResult(call, intent, "contactPicked");
+    }
+
+    @ActivityCallback
+    private void contactPicked(PluginCall call, ActivityResult result) {
+        if (call == null) return;
+
+        JSObject response = new JSObject();
+        Uri contactUri = (result.getResultCode() == Activity.RESULT_OK && result.getData() != null)
+                ? result.getData().getData()
+                : null;
+
+        if (contactUri == null) {
+            response.put("cancelled", true);
+            call.resolve(response);
+            return;
+        }
+
+        String name = "";
+        try (Cursor cursor = getContext().getContentResolver().query(contactUri, null, null, null, null)) {
+            if (cursor != null && cursor.moveToFirst()) {
+                int nameCol = cursor.getColumnIndex(ContactsContract.Contacts.DISPLAY_NAME);
+                if (nameCol >= 0) {
+                    String n = cursor.getString(nameCol);
+                    if (n != null) name = n;
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "contactPicked: could not read the chosen contact's name", e);
+        }
+
+        // See the class-level note above: this sub-path is what makes the
+        // query work without READ_CONTACTS — it inherits `contactUri`'s own
+        // grant rather than needing the permission for the Data table at large.
+        JSArray addresses = new JSArray();
+        Uri dataUri = Uri.withAppendedPath(contactUri, ContactsContract.Contacts.Data.CONTENT_DIRECTORY);
+        try (Cursor data = getContext().getContentResolver().query(
+                dataUri,
+                new String[]{ContactsContract.Data.MIMETYPE, ContactsContract.CommonDataKinds.Email.ADDRESS},
+                ContactsContract.Data.MIMETYPE + " = ?",
+                new String[]{ContactsContract.CommonDataKinds.Email.CONTENT_ITEM_TYPE},
+                null)) {
+            if (data != null) {
+                int addrCol = data.getColumnIndex(ContactsContract.CommonDataKinds.Email.ADDRESS);
+                while (data.moveToNext()) {
+                    if (addrCol < 0) continue;
+                    String address = data.getString(addrCol);
+                    if (address != null && !address.isEmpty()) addresses.put(address);
+                }
+            }
+        } catch (Exception e) {
+            // The name above is still usable without an email — the JS side
+            // treats an empty `addresses` as "nothing to import from this one".
+            Log.e(TAG, "contactPicked: could not read email addresses for the chosen contact", e);
+        }
+
+        response.put("name", name);
+        response.put("addresses", addresses);
+        call.resolve(response);
+    }
+
+    // -----------------------------------------------------------------------
     // Received attachments
     //
     // Three separate capabilities, because they answer three different
@@ -2060,11 +2147,23 @@ public class AevistleNativePlugin extends Plugin {
          * about a message that can be opened.
          */
         String messageId = call.getString("messageId", "");
+        /*
+         * `accountId` and `markReadLabel` are what let a foreground new-mail
+         * notification carry the same "Mark as read" action the background
+         * sync worker's own new-mail notifications do — see
+         * `InboxSyncWorker.announce`. Both optional, and the action is simply
+         * absent without them (see `Notifier.mail`): the renderer's own call
+         * site did not have an account id in scope until it was added
+         * alongside this, and an older web layer that has not learned about
+         * either yet must still produce a correct, tappable notification.
+         */
+        String accountId = call.getString("accountId", "");
+        String markReadLabel = call.getString("markReadLabel", "");
         try {
             if (isCode) {
                 Notifier.code(getContext(), title, title, body, codeValue, copyLabel);
             } else if (!messageId.isEmpty()) {
-                Notifier.mail(getContext(), messageId, title, body, messageId);
+                Notifier.mail(getContext(), messageId, title, body, messageId, accountId, markReadLabel);
             } else {
                 Notifier.status(getContext(), title + body, title, body);
             }
@@ -2094,6 +2193,24 @@ public class AevistleNativePlugin extends Plugin {
         JSObject result = new JSObject();
         String id = MainActivity.takePendingOpenMessageId();
         if (id != null && !id.isEmpty()) result.put("messageId", id);
+        call.resolve(result);
+    }
+
+    /**
+     * Which long-press-icon shortcut (`res/xml/shortcuts.xml`) was tapped, if
+     * one was.
+     *
+     * Same shape and same reasoning as {@link #takePendingOpen}: a shortcut
+     * tap is routinely a cold start, so {@link MainActivity} parks the route
+     * from the intent and this hands it over once, on the launch it actually
+     * happened on. Resolves with an absent `route` — not a rejection — when
+     * nothing is waiting, which is every launch that was not a shortcut tap.
+     */
+    @PluginMethod
+    public void takePendingShortcut(PluginCall call) {
+        JSObject result = new JSObject();
+        String route = MainActivity.takePendingShortcutRoute();
+        if (route != null && !route.isEmpty()) result.put("route", route);
         call.resolve(result);
     }
 
@@ -2288,6 +2405,7 @@ public class AevistleNativePlugin extends Plugin {
         JSObject result = new JSObject();
         result.put("notifications", notificationState());
         result.put("exactAlarms", Permissions.exactAlarms(getContext()));
+        result.put("batteryOptimized", Permissions.batteryOptimized(getContext()));
         result.put("canAskNotifications", canAskNotifications());
         return result;
     }
@@ -2374,6 +2492,20 @@ public class AevistleNativePlugin extends Plugin {
     public void openExactAlarmSettings(PluginCall call) {
         JSObject result = new JSObject();
         result.put("opened", Permissions.openExactAlarmSettings(getContext(), getActivity()));
+        call.resolve(result);
+    }
+
+    /**
+     * Battery optimization's own route out — a direct Allow/Deny dialog
+     * rather than a settings screen. See {@link Permissions#batteryOptimized}
+     * for why this is asked about at all: exact-alarm and notification
+     * permission both granted is not enough on a phone whose manufacturer
+     * freezes backgrounded apps on top of stock Doze.
+     */
+    @PluginMethod
+    public void openBatteryOptimizationSettings(PluginCall call) {
+        JSObject result = new JSObject();
+        result.put("opened", Permissions.openBatteryOptimizationSettings(getContext(), getActivity()));
         call.resolve(result);
     }
 

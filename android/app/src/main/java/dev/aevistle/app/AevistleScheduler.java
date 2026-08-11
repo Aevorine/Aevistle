@@ -64,6 +64,12 @@ final class AevistleScheduler {
 
             arm(context, alarms, jobId, next);
         }
+
+        // Every path that reaches `rearmAll` — `syncJobs`, a reboot, an app
+        // update, the exact-alarm permission changing — is exactly a path
+        // that may have moved the soonest still-future occurrence. See
+        // `NextSendWidgetProvider`'s class comment for the other refresh site.
+        NextSendWidgetProvider.refresh(context);
     }
 
     /**

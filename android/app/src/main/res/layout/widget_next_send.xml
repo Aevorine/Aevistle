@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    2x1 home-screen widget: the Windows tray's "Next: <time>" line, on a phone.
+    See `NextSendWidgetProvider`'s class comment for why and when it refreshes.
+
+    RemoteViews can only inflate a fixed subset of views — no custom classes,
+    no arbitrary attributes evaluated at bind time — which is why this stays
+    two plain LinearLayouts and two TextViews rather than reaching for
+    anything from the app's own component set.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_next_send_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:background="@drawable/widget_background"
+    android:paddingStart="14dp"
+    android:paddingEnd="14dp"
+    android:paddingTop="10dp"
+    android:paddingBottom="10dp">
+
+    <!--
+        The same envelope glyph every notification wears (`ic_notification`),
+        already flat white — no tint override needed here the way
+        `Notifier.java` needs one for the status bar's own tinting.
+    -->
+    <ImageView
+        android:layout_width="20dp"
+        android:layout_height="20dp"
+        android:layout_marginEnd="10dp"
+        android:src="@drawable/ic_notification"
+        android:importantForAccessibility="no" />
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/widget_next_send_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/app_name"
+            android:textColor="@color/widget_on_accent"
+            android:alpha="0.82"
+            android:textSize="11sp"
+            android:singleLine="true" />
+
+        <TextView
+            android:id="@+id/widget_next_send_text"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="@string/widget_nothing_due"
+            android:textColor="@color/widget_on_accent"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:maxLines="2"
+            android:ellipsize="end" />
+
+    </LinearLayout>
+
+</LinearLayout>

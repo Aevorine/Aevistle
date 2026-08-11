@@ -32,6 +32,20 @@
             </intent-filter>
 
             <!--
+                Long-press-icon shortcuts. Must sit on the activity carrying
+                the LAUNCHER intent-filter just above — that is the contract,
+                not a convenience — and points at `res/xml/shortcuts.xml`,
+                which is the whole of the rest of this feature: two static
+                entries, each launching this same activity with a
+                `shortcutRoute` extra `MainActivity`/`AevistleNativePlugin`
+                already know how to park and hand over, the same way a
+                notification tap or an incoming share already do.
+            -->
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
+
+            <!--
                 The OAuth2 consent redirect.
 
                 A private-use URI scheme, which is what RFC 8252 §7.1 prescribes
@@ -152,13 +166,25 @@
             this, granting the permission would visibly change nothing until the
             app was next opened. Android delivers that broadcast to
             manifest-declared receivers for exactly this purpose.
+
+            `LOCKED_BOOT_COMPLETED` is deliberately not listed here, though an
+            earlier version of this manifest carried it with a comment claiming
+            it re-armed alarms "before the user unlocks". It cannot: Android
+            only delivers that broadcast to components explicitly marked
+            `android:directBootAware="true"`, which nothing in this app is, and
+            an unaware receiver registered for it simply never fires — dead
+            code that reads as working. `BOOT_COMPLETED`, fired once the user
+            has unlocked at least once, is what actually reaches this receiver
+            after a restart; genuine direct-boot support (a
+            `directBootAware` receiver reading from device-protected storage,
+            which `JobStore`/`SecretStore` do not use) is a larger change than
+            this fix, not attempted here.
         -->
         <receiver
             android:name=".BootReceiver"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
-                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
                 <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
             </intent-filter>
@@ -179,6 +205,63 @@
             <intent-filter>
                 <action android:name="dev.aevistle.app.COPY_CODE" />
             </intent-filter>
+        </receiver>
+
+        <!--
+            The "Retry now" button on a failed scheduled-send notification.
+
+            Not exported, for the same reason `CopyCodeReceiver` above is not:
+            an exported receiver would let any app on the device broadcast the
+            action and make Aevistle send an arbitrary job id's mail on demand.
+        -->
+        <receiver
+            android:name=".RetryJobReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="dev.aevistle.app.RETRY_JOB" />
+            </intent-filter>
+        </receiver>
+
+        <!--
+            The "Mark as read" button on a new-mail notification.
+
+            Not exported, same reasoning as `RetryJobReceiver` just above: an
+            exported receiver would let any app on the device mark arbitrary
+            messages read by broadcasting the action with an account/message
+            id pair of its own choosing.
+        -->
+        <receiver
+            android:name=".MarkReadReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="dev.aevistle.app.MARK_READ" />
+            </intent-filter>
+        </receiver>
+
+        <!--
+            The home-screen widget — the Android equivalent of the Windows
+            tray's "Next: <time>" line. `exported="true"`, unlike every other
+            receiver in this file: those are only ever meant to hear from this
+            app itself, but a widget's update broadcast is sent by the home
+            screen app the user picked, a different process and a different
+            uid, so an unexported receiver would simply never see it. This is
+            the standard, documented shape for an `AppWidgetProvider`
+            component — see the `<meta-data>` below pointing at
+            `widget_next_send_info.xml` for the size, refresh interval, and
+            initial layout, and `NextSendWidgetProvider` for the actual
+            refresh logic and the two paths that call it directly rather than
+            waiting on the periodic broadcast alone.
+        -->
+        <receiver
+            android:name=".NextSendWidgetProvider"
+            android:exported="true"
+            android:label="@string/widget_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_next_send_info" />
         </receiver>
 
         <provider
@@ -226,6 +309,21 @@
         than failing, says so, and offers the settings screen that fixes it.
     -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+
+    <!--
+        Ask, directly, to be exempted from battery optimization.
+
+        Exact alarms and notifications can both be granted and a manufacturer's
+        own background-app manager (Xiaomi, Huawei, OPPO, vivo, Samsung all ship
+        one on top of stock Doze) can still freeze this app's process between
+        alarms — the mail simply stops arriving and sending on time, with
+        nothing on screen to say why, because the process that would have said
+        so was the one that got frozen. This is what lets
+        `ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` raise the system's own
+        Allow/Deny dialog rather than merely opening a settings screen; see
+        `Permissions.batteryOptimized` and `openBatteryOptimizationSettings`.
+    -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <!-- Finish an in-flight send if the screen goes off mid-upload. -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />

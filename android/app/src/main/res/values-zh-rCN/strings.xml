@@ -9,4 +9,14 @@
     <string name="notify_new_mail_many">%1$d 封新邮件 · 最新来自 %2$s</string>
     <string name="notify_new_mail_summary">%1$d 封新邮件</string>
     <string name="notify_no_subject">（无主题）</string>
+    <string name="notify_mark_read">标为已读</string>
+    <string name="notify_retry_now">立即重试</string>
+    <string name="shortcut_compose_short">新建邮件</string>
+    <string name="shortcut_compose_long">新建定时邮件</string>
+    <string name="shortcut_codes_short">验证码</string>
+    <string name="shortcut_codes_long">查验证码</string>
+    <string name="widget_label">Aevistle — 下次发送</string>
+    <string name="widget_description">显示下一次计划发送邮件的时间。</string>
+    <string name="widget_next_at">下一次：</string>
+    <string name="widget_nothing_due">没有待发提醒</string>
 </resources>

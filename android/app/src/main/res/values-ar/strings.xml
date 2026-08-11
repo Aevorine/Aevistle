@@ -5,4 +5,14 @@
     <string name="notify_new_mail_many">%1$d رسائل جديدة · أحدثها من %2$s</string>
     <string name="notify_new_mail_summary">%1$d رسائل جديدة</string>
     <string name="notify_no_subject">(بلا موضوع)</string>
+    <string name="notify_mark_read">تحديد كمقروءة</string>
+    <string name="notify_retry_now">إعادة المحاولة الآن</string>
+    <string name="shortcut_compose_short">جديد</string>
+    <string name="shortcut_compose_long">بريد مجدول جديد</string>
+    <string name="shortcut_codes_short">الرموز</string>
+    <string name="shortcut_codes_long">التحقق من رموز التحقق</string>
+    <string name="widget_label">Aevistle — الإرسال التالي</string>
+    <string name="widget_description">يعرض موعد الإرسال المجدول التالي.</string>
+    <string name="widget_next_at">التالي:</string>
+    <string name="widget_nothing_due">لا شيء مجدول</string>
 </resources>

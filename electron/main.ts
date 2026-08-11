@@ -25,7 +25,7 @@ import {
 } from 'electron'
 import path from 'node:path'
 import { promises as fs, readFileSync, statSync, writeFileSync } from 'node:fs'
-import { IPC, type DesktopPrefs, type TrayCommand } from '../src/core/ipc-contract'
+import { IPC, type BadgeCounts, type DesktopPrefs, type TrayCommand } from '../src/core/ipc-contract'
 import type {
   Attachment,
   ControlScope,
@@ -39,6 +39,7 @@ import type {
   SendResult,
   SharePayload,
 } from '../src/core/types'
+import { DEFAULT_SETTINGS } from '../src/core/types'
 import type { DataFolder, DataFolderChange } from '../src/core/bridge'
 // The translation tables, not the i18n module: that one pulls in React for the
 // context helper, and the main process has no business bundling React.
@@ -108,6 +109,7 @@ import {
 } from './store'
 import {
   forgetOAuthAccount,
+  hasOAuthGrant,
   invalidateOAuthToken,
   oauthStatusFor,
   runConsent,
@@ -159,6 +161,16 @@ let desktopPrefs: DesktopPrefs = {
   notifyOnSuccess: true,
   notifyOnFailure: true,
 }
+/**
+ * The last counts `IPC.setBadgeCounts` reported, reapplied whenever
+ * `mainWindow` is (re)created.
+ *
+ * A fresh window otherwise starts with no overlay even while unread mail or
+ * an armed reminder already exist — the renderer only pushes on *change*
+ * (see the effect in `App.tsx`), so a window that did not exist yet when
+ * that last push happened would never be told.
+ */
+let lastBadgeCounts: BadgeCounts = { unread: 0, armed: 0 }
 /**
  * Started by the OS at login, so the first window should stay out of the way.
  * Consumed once — see `ready-to-show`.
@@ -228,6 +240,24 @@ const controlServer = new ControlServer({
   },
   calendarSubscribeEnabled: () => controlSettings.calendarSubscribeEnabled,
   buildCalendarIcs: () => buildCalendarIcsText(),
+  /*
+   * Same source `buildCalendarIcsText` above reads: `state.json` off disk,
+   * not `controlSettings` — that cache only ever holds the fields
+   * `IPC.applyControl` was given, which are the control toggles, not the
+   * activity log's retention policy. Falling back to `DEFAULT_SETTINGS`
+   * covers a state file written before this account existed, or a read that
+   * failed outright, the same way every other reader of `Settings` in this
+   * process does.
+   */
+  retentionPolicy: async () => {
+    const state = await loadState<{
+      settings?: { logRetentionDays?: number; logMaxEntries?: number }
+    }>().catch(() => null)
+    return {
+      days: state?.settings?.logRetentionDays ?? DEFAULT_SETTINGS.logRetentionDays,
+      maxEntries: state?.settings?.logMaxEntries ?? DEFAULT_SETTINGS.logMaxEntries,
+    }
+  },
   execute: (request) =>
     new Promise<ControlResponse>((resolve) => {
       const window = mainWindow
@@ -983,6 +1013,12 @@ function createWindow(): void {
      compose form out twice at two different heights. */
   if (saved?.maximized) mainWindow.maximize()
 
+  // The renderer only pushes badge counts on *change* (see the effect in
+  // `App.tsx`), so a window created after the last push — the ordinary case,
+  // since this runs before the renderer has loaded at all — would otherwise
+  // start with no overlay even while unread mail or an armed reminder exist.
+  applyBadgeCounts(lastBadgeCounts)
+
   /*
    * Started by the OS at login means started for the schedule. Showing the
    * window would make "start with the computer" feel like an intrusion every
@@ -1290,6 +1326,115 @@ function fallbackTrayIcon(): Electron.NativeImage {
 }
 
 /**
+ * A compact 3×5 bitmap font, digits and `+` only — everything `badgeIcon`
+ * below ever has to draw. `'1'` is an ink pixel, anything else is not.
+ */
+const BADGE_FONT: Record<string, string[]> = {
+  '0': ['111', '101', '101', '101', '111'],
+  '1': ['010', '110', '010', '010', '111'],
+  '2': ['111', '001', '111', '100', '111'],
+  '3': ['111', '001', '111', '001', '111'],
+  '4': ['101', '101', '111', '001', '001'],
+  '5': ['111', '100', '111', '001', '111'],
+  '6': ['111', '100', '111', '101', '111'],
+  '7': ['111', '001', '010', '010', '010'],
+  '8': ['111', '101', '111', '101', '111'],
+  '9': ['111', '101', '111', '001', '111'],
+  '+': ['000', '010', '111', '010', '000'],
+}
+
+/**
+ * A small round taskbar-overlay badge with a 1–2 character count, drawn from
+ * raw pixels — the same reasoning as `fallbackTrayIcon` above applies twice
+ * over here: `setOverlayIcon` needs a real image the instant unread mail or
+ * an armed reminder exists, and there is no packaged asset to go missing in
+ * the first place since the number changes on every call.
+ *
+ * Capped at `"9+"` rather than the sidebar's `"99+"` (see `navBadgeText` in
+ * `App.tsx`) — three characters do not read at the size Windows actually
+ * renders a taskbar overlay at, and two barely do. The brand colour matches
+ * `fallbackTrayIcon`'s, both written in the BGRA byte order
+ * `nativeImage.createFromBuffer` expects.
+ */
+function badgeIcon(count: number): Electron.NativeImage {
+  const text = count > 9 ? '9+' : String(Math.max(0, count))
+  const size = 32
+  const pixels = Buffer.alloc(size * size * 4) // fully transparent until painted
+
+  const setPixel = (x: number, y: number, r: number, g: number, b: number, a: number) => {
+    if (x < 0 || y < 0 || x >= size || y >= size) return
+    const i = (y * size + x) * 4
+    pixels[i + 0] = b
+    pixels[i + 1] = g
+    pixels[i + 2] = r
+    pixels[i + 3] = a
+  }
+
+  const cx = size / 2
+  const cy = size / 2
+  const radius = size / 2 - 1
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const dx = x - cx + 0.5
+      const dy = y - cy + 0.5
+      if (dx * dx + dy * dy <= radius * radius) setPixel(x, y, 0x4f, 0x46, 0xe5, 0xff)
+    }
+  }
+
+  const scale = 3
+  const glyphWidth = 3 * scale
+  const glyphHeight = 5 * scale
+  const gap = Math.round(scale * 1.2)
+  const totalWidth = text.length * glyphWidth + (text.length - 1) * gap
+  const startX = Math.round((size - totalWidth) / 2)
+  const startY = Math.round((size - glyphHeight) / 2)
+
+  for (let ci = 0; ci < text.length; ci++) {
+    const glyph = BADGE_FONT[text[ci]]
+    if (!glyph) continue
+    const ox = startX + ci * (glyphWidth + gap)
+    for (let row = 0; row < 5; row++) {
+      for (let col = 0; col < 3; col++) {
+        if (glyph[row][col] !== '1') continue
+        for (let sy = 0; sy < scale; sy++) {
+          for (let sx = 0; sx < scale; sx++) {
+            setPixel(ox + col * scale + sx, startY + row * scale + sy, 0xff, 0xff, 0xff, 0xff)
+          }
+        }
+      }
+    }
+  }
+
+  return nativeImage.createFromBuffer(pixels, { width: size, height: size })
+}
+
+/**
+ * Draw or clear the taskbar overlay from the renderer's latest counts.
+ *
+ * `setOverlayIcon` is Windows-only — Electron no-ops it elsewhere, but the
+ * call is still wrapped in `try/catch` because "no-op" is the documented
+ * behaviour, not a guarantee for every Electron version this app has shipped
+ * against, and a badge is not worth a crashed main process over.
+ */
+function applyBadgeCounts(counts: BadgeCounts): void {
+  lastBadgeCounts = counts
+  if (!mainWindow) return
+  const total = Math.max(0, counts.unread) + Math.max(0, counts.armed)
+  try {
+    if (total <= 0) {
+      mainWindow.setOverlayIcon(null, '')
+      return
+    }
+    const description =
+      `${tr(uiLocale, 'nav.inbox')}: ${counts.unread} · ${tr(uiLocale, 'nav.schedule')}: ${counts.armed}`
+    mainWindow.setOverlayIcon(badgeIcon(total), description)
+  } catch {
+    // Platform does not support it, or the window was mid-teardown — either
+    // way there is nothing actionable to do about it.
+  }
+}
+
+/**
  * The window icon, loaded once and reused for every notification.
  *
  * Windows draws a toast with whatever icon it can find, and for an
@@ -1576,6 +1721,13 @@ function registerIpc(): void {
         console.error('[aevistle] could not update the login item:', error)
       }
     }
+  })
+
+  ipcMain.handle(IPC.setBadgeCounts, (_e, counts: BadgeCounts) => {
+    applyBadgeCounts({
+      unread: Number.isFinite(counts?.unread) ? counts.unread : 0,
+      armed: Number.isFinite(counts?.armed) ? counts.armed : 0,
+    })
   })
 
   ipcMain.handle(IPC.setUiLocale, (_e, locale: LocaleId) => {
@@ -1903,13 +2055,21 @@ function registerIpc(): void {
    * The renderer sends configs without passwords — those never leave the main
    * process — so the secret for each is looked up here before handing the set
    * to the watcher pool, which reconciles it against what is already running.
+   *
+   * An account with no password may still belong here: `hasOAuthGrant` is the
+   * cheap, no-network check `imap.ts`'s polling path already trusts for "is
+   * there a credential at all" (see that file's own comment on why `!secret`
+   * alone is the wrong question once OAuth2 exists), checked only when the
+   * password lookup came back empty so a normal password account never pays
+   * for it.
    */
   ipcMain.handle(IPC.watchInbox, async (_e, configs: InboxAccountState[]) => {
     const withSecrets = await Promise.all(
-      configs.map(async (config) => ({
-        config,
-        secret: await getInboxSecret(config.accountId),
-      })),
+      configs.map(async (config) => {
+        const secret = await getInboxSecret(config.accountId)
+        const oauthAccount = secret ? false : await hasOAuthGrant(config.accountId)
+        return { config, secret, oauthAccount }
+      }),
     )
     watchInboxes(withSecrets, (accountId) => {
       // The watcher only ever says "something changed"; the renderer runs the

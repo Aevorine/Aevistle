@@ -88,6 +88,35 @@ public class MainActivity extends BridgeActivity {
         return share;
     }
 
+    /** The intent extra `res/xml/shortcuts.xml` attaches to each shortcut's launch intent. */
+    private static final String EXTRA_SHORTCUT_ROUTE = "shortcutRoute";
+
+    /**
+     * Which long-press-icon shortcut was tapped, waiting to be collected.
+     *
+     * Same shape and same reasoning as {@link #pendingOpenMessageId}: a
+     * shortcut tap routinely *is* the cold start — there is no WebView yet to
+     * fire an event at, so the route is parked here and {@code
+     * AevistleNativePlugin.takePendingShortcut} hands it over once the page
+     * asks. Only the newest is kept, for the same reason as the other two:
+     * two taps before the page is ready still means one place to land, and it
+     * is wherever was tapped last.
+     */
+    private static volatile String pendingShortcutRoute = null;
+
+    /** Read and clear — see {@link #takePendingOpenMessageId()}. */
+    static String takePendingShortcutRoute() {
+        String route = pendingShortcutRoute;
+        pendingShortcutRoute = null;
+        return route;
+    }
+
+    private static void recordPendingShortcut(Intent intent) {
+        if (intent == null) return;
+        String route = intent.getStringExtra(EXTRA_SHORTCUT_ROUTE);
+        if (route != null && !route.isEmpty()) pendingShortcutRoute = route;
+    }
+
     @Override
     public void onCreate(Bundle savedInstanceState) {
         // Must happen before super.onCreate() — the bridge builds its plugin
@@ -95,9 +124,42 @@ public class MainActivity extends BridgeActivity {
         // the WebView.
         registerPlugin(AevistleNativePlugin.class);
         super.onCreate(savedInstanceState);
+        applyStartupBackground();
         recordPendingOpen(getIntent());
         recordPendingShare(getIntent());
+        recordPendingShortcut(getIntent());
         applyWindowInsets();
+    }
+
+    /**
+     * Paint the window and the WebView the app's own background before either
+     * has anything else to draw.
+     *
+     * A WebView with no background set defaults to white, and the splash
+     * theme (`AppTheme.NoActionBarLaunch`) only covers the gap up to this
+     * activity's first frame — not the moment after that where the WebView
+     * exists but has not yet loaded enough CSS to paint `--bg` itself. A dark
+     * theme or a dark visual style loading into an unset white background is
+     * exactly the flash `electron/main.ts` avoids by giving `BrowserWindow` a
+     * `backgroundColor` before it ever shows a frame; this is the same fix
+     * for the surface Android controls instead.
+     *
+     * The two colours are that same pair, not a colour read off `--bg` —
+     * there is no page loaded yet to compute a CSS custom property from, and
+     * six visual styles reduce to the same two families (light backgrounds,
+     * dark backgrounds) for the one frame this covers. {@link
+     * AppSettingsSignal} reads the same persisted theme choice the settings
+     * screen writes, falling back to the device's own night mode for
+     * `'system'` — the same fallback the CSS itself uses once it loads.
+     */
+    private void applyStartupBackground() {
+        int color = AppSettingsSignal.isDarkTheme(this)
+                ? android.graphics.Color.parseColor("#14161b")
+                : android.graphics.Color.parseColor("#eceef1");
+        getWindow().getDecorView().setBackgroundColor(color);
+        com.getcapacitor.Bridge bridge = getBridge();
+        android.webkit.WebView webView = bridge == null ? null : bridge.getWebView();
+        if (webView != null) webView.setBackgroundColor(color);
     }
 
     /**
@@ -114,6 +176,7 @@ public class MainActivity extends BridgeActivity {
         super.onNewIntent(intent);
         recordPendingOpen(intent);
         recordPendingShare(intent);
+        recordPendingShortcut(intent);
     }
 
     private static void recordPendingOpen(Intent intent) {

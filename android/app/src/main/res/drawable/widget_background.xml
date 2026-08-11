@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Flat solid blue, on purpose — no gradient, no stroke, no default widget
+    chrome. `@color/notification_accent` is `#0B6BD8`, the same
+    `accent-azure-l` token `colors.xml` already ties the notification tint to,
+    so the widget and every other Aevistle-drawn surface stay one colour
+    without a second value to keep in step by hand.
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@color/notification_accent" />
+    <corners android:radius="16dp" />
+</shape>

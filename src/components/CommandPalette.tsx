@@ -1,7 +1,8 @@
 /**
  * Ctrl+K — go anywhere, find anything, do the common things.
  *
- * The app has seven screens and four kinds of saved object, and reaching a
+ * The app has seven screens and five kinds of saved object — contacts,
+ * templates, reminders and received mail among them — and reaching a
  * particular contact today means: click Contacts, click the search box, type,
  * read. That is fine once and grating on the fiftieth time. One keystroke and
  * a few letters replaces all of it.
@@ -86,11 +87,14 @@ export function CommandPalette({
   onClose,
   onNavigate,
   onCompose,
+  onOpenMessage,
 }: {
   open: boolean
   onClose: () => void
   onNavigate: (target: PaletteTarget) => void
   onCompose: (prefill?: { to?: string[]; subject?: string; body?: string }) => void
+  /** Chosen a received message: open it in the Inbox reader. */
+  onOpenMessage: (messageId: string) => void
 }) {
   const { state } = useApp()
   const { t } = useI18n()
@@ -176,8 +180,35 @@ export function CommandPalette({
         run: () => onNavigate('schedule'),
       })
     }
+    // Received mail — searching by sender or subject is the single most
+    // common thing a search box does in a mail client, and until now this one
+    // could not: only the four kinds of saved object above were indexed.
+    // Label is the subject so a prefix match ("周会") ranks it correctly;
+    // `from` rides in `hint`, which `results` below scores too (see `score`'s
+    // 0.6 weighting), so "找xiaowang发的信" works from the sender alone.
+    for (const account of state.inboxAccounts) {
+      for (const message of account.messages) {
+        out.push({
+          id: `msg:${message.id}`,
+          label: message.subject || t('inbox.noSubject'),
+          hint: message.from,
+          icon: IconInbox,
+          run: () => onOpenMessage(message.id),
+        })
+      }
+    }
     return out
-  }, [open, state.contacts, state.templates, state.jobs, t, onNavigate, onCompose])
+  }, [
+    open,
+    state.contacts,
+    state.templates,
+    state.jobs,
+    state.inboxAccounts,
+    t,
+    onNavigate,
+    onCompose,
+    onOpenMessage,
+  ])
 
   const results = useMemo<Ranked[]>(() => {
     if (!open) return NO_RESULTS

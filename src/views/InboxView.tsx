@@ -95,6 +95,7 @@ import { extractDates, type DateHit } from '../core/dateExtract'
 import type { InboxMessageBody } from '../core/bridge'
 import {
   DEFAULT_RETRY,
+  INBOX_LIST_FETCH_LIMIT,
   REMOVED_RETENTION_MS,
   defaultRecurrence,
   effectiveImagePolicy,
@@ -349,6 +350,30 @@ export function InboxView({
   const canUseInbox = canSyncInbox || enabledInboxes.length > 0
 
   const allMessages = useMemo(() => enabledInboxes.flatMap((i) => i.messages), [enabledInboxes])
+
+  /**
+   * The biggest gap, among the accounts this screen is currently showing,
+   * between "messages on the server" (`InboxFolder.totalCount`) and
+   * "messages this app fetched" (`INBOX_LIST_FETCH_LIMIT`) — 0 when every
+   * visible account's whole INBOX fits inside that limit already.
+   *
+   * There is no pagination yet (see that constant's own comment), so this is
+   * the one honest thing the list can say about mail it does not show:
+   * *how much* is missing, for whichever account(s) `filter` has selected
+   * right now — switching the tab changes what "the most recent 50" is
+   * relative to, and the banner below has to track that rather than always
+   * describing "all accounts".
+   */
+  const inboxServerTotal = useMemo(() => {
+    const relevant =
+      filter === 'all' ? enabledInboxes : enabledInboxes.filter((i) => i.accountId === filter)
+    let max = 0
+    for (const account of relevant) {
+      const total = account.folders.find((f) => f.path === 'INBOX')?.totalCount ?? 0
+      if (total > max) max = total
+    }
+    return max
+  }, [enabledInboxes, filter])
 
   const accountLabel = useCallback(
     (accountId: string) => {
@@ -1523,6 +1548,23 @@ export function InboxView({
                 ))}
               </div>
             </div>
+
+            {/*
+              What "the most recent 50" leaves out, said before someone goes
+              looking for older mail that is not here and concludes the app
+              lost it. `keep` because a phone is exactly where a missing
+              message is most likely to be noticed and least likely to be
+              explained by anything else on screen — see the `--keep`
+              discussion on the other banners in this file.
+            */}
+            {inboxServerTotal > INBOX_LIST_FETCH_LIMIT ? (
+              <Banner tone="info" keep>
+                {t('inbox.recentLimitNote', {
+                  limit: INBOX_LIST_FETCH_LIMIT,
+                  total: inboxServerTotal,
+                })}
+              </Banner>
+            ) : null}
 
             {/*
               Gated on the selection only. It used to also require

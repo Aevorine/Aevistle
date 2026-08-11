@@ -136,6 +136,41 @@ final class InboxCache {
         return true;
     }
 
+    /**
+     * Mark one cached message read, locally only — no IMAP round trip.
+     *
+     * The whole job of the new-mail notification's "Mark as read" action: per
+     * `docs/ARCHITECTURE.md`, this class already only ever touches the local
+     * cache (see {@link #deleteMessages}, which is the same contract for
+     * delete), and there is no WebView in this process to hand a
+     * `setMessageFlags` call to even if the action wanted a server-side one.
+     *
+     * A no-op, not a failure, when the account or the message is no longer in
+     * the cache — the Inbox screen may already have re-synced past it by the
+     * time the notification action fires, which is not a reason to raise
+     * anything.
+     */
+    void markSeen(String accountId, String messageId) {
+        JSONObject account = account(accountId);
+        if (account == null || messageId == null || messageId.isEmpty()) return;
+        JSONArray messages = account.optJSONArray("messages");
+        if (messages == null) return;
+
+        boolean changed = false;
+        for (int i = 0; i < messages.length(); i++) {
+            JSONObject m = messages.optJSONObject(i);
+            if (m == null || !messageId.equals(m.optString("id", ""))) continue;
+            try {
+                m.put("seen", true);
+                changed = true;
+            } catch (Exception e) {
+                Log.e(TAG, "markSeen: could not update message " + messageId, e);
+            }
+            break;
+        }
+        if (changed) upsert(account);
+    }
+
     private static boolean matches(JSONObject message, JSONArray items) {
         String folderPath = message.optString("folderPath", "");
         long uid = message.optLong("uid", -1);

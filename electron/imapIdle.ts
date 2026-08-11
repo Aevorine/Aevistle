@@ -25,7 +25,10 @@ import { createHash } from 'node:crypto'
 import { ImapFlow } from 'imapflow'
 import type { InboxAccountState } from '../src/core/types'
 import { endpointLadder, rungBudgetMs, totalBudgetMs, withDeadline } from '../src/core/transport'
+import { classifyError } from '../src/core/bridge'
 import { resolveHostCached } from './mailer'
+import { isAuthFailure } from './imap'
+import { accessTokenForAccount, noteOAuthAuthFailure } from './oauth'
 
 const INBOX_PATH = 'INBOX'
 
@@ -61,8 +64,15 @@ type MailHandler = (accountId: string) => void
  * happened to drop and reconnect on its own. Push silently kept working off a
  * credential the user believed they had rotated out. Hashed rather than
  * embedded plainly so the password itself never sits in a Map key in memory.
+ *
+ * An OAuth2 account has no password to hash — `secret` is `''` for those, by
+ * construction in `watchInboxes` below — so `oauthAccount` is folded into the
+ * key too. Without it, switching an account from a password to a connected
+ * OAuth2 grant (both with the box otherwise unchanged) would hash to the same
+ * key as the account's earlier, password-less "not configured yet" state and
+ * never reconnect to pick up the grant.
  */
-function connectionKey(config: InboxAccountState, secret: string): string {
+function connectionKey(config: InboxAccountState, secret: string, oauthAccount: boolean): string {
   return [
     config.accountId,
     config.imapHost,
@@ -70,6 +80,7 @@ function connectionKey(config: InboxAccountState, secret: string): string {
     config.imapSecurity,
     config.imapUsername,
     config.imapAllowInvalidCert ? '1' : '0',
+    oauthAccount ? 'oauth' : 'password',
     createHash('sha256').update(secret).digest('hex'),
   ].join('|')
 }
@@ -136,6 +147,18 @@ class Watcher {
       return
     }
 
+    /*
+     * An XOAUTH2 bearer token, when this account signed in with OAuth2.
+     *
+     * Resolved once per connection attempt, the same point `imap.ts`'s
+     * `withConnection` resolves it for the polling path — reused rather than
+     * reimplemented, because a second, subtly different way to mint a token
+     * is exactly the kind of drift that made push silently skip these
+     * accounts in the first place. `accessTokenForAccount` answers `null` for
+     * every password account, which keeps this a no-op on that path.
+     */
+    const accessToken = await accessTokenForAccount(this.config.accountId)
+
     for (const endpoint of ladder) {
       if (this.stopped) return
 
@@ -147,7 +170,13 @@ class Watcher {
         // The connection target is a pre-resolved IP; identity is still
         // checked against the real hostname. See mailer.ts on why.
         servername: this.config.imapHost,
-        auth: { user: this.config.imapUsername, pass: this.secret },
+        // Same choice `imap.ts`'s `buildClient` makes: a bearer token wins
+        // over a stored password when both are somehow present, because a
+        // signed-in OAuth2 account has no real password to fall back to —
+        // `this.secret` is `''` for those, by construction in `watchInboxes`.
+        auth: accessToken
+          ? { user: this.config.imapUsername, accessToken }
+          : { user: this.config.imapUsername, pass: this.secret },
         tls: { rejectUnauthorized: !this.config.imapAllowInvalidCert, minVersion: 'TLSv1.2' },
         logger: false,
         // The one place in this codebase that wants imapflow's own IDLE loop.
@@ -183,8 +212,10 @@ class Watcher {
       }
       client.on('error', swallowEarly)
 
+      let connected = false
       try {
         await withDeadline(() => client.connect(), perRung, () => client.close())
+        connected = true
         if (this.stopped) {
           client.close()
           return
@@ -223,11 +254,34 @@ class Watcher {
         }, RECYCLE_MS)
 
         return
-      } catch {
+      } catch (e) {
         try {
           client.close()
         } catch {
           /* already gone */
+        }
+        /*
+         * A refused bearer token, not a network hiccup. Same duck-typed check
+         * `imap.ts` uses on the polling path, imported rather than
+         * reimplemented — see that function's own comment for why it is not
+         * an `instanceof`.
+         *
+         * Invalidating here is what makes the *next* reconnect attempt worth
+         * making: `accessTokenForAccount` will mint a fresh token instead of
+         * re-offering the one that was just refused. Without it, a watcher
+         * would retry the same dead token every backoff interval and never
+         * recover on its own — silently, since nothing surfaces a watcher's
+         * failures to the UI (see `oauthStatusFor`/the account dialog for
+         * where a refused grant is actually reported to the user).
+         */
+        const err = e instanceof Error ? e : new Error(String(e))
+        const refusedCredentials =
+          isAuthFailure(err) || (connected && classifyError(err.message) === 'auth')
+        if (refusedCredentials && accessToken) {
+          noteOAuthAuthFailure(this.config.accountId)
+          // Every other rung would fail on the same credentials — trying them
+          // only spends time and, on some providers, a lockout budget.
+          break
         }
       }
     }
@@ -247,13 +301,37 @@ const watchers = new Map<string, Watcher>()
  * rebuilt, which would drop the socket every time the user edited anything.
  */
 export function watchInboxes(
-  configs: Array<{ config: InboxAccountState; secret: string | null }>,
+  configs: Array<{
+    config: InboxAccountState
+    secret: string | null
+    /**
+     * True when this account has no stored IMAP password but does have an
+     * OAuth2 grant — `electron/main.ts` resolves this from the same
+     * `hasOAuthGrant` check `imap.ts`'s polling path uses, since the caller
+     * is already in an async context and this function is not.
+     *
+     * Without it, an account that signed in with Gmail one-click had
+     * `secret: null` and was filtered out below exactly like an account with
+     * no credential at all — the bug this parameter exists to close: push
+     * silently skipped every OAuth2 account and fell back to the slower
+     * polling path with nothing in the UI saying so.
+     */
+    oauthAccount?: boolean
+  }>,
   onMail: MailHandler,
 ): void {
-  const wanted = new Map<string, { config: InboxAccountState; secret: string }>()
-  for (const { config, secret } of configs) {
-    if (!config.enabled || !secret || !config.imapHost || !config.imapUsername) continue
-    wanted.set(connectionKey(config, secret), { config, secret })
+  const wanted = new Map<
+    string,
+    { config: InboxAccountState; secret: string; oauthAccount: boolean }
+  >()
+  for (const { config, secret, oauthAccount } of configs) {
+    const eligible = Boolean(secret) || Boolean(oauthAccount)
+    if (!config.enabled || !eligible || !config.imapHost || !config.imapUsername) continue
+    wanted.set(connectionKey(config, secret ?? '', Boolean(oauthAccount)), {
+      config,
+      secret: secret ?? '',
+      oauthAccount: Boolean(oauthAccount),
+    })
   }
 
   for (const [key, watcher] of watchers) {

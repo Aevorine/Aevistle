@@ -35,7 +35,7 @@ import type {
   SharePayload,
 } from './types'
 import type { DownloadProgress, UpdateAsset, UpdateInfo } from './update'
-import type { DesktopPrefs, DownloadOutcome, TrayCommand } from './ipc-contract'
+import type { BadgeCounts, DesktopPrefs, DownloadOutcome, TrayCommand } from './ipc-contract'
 
 export interface AppInfo {
   version: string
@@ -258,12 +258,37 @@ export interface PlatformBridge {
   setUiLocale?(locale: LocaleId): Promise<void>
 
   /**
+   * Keep Android's status bar in step with the in-page theme.
+   *
+   * The status bar is a second piece of window chrome the page cannot reach
+   * on its own — same reasoning as the `theme-color` meta tag the renderer
+   * already keeps live off `--bg`, just for a strip the WebView does not
+   * paint. `background` is that same computed value, so the status bar
+   * tracks whichever of the six visual styles is active rather than a hard-
+   * coded light/dark pair; `dark` only picks the icon/text contrast, which
+   * Android has no way to derive from a colour on its own.
+   *
+   * Absent everywhere but Android, where alone a status bar exists to match.
+   */
+  syncStatusBar?(opts: { dark: boolean; background: string }): Promise<void>
+
+  /**
    * Hand the shell the two settings it, not the window, has to act on.
    *
    * Absent on Android and in the browser preview, where neither a tray nor a
    * login item exists — the settings screen hides both switches there.
    */
   setDesktopPrefs?(prefs: DesktopPrefs): Promise<void>
+
+  /**
+   * Unread mail and armed reminders, for a taskbar overlay badge.
+   *
+   * Optional and desktop-only for the same reason `setDesktopPrefs` is: only
+   * a window with its own taskbar icon has anywhere to put a badge. Android's
+   * equivalent is the launcher badge the OS already draws from the system
+   * notification, and the browser preview has no icon of its own at all.
+   */
+  setBadgeCounts?(counts: BadgeCounts): Promise<void>
 
   /** Tray menu items that ask the window to do something. Desktop only. */
   onTrayCommand?(handler: (command: TrayCommand) => void): () => void
@@ -401,6 +426,21 @@ export interface PlatformBridge {
    * the sync.
    */
   openAccountSecrets?(keyRef: string, envelope: PairingEnvelope): Promise<string[]>
+
+  // --- contacts -------------------------------------------------------------
+  /**
+   * Android only: hand off to the system Contacts app's own picker and
+   * return whatever the user chose.
+   *
+   * One contact per call — see `AevistleNativePlugin.java`'s note on why
+   * `ACTION_PICK` only ever returns one, and why that is still the right
+   * trade against asking for `READ_CONTACTS`. `addresses` is empty when the
+   * chosen contact has no email on file, which the caller treats as nothing
+   * to import rather than an error. `cancelled` is true when the picker was
+   * dismissed without a choice — never rejects for that, the same way
+   * `oauthConsent` does not reject on a closed tab.
+   */
+  pickContact?(): Promise<{ name: string; addresses: string[]; cancelled?: boolean }>
 
   // --- files --------------------------------------------------------------
   pickFiles(): Promise<Attachment[]>
@@ -695,6 +735,18 @@ export interface PlatformBridge {
        * notification is tapped, and the app opens that message.
        */
       messageId?: string
+      /**
+       * The account `messageId` belongs to — Android's Mark-as-read action
+       * needs both to know which cached inbox to update. Only meaningful
+       * alongside `messageId`; a platform (or a call) with no such action
+       * simply ignores it.
+       */
+      accountId?: string
+      /**
+       * That action's own label, already translated — same reasoning as
+       * `copyLabel` above: the native layer has no access to `src/i18n`.
+       */
+      markReadLabel?: string
     },
   ): Promise<void>
   /**
@@ -720,6 +772,17 @@ export interface PlatformBridge {
    * Optional: the web build has no OS to be shared to.
    */
   onShare?(handler: (share: SharePayload) => void): () => void
+  /**
+   * A long-press-icon shortcut (`res/xml/shortcuts.xml`) was tapped. Opens
+   * the named screen.
+   *
+   * Same delivery shape as `onOpenMessage`/`onShare` and for the same reason:
+   * a shortcut tap is routinely what starts the app, so Android stores the
+   * route and this handler is called once at startup with whatever was
+   * waiting. Android only — no other platform has a launcher shortcut menu
+   * to be tapped from.
+   */
+  onShortcut?(handler: (route: 'compose' | 'codes') => void): () => void
   openExternal(url: string): Promise<void>
   appInfo(): Promise<AppInfo>
   /**

@@ -84,11 +84,31 @@ final class Notifier {
     private Notifier() {
     }
 
-    /** A scheduled send result. */
+    /** A scheduled send result with no action on it — a success, or a skip nothing can retry. */
     static void status(Context context, String key, String title, String body) {
+        status(context, key, title, body, null, null);
+    }
+
+    /**
+     * A scheduled send result, optionally with a "Retry now" action.
+     *
+     * @param retryJobId the job to retry without opening the app, or null for
+     *                    a result with nothing to act on — the account-missing
+     *                    case in {@link SendWorker}, for instance, would fail
+     *                    identically on retry, so it is not offered one.
+     * @param retryLabel the button's own translated text; see {@link #code}
+     *                    for why the caller supplies it rather than this file
+     *                    wording it.
+     */
+    static void status(Context context, String key, String title, String body,
+                       String retryJobId, String retryLabel) {
         NotificationCompat.Builder builder = base(context, CHANNEL_STATUS, "Aevistle status",
                 "Results of scheduled sends", NotificationManager.IMPORTANCE_DEFAULT, title, body);
-        post(context, ID_STATUS_BASE + slot(key), builder);
+        int id = ID_STATUS_BASE + slot(key);
+        if (retryJobId != null && !retryJobId.isEmpty() && retryLabel != null && !retryLabel.isEmpty()) {
+            builder.addAction(0, retryLabel, RetryJobReceiver.intentFor(context, retryJobId, id));
+        }
+        post(context, id, builder);
     }
 
     /**
@@ -130,14 +150,33 @@ final class Notifier {
      *
      * @param messageId the inbox message to open on tap; may be null for a
      *                  notification that has no single message behind it.
+     * @param accountId which account's cache {@link MarkReadReceiver} should
+     *                  update. The action button is only added when this,
+     *                  {@code messageId} and {@code markReadLabel} are all
+     *                  present — same optional-action rule as {@link #code}'s
+     *                  Copy button, for the same reason: a caller with nothing
+     *                  to act on (the plugin's bare {@code notify} call has no
+     *                  account in scope, only a message id) still gets a
+     *                  correct notification, just without the button.
+     * @param markReadLabel the button's own translated text — see {@link #code}
+     *                      for why this travels in rather than being worded
+     *                      here.
      */
-    static void mail(Context context, String key, String title, String body, String messageId) {
+    static void mail(Context context, String key, String title, String body, String messageId,
+                     String accountId, String markReadLabel) {
         NotificationCompat.Builder builder = base(context, CHANNEL_MAIL, "New mail",
                 "Mail arriving in a mailbox you receive from",
                 NotificationManager.IMPORTANCE_DEFAULT, title, body);
         builder.setGroup(GROUP_MAIL);
         builder.setContentIntent(openApp(context, messageId));
-        post(context, ID_MAIL_BASE + slot(key), builder);
+        int id = ID_MAIL_BASE + slot(key);
+        if (accountId != null && !accountId.isEmpty()
+                && messageId != null && !messageId.isEmpty()
+                && markReadLabel != null && !markReadLabel.isEmpty()) {
+            builder.addAction(0, markReadLabel,
+                    MarkReadReceiver.intentFor(context, accountId, messageId, id));
+        }
+        post(context, id, builder);
     }
 
     /**

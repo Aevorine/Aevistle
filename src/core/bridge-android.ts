@@ -9,6 +9,7 @@
 
 import { registerPlugin } from '@capacitor/core'
 import { Preferences } from '@capacitor/preferences'
+import { StatusBar, Style } from '@capacitor/status-bar'
 import type {
   AppInfo,
   DataFolder,
@@ -88,9 +89,23 @@ export type NotificationPermission = 'granted' | 'prompt' | 'blocked'
  */
 export type ExactAlarmPermission = 'granted' | 'denied' | 'not-required'
 
+/**
+ * `not-required` — below Android 6, where the mechanism does not exist.
+ * `denied`       — the OS (or, more often, the manufacturer's own power
+ *                  manager on top of it) is free to freeze this app's
+ *                  process between alarms, which can silently stop
+ *                  background send and receive even with exact-alarm and
+ *                  notification permission both granted. There is no
+ *                  settings-only route for this one — `openBatteryOptimizationSettings`
+ *                  raises the system's direct Allow/Deny dialog.
+ */
+export type BatteryOptimizationPermission = 'granted' | 'denied' | 'not-required'
+
 export interface AndroidPermissionState {
   notifications: NotificationPermission
   exactAlarms: ExactAlarmPermission
+  /** `'granted'` here means *exempt* — see {@link BatteryOptimizationPermission}. */
+  batteryOptimized: BatteryOptimizationPermission
   /**
    * Whether `requestNotificationPermission` would actually raise a dialog.
    * False when blocked — offer `openNotificationSettings` instead of a button
@@ -130,6 +145,14 @@ export interface AndroidPermissionApi {
   openNotificationSettings(): Promise<{ opened: boolean }>
   /** Open this app's "Alarms & reminders" screen. Only meaningful on Android 12+. */
   openExactAlarmSettings(): Promise<{ opened: boolean }>
+  /**
+   * Raise the direct "ignore battery optimizations" dialog. Unlike the other
+   * two, this can be shown again after a refusal — Android does not record a
+   * permanent "don't ask again" for it — so there is no settings-only
+   * fallback state to design for the way `openNotificationSettings` exists
+   * for a blocked notification permission.
+   */
+  openBatteryOptimizationSettings(): Promise<{ opened: boolean }>
 }
 
 interface AevistleNativePlugin extends AndroidPermissionApi {
@@ -217,6 +240,9 @@ interface AevistleNativePlugin extends AndroidPermissionApi {
   sendNow(opts: { draft: MessageDraft; account: MailAccount }): Promise<SendResult>
   testConnection(opts: { account: MailAccount; secret?: string }): Promise<SendResult>
 
+  /** See `pickContact` on `PlatformBridge` — this is its native counterpart. */
+  pickContact(): Promise<{ name?: string; addresses?: string[]; cancelled?: boolean }>
+
   pickFiles(): Promise<{ files: Attachment[] }>
   snapshotAttachments(opts: {
     attachments: Attachment[]
@@ -253,6 +279,10 @@ interface AevistleNativePlugin extends AndroidPermissionApi {
     copyLabel?: string
     /** The inbox message to open when the notification is tapped. */
     messageId?: string
+    /** The account `messageId` belongs to — what the Mark-as-read action updates. */
+    accountId?: string
+    /** That action's own label, translated here — same reasoning as `copyLabel`. */
+    markReadLabel?: string
   }): Promise<void>
   /**
    * The message a tapped notification asked for, if one is waiting.
@@ -276,6 +306,14 @@ interface AevistleNativePlugin extends AndroidPermissionApi {
    * ordinary launch.
    */
   takePendingShare(): Promise<SharePayload>
+  /**
+   * Which long-press-icon shortcut was tapped, if one was.
+   *
+   * Polled for the same reason `takePendingOpen` is — a shortcut tap is
+   * routinely a cold start — and just as one-shot: `route` is absent on
+   * every launch that was not a shortcut tap, which is nearly all of them.
+   */
+  takePendingShortcut(): Promise<{ route?: string }>
   /**
    * `ClipboardManager.setPrimaryClip`, because the web API cannot do this here.
    *
@@ -593,6 +631,15 @@ export function createAndroidBridge(): PlatformBridge & AndroidPermissionApi {
         return await Native.testConnection({ account, secret })
       } catch (e) {
         return failedResult(e, started)
+      }
+    },
+
+    async pickContact() {
+      const result = await Native.pickContact()
+      return {
+        name: result.name ?? '',
+        addresses: Array.isArray(result.addresses) ? result.addresses : [],
+        cancelled: result.cancelled,
       }
     },
 
@@ -925,6 +972,8 @@ export function createAndroidBridge(): PlatformBridge & AndroidPermissionApi {
         value: opts?.value,
         copyLabel: opts?.copyLabel,
         messageId: opts?.messageId,
+        accountId: opts?.accountId,
+        markReadLabel: opts?.markReadLabel,
       }),
 
     /**
@@ -999,7 +1048,49 @@ export function createAndroidBridge(): PlatformBridge & AndroidPermissionApi {
       }
     },
 
+    /** Same poll-at-subscribe-and-on-resume shape as `onShare` just above, and for the same reason. */
+    onShortcut(handler) {
+      let cancelled = false
+      const poll = () => {
+        void Native.takePendingShortcut()
+          .then(({ route }) => {
+            if (!cancelled && (route === 'compose' || route === 'codes')) handler(route)
+          })
+          .catch(() => {
+            /* An older APK with no such method. Nothing was waiting either way. */
+          })
+      }
+      poll()
+      const onVisible = () => {
+        if (document.visibilityState === 'visible') poll()
+      }
+      document.addEventListener('visibilitychange', onVisible)
+      return () => {
+        cancelled = true
+        document.removeEventListener('visibilitychange', onVisible)
+      }
+    },
+
     copyText: (text) => Native.clipboardWrite({ text }),
+
+    /**
+     * See the interface doc: `background` is the live `--bg` the renderer
+     * already computed for the `theme-color` meta tag, so the status bar
+     * follows whichever visual style is on screen rather than a fixed pair
+     * of colours. Wrapped rather than left to throw: Android 15 removed both
+     * underlying APIs (`setBackgroundColor` is a no-op there, `setStyle`
+     * still works and is what the icon-contrast half depends on), and a
+     * status bar that briefly does not match the theme is cosmetic — never
+     * a reason to break the effect that calls this on every theme change.
+     */
+    async syncStatusBar({ dark, background }) {
+      try {
+        await StatusBar.setStyle({ style: dark ? Style.Dark : Style.Light })
+        await StatusBar.setBackgroundColor({ color: background })
+      } catch {
+        // See above — best-effort, and the WebView content is correct either way.
+      }
+    },
 
     async openExternal(url) {
       window.open(url, '_blank', 'noopener')
@@ -1015,6 +1106,7 @@ export function createAndroidBridge(): PlatformBridge & AndroidPermissionApi {
     requestNotificationPermission: () => Native.requestNotificationPermission(),
     openNotificationSettings: () => Native.openNotificationSettings(),
     openExactAlarmSettings: () => Native.openExactAlarmSettings(),
+    openBatteryOptimizationSettings: () => Native.openBatteryOptimizationSettings(),
   }
 
   return bridge

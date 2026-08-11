@@ -6,16 +6,17 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.Build;
+import android.os.PowerManager;
 import android.provider.Settings;
 
 import androidx.core.app.NotificationManagerCompat;
 
 /**
- * The two permissions this app cannot do its job without, and the honest state
- * of each one.
+ * The permissions this app cannot do its job without, and the honest state of
+ * each one.
  *
- * Both were declared in the manifest and never asked for. That is not a small
- * omission on either count:
+ * All three were declared in the manifest and never asked for. That is not a
+ * small omission on any of the three counts:
  *
  *   POST_NOTIFICATIONS became a runtime permission in Android 13 (API 33). A
  *   permission that is declared but never requested is *denied*, so
@@ -28,12 +29,26 @@ import androidx.core.app.NotificationManagerCompat;
  *   "09:00" becomes "some time after 09:00" for an app whose entire promise is
  *   that it sends on time.
  *
- * Neither is fixed by asking harder. Notifications get one system dialog, at a
- * moment when the reason for it is on screen; exact alarms get no dialog at all
- * (only a settings screen), so the app has to explain and then take the user
- * there. What this class provides is the state to say that with, and the two
- * intents to act on it. Nothing here fires an intent on its own — every entry
- * point is reached from a user action.
+ *   Battery optimization is not a manifest permission at all — every app
+ *   starts subject to it — but the settings screen it is undone from needs
+ *   the same {@code REQUEST_IGNORE_BATTERY_OPTIMIZATIONS} declaration the
+ *   other two get, so it is told apart here rather than elsewhere. A phone
+ *   whose manufacturer manages background apps aggressively (Xiaomi, Huawei,
+ *   OPPO, vivo, Samsung all ship their own layer on top of stock Doze) can
+ *   freeze this app's process between alarms even with exact-alarm and
+ *   notification permission both granted — the mail simply never gets sent,
+ *   with nothing on screen to say why, because the process that would have
+ *   said so was the one that got frozen.
+ *
+ * None of the three is fixed by asking harder. Notifications get one system
+ * dialog, at a moment when the reason for it is on screen; exact alarms get no
+ * dialog at all (only a settings screen); battery optimization gets a dialog
+ * too, but — unlike notifications — it can be re-shown as many times as the
+ * user keeps saying no, because Android's "don't ask again" bookkeeping does
+ * not apply to it, so this class has to explain each time rather than fall
+ * back to a settings screen. What this class provides is the state to say
+ * that with, and the intents to act on it. Nothing here fires an intent on its
+ * own — every entry point is reached from a user action.
  */
 final class Permissions {
 
@@ -117,6 +132,24 @@ final class Permissions {
         return alarms.canScheduleExactAlarms() ? GRANTED : DENIED;
     }
 
+    /**
+     * Is this app exempt from battery optimization?
+     *
+     * `isIgnoringBatteryOptimizations` is the platform's own name for "yes,
+     * exempt" — a double negative, but it is the API Android actually offers,
+     * and the naming is echoed here only in the doc, not in the answer: this
+     * still returns {@link #GRANTED} for "exempt", matching {@link
+     * #exactAlarms}'s shape so the settings screen can treat both the same
+     * way. `NOT_REQUIRED` below API 23, where the mechanism does not exist at
+     * all.
+     */
+    static String batteryOptimized(Context context) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return NOT_REQUIRED;
+        PowerManager power = context.getSystemService(PowerManager.class);
+        if (power == null) return NOT_REQUIRED;
+        return power.isIgnoringBatteryOptimizations(context.getPackageName()) ? GRANTED : DENIED;
+    }
+
     // -----------------------------------------------------------------------
     // When to ask
     // -----------------------------------------------------------------------
@@ -194,6 +227,25 @@ final class Permissions {
         Intent intent = new Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
                 Uri.parse("package:" + context.getPackageName()));
         return start(context, activity, intent, appDetails(context));
+    }
+
+    /**
+     * Ask, directly — the one permission-adjacent screen here that is a
+     * dialog rather than a settings page.
+     *
+     * `ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` raises the system's own
+     * "Allow Aevistle to ignore battery optimizations?" prompt right over the
+     * app, with Allow/Deny in it — no trip to Settings required, unlike
+     * exact alarms. Requires {@code REQUEST_IGNORE_BATTERY_OPTIMIZATIONS} in
+     * the manifest; without it Android throws rather than degrading, so the
+     * fallback below is a genuine second attempt, not defensive padding.
+     */
+    static boolean openBatteryOptimizationSettings(Context context, android.app.Activity activity) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return false;
+        Intent intent = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                Uri.parse("package:" + context.getPackageName()));
+        Intent fallback = new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS);
+        return start(context, activity, intent, fallback);
     }
 
     private static Intent appDetails(Context context) {

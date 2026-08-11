@@ -291,6 +291,21 @@ function Shell() {
    */
   const freshCodeCount = useMemo(() => actionableHits(state.codeHits).length, [state.codeHits])
 
+  /**
+   * Mirror the sidebar's two mail/reminder badges onto the taskbar icon.
+   *
+   * `armedCount` and `unreadInboxCount` already drove `.nav__badge` above —
+   * this is the same two numbers, just reaching further: a minimised or
+   * tray-only window has no sidebar on screen at all, so without this the
+   * only way to learn mail had arrived was to restore the window and look.
+   * `bridge?.setBadgeCounts?.` is a no-op on Android and in the browser
+   * preview, where neither has a taskbar icon of its own to badge — see the
+   * method's doc in `core/bridge.ts`.
+   */
+  useEffect(() => {
+    void bridge?.setBadgeCounts?.({ unread: unreadInboxCount, armed: armedCount })
+  }, [bridge, unreadInboxCount, armedCount])
+
   // Once the first screen is up and the app is idle, pull the rest in.
   useEffect(() => {
     if (ready) prefetchScreens()
@@ -352,6 +367,48 @@ function Shell() {
     }
     if (typeof requestIdleCallback === 'function') requestIdleCallback(run, { timeout: 5000 })
     else setTimeout(run, 2000)
+  }, [ready, bridge, state.settings.updateCheckOnStart, toast, t])
+
+  /**
+   * The same check again, roughly once a day, for as long as the window stays
+   * open.
+   *
+   * The startup check above answers "is this launch on the latest build" and
+   * is deliberately spent once, via `claimStartupUpdateCheck` — see its
+   * comment. This app is also built to run unattended for weeks at a time
+   * (auto-launch and minimise-to-tray both exist for exactly that), and a
+   * one-shot-per-launch check leaves a long-lived instance never hearing
+   * about a security or bug-fix release for as long as it stays open.
+   *
+   * A separate effect rather than a second branch in the one above: this one
+   * is not a claim on a module-level lock, has no reason to wait for a
+   * StrictMode remount to settle, and — unlike the startup check — is safe to
+   * cancel and restart on every dependency change, since the worst case is
+   * the daily timer resetting by a few milliseconds. `setInterval`, not a
+   * repeating `setTimeout`, because there is nothing here that needs to see
+   * its own previous result before scheduling the next run.
+   *
+   * Gated on the same `updateCheckOnStart` switch as the startup check —
+   * its Settings description is "ask GitHub for the latest release", not
+   * "only when Aevistle starts", so someone who turned network update checks
+   * off should not have this quietly still make them once a day.
+   */
+  useEffect(() => {
+    if (!ready || !bridge || !state.settings.updateCheckOnStart) return
+
+    const ONE_DAY_MS = 24 * 60 * 60 * 1000
+    const run = () => {
+      void runUpdateCheck(() => bridge.checkForUpdate(), __APP_VERSION__).then((info) => {
+        if (!info.available) return
+        toast.push({
+          tone: 'info',
+          title: t('update.newVersionToast', { version: info.latest }),
+          detail: t('update.newVersionToastHint'),
+        })
+      })
+    }
+    const interval = window.setInterval(run, ONE_DAY_MS)
+    return () => window.clearInterval(interval)
   }, [ready, bridge, state.settings.updateCheckOnStart, toast, t])
 
   const goToAccounts = () => {
@@ -454,6 +511,22 @@ function Shell() {
     })
   }, [ready, bridge, dispatch])
 
+  /**
+   * A long-press-icon shortcut (`res/xml/shortcuts.xml`) was tapped.
+   *
+   * Same placement and the same reasoning as `onOpenMessage`/`onShare` above:
+   * the tap is routinely a cold start, so the target screen may not be
+   * mounted — or nothing may be — and Android holds the route until this
+   * subscribes and asks for it.
+   */
+  useEffect(() => {
+    if (!bridge?.onShortcut) return
+    return bridge.onShortcut((route) => {
+      setOpenAccountOnMount(false)
+      setView(route)
+    })
+  }, [bridge])
+
   /*
    * The palette's three props are `useCallback`s and not inline arrows.
    *
@@ -467,6 +540,7 @@ function Shell() {
    * ends are fixed because either one alone leaves the other half of the work.
    */
   const closePalette = useCallback(() => setPaletteOpen(false), [])
+  const openPalette = useCallback(() => setPaletteOpen(true), [])
   const paletteNavigate = useCallback((target: PaletteTarget) => {
     setOpenAccountOnMount(false)
     setView(target)
@@ -478,6 +552,17 @@ function Shell() {
     },
     [dispatch],
   )
+  /**
+   * A message chosen from the palette's results: same landing as clicking a
+   * new-mail notification (`onOpenMessage` above) — go to the Inbox and open
+   * that message — because it is the same request, just typed instead of
+   * clicked.
+   */
+  const paletteOpenMessage = useCallback((messageId: string) => {
+    setOpenAccountOnMount(false)
+    setFocusMessageId(messageId)
+    setView('inbox')
+  }, [])
 
   /**
    * The frame arrives before the data does.
@@ -656,7 +741,6 @@ function Shell() {
 
         {view === 'compose' ? (
           <ComposeView
-            onGoToAccounts={goToAccounts}
             // The health strip names problems that live on other screens, so
             // it needs to be able to get there; a "Fix" link that does nothing
             // is worse than no link.
@@ -734,6 +818,7 @@ function Shell() {
               onCompose={() => setView('compose')}
               armedCount={armedCount}
               narrow={narrow}
+              onOpenPalette={openPalette}
             />
           </Suspense>
         ) : null}
@@ -745,6 +830,7 @@ function Shell() {
         onClose={closePalette}
         onNavigate={paletteNavigate}
         onCompose={paletteCompose}
+        onOpenMessage={paletteOpenMessage}
       />
 
       <ShortcutsDialog open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />

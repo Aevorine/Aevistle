@@ -1064,6 +1064,41 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
                     ) : null}
                   </div>
                 </div>
+                {/*
+                  A phone whose manufacturer manages background apps on top of
+                  stock Android (Xiaomi, Huawei, OPPO, vivo, Samsung all ship
+                  one) can freeze this app between alarms even with both
+                  permissions above granted — the mail simply stops arriving
+                  and sending on time, with nothing on screen to say why.
+                  Same card shape as "Alarms & reminders" just above; the
+                  fix is a direct Allow/Deny dialog rather than a settings
+                  screen, so it can be offered again after a "not now".
+                */}
+                <div className="field">
+                  <div className="switch__text">
+                    <span className="switch__title">{t('settings.permBatteryOptimization')}</span>
+                  </div>
+                  <div className="btn-row">
+                    <StatusChip
+                      tone={permissions.batteryOptimized === 'denied' ? 'warning' : 'success'}
+                      label={t(
+                        permissions.batteryOptimized === 'granted'
+                          ? 'settings.permGranted'
+                          : permissions.batteryOptimized === 'denied'
+                            ? 'settings.permDenied'
+                            : 'settings.permNotRequired',
+                      )}
+                    />
+                    {permissions.batteryOptimized === 'denied' ? (
+                      <Button
+                        variant="ghost"
+                        onClick={() => void fixPermission('openBatteryOptimizationSettings')}
+                      >
+                        {t('settings.permAsk')}
+                      </Button>
+                    ) : null}
+                  </div>
+                </div>
               </>
             ) : null}
 

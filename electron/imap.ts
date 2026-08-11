@@ -21,12 +21,13 @@
 
 import { ImapFlow } from 'imapflow'
 import { simpleParser } from 'mailparser'
-import type {
-  InboxAccountState,
-  InboxFolder,
-  InboxMessage,
-  InboxTag,
-  SendResult,
+import {
+  INBOX_LIST_FETCH_LIMIT,
+  type InboxAccountState,
+  type InboxFolder,
+  type InboxMessage,
+  type InboxTag,
+  type SendResult,
 } from '../src/core/types'
 import {
   endpointLadder,
@@ -44,8 +45,14 @@ import { sanitizeMessageHtml } from './sanitizeHtml'
 import { readMessageBody, writeInboxAttachments, writeMessageBody } from './inboxStore'
 
 const INBOX_PATH = 'INBOX'
-/** How many of the most recent messages populate the list per sync. */
-const LIST_FETCH_LIMIT = 50
+/**
+ * How many of the most recent messages populate the list per sync.
+ *
+ * `INBOX_LIST_FETCH_LIMIT` (`src/core/types.ts`), not a number restated
+ * here — see that constant's own comment for why the UI needs to agree with
+ * this file on the exact value rather than a copy of it.
+ */
+const LIST_FETCH_LIMIT = INBOX_LIST_FETCH_LIMIT
 /** Of those, how many also get their body downloaded and cached eagerly. */
 const BODY_PREFETCH_LIMIT = 15
 /** Skip eager prefetch above this size; the message is still listed, its body just loads on demand. */
@@ -72,8 +79,13 @@ const SNIPPET_MAX_CHARS = 2000
  *
  * `serverResponseCode` covers the servers that answer
  * `NO [AUTHENTICATIONFAILED] …` without imapflow tagging the error itself.
+ *
+ * Exported for `imapIdle.ts`'s `Watcher`, which needs the identical check to
+ * decide whether a dead access token is worth invalidating rather than just
+ * retried — see the reasoning at that call site for why duplicating this
+ * function there would be the wrong fix.
  */
-function isAuthFailure(err: unknown): boolean {
+export function isAuthFailure(err: unknown): boolean {
   if (!err || typeof err !== 'object') return false
   const e = err as { authenticationFailed?: unknown; serverResponseCode?: unknown }
   if (e.authenticationFailed === true) return true

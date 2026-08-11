@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Long-press-icon shortcuts, static because there is nothing per-account or
+    per-schedule to base a dynamic one on — every install offers the same two
+    jumping-off points, unlike (say) a chat app's "message this contact".
+
+    Each intent targets `MainActivity` explicitly and carries a `shortcutRoute`
+    extra rather than a distinct action or deep-link scheme: `MainActivity`
+    already has a static, one-shot "something is waiting for the page to ask
+    for it" field for exactly this shape of problem (see `pendingOpenMessageId`
+    and `pendingShare`), because a shortcut tap is routinely a cold start —
+    there is no WebView yet to hand an event to. `pendingShortcutRoute` follows
+    the same pattern, and `AevistleNativePlugin.takePendingShortcut` is its
+    JS-facing half.
+
+    Icons reuse the launcher icon rather than bespoke art — a shortcut with no
+    icon at all falls back to a generic one anyway, and a mismatched hand-drawn
+    glyph would be a worse signal than the app's own mark.
+-->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="compose"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/shortcut_compose_short"
+        android:shortcutLongLabel="@string/shortcut_compose_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="dev.aevistle.app"
+            android:targetClass="dev.aevistle.app.MainActivity">
+            <extra
+                android:name="shortcutRoute"
+                android:value="compose" />
+        </intent>
+    </shortcut>
+    <shortcut
+        android:shortcutId="codes"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/shortcut_codes_short"
+        android:shortcutLongLabel="@string/shortcut_codes_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="dev.aevistle.app"
+            android:targetClass="dev.aevistle.app.MainActivity">
+            <extra
+                android:name="shortcutRoute"
+                android:value="codes" />
+        </intent>
+    </shortcut>
+</shortcuts>

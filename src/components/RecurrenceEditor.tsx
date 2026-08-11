@@ -14,6 +14,7 @@
 
 import { useMemo, useState } from 'react'
 import { Field, Segmented, Switch } from './ui'
+import { DateTimeField, TimeField } from './DateTimeField'
 import { useApp } from '../state/AppState'
 import { parseNaturalTime } from '../core/naturalTime'
 import { nextComposeStart } from '../core/composeSeed'
@@ -418,21 +419,17 @@ export function RecurrenceEditor({
       */}
       <div className="field__row">
         <Field label={t('schedule.startAt')}>
-          <input
-            className="input"
-            type="datetime-local"
-            value={toLocalInput(recurrence.startAt)}
-            onChange={(e) => patch({ startAt: fromLocalInput(e.target.value, recurrence.startAt) })}
+          <DateTimeField
+            value={recurrence.startAt}
+            onChange={(at) => patch({ startAt: at })}
           />
         </Field>
 
         {recurrence.kind !== 'once' && recurrence.kind !== 'interval' ? (
           <Field label={t('schedule.timeOfDay')}>
-            <input
-              className="input"
-              type="time"
+            <TimeField
               value={recurrence.timeOfDay}
-              onChange={(e) => patch({ timeOfDay: e.target.value })}
+              onChange={(value) => patch({ timeOfDay: value })}
             />
           </Field>
         ) : null}
@@ -600,13 +597,9 @@ export function RecurrenceEditor({
 
           {recurrence.endMode === 'onDate' ? (
             <Field label={t('schedule.ends')}>
-              <input
-                className="input"
-                type="datetime-local"
-                value={toLocalInput(recurrence.endDate ?? recurrence.startAt + 86_400_000 * 30)}
-                onChange={(e) =>
-                  patch({ endDate: fromLocalInput(e.target.value, recurrence.startAt) })
-                }
+              <DateTimeField
+                value={recurrence.endDate ?? recurrence.startAt + 86_400_000 * 30}
+                onChange={(at) => patch({ endDate: at })}
               />
             </Field>
           ) : null}

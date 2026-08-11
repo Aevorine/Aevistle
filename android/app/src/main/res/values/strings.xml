@@ -12,12 +12,54 @@
         Android as an already-worded string in the `notify` bridge call. These
         four cannot be: they are used by `InboxSyncWorker`, which runs on
         WorkManager's schedule with no WebView in the process and therefore no
-        access to the app's own locale machinery at all. Android's own resource
-        qualifiers do the same job — see `values-zh-rCN` and its siblings, which
-        `check-android-strings.mjs` holds to the same key set as this file.
+        access to the app's own i18n table at all. Android's own resource
+        qualifiers hold the translations — see `values-zh-rCN` and its siblings,
+        which `check-android-strings.mjs` holds to the same key set as this file
+        — but `InboxSyncWorker` no longer lets the *device* locale pick which one
+        loads. It asks `AppSettingsSignal` for the app's own display-language
+        setting first (the same one the settings screen writes) and only falls
+        back to the device locale when that is `'system'` or unset — otherwise a
+        phone set to a different system language than the one the user chose in
+        the app got background notifications in a language the rest of the app
+        was not showing.
     -->
     <string name="notify_new_mail_one">Mail from %1$s</string>
     <string name="notify_new_mail_many">%1$d new messages · latest from %2$s</string>
     <string name="notify_new_mail_summary">%1$d new messages</string>
     <string name="notify_no_subject">(no subject)</string>
+    <!--
+        The two quick-action button labels raised entirely from native code —
+        InboxSyncWorker's new-mail notification (mark read) and SendWorker's
+        failed-send notification (retry). The JS-triggered notify() call has
+        its own translated labels passed as call arguments (see `copyLabel` in
+        `AevistleNativePlugin.notify`); these are for the paths that have no
+        WebView to ask.
+    -->
+    <string name="notify_mark_read">Mark as read</string>
+    <string name="notify_retry_now">Retry now</string>
+    <!--
+        Long-press-icon shortcut labels (res/xml/shortcuts.xml). The launcher
+        reads these directly — there is no WebView involved in showing them,
+        the same reason the four notification strings above live here rather
+        than in `src/i18n/*.ts` — and, unlike those four, there is no app
+        setting to prefer either: the shortcut menu is drawn by the launcher,
+        before this app's process exists to have an opinion about anything.
+    -->
+    <string name="shortcut_compose_short">Compose</string>
+    <string name="shortcut_compose_long">New scheduled mail</string>
+    <string name="shortcut_codes_short">Codes</string>
+    <string name="shortcut_codes_long">Check verification codes</string>
+    <!--
+        The home-screen widget (`NextSendWidgetProvider`). Native for the same
+        reason as the notification strings above: the widget is drawn by
+        RemoteViews with no WebView anywhere in the process, so it cannot ask
+        `src/i18n/*.ts` for anything either. `widget_next_at` / `widget_nothing_due`
+        deliberately match the wording of the desktop tray's `tray.nextAt` /
+        `tray.nothingDue` in every language — same feature, same words, two
+        different UI toolkits.
+    -->
+    <string name="widget_label">Aevistle — next send</string>
+    <string name="widget_description">Shows when the next scheduled mail goes out.</string>
+    <string name="widget_next_at">Next:</string>
+    <string name="widget_nothing_due">Nothing scheduled</string>
 </resources>

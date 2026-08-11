@@ -101,6 +101,7 @@ const api: DesktopApi = {
   prewarm: (account) => ipcRenderer.invoke(IPC.prewarm, account),
   setUiLocale: (locale) => ipcRenderer.invoke(IPC.setUiLocale, locale),
   setDesktopPrefs: (prefs) => ipcRenderer.invoke(IPC.setDesktopPrefs, prefs),
+  setBadgeCounts: (counts) => ipcRenderer.invoke(IPC.setBadgeCounts, counts),
 
   pickFiles: () => ipcRenderer.invoke(IPC.pickFiles),
   snapshotAttachments: (attachments, jobId) =>

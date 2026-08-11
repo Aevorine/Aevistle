@@ -203,7 +203,7 @@ public class SendWorker extends Worker {
             // before, so turning "announce failures" off in the settings screen
             // changed nothing at all on this platform.
             if (store.notifyOnFailure()) {
-                notify(context, jobId, "Scheduled send failed — " + title,
+                notifyFailure(context, jobId, "Scheduled send failed — " + title,
                         result.error == null ? "Unknown error" : result.error);
             }
 
@@ -258,6 +258,11 @@ public class SendWorker extends Worker {
         if (refreshed == null) return;
         long next = AevistleScheduler.nextOccurrence(context, refreshed);
         if (next > 0) AevistleScheduler.armOne(context, jobId, next);
+
+        // A send or a skip just consumed this job's occurrence — the one
+        // schedule change `rearmAll` never sees, because nothing calls it on
+        // this path. See `NextSendWidgetProvider`'s class comment.
+        NextSendWidgetProvider.refresh(context);
     }
 
     /**
@@ -268,5 +273,23 @@ public class SendWorker extends Worker {
      */
     private void notify(Context context, String jobId, String title, String body) {
         Notifier.status(context, jobId, title, body);
+    }
+
+    /**
+     * A send failure, with a "Retry now" action that runs this exact job
+     * without opening the app.
+     *
+     * Only for this one call site — the plain SMTP failure — and not for the
+     * condition-skip or missing-account notifications above: retrying either
+     * of those would reach the same outcome every time (the condition is
+     * still unmet; the account still does not exist), so offering a button
+     * that always does nothing new would be worse than no button at all.
+     * `jobId` doubles as the retry target, since that is exactly the job this
+     * notification is about.
+     */
+    private void notifyFailure(Context context, String jobId, String title, String body) {
+        String retryLabel = AppSettingsSignal.localizedContext(context)
+                .getString(R.string.notify_retry_now);
+        Notifier.status(context, jobId, title, body, jobId, retryLabel);
     }
 }

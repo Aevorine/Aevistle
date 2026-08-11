@@ -1,11 +1,6 @@
-import { createContext, useContext } from 'react'
+import { createContext, useContext, useEffect, useState } from 'react'
 import type { LocaleId } from '../core/types'
 import { en, type TranslationKey, type Translations } from './en'
-import { zhCN } from './zh-CN'
-import { fr } from './fr'
-import { es } from './es'
-import { ru } from './ru'
-import { ar } from './ar'
 
 export type { TranslationKey, Translations }
 
@@ -28,13 +23,93 @@ export const LOCALES: LocaleMeta[] = [
   { id: 'ar', nativeName: 'العربية', englishName: 'Arabic', dir: 'rtl', intlTag: 'ar' },
 ]
 
-const TABLES: Record<LocaleId, Translations> = {
-  en,
-  'zh-CN': zhCN,
-  fr,
-  es,
-  ru,
-  ar,
+/**
+ * Every locale but English, loaded on demand.
+ *
+ * `src/i18n/index.ts` used to import all six tables statically, so every
+ * session paid for five languages nobody in it was reading — the built
+ * `i18n-*.js` chunk was bigger than the rest of the app combined. Only one
+ * locale is ever active at a time, so only one needs to be in memory: English
+ * ships in the main bundle as the synchronous fallback (see `loaded` below),
+ * and each other table is its own chunk, fetched the first time that locale
+ * is actually selected.
+ */
+const LOADERS: Partial<Record<LocaleId, () => Promise<Translations>>> = {
+  'zh-CN': () => import('./zh-CN').then((m) => m.zhCN),
+  fr: () => import('./fr').then((m) => m.fr),
+  es: () => import('./es').then((m) => m.es),
+  ru: () => import('./ru').then((m) => m.ru),
+  ar: () => import('./ar').then((m) => m.ar),
+}
+
+/** Tables resolved so far. English needs no fetch, so it starts seeded. */
+const loaded: Partial<Record<LocaleId, Translations>> = { en }
+
+/** In-flight loads, so flipping the language back and forth never fetches twice. */
+const pending = new Map<LocaleId, Promise<Translations>>()
+
+type Listener = () => void
+const listeners = new Set<Listener>()
+
+/**
+ * Start fetching `locale`'s table if nothing already has. Fire-and-forget:
+ * `translate` below needs to return a string synchronously, so callers read
+ * `loaded` for the result rather than awaiting this.
+ */
+function ensureLocaleLoading(locale: LocaleId): void {
+  if (loaded[locale] || pending.has(locale)) return
+  const load = LOADERS[locale]
+  if (!load) return // English, or an id this build does not know
+  const promise = load()
+    .then((table) => {
+      loaded[locale] = table
+      pending.delete(locale)
+      for (const listener of listeners) listener()
+      return table
+    })
+    .catch(() => {
+      // Left unresolved on purpose: `translate` keeps returning the English
+      // fallback for this locale, and the next call to `ensureLocaleLoading`
+      // (e.g. the user reopening Settings) tries the fetch again rather than
+      // being permanently stuck on a table that failed once.
+      pending.delete(locale)
+      return en
+    })
+  pending.set(locale, promise)
+}
+
+/**
+ * True once `locale`'s real table is in memory. English is always true.
+ *
+ * Exposed for `useLocaleReady` below; there is no reason for a screen to poll
+ * this directly rather than subscribing.
+ */
+function isLocaleLoaded(locale: LocaleId): boolean {
+  return locale in loaded
+}
+
+/**
+ * Re-renders the calling component once `locale`'s table finishes loading,
+ * and kicks off that load if nothing has yet.
+ *
+ * Every `t()` call already reads whatever is in `loaded` right now — English
+ * until the real table lands — so nothing downstream needs to change. What
+ * was missing without this hook is a reason for React to render *again*
+ * after the fetch resolves; without it the very first paint's English
+ * fallback would simply stick, since no state anywhere had changed.
+ */
+export function useLocaleReady(locale: LocaleId): boolean {
+  const [, forceRender] = useState(0)
+  useEffect(() => {
+    if (isLocaleLoaded(locale)) return
+    ensureLocaleLoading(locale)
+    const listener = () => forceRender((n) => n + 1)
+    listeners.add(listener)
+    return () => {
+      listeners.delete(listener)
+    }
+  }, [locale])
+  return isLocaleLoaded(locale)
 }
 
 export function localeMeta(id: LocaleId): LocaleMeta {
@@ -62,14 +137,20 @@ export type Interpolations = Record<string, string | number>
  * Look up a key and substitute `{placeholders}`.
  *
  * Falls back to English rather than showing a raw key: a user who picked
- * French should see one English word, not `schedule.jitterHint`.
+ * French should see one English word, not `schedule.jitterHint`. Also the
+ * fallback while `locale`'s own chunk is still in flight — see
+ * `useLocaleReady`, which is what turns this back into the right language
+ * once it lands. Kicking off the load here too (not just from the hook)
+ * means a caller of `translate` directly, outside of React, still gets the
+ * table eventually rather than being stuck in English forever.
  */
 export function translate(
   locale: LocaleId,
   key: TranslationKey,
   values?: Interpolations,
 ): string {
-  const table = TABLES[locale] ?? en
+  ensureLocaleLoading(locale)
+  const table = loaded[locale] ?? en
   const template = table[key] ?? en[key] ?? key
   if (!values) return template
   return template.replace(/\{(\w+)\}/g, (whole, name: string) =>

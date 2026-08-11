@@ -42,6 +42,16 @@ const REQUIRED = [
   'notify_new_mail_many',
   'notify_new_mail_summary',
   'notify_no_subject',
+  'notify_mark_read',
+  'notify_retry_now',
+  'shortcut_compose_short',
+  'shortcut_compose_long',
+  'shortcut_codes_short',
+  'shortcut_codes_long',
+  'widget_label',
+  'widget_description',
+  'widget_next_at',
+  'widget_nothing_due',
 ]
 
 const failures = []

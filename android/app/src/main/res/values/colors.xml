@@ -19,4 +19,15 @@
 -->
 <resources>
     <color name="notification_accent">#0B6BD8</color>
+
+    <!--
+        Text drawn over `widget_background`'s solid `notification_accent`.
+        Mirrors the `accent-text` token from `src/styles/theme.css` (written
+        without its leading dashes — see the note above) — the light-mode
+        value specifically, because the widget's background is always the
+        light-mode azure (see `widget_background.xml`'s comment), so its text
+        colour has to be the one that was chosen to sit on that shade, not
+        whichever theme the phone happens to be in.
+    -->
+    <color name="widget_on_accent">#FFFFFF</color>
 </resources>

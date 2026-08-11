@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    A 2-column x 1-row widget: `minWidth="110dp"` / `minHeight="40dp"` are the
+    standard `70*cells - 30` figures for 2 and 1 respectively, the formula the
+    Android widget docs give for the default launcher grid. `targetCellWidth`/
+    `targetCellHeight` restate the same 2x1 for launchers that read the
+    API 31+ grid-size attributes instead.
+
+    `updatePeriodMillis` is a 30-minute fallback poll, not the primary refresh
+    path — see `NextSendWidgetProvider`'s class comment for the two call sites
+    that push an update the moment the schedule actually changes. 1 800 000 is
+    written out rather than left to whatever the system clamps a smaller value
+    to, because that clamp (also 30 minutes) is easy to mistake for a bug the
+    next time someone reads this file.
+-->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="110dp"
+    android:minHeight="40dp"
+    android:targetCellWidth="2"
+    android:targetCellHeight="1"
+    android:updatePeriodMillis="1800000"
+    android:initialLayout="@layout/widget_next_send"
+    android:resizeMode="horizontal|vertical"
+    android:widgetCategory="home_screen"
+    android:previewImage="@mipmap/ic_launcher"
+    android:description="@string/widget_description" />

@@ -32,6 +32,7 @@ import {
   type ControlResponse,
 } from '../src/core/control'
 import type { ControlScope } from '../src/core/types'
+import { LOG_CAP_FALLBACK, LOG_CAP_MAX } from '../src/core/logRetention'
 
 export function homeControlDir(): string {
   return path.join(os.homedir(), HOME_CONTROL_DIR)
@@ -62,6 +63,16 @@ export interface ControlHooks {
   /** Where `control/` and `drop/` live. */
   dataRoot(): string
   log(level: 'info' | 'warn' | 'error', message: string, detail?: string): void
+  /**
+   * The same days-and-count policy `core/logRetention.ts`'s `pruneLogs`
+   * applies to the activity log, reused here for the drop folder's `done/`
+   * and `failed/` subfolders — see `pruneDropFolders` below for why that
+   * folder needed the same treatment and never got it. Read fresh on every
+   * prune pass rather than cached at startup, for the same reason
+   * `permissions()` above is: a retention change in Settings should not
+   * need Aevistle restarted to take effect.
+   */
+  retentionPolicy(): Promise<{ days: number; maxEntries: number }>
 
   // --- calendar subscribe ---------------------------------------------------
   // A second, independent doorway on the same server — see `GET /calendar.ics`
@@ -95,6 +106,8 @@ export class ControlServer {
   private token = ''
   private dropTimer: NodeJS.Timeout | null = null
   private draining = false
+  /** Counts ticks of `dropTimer` — see `startDropWatcher` on why pruning rides it at 1/30th the rate. */
+  private dropTicks = 0
 
   constructor(private readonly hooks: ControlHooks) {}
 
@@ -136,8 +149,48 @@ export class ControlServer {
     // Polling rather than fs.watch: watchers are unreliable across network
     // shares and synced folders, and the data folder is explicitly allowed to
     // be either. Two seconds is well inside "I dropped a file, did it work?".
-    this.dropTimer = setInterval(() => void this.drainDrop(), 2_000)
+    this.dropTimer = setInterval(() => {
+      void this.drainDrop()
+      /*
+       * Pruning rides the same timer rather than getting a second one of its
+       * own — one more interval is one more thing `dispose()` has to
+       * remember to clear, for a job that does not need 2-second resolution.
+       * `done/` and `failed/` gain at most one pair of files per *processed*
+       * request — rare enough that checking every 2 seconds would mean
+       * reading `state.json` (`retentionPolicy()`'s source, and a file that
+       * can be large) far more often than either folder could plausibly have
+       * changed. Every 30th tick is once a minute: prompt enough that a
+       * retention setting takes effect the same session it was changed in,
+       * without the file being read on every drop-folder poll.
+       */
+      this.dropTicks++
+      if (this.dropTicks % 30 === 0) void this.pruneDropFolders()
+    }, 2_000)
     await this.drainDrop()
+    // Once at startup too, unthrottled — otherwise files left over from a
+    // session that ended (or crashed) up to a minute before the last prune
+    // sit there for up to another minute before the timer above catches them.
+    await this.pruneDropFolders()
+  }
+
+  /**
+   * Apply the log's own retention policy to `done/` and `failed/`.
+   *
+   * Nothing pruned these before this existed: `drainDrop` only ever adds
+   * files to them, so a control interface used daily accumulated one
+   * `<timestamp>-<name>` and one `<timestamp>-<name>.result.json` per
+   * request forever, unlike the activity log this project already promises a
+   * retention policy for. Reusing that exact policy — the same
+   * `logRetentionDays`/`logMaxEntries` a user already set, rather than a
+   * second pair of settings nobody knew to look for — is the point: one
+   * promise ("old records get cleaned up"), kept in two places instead of
+   * one.
+   */
+  private async pruneDropFolders(): Promise<void> {
+    const policy = await this.hooks.retentionPolicy()
+    const now = Date.now()
+    await pruneEntryFolder(path.join(this.dropDir(), 'done'), policy, now)
+    await pruneEntryFolder(path.join(this.dropDir(), 'failed'), policy, now)
   }
 
   private async start(): Promise<void> {
@@ -536,6 +589,88 @@ export class ControlServer {
         error: error instanceof Error ? error.message : String(error),
       })
     }
+  }
+}
+
+/**
+ * The cutoff and cap `core/logRetention.ts`'s `pruneLogs` computes for the
+ * activity log, computed the same way here.
+ *
+ * Not a call to `pruneLogs` itself: that function takes a full `LogEntry[]`
+ * (`kind`, `level`, `title`, …), and inventing values for fields a filesystem
+ * entry does not have would be forcing a shape onto data that was never a
+ * log line to begin with. The arithmetic — an unusable `days`/`maxEntries`
+ * falls back rather than being taken literally, `LOG_CAP_MAX` bounds a
+ * user-typed cap — is copied from there instead of re-derived, and
+ * `LOG_CAP_FALLBACK`/`LOG_CAP_MAX` are imported rather than restated so a
+ * later change to either only has to be made in one place to be noticed
+ * here too.
+ *
+ * Exported for a check script the same way `imap.ts`'s `buildClient` is —
+ * this and `pruneEntryFolder` below are the only two functions in this file
+ * with no I/O side effects, and them being unreachable from `ControlServer`
+ * itself is what makes an automated check for "old entries actually get
+ * deleted" worth writing.
+ */
+export function retentionCutoffAndCap(
+  policy: { days: number; maxEntries: number },
+  now: number,
+): { cutoff: number; cap: number } {
+  const days = Number(policy.days)
+  const max = Number(policy.maxEntries)
+  const cutoff = Number.isFinite(days) && days > 0 ? now - days * 86_400_000 : -Infinity
+  const cap =
+    Number.isFinite(max) && max > 0 ? Math.min(Math.floor(max), LOG_CAP_MAX) : LOG_CAP_FALLBACK
+  return { cutoff, cap }
+}
+
+/**
+ * Apply the retention policy to one of `done/`/`failed/`.
+ *
+ * A processed request leaves two files behind in the same directory — the
+ * moved request, named `<timestamp>-<original name>`, and its
+ * `<timestamp>-<original name>.result.json` — so this treats the pair as one
+ * dated entry (`at` read back off the filename's own timestamp prefix, the
+ * same value `Date.now()` wrote into it in `runDropped`'s `finish`) and
+ * removes both together. Deleting only the primary file would have left an
+ * orphaned `.result.json` for an external script to trip over; deleting only
+ * the result would have left a request with no record of what happened to
+ * it, which is the one thing this whole mechanism exists to preserve.
+ *
+ * Anything whose name does not start with a parseable timestamp is left
+ * alone rather than guessed at — this folder is also where a human might
+ * drop something by hand while poking around, and a prune pass is not the
+ * place to decide that is safe to delete.
+ */
+export async function pruneEntryFolder(
+  dir: string,
+  policy: { days: number; maxEntries: number },
+  now: number,
+): Promise<void> {
+  const names = await fs.readdir(dir).catch(() => [] as string[])
+  const entries: Array<{ primary: string; at: number }> = []
+  for (const name of names) {
+    if (name.endsWith('.result.json')) continue // the primary file's pair, handled alongside it
+    const at = Number(name.split('-', 1)[0])
+    if (!Number.isFinite(at)) continue
+    entries.push({ primary: name, at })
+  }
+  // Newest first, matching `pruneLogs`'s own assumption about the order it
+  // is handed — the cap below keeps the *first* `cap` entries after this.
+  entries.sort((a, b) => b.at - a.at)
+
+  const { cutoff, cap } = retentionCutoffAndCap(policy, now)
+  const keep = new Set(
+    entries
+      .filter((entry) => entry.at >= cutoff)
+      .slice(0, cap)
+      .map((entry) => entry.primary),
+  )
+
+  for (const entry of entries) {
+    if (keep.has(entry.primary)) continue
+    await fs.rm(path.join(dir, entry.primary), { force: true }).catch(() => {})
+    await fs.rm(path.join(dir, `${entry.primary}.result.json`), { force: true }).catch(() => {})
   }
 }
 
