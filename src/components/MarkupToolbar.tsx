@@ -20,10 +20,10 @@
  *   back into the box.
  */
 
-import type { ReactNode, RefObject } from 'react'
+import { useId, useState, type ReactNode, type RefObject } from 'react'
 import { applyMarkup, type MarkupAction } from '../core/markup'
 import { useI18n, type TranslationKey } from '../i18n'
-import { IconLink } from './icons'
+import { IconChevronDown, IconLink } from './icons'
 
 const ACTIONS: Array<{ action: MarkupAction; glyph: ReactNode; labelKey: TranslationKey }> = [
   { action: 'bold', glyph: 'B', labelKey: 'markup.bold' },
@@ -47,6 +47,16 @@ export function MarkupToolbar({
   onChange: (body: string) => void
 }) {
   const { t } = useI18n()
+  /*
+   * Closed on arrival, on every screen and every visit.
+   *
+   * Not persisted deliberately. The default *is* the feature — it is what buys
+   * the message box its extra row — and a remembered "open" would quietly give
+   * that row away again for a formatting session the user finished last week.
+   * Reopening costs one tap; the box being short costs every visit.
+   */
+  const [open, setOpen] = useState(false)
+  const groupId = useId()
 
   const run = (action: MarkupAction) => {
     const el = textarea.current
@@ -73,23 +83,59 @@ export function MarkupToolbar({
   }
 
   return (
-    <div className="markup" role="toolbar" aria-label={t('markup.title')}>
-      {ACTIONS.map(({ action, glyph, labelKey }) => (
-        <button
-          key={action}
-          type="button"
-          className="markup__btn"
-          title={t(labelKey)}
-          aria-label={t(labelKey)}
-          // The mousedown default is what moves focus out of the textarea and
-          // collapses the selection; without this the button would act on
-          // nothing every time.
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => run(action)}
-        >
-          {glyph}
-        </button>
-      ))}
-    </div>
+    <>
+      {/*
+        The disclosure, and its sibling `.markup` below is what it discloses.
+
+        Two elements rather than a wrapper around both, because the narrow
+        layout needs them on *different rows* of `.field__tools`: the toggle
+        rides the label line beside the byte count, and the strip drops to a
+        full-width row of its own beneath. A wrapper would have to be a flex
+        item in its own right, and everything inside it would be trapped in
+        that item's width.
+
+        The open/closed state is published as `aria-expanded` and read back by
+        CSS through `.markup__toggle[aria-expanded="false"] + .markup`, so
+        there is exactly one source of truth and no second data attribute that
+        could disagree with the accessible one.
+
+        Hidden entirely on a wide window (`.markup__toggle { display: none }`),
+        where all seven buttons fit on the label line and folding them would be
+        a tap charged for nothing. Rendering it unconditionally and letting CSS
+        decide keeps the state across a window resize.
+      */}
+      <button
+        type="button"
+        className="markup__toggle"
+        aria-expanded={open}
+        aria-controls={groupId}
+        title={t('markup.title')}
+        // Same reason as the action buttons below: without this, opening the
+        // strip would collapse the selection it is about to act on.
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => setOpen((v) => !v)}
+      >
+        {t('markup.title')}
+        <IconChevronDown size={12} />
+      </button>
+      <div className="markup" role="toolbar" aria-label={t('markup.title')} id={groupId}>
+        {ACTIONS.map(({ action, glyph, labelKey }) => (
+          <button
+            key={action}
+            type="button"
+            className="markup__btn"
+            title={t(labelKey)}
+            aria-label={t(labelKey)}
+            // The mousedown default is what moves focus out of the textarea and
+            // collapses the selection; without this the button would act on
+            // nothing every time.
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => run(action)}
+          >
+            {glyph}
+          </button>
+        ))}
+      </div>
+    </>
   )
 }

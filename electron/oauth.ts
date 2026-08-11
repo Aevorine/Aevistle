@@ -384,6 +384,25 @@ const CONSENT_TIMEOUT_MS = 5 * 60_000
 const MAX_CALLBACK_URL = 8 * 1024
 
 /**
+ * The app's own families, named literally, single-quoted because they are
+ * written into a double-quoted HTML `style` attribute.
+ *
+ * The page below renders in the user's default browser, not in the app, so it
+ * cannot reach `src/styles/theme.css` — no stylesheet link, no `@font-face`,
+ * by design (see `resultPage`). `system-ui` was therefore not "the app's
+ * font falling back gracefully"; it was a different typeface entirely, and
+ * this is the last screen of a sign-in that starts inside Aevistle.
+ *
+ * System faces only, for the same reason the message reader's stack is (see
+ * `src/components/MessageBodyFrame.tsx`): the bundled "Aevistle Text" family
+ * cannot be served here. On Windows that lands on real Times New Roman and
+ * real SimSun/宋体 and matches the app closely; anywhere without them it
+ * lands on the platform serif, which is a near miss rather than a match.
+ */
+const RESULT_FONT_STACK =
+  "'Times New Roman', Times, 'SimSun', '宋体', 'Songti SC', 'Noto Serif SC', 'Noto Serif CJK SC', serif"
+
+/**
  * The page the browser lands on when it is over.
  *
  * Entirely self-contained — no stylesheet, no script, no image. It is served
@@ -395,13 +414,18 @@ const MAX_CALLBACK_URL = 8 * 1024
 function resultPage(title: string, detail: string): string {
   const escape = (value: string) =>
     value.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!)
+  // Longhands rather than the `font:` shorthand: the shorthand cannot carry a
+  // family list containing quoted names without also re-stating weight, style
+  // and variant, and the h1 below is given an absolute 20px rather than
+  // `1.25rem` so the heading rank is the app's own step and not a multiple of
+  // whatever default size this particular browser is configured with.
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Aevistle</title></head>
-<body style="font:16px/1.6 system-ui,sans-serif;margin:0;display:grid;place-items:center;min-height:100vh;background:#14161b;color:#eceef1">
+<body style="font-family:${RESULT_FONT_STACK};font-size:16px;line-height:1.6;margin:0;display:grid;place-items:center;min-height:100vh;background:#14161b;color:#eceef1">
 <main style="max-width:32rem;padding:2rem;text-align:center">
-<h1 style="font-size:1.25rem;margin:0 0 .75rem">${escape(title)}</h1>
+<h1 style="font-size:20px;margin:0 0 .75rem">${escape(title)}</h1>
 <p style="margin:0;opacity:.8">${escape(detail)}</p>
 </main></body></html>`
 }

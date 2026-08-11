@@ -24,26 +24,43 @@
    Latin, digits and Western punctuation → Times New Roman.
    CJK ideographs and full-width punctuation → 宋体 / Songti.
 
-   The `local()` sources mean nothing is downloaded: these are the fonts that
-   ship with Windows, macOS and most Linux distributions. The fallbacks after
-   each preferred name cover the machines that lack the first choice — Tinos
-   and Liberation Serif are metric-compatible with Times New Roman, and Noto
-   Serif CJK / Source Han Serif are the usual Songti substitutes.
+   Both faces are ordered system-first: every `local()` name comes before the
+   bundled `url()`, so a machine that already owns the real typeface uses the
+   real typeface and downloads nothing at all. Windows answers with Times New
+   Roman and SimSun, macOS with Times New Roman and Songti SC, desktop Linux
+   with the metric-compatible clones (Tinos, Liberation Serif) and the Noto
+   Serif CJK / Source Han Serif line. Android owns none of them, every
+   `local()` there misses, and the browser falls through to the bundled files
+   at the end of each list — so Android is the only platform that pays for
+   them, which is the platform they were added for.
+
+   The rejected alternative is url()-first, which is how this file was written
+   until now. It bought one identical rendering on every platform, and it cost
+   too much for that: a loaded url() font owns its entire declared
+   unicode-range, so the `local()` names could never be reached on any machine
+   that was not offline, and Windows downloaded and rendered a 4.05MB bundled
+   Songti instead of the SimSun sitting on its own disk. The two bundled files
+   are chosen so that dropping them on desktop changes nothing dimensionally:
+   Tinos is metric-compatible with Times New Roman glyph for glyph, and Noto
+   Serif SC is the same Songti-family design as SimSun, so a line wraps in the
+   same place on a phone as it does on a desktop.
    ========================================================================== */
 
 @font-face {
   font-family: "Aevistle Text";
   font-style: normal;
   font-weight: 100 900;
+  /* Paint the fallback immediately and swap when the bundled file lands.
+     Undeclared, this is `auto`, which every engine implements as a block
+     period of up to three seconds — three seconds of invisible text on the
+     one platform that actually fetches these files. Nothing here is
+     decorative enough to be worth hiding words for, and a reflow one screen
+     into the session is the cheaper of the two costs. */
+  font-display: swap;
   src:
-    /* Bundled fallback for platforms with none of the `local()` names below —
-       Android chief among them. Tinos (Google, SIL OFL 1.1) is metric-
-       compatible with Times New Roman by design, subset to the Latin/
-       Cyrillic/Greek/punctuation ranges this face actually covers (see the
-       unicode-range below) — 90KB rather than the ~510KB full font. See
-       src/assets/fonts/OFL-Tinos.txt for the license text this subset ships
-       under. */
-    url("../assets/fonts/aevistle-serif-latin.woff2") format("woff2"),
+    /* The real thing first, then the two metric-compatible clones that stand
+       in for it on desktop Linux. None of these costs a byte: they are
+       already installed, which is the whole point of the ordering. */
     local("Times New Roman"), local("TimesNewRomanPSMT"), local("Tinos"),
     local("Liberation Serif"), local("Nimbus Roman"),
     /* Android. None of the five above ship on it — Times New Roman is a
@@ -54,7 +71,18 @@
        the unicode-range split on the way — so a phone got one font for the
        whole sentence, which is the exact thing this pair of @font-face rules
        exists to prevent. */
-    local("Noto Serif"), local("Droid Serif");
+    local("Noto Serif"), local("Droid Serif"),
+    /* Last, and reached only when every name above has missed. Tinos (Google,
+       SIL OFL 1.1) is metric-compatible with Times New Roman by design,
+       subset to the Latin/Cyrillic/Greek/punctuation ranges this face
+       actually covers (see the unicode-range below) — 90KB rather than the
+       ~510KB full font. 90KB is cheap enough that loading it everywhere would
+       not have hurt, but there is no argument for it either: a machine that
+       reaches this line has nothing better, and a machine that does not reach
+       it is already drawing the face this file was cut to imitate. See
+       src/assets/fonts/OFL-Tinos.txt for the license text this subset ships
+       under. */
+    url("../assets/fonts/aevistle-serif-latin.woff2") format("woff2");
   /* Basic Latin, Latin-1, Latin Extended-A/B, IPA, Greek, Cyrillic,
      general punctuation, superscripts, currency and letterlike symbols. */
   unicode-range:
@@ -66,32 +94,50 @@
   font-family: "Aevistle Text";
   font-style: normal;
   font-weight: 100 900;
+  /* Matters far more here than on the Latin face: the bundled file below is
+     4.05MB, and the default block period would hold every Chinese character
+     on screen blank for up to three seconds on the platform that downloads
+     it — which, this being a Chinese-language UI, is very nearly the whole
+     screen. Swap paints immediately and re-renders once. */
+  font-display: swap;
   src:
-    /* Bundled fallback: SimSun is Microsoft-proprietary and ships on no
-       Android device, so the `local()` names below are a silent no-op there
-       — this is the actual fix for that platform. Noto Serif SC (Google, SIL
-       OFL 1.1) is the free, redistributable substitute — same underlying
-       design as Source Han Serif SC (Adobe/Google). Instanced from the
-       variable font to a static Regular weight, then subset to the CJK
-       Unified Ideographs Basic block (U+4E00-9FFF, 100% glyph coverage) plus
-       CJK symbols/punctuation and halfwidth/fullwidth forms — the range this
-       UI's Chinese text actually needs — at 4.05MB, down from a 25.1MB
-       full/variable source font. Characters outside that subset (rare CJK
-       Extension-A ideographs, Hiragana/Katakana, compatibility ideographs —
-       none of which this app's UI or locale strings use) will fall through
-       to `.notdef` on any platform once this file has loaded, rather than to
-       the `local()` names after it: a successfully-loaded `url()` font is
-       used for its whole declared unicode-range, and per-glyph fallback to
-       a later `src` entry only happens on total load failure, not on a
-       missing individual glyph. See src/assets/fonts/OFL-NotoSerifSC.txt for
-       the license text this subset ships under. */
-    url("../assets/fonts/aevistle-serif-cjk.woff2") format("woff2"),
+    /* The literal 宋体 first: it is the face this app was designed around and
+       the one asked for by name. Windows answers with SimSun, macOS with
+       Songti SC or STSong, desktop Linux with the Noto Serif CJK / Source Han
+       Serif line or AR PL UMing. Every one of these is already on the disk,
+       so on those three platforms this face costs nothing and renders in the
+       hinting the OS shipped, which no downloaded subset can match. */
     local("SimSun"), local("宋体"), local("NSimSun"), local("Songti SC"),
     local("STSong"), local("Noto Serif CJK SC"), local("Noto Serif SC"),
     local("Source Han Serif SC"), local("AR PL UMing CN"),
     /* Android's own Songti substitute. Named differently on different vendor
        builds, so all three spellings are listed. */
-    local("Noto Serif CJK"), local("NotoSerifCJK"), local("Source Han Serif");
+    local("Noto Serif CJK"), local("NotoSerifCJK"), local("Source Han Serif"),
+    /* Last, and the reason the file is bundled at all: SimSun is
+       Microsoft-proprietary and ships on no Android device, and plenty of
+       Android builds answer none of the names above either, so without this
+       entry the Chinese half of the UI would land on whatever the vendor
+       chose for generic `serif`. Noto Serif SC (Google, SIL OFL 1.1) is the
+       free, redistributable substitute — same underlying design as Source Han
+       Serif SC (Adobe/Google), so it is a Songti, and text wraps where it
+       wraps on Windows. Instanced from the variable font to a static Regular
+       weight, then subset to the CJK Unified Ideographs Basic block
+       (U+4E00-9FFF, 100% glyph coverage) plus CJK symbols/punctuation and
+       halfwidth/fullwidth forms — the range this UI's Chinese text actually
+       needs — at 4.05MB, down from a 25.1MB full/variable source font.
+
+       That subset has a hole, and this ordering is what confines it to the
+       platforms that reach this line. A successfully-loaded `url()` font is
+       used for its whole declared unicode-range, and per-glyph fallback to a
+       later `src` entry only happens on total load failure, not on a missing
+       individual glyph — so wherever this file does load, a character outside
+       the subset (rare CJK Extension-A ideographs, Hiragana/Katakana,
+       compatibility ideographs — none of which this app's UI or locale
+       strings use) renders as `.notdef`. On Windows and macOS that hole no
+       longer exists at all, because the system font answers first and this
+       file is never fetched. See src/assets/fonts/OFL-NotoSerifSC.txt for the
+       license text this subset ships under. */
+    url("../assets/fonts/aevistle-serif-cjk.woff2") format("woff2");
   /* CJK symbols and punctuation, Hiragana/Katakana, unified ideographs,
      compatibility ideographs and full-width forms. */
   unicode-range:
@@ -158,41 +204,90 @@
        小二 (18 pt) = 24px  — the name of the screen you are on
        二号 (22 pt) = 29.33px — the one hero line
 
-     Three roles, three sizes, and they are the whole ladder:
+     Two ranks below the headings, and they are the whole ladder:
 
-       body       16px  the sentence you are reading, and every form control
-       secondary  14px  metadata, senders, hints, notes, descriptions
-       auxiliary  12.5px timestamps, chips, counts, small all-caps labels
+       prose  16px  anything a person reads as language — sentences, hints,
+                    descriptions, subjects, previews, empty states, banner
+                    copy, the primary line of a list row — and every input
+       data   14px  and nothing but data — timestamps, byte counts, numeric
+                    badges, chips, table column heads, shortcut keys
 
-     This replaces a scale where `--text-sm`, `--text-base` and `--text-md`
-     were all `1rem`. Three names for one number is not a scale: "secondary"
-     text came out the same size as the sentence beside it on every screen in
-     the app, so nothing had a second rank and the whole interface read as one
-     wall of 16px — reported as 字体太大，显示的范围太小 on the two list screens,
-     where a row that says four things at one size says none of them first.
+     Two corrections are recorded here, in the order they happened, because
+     the second one only makes sense against the first.
+
+     The first replaced a scale where `--text-sm`, `--text-base` and
+     `--text-md` were all `1rem`. Three names for one number is not a scale:
+     "secondary" text came out the same size as the sentence beside it on
+     every screen in the app, so nothing had a second rank and the whole
+     interface read as one wall of 16px — reported as 字体太大，显示的范围太小 on
+     the two list screens, where a row that says four things at one size says
+     none of them first. That fix introduced 14px and a third, auxiliary rank
+     at 12.5px.
+
+     The second correction is this one, and it is a floor: 14px is now the
+     smallest size that exists anywhere in this app, and it is reserved for
+     data. The auxiliary rank spread past what it was for — text that is
+     plainly prose (hints, notes, descriptions, a message preview) ended up at
+     14px or 12.5px because it was "secondary" to something else on the row,
+     and 12.5px 宋体 on a phone is not small, it is unreadable. So the rule is
+     no longer about rank, it is about kind: if a person reads it as language
+     it is 16px or larger no matter what it sits next to, and 14px is for text
+     that is looked at rather than read.
 
      16px stays the floor for anything read as a sentence and for every input:
      iOS and Android zoom the page when a focused field is under 16px, so the
      body step is an interaction requirement as well as a reading one. What
-     comes down is only the two ranks *below* prose. */
+     comes down is only the one rank *below* prose, and it stops at 14px. */
   --font-sans:
     "Aevistle Text", "Times New Roman", "SimSun", "Songti SC",
     "Noto Serif CJK SC", "Noto Sans Arabic", "Segoe UI Emoji", serif;
+  /*
+   * Not a monospace any more, despite the name.
+   *
+   * Sixteen rules read this token — verification codes, file paths, host:port
+   * readouts, SSL error strings, recovery keys, URLs. All of them are Latin
+   * text, and the instruction for this round was that Latin, digits and
+   * punctuation are Times New Roman everywhere, with the app's typography
+   * identical on every screen. A coding sans in sixteen places is the largest
+   * remaining exception to that, so it goes.
+   *
+   * What the monospace was actually buying was column alignment of digits, and
+   * that is kept: `body` already sets `font-variant-numeric: tabular-nums`
+   * (app.css), which gives every digit the same advance width in Times New
+   * Roman too. A column of byte counts or timestamps still lines up.
+   *
+   * What is genuinely lost is glyph disambiguation. A coding face draws 0/O
+   * and 1/l/I apart on purpose; a serif does not, so a verification code
+   * containing those characters is marginally easier to mistype than it was.
+   * That is a real cost of the instruction rather than an oversight — reverting
+   * it is this one declaration, nothing else.
+   *
+   * The token keeps its name so the sixteen call sites, and the check scripts
+   * that know them, do not all have to move for a change of value.
+   */
   --font-mono:
-    "JetBrains Mono", "Cascadia Code", "SF Mono", "Consolas", ui-monospace, monospace;
+    "Times New Roman", Times, "SimSun", "宋体", "Songti SC",
+    "Noto Serif SC", "Noto Serif CJK SC", serif;
 
-  /* 12.5px — the auxiliary rank: a timestamp, a chip, a count, a file-type
-     tag. Never a sentence. Fenced off behind a name instead of being typed as
-     a bare `12px` wherever it was wanted, which is how ten sites each picked
-     their own number the last time. */
-  --text-xs: 0.78125rem;
-  /* Was 12px, one notch below `--text-xs`'s old 14px. Now that the auxiliary
-     rank *is* 12.5px there is nothing for a second step half a pixel under it
-     to express — a difference nobody can see is a difference nobody can
-     maintain — so it is an alias, and the five badge sites that name it stay
-     spelled the way they read. */
+  /* 14px — the data rank, and the smallest size in the app: a timestamp, a
+     chip, a count, a file-type tag. Never a sentence. It was 12.5px until the
+     floor rule above moved it up to meet `--text-sm`, so the two names are now
+     deliberately the same number. Kept as a separate name rather than folded
+     into `--text-sm` because the ~50 call sites that say `--text-xs` are
+     saying "this is the small one" and still read correctly; collapsing them
+     would be a fifty-site rewrite that buys nothing today and throws away the
+     distinction on the day a third rank is wanted back. Fenced off behind a
+     name instead of being typed as a bare number wherever it was wanted,
+     which is how ten sites each picked their own the last time. */
+  --text-xs: 0.875rem;
+  /* Was 12px, then an alias of `--text-xs` at 12.5px, now an alias at 14px.
+     There was never anything for a step below the smallest step to express —
+     a difference nobody can see is a difference nobody can maintain — and now
+     that the smallest step is the floor there is less than never, so it stays
+     an alias and the badge sites that name it stay spelled the way they
+     read. */
   --text-2xs: var(--text-xs);
-  --text-sm: 0.875rem;      /* 14px  五号 — the secondary rank */
+  --text-sm: 0.875rem;      /* 14px  五号 — the data rank; see the floor above */
   --text-base: 1rem;        /* 16px  小四 — body copy, the workhorse */
   /* Inputs and the body textarea. Same 16px as `--text-base` — deliberately
      the same rank, not a fourth number — kept as its own name because the
@@ -285,6 +380,13 @@
   /* The bottom tab bar on a phone. `.toasts` and `.sendresult` sit above it,
      and both used to hard-code a number that had stopped being true. */
   --nav-h: 52px;
+  /* How much of the viewport the soft keyboard is covering, in CSS pixels.
+     Written by `core/keyboardInset.ts`; see that file for why the value comes
+     from three cross-checked sources rather than from the window shrinking.
+     Declared here so it resolves to zero on every platform that never sets it
+     — Windows, the web preview — and so `check-css-tokens.mjs` can see that
+     the token is defined. */
+  --kb: 0px;
 
   /* ---- motion ----
      Short and eased-out. Anything longer than 220ms on a click feels like lag

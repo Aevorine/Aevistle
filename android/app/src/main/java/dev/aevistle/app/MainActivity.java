@@ -401,41 +401,50 @@ public class MainActivity extends BridgeActivity {
      * Left and right insets are applied too, for a landscape phone with a
      * display cutout down one side.
      *
-     * The keyboard rides along on the same listener, and for the same reason.
-     * `adjustResize` in the manifest is what used to shrink the window for the
-     * keyboard on its own, but that stopped working the moment this listener
-     * started consuming every inset pass and padding the content view itself:
-     * whatever this callback does not read from `windowInsets` before
-     * returning `CONSUMED` is simply gone, and `ime()` was never in the mask
-     * being read. Every height below this point is CSS driven off the
-     * window's own size, so with the keyboard's inset silently dropped, that
-     * size stops changing when the keyboard opens — the compose screen's
-     * message box keeps the height it computed for the full screen, and the
-     * keyboard just covers the bottom of it instead of the layout giving that
-     * space back. Folding `ime()` into the bottom padding here, capped to
-     * never go *below* the system-bar floor when the keyboard is closed, is
-     * what makes the window really shrink again.
+     * **The keyboard is deliberately NOT in this padding any more.**
      *
-     * `ime.bottom` is read only when `isVisible(ime())` is true, not trusted
-     * on its own. Android is known to occasionally deliver one more insets
-     * pass mid-close-animation (or, on some OEM keyboards, to skip the final
-     * settle pass altogether) where `ime().bottom` still reports a stale
-     * non-zero height even though the keyboard is no longer up. Without this
-     * guard that stale value becomes permanent padding — nothing later ever
-     * lowers it again — leaving every screen with a blank strip at the
-     * bottom for the rest of the session. `isVisible()` reflects the
-     * keyboard's actual settled state rather than an in-flight animation
-     * value, so it is what decides whether `ime.bottom` counts at all.
+     * It was, for two releases, and that is what produced the bug this comment
+     * now exists to prevent a fourth attempt at. The chain was: fold `ime()`
+     * into the bottom padding, so the content view shrinks, so the WebView
+     * shrinks, so `100dvh` shrinks, so `.shell` shrinks — and `.shell` is what
+     * the phone's bottom tab bar is laid out inside. A keyboard-sized bottom
+     * padding therefore lifts the five tabs a keyboard's height off the bottom
+     * of the screen, and paints the strip below them in the app's own
+     * background colour (see {@link #applyStartupBackground}), so the result
+     * reads as a design rather than as a fault.
+     *
+     * That would be survivable if the padding always came back down. It does
+     * not. `setPadding` is only ever reached from inside this listener, and
+     * the listener only runs when Android chooses to deliver an insets pass.
+     * Some OEM keyboards skip the final settle pass on close. When that
+     * happens there is no second chance: the padding is permanent for the rest
+     * of the session, on every screen, until the app is force-stopped.
+     *
+     * Two previous fixes both attacked the arithmetic — first clamping the
+     * value to the system-bar floor, then guarding it behind `isVisible(ime())`
+     * so a stale in-flight height could not be trusted. Neither could work,
+     * because both still require a pass to arrive in order to lower anything.
+     *
+     * So the keyboard is now handled where it can be observed continuously
+     * rather than only when the system volunteers: the height is *published*
+     * to the page (see {@link #publishKeyboardInset}) and the web layer sizes
+     * itself against it, cross-checked there against whether a text field is
+     * actually focused. If this value ever sticks, the page can still tell that
+     * nothing is focused and ignore it. The native window, meanwhile, stays the
+     * full height of the screen at all times, so the tab bar cannot be lifted
+     * off the bottom no matter what any of this gets wrong.
+     *
+     * The bottom padding is additionally capped at a quarter of the window.
+     * Nothing legitimate — gesture handle, three-button bar, cutout — comes
+     * close to that. It is a backstop against exactly the failure above ever
+     * returning through some other route: a bug can now cost at most a strip,
+     * never half the screen.
      */
     private void applyWindowInsets() {
         View root = findViewById(android.R.id.content);
         if (root == null) return;
         ViewCompat.setOnApplyWindowInsetsListener(root, (view, windowInsets) -> {
-            Insets bars = windowInsets.getInsets(
-                    WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.displayCutout());
-            boolean imeVisible = windowInsets.isVisible(WindowInsetsCompat.Type.ime());
-            int imeBottom = imeVisible ? windowInsets.getInsets(WindowInsetsCompat.Type.ime()).bottom : 0;
-            view.setPadding(bars.left, bars.top, bars.right, Math.max(bars.bottom, imeBottom));
+            applyInsets(view, windowInsets);
             // Consumed: nothing below this view needs to inset itself again,
             // and letting the insets through would double the padding on the
             // WebView's own scrolling container.
@@ -444,5 +453,110 @@ public class MainActivity extends BridgeActivity {
         // The listener only fires on the next insets pass, which has usually
         // already happened by the time onCreate returns.
         ViewCompat.requestApplyInsets(root);
+    }
+
+    /**
+     * The body of the insets listener, split out so the recovery path below can
+     * run exactly the same arithmetic without waiting to be called.
+     */
+    private void applyInsets(View view, WindowInsetsCompat windowInsets) {
+        Insets bars = windowInsets.getInsets(
+                WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.displayCutout());
+        int height = view.getHeight();
+        int bottom = height > 0 ? Math.min(bars.bottom, height / 4) : bars.bottom;
+        view.setPadding(bars.left, bars.top, bars.right, bottom);
+
+        boolean imeVisible = windowInsets.isVisible(WindowInsetsCompat.Type.ime());
+        int imeBottom = imeVisible ? windowInsets.getInsets(WindowInsetsCompat.Type.ime()).bottom : 0;
+        // The window is already padded past the navigation bar, so the page
+        // only needs the part of the keyboard that rises above it.
+        publishKeyboardInset(Math.max(0, imeBottom - bottom));
+    }
+
+    /**
+     * Re-read the insets from the window itself and re-apply them.
+     *
+     * {@link ViewCompat#getRootWindowInsets} reports what the window currently
+     * holds, independently of the dispatch chain that {@code applyWindowInsets}
+     * consumes — so this works even when the listener has not fired and would
+     * not fire. That is the whole point: the padding now has a way back down
+     * that does not depend on the system's cooperation.
+     *
+     * Called on every return to the foreground and on every focus gain, which
+     * between them cover the cases the insets pass is known to miss: the app
+     * backgrounded with the keyboard up, a gesture-back dismissal, and a warm
+     * start through {@code onNewIntent} from a notification or a shortcut.
+     */
+    private void refreshWindowInsets() {
+        View root = findViewById(android.R.id.content);
+        if (root == null) return;
+        WindowInsetsCompat current = ViewCompat.getRootWindowInsets(root);
+        if (current != null) applyInsets(root, current);
+        ViewCompat.requestApplyInsets(root);
+    }
+
+    /* `public`, not the `protected` that `Activity` declares: Capacitor's
+       `BridgeActivity` widens it, and Java forbids an override from narrowing
+       the visibility it inherits. */
+    @Override
+    public void onResume() {
+        super.onResume();
+        refreshWindowInsets();
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        // Only on gain. A focus *loss* is the app going behind a dialog or the
+        // recents screen, where the insets it would read are not the ones it
+        // will come back to.
+        if (hasFocus) refreshWindowInsets();
+    }
+
+    /**
+     * The last keyboard height handed to the page, in CSS pixels.
+     *
+     * Kept so an unchanged value costs nothing: insets passes arrive in bursts
+     * during a keyboard animation, and each one would otherwise be a separate
+     * hop across the JavaScript bridge.
+     *
+     * {@code -1} rather than {@code 0}, so the first pass always publishes —
+     * including the common one that publishes zero.
+     */
+    private int lastKeyboardCssPx = -1;
+
+    /**
+     * Tell the page how much of it the keyboard is covering.
+     *
+     * Converted to CSS pixels here rather than in the page: the density is
+     * known on this side, and handing across a device-pixel figure that the
+     * page would have to divide by a number it has to guess is how the two
+     * sides drift apart.
+     *
+     * The receiving end is `window.__aevistleKeyboardInset` in
+     * `src/core/keyboardInset.ts`. The `&&` guard covers the window between
+     * the WebView existing and the bundle having run — an insets pass during
+     * startup is normal, and an undefined function is not an error worth
+     * logging.
+     */
+    private void publishKeyboardInset(int deviceBottom) {
+        float density = getResources().getDisplayMetrics().density;
+        int css = density > 0 ? Math.round(deviceBottom / density) : deviceBottom;
+        if (css == lastKeyboardCssPx) return;
+        lastKeyboardCssPx = css;
+        com.getcapacitor.Bridge bridge = getBridge();
+        final WebView webView = bridge == null ? null : bridge.getWebView();
+        if (webView == null) return;
+        final String js = "window.__aevistleKeyboardInset && window.__aevistleKeyboardInset(" + css + ")";
+        webView.post(() -> {
+            try {
+                webView.evaluateJavascript(js, null);
+            } catch (Exception e) {
+                // Not fatal — the page has its own `visualViewport` fallback
+                // and its own focus check. Logged rather than swallowed so a
+                // bridge that is failing every time is visible in logcat.
+                Log.w(TAG, "could not publish keyboard inset to the page", e);
+            }
+        });
     }
 }

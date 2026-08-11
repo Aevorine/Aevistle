@@ -140,6 +140,27 @@ textarea {
   grid-template-columns: var(--sidebar-w-collapsed) 1fr;
 }
 
+/*
+ * Give the keyboard its space here, rather than letting the window shrink.
+ *
+ * `--kb` is written by `core/keyboardInset.ts` and is `0px` everywhere that
+ * has no soft keyboard, so this rule is inert on Windows and in the browser
+ * preview. See that file for why the height is decided in CSS from a
+ * cross-checked number instead of by Android padding the WebView — the short
+ * version is that padding the WebView is what kept lifting the phone's tab bar
+ * off the bottom of the screen, four reports running.
+ *
+ * One rule covers both shells because both resolve `100%` to the right thing.
+ * On a phone `.shell` is `position: fixed; inset: 0` (see the phone block
+ * below), so the percentage is of the viewport and setting `height` alongside
+ * `top` simply wins over `bottom`. On a tablet it is still a `height: 100%`
+ * grid child of `#root`. Either way the shell ends where the keyboard begins,
+ * so the focused field is above it rather than under it.
+ */
+:root[data-shell="mobile"][data-kb="open"] .shell {
+  height: calc(100% - var(--kb));
+}
+
 /* --- sidebar --- */
 
 .sidebar {
@@ -303,12 +324,14 @@ textarea {
   justify-content: center;
   padding-inline: 0;
 }
+/* Same growth as the phone bar's badge below: `--text-2xs` is the 14px floor
+   now, and 14px of digit does not fit in a 16px pill. */
 .shell[data-collapsed="true"] .nav__badge {
   position: absolute;
-  top: 2px;
-  inset-inline-end: 6px;
-  min-width: 16px;
-  height: 16px;
+  top: 0;
+  inset-inline-end: 4px;
+  min-width: 20px;
+  height: 20px;
   font-size: var(--text-2xs);
 }
 
@@ -470,7 +493,7 @@ textarea {
   /* --text-3 is tuned against a card, and the page head sits on the darker page
      background instead — the same colour measures 3.4:1 here, under AA. */
   color: var(--text-2);
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   line-height: var(--leading-tight);
   max-width: var(--reading-max);
 }
@@ -525,7 +548,7 @@ textarea {
   line-height: var(--leading-tight);
 }
 .card__hint {
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   color: var(--text-3);
 }
 
@@ -701,7 +724,7 @@ textarea {
  * the screen that can contain an arbitrary-length token inside a sentence.
  */
 .autoconf__note {
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   line-height: var(--leading-relaxed);
   color: var(--text-3);
   overflow-wrap: anywhere;
@@ -752,7 +775,7 @@ textarea {
   gap: var(--sp-3);
   padding-block-start: var(--sp-3);
   border-block-start: 1px solid var(--border-subtle);
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   color: var(--text-2);
 }
 /* The sentence takes the row and the undo button sits beside it until there is
@@ -882,7 +905,7 @@ textarea {
   /* Also 小四: this is a sentence of Chinese guidance, not a numeric label.
      It costs no height — it shares the label's line — so there is nothing to
      trade off here. */
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   color: var(--text-3);
 }
 .field__optional {
@@ -891,7 +914,7 @@ textarea {
   font-size: var(--text-sm);
 }
 .field__hint {
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   color: var(--text-3);
   line-height: var(--leading-relaxed);
   /* A hint is often the place a machine string surfaces — the sync scope
@@ -1223,7 +1246,7 @@ textarea {
   color: var(--text-1);
 }
 .switch__desc {
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   color: var(--text-3);
   line-height: var(--leading-relaxed);
   margin-top: 2px;
@@ -1413,13 +1436,20 @@ textarea {
   gap: 5px;
 }
 /* 小四, like everything else that is read rather than glanced at. It was
-   `--text-xs` (14px) — one of exactly two places in the whole application
-   under 16px, found by walking all nine screens at six widths. "周一" is two
+   `--text-xs` — one of exactly two places in the whole application under
+   16px, found by walking all nine screens at six widths. "周一" is two
    glyphs; at 16px that is 32px inside a 38px cell at 360px, so the grid does
-   not widen. */
+   not widen.
+
+   Named as `--text-base` rather than `--text-sm`, which is what it said until
+   this round. That was not a decision: `--text-sm` *was* 1rem when this rule
+   was written, and a later pass dropped the token to 14px to make two list
+   screens fit — silently taking this rule and three others down with it and
+   leaving four comments claiming a size they no longer had. Naming the rank
+   this rule actually wants is what stops that happening a third time. */
 .monthgrid__weekday {
   text-align: center;
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   font-weight: 700;
   /* --text-2, not --text-3, for the reason `.page-subtitle` gives: --text-3 is
      tuned against a card, and this row is the one part of the grid that reads
@@ -2115,7 +2145,7 @@ textarea {
   padding: var(--sp-3) var(--sp-4);
   border-radius: var(--r-md);
   border: 1px solid transparent;
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   line-height: var(--leading-relaxed);
 }
 .banner__icon {
@@ -2227,7 +2257,7 @@ textarea {
 .toast__body {
   flex: 1;
   min-width: 0;
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
 }
 .toast__title {
   font-weight: 700;
@@ -2235,7 +2265,7 @@ textarea {
 }
 .toast__detail {
   color: var(--text-3);
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   margin-top: 2px;
   overflow-wrap: anywhere;
 }
@@ -2293,7 +2323,7 @@ textarea {
   color: var(--text-2);
 }
 .empty__hint {
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   max-width: 380px;
 }
 
@@ -2550,7 +2580,7 @@ textarea {
 /* The other of the two sub-16px findings. A style's name is read, and the
    tile is 116px wide — "Северное сияние" wraps either way. */
 .stylecard__name {
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   line-height: var(--leading-tight);
   overflow-wrap: anywhere;
 }
@@ -2742,7 +2772,7 @@ textarea {
 .select--compact {
   height: 32px;
   padding-block: 0;
-  font-size: var(--text-sm);
+  font-size: var(--text-md);
   width: auto;
   min-width: 8.5em;
 }
@@ -2845,7 +2875,7 @@ textarea {
 .log__body { flex: 1; min-width: 0; }
 .log__title { font-size: var(--text-base); }
 .log__detail {
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   color: var(--text-3);
   margin-top: 2px;
   overflow-wrap: anywhere;
@@ -2896,8 +2926,37 @@ textarea {
    ========================================================================== */
 
 @media (max-width: 760px) {
+  /*
+   * `position: fixed`, and this is the whole point of it.
+   *
+   * The tab bar is the `auto` row of this grid, so its distance from the
+   * bottom of the screen is whatever this box's bottom edge happens to be.
+   * As a `height: 100%` box that was `100dvh` on `#root`, i.e. the WebView's
+   * viewport — and on Android the WebView's viewport is whatever
+   * `MainActivity` last padded the content view down to. A keyboard-sized
+   * bottom padding that never came back down (the failure that file's comment
+   * now documents at length) therefore lifted the five tabs a keyboard's
+   * height off the bottom of the screen, permanently, with a band of blank
+   * app-coloured background under them.
+   *
+   * Fixed to the viewport, that cannot happen. The shell is glued to the
+   * screen the browser reports, not to the box the app was handed, so the bar
+   * is at the bottom of the visible area under every combination of the two
+   * being wrong. Nothing in the ancestor chain (`html`, `body`, `#root`) sets
+   * `transform`, `filter`, `perspective`, `contain` or `will-change`, so the
+   * containing block really is the viewport — checked, not assumed.
+   *
+   * This also costs nothing in the layout below it: the bar stays a grid row
+   * rather than becoming an overlay, so `.main` needs no compensating padding
+   * and every height measured inside it is unchanged. Taking the bar *out* of
+   * flow would have been the obvious way to pin it and would have shortened
+   * `.view--compose` by the bar's height, straight into the 85% floor
+   * `scripts/layout-probe.mjs` holds the message box to.
+   */
   .shell,
   .shell[data-collapsed="true"] {
+    position: fixed;
+    inset: 0;
     grid-template-columns: 1fr;
     grid-template-rows: 1fr auto;
   }
@@ -2909,6 +2968,24 @@ textarea {
     border-top: 1px solid var(--border);
     padding: var(--sp-2) var(--sp-2)
       calc(var(--sp-2) + env(safe-area-inset-bottom, 0px));
+  }
+  /*
+   * The bar stands down while the keyboard is up.
+   *
+   * Chosen deliberately over floating it above the keyboard: the five tabs are
+   * navigation, and nobody navigates mid-sentence. Giving that strip back to
+   * the message box is worth more than keeping a control on screen that the
+   * user is, by definition, not reaching for. `display: none` rather than a
+   * transform, so the grid row collapses and `.main` actually receives the
+   * space instead of the bar merely sliding off it.
+   *
+   * Scoped to this media query on purpose. A portrait tablet gets
+   * `data-shell="mobile"` but keeps the sidebar as a left rail (see
+   * `useMobileShell`), and hiding *that* whenever someone typed would take the
+   * navigation away from a screen with room to spare.
+   */
+  :root[data-kb="open"] .sidebar {
+    display: none;
   }
   .brand,
   .sidebar__footer {
@@ -2980,14 +3057,19 @@ textarea {
      icon's top-right corner instead, off the label's own flow entirely,
      because `.nav__item` already carries the `position: relative` its
      `[aria-current="page"]::before` bar needs. */
+  /* The only literal font-size left in this stylesheet was here — 10px, six
+     below the scale's own floor, on the one number a phone user glances at
+     most. Now on the scale like everything else, and the pill grew from 16px
+     to 20px to hold it. `--text-xs` is the auxiliary rank (14px): a count is
+     data, not prose, so it belongs at the floor rather than at body size. */
   .nav__badge {
     position: absolute;
-    top: 2px;
-    inset-inline-end: calc(50% - 26px);
-    min-width: 16px;
-    height: 16px;
-    padding: 0 4px;
-    font-size: 10px;
+    top: 0;
+    inset-inline-end: calc(50% - 28px);
+    min-width: 20px;
+    height: 20px;
+    padding: 0 5px;
+    font-size: var(--text-xs);
   }
   .view {
     padding: 0 var(--sp-4) var(--sp-6);
@@ -3306,7 +3388,7 @@ textarea {
   line-height: var(--leading-tight);
 }
 .update-meta {
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   color: var(--text-3);
   margin-top: 2px;
 }
@@ -3332,7 +3414,7 @@ textarea {
   border: 1px solid var(--border-subtle);
   border-radius: var(--r-sm);
   background: var(--surface-inset);
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   line-height: var(--leading-relaxed);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -3703,7 +3785,7 @@ textarea {
   display: flex;
   align-items: flex-start;
   gap: var(--sp-2);
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   color: var(--text-2);
 }
 .preflight__note--warning {
@@ -3754,7 +3836,7 @@ textarea {
   border-radius: var(--r-sm);
   background: var(--surface-2);
   font-family: inherit;
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   line-height: var(--leading-normal);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -3955,7 +4037,7 @@ textarea {
   gap: var(--sp-2);
 }
 .condition__effect {
-  font-size: var(--text-xs);
+  font-size: var(--text-base);
   color: var(--text-3);
   line-height: var(--leading-normal);
 }
@@ -3981,7 +4063,7 @@ textarea {
 .workcal__paste {
   min-height: 4.5rem;
   font-family: var(--font-mono);
-  font-size: var(--text-xs);
+  font-size: var(--text-md);
 }
 .workcal__dates {
   display: flex;
@@ -4666,7 +4748,7 @@ textarea {
   white-space: nowrap;
 }
 .codecard__meta {
-  font-size: var(--text-xs);
+  font-size: var(--text-base);
   color: var(--text-3);
 }
 /* Same fix, same reason. The `max-width: 42ch` that used to be here was an
@@ -4763,7 +4845,7 @@ textarea {
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   background: var(--surface-2);
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
 }
 .checkbar[data-tone="success"] {
   border-color: var(--success);
@@ -4900,7 +4982,7 @@ textarea {
 .codewhy {
   padding: var(--sp-3) var(--sp-5) var(--sp-4);
   border-top: 1px dashed var(--border);
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   color: var(--text-2);
   display: flex;
   flex-direction: column;
@@ -4951,7 +5033,7 @@ textarea {
 }
 .codewhy__altReason {
   color: var(--text-3);
-  font-size: var(--text-xs);
+  font-size: var(--text-base);
 }
 .codewhy__foot {
   display: flex;
@@ -4961,7 +5043,7 @@ textarea {
 }
 .codewhy__note {
   color: var(--text-3);
-  font-size: var(--text-xs);
+  font-size: var(--text-base);
 }
 
 .qrbox {
@@ -5003,7 +5085,7 @@ textarea {
 .pairqr__hint {
   margin: 0;
   color: var(--text-2);
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   text-align: center;
 }
 .pairqr__frame {
@@ -5089,7 +5171,7 @@ textarea {
 .pairqr__note {
   margin: 0;
   color: var(--text-3);
-  font-size: var(--text-xs);
+  font-size: var(--text-base);
   text-align: center;
 }
 
@@ -5822,7 +5904,7 @@ textarea {
   margin: 0;
   padding: var(--sp-2) var(--sp-3);
   border-top: 1px solid var(--border-subtle);
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   color: var(--text-3);
 }
 
@@ -7195,10 +7277,15 @@ textarea {
   white-space: nowrap;
   border: 0;
 }
+/* `wrap`, and only here, because the formatting strip now takes a row of its
+   own when it is opened — see the fold below. Closed, which is how this row
+   arrives, there are two `flex: none` items on it (the toggle at ~70px and the
+   count at ~80px against 320px of row) and it never wraps, so the narrow
+   layout's height is unchanged by allowing it to. */
 .view--compose[data-narrow] .compose-layout > .field:has(.textarea--body) .field__tools {
   flex: 1 1 auto;
   min-width: 0;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   gap: var(--sp-2);
 }
 /* "0 字 · 0 B" wrapped to two lines at 360px, and two lines of 16px text is
@@ -7233,8 +7320,71 @@ textarea {
  * `--bg` and not `--surface-1`: the narrow compose card is transparent (top of
  * this block), so what is behind the strip is the page.
  */
-.view--compose[data-narrow] .compose-layout > .field:has(.textarea--body) .markup {
-  flex: 0 1 auto;
+/*
+ * Deliberately short, and the `::after` is why that is not a shrunken target.
+ *
+ * The whole point of folding the strip was to give the message box the row
+ * back. Measured, it did not: with the toggle sized as a 44px control this row
+ * stayed exactly 44px and the box stayed at 85.5%, because the toggle had
+ * simply taken the seven buttons' place on it. The row is only as short as its
+ * tallest item, and 44px of button next to 23px of byte count is 44px of row.
+ *
+ * So the *box* is 23px — the height of the count beside it, i.e. free — and
+ * the *target* is 44px, painted nowhere and reaching past the box on all four
+ * sides. A finger still lands on a 44px area; the layout is only charged for
+ * the text. `inset` is negative rather than a `padding` because padding would
+ * put the height straight back.
+ *
+ * The expander is `::after` on a `position: relative` button, so it is clipped
+ * by nothing and stacks under nothing that matters: its only neighbour on this
+ * row is a live-region count, which is not interactive and cannot be stolen
+ * from. Measured after: row 44px -> 23.8px, box 566 -> 586.4, share 85.5% ->
+ * 88.6%.
+ */
+.view--compose[data-narrow] .compose-layout > .field:has(.textarea--body) .markup__toggle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+.view--compose[data-narrow]
+  .compose-layout
+  > .field:has(.textarea--body)
+  .markup__toggle::after {
+  content: "";
+  position: absolute;
+  /* Whatever it takes to reach 44px around a ~23px box. */
+  inset: -11px -12px;
+}
+/* Closed — which is how every visit starts. The seven buttons are not merely
+   scrolled out of sight, they are out of the layout, so nothing about them
+   contributes to this row's height or to the width the count has to share. */
+.view--compose[data-narrow]
+  .compose-layout
+  > .field:has(.textarea--body)
+  .markup__toggle[aria-expanded="false"]
+  + .markup {
+  display: none;
+}
+/* Open — a full-width row beneath the label line, which is the arrangement
+   that already worked, now paid for only while it is being used.
+   `order: 2` puts it after the count even though it precedes the count in the
+   DOM: visual order is [toggle] [count] / [strip], while tab order stays
+   toggle-then-strip, which is the order someone operating it needs. */
+.view--compose[data-narrow]
+  .compose-layout
+  > .field:has(.textarea--body)
+  .markup__toggle[aria-expanded="true"]
+  + .markup {
+  flex: 1 1 100%;
+  order: 2;
   min-width: 0;
   flex-wrap: nowrap;
   overflow-x: auto;
@@ -7494,7 +7644,7 @@ textarea {
 }
 .bootfail__hint {
   margin: 0;
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   color: var(--text-3);
   line-height: 1.6;
 }
@@ -7528,7 +7678,7 @@ textarea {
 }
 .uifail__hint {
   margin: 0 0 var(--sp-4);
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   color: var(--text-3);
   line-height: 1.6;
 }
@@ -7621,7 +7771,7 @@ textarea {
 }
 .selfcheck__hint {
   margin-block-start: var(--sp-2);
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   color: var(--text-3);
   line-height: 1.6;
 }
@@ -8138,6 +8288,17 @@ textarea {
 .markup {
   display: flex;
   gap: 3px;
+}
+/* The wide layout has room for all seven, so the fold does not exist here: the
+   toggle is off and the group is the plain row it always was. Everything that
+   makes the fold real lives in the narrow-compose block far above. */
+.markup__toggle {
+  display: none;
+}
+.markup__group {
+  display: flex;
+  gap: 3px;
+  min-width: 0;
 }
 .markup__btn {
   display: inline-flex;
@@ -8718,7 +8879,7 @@ textarea {
 .dayrow__previewempty {
   margin: 0;
   color: var(--text-3);
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
 }
 
 /* --- a reminder, opened from the calendar -------------------------------- */
@@ -8783,7 +8944,7 @@ textarea {
   gap: var(--sp-2);
   padding: var(--sp-2) var(--sp-3);
   border-radius: var(--r-sm);
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   background: var(--warning-bg);
   color: var(--text-1);
 }
@@ -8838,7 +8999,7 @@ textarea {
   margin-inline-end: auto;
 }
 .yearlist__missing {
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   color: var(--text-3);
   margin-inline-end: auto;
 }
@@ -8855,7 +9016,7 @@ textarea {
   display: inline-block;
   margin-top: var(--sp-1);
   font-family: var(--font-mono);
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   color: var(--text-3);
   /* A URL is one long unbreakable token; without this it widens the card. */
   overflow-wrap: anywhere;
@@ -8941,7 +9102,7 @@ textarea {
   }
   .whenbar__text {
     flex: 1 1 100%;
-    font-size: var(--text-sm);
+    font-size: var(--text-base);
   }
 
   /* A panel indented by a label gutter that no longer exists at this width.
@@ -9356,10 +9517,12 @@ textarea {
   flex-wrap: wrap;
   gap: 3px;
 }
-/* Inherits 14px from `.monthgrid__legend span`; the number on the busiest step
-   is read, not glanced at. */
+/* The busiest step's number is read, not glanced at, so it leaves the 14px
+   its `.monthgrid__legend span` neighbours inherit and states the body rank.
+   The comment here used to say "inherits 14px ... is read, not glanced at",
+   which argued for one size and set another. */
 .monthgrid__legendmax {
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   margin-inline-start: 3px;
   font-variant-numeric: tabular-nums;
 }
@@ -9420,7 +9583,7 @@ textarea {
 }
 .dayrow__subject {
   color: var(--text-1);
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
 }
 
 /* --- narrow ---------------------------------------------------------------
@@ -9728,7 +9891,7 @@ textarea {
 .deliverwin__note {
   margin: 0;
   color: var(--text-2);
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   line-height: var(--leading-normal);
   overflow-wrap: anywhere;
 }
@@ -9756,7 +9919,7 @@ textarea {
   border-radius: var(--r-md);
   background: var(--surface-2);
   color: var(--text-1);
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   line-height: var(--leading-relaxed);
   overflow-wrap: anywhere;
 }
@@ -9768,7 +9931,7 @@ textarea {
 .deliverwin__source {
   margin: 0;
   color: var(--text-3);
-  font-size: var(--text-xs);
+  font-size: var(--text-base);
   line-height: var(--leading-normal);
   overflow-wrap: anywhere;
 }
@@ -9906,7 +10069,7 @@ textarea {
   margin: 0;
   padding: var(--sp-3);
   color: var(--text-2);
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   overflow-wrap: anywhere;
 }
 
@@ -9914,7 +10077,7 @@ textarea {
   margin: 0;
   padding-inline: var(--sp-3);
   color: var(--text-3);
-  font-size: var(--text-xs);
+  font-size: var(--text-base);
 }
 
 /* --- the compose marker --------------------------------------------------- */
@@ -9936,7 +10099,7 @@ textarea {
  */
 .whenbar__window {
   color: color-mix(in srgb, var(--accent) 78%, var(--text-1));
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   line-height: var(--leading-tight);
   overflow-wrap: anywhere;
   cursor: help;
@@ -10034,7 +10197,7 @@ textarea {
 /* A subject the sender wrote, so it wraps rather than pushing the card wide. */
 .datecard__title {
   color: var(--text-2);
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   overflow-wrap: anywhere;
 }
 
@@ -10066,7 +10229,7 @@ textarea {
 }
 .datecard__snippet {
   color: var(--text-2);
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   line-height: var(--leading-normal);
   overflow-wrap: anywhere;
   display: -webkit-box;
@@ -10132,7 +10295,7 @@ textarea {
 }
 .datecard__warn {
   color: var(--warning);
-  font-size: var(--text-xs);
+  font-size: var(--text-base);
   line-height: var(--leading-normal);
   overflow-wrap: anywhere;
 }
@@ -10241,33 +10404,29 @@ textarea {
    background under any style — there is no rule to add here without
    reintroducing the bug that comment fixed. */
 
-/* --- typography pairing: headings in 'Aevistle Rune' -----------------------
-   Section names (`--text-lg`, 四号) and screen titles (`--text-xl`, 小二) —
-   the sizes 楷体 was drawn to be read at. Never `--font-sans`: see the note
-   beside the @font-face pair in theme.css for why 小四 body copy stays out. */
-[data-style="runecircuit"] .section-label,
-/* `.card__title` is the header form of the thing `.section-label` is the
-   inline form of — see the note beside `.card__hint` — and `.modal__title` is
-   the same 四号 role in a dialog. Leaving either out put a Songti heading
-   directly beside a KaiTi one on the same screen, which reads as a rendering
-   bug rather than as a pairing. `.brand__name` and `.composetop__title` are
-   the two other 四号 names of things; the compose screen's field labels are
-   there because app.css states outright that the name of a field is the name
-   of a function. */
-[data-style="runecircuit"] .card__title,
-[data-style="runecircuit"] .modal__title,
-[data-style="runecircuit"] .brand__name,
-[data-style="runecircuit"] .composetop__title,
-[data-style="runecircuit"] .view--compose .field > .field__label,
-[data-style="runecircuit"] .view--compose .switch__title,
-[data-style="runecircuit"] .page-title,
-[data-style="runecircuit"] .stat__value,
-[data-style="runecircuit"] .bootfail__title {
-  font-family: 'Aevistle Rune', var(--font-sans);
-}
-/* No `--text-2xl` (二号 hero) rule exists anywhere in this codebase yet —
-   nothing currently sets that font-size. Whichever screen adds one belongs
-   in the selector list above, beside the three `--text-xl` rules. */
+/* --- typography pairing: withdrawn ----------------------------------------
+ *
+ * This style used to set every section name, screen title and dialog title in
+ * 'Aevistle Rune' (楷体 for CJK, a coding monospace for Latin), pairing a
+ * calligraphic heading against the Songti body copy. It was the only place in
+ * the app where the typeface depended on which of the seven visual styles was
+ * selected.
+ *
+ * Removed on an explicit instruction that the typography must be identical on
+ * every screen and under every style — stated as the single most important
+ * requirement of the round. A pairing that exists under one style and not the
+ * six others is exactly the inconsistency that instruction rules out, however
+ * deliberate it was.
+ *
+ * What is gone is only the *typeface*. Runecircuit keeps its palette, its
+ * circuit traces, its solar-term washes and its neon edges — everything below
+ * and above this note. It is now a colour-and-texture style rather than a
+ * colour-and-type one.
+ *
+ * The 'Aevistle Rune' @font-face pair is left declared in theme.css. It is a
+ * pure `local()` face with no `url()`, so an unused declaration downloads
+ * nothing and costs nothing, and leaving it means restoring this pairing is a
+ * one-block change if the instruction is ever relaxed. */
 
 /* Numerals stay in the coding monospace `--font-mono` already draws from,
    even under a calligraphic heading font: a verification code or a byte

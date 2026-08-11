@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import App from './App'
 import { detectPlatform } from './core/bridge'
+import { installKeyboardInset } from './core/keyboardInset'
 import { MOBILE_SHELL_ATTR, MOBILE_SHELL_VALUE, NARROW_QUERY } from './components/useNarrow'
 import './styles/theme.css'
 import './styles/app.css'
@@ -28,6 +29,13 @@ if (
 ) {
   document.documentElement.setAttribute(MOBILE_SHELL_ATTR, MOBILE_SHELL_VALUE)
 }
+
+/**
+ * Before the first render, for the same reason as the block above: the compose
+ * screen sizes its message box against `--kb`, and a cold start straight into a
+ * focused field would otherwise paint one frame at the wrong height.
+ */
+installKeyboardInset()
 
 const container = document.getElementById('root')
 if (!container) throw new Error('#root is missing from index.html')

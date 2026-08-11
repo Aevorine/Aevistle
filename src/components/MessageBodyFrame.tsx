@@ -17,13 +17,59 @@
 
 import { useEffect, useRef, useState } from 'react'
 
+/**
+ * The families received mail is set in, named literally.
+ *
+ * They have to be named, not inherited. This frame is a *separate document*:
+ * `font-family: inherit` inside it resolves against that document's own root,
+ * which has no `font-family` and no `@font-face` — the parent page's
+ * `--font-sans` and its bundled faces do not cross the document boundary. So
+ * the old `inherit` did not mean "the app's type", it meant "whatever this
+ * engine's default standard font is": roughly Times plus a system CJK face on
+ * Windows, and Roboto plus Noto Sans CJK — sans-serif — on Android. The two
+ * screens that read the most text were the two that matched the app least.
+ *
+ * This mirrors what `--font-sans` in `src/styles/theme.css` resolves to, with
+ * one honest omission: the bundled "Aevistle Text" family is *not* here and
+ * cannot be. Reaching it would need an `@font-face` with a `url()` pointing at
+ * the app's woff2 files, which this frame is deliberately not allowed to load
+ * — no font is injected and the srcDoc sandbox and CSP are not widened for
+ * one. What is left is system faces only:
+ *
+ *   Windows  real Times New Roman and real SimSun/宋体 are both installed, so
+ *            the frame lands on the same two faces the rest of the app draws
+ *            with. Effectively a match.
+ *   Android  neither Times New Roman nor SimSun exists. Latin falls to the
+ *            platform's `serif` (Noto Serif / Tinos), and CJK falls to the
+ *            ROM's Noto Serif CJK if it ships one and to the system default
+ *            if it does not. That is a serif — the fault this replaces put a
+ *            sans-serif there — but it is not the same serif the app itself
+ *            uses. This is the best available without widening the sandbox,
+ *            and it is a real remaining difference, not parity.
+ */
+const READER_FONT_STACK =
+  '"Times New Roman", Times, "SimSun", "宋体", "Songti SC", "Noto Serif SC", "Noto Serif CJK SC", serif'
+
+/**
+ * The same stack, single-quoted, for the one place it is written inside a
+ * double-quoted HTML `style` attribute. Derived rather than typed twice: a
+ * literal double quote there would close the attribute at "Times New Roman"
+ * and silently drop every family after it.
+ */
+const READER_FONT_STACK_ATTR = READER_FONT_STACK.replace(/"/g, "'")
+
 /** Wrap a plain-text body so it can go through the same frame the HTML does. */
 export function textAsHtml(text: string): string {
   const escaped = text
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-  return `<pre style="white-space:pre-wrap;word-break:break-word;font:inherit;margin:0">${escaped}</pre>`
+  // Named, not `font: inherit` — see `READER_FONT_STACK`. The size and
+  // leading are spelled out for the same reason the family is, and because
+  // `<pre>` carries a UA default (monospace, and the 13px monospace quirk
+  // with it) that has to be displaced by a real value rather than by a
+  // keyword that resolves to nothing useful in this document.
+  return `<pre style="white-space:pre-wrap;word-break:break-word;font-family:${READER_FONT_STACK_ATTR};font-size:16px;line-height:1.65;margin:0">${escaped}</pre>`
 }
 
 export function MessageBodyFrame({
@@ -79,8 +125,31 @@ export function MessageBodyFrame({
         linkRef.current(target.href)
       }
       doc.addEventListener('click', handler)
-      // Match the app's own type so a plain-text mail does not arrive in
-      // whatever the engine's default serif happens to be.
+      // The families are named literally rather than inherited, and the size
+      // and leading with them — see `READER_FONT_STACK` for why `inherit`
+      // could never have worked across a document boundary and for what this
+      // does and does not match on each platform.
+      //
+      // This sets the app's type as the frame's *default*, not as an
+      // override. There is no `!important` and no universal selector: a
+      // declaration on `body` reaches every element that does not state a
+      // font of its own, and yields to any that does. That is the right way
+      // round for a mail reader — a newsletter's own typography is part of
+      // what the sender wrote, and a client that overrules it is showing
+      // something other than the message.
+      //
+      // In practice the sender has almost no way to exercise that anyway,
+      // and it is worth being exact about which: `electron/sanitizeHtml.ts`
+      // strips `<style>` elements outright, and its `ALLOWED_STYLES` list
+      // has no `font-family` entry, so a `style="font-family:Arial"` on a
+      // `<td>` is gone before the HTML ever reaches this frame. The one
+      // channel left open is the legacy `<font face="...">` tag, which the
+      // sanitiser does allow; it applies to its own element directly and so
+      // beats the inherited `body` rule below. A sender who asks that
+      // plainly still gets the face they asked for; everything else — which
+      // is nearly everything — lands on the stack above. `font-size` behaves
+      // the same way: the sanitiser permits it, so a sender who sets one
+      // keeps it, and 16px is what the rest of the message reads at.
       //
       // The `margin-inline: auto` run is the fix for the oldest-looking
       // complaint about this app: "only the left half of the window has
@@ -115,7 +184,9 @@ export function MessageBodyFrame({
         '{margin-inline:auto}'
       const style = doc.createElement('style')
       style.textContent =
-        'body{margin:0;padding:16px;font-family:inherit;color:#111;background:#fff;word-break:break-word}' +
+        'body{margin:0;padding:16px;font-family:' +
+        READER_FONT_STACK +
+        ';font-size:16px;line-height:1.65;color:#111;background:#fff;word-break:break-word}' +
         'img{max-width:100%;height:auto}table{max-width:100%}' +
         centreOuter +
         'mark.aev-find{background:#ffe066;color:#111}'
