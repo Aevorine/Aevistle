@@ -77,7 +77,7 @@ import {
 import { VirtualList } from '../components/VirtualList'
 import { useSwipe } from '../components/useSwipe'
 import { useTwoPane } from '../components/useNarrow'
-import { MessageBodyFrame, textAsHtml } from '../components/MessageBodyFrame'
+import { MessageBodyFrame, textAsHtml, type FrameImages } from '../components/MessageBodyFrame'
 import { useApp } from '../state/AppState'
 import { PULL_THRESHOLD_PX, resolvePull, type PullState } from '../core/platform/gestures'
 import { SearchInput } from '../components/inputs'
@@ -91,7 +91,13 @@ import {
 import { useI18n, type TranslationKey } from '../i18n'
 import { accountGroupKey, orderedAccounts } from '../core/mail/accounts'
 import { useReorder } from '../components/useReorder'
-import { BROKEN_IMAGE, resolveRemoteImages } from '../core/mail/remoteImagePlaceholder'
+import {
+  BROKEN_IMAGE,
+  inlineCidsOf,
+  normalizeCid,
+  resolveInlineImages,
+  resolveRemoteImages,
+} from '../core/mail/remoteImagePlaceholder'
 import { resolveWithCache } from '../core/mail/imageCache'
 import { getCachedBody, putCachedBody } from '../core/mail/bodyMemo'
 import { CHAIN_STAGES, buildChain, leadLabelKey } from '../core/schedule/chain'
@@ -138,6 +144,37 @@ const LEAD_PREFERENCE = [86_400_000, 2 * 3_600_000, 0, 3 * 86_400_000, 7 * 86_40
 
 /** Longest evidence snippet worth putting in a reminder mail, in characters. */
 const EVIDENCE_LIMIT = 240
+
+/**
+ * How many inline (`cid:`) pictures one message may have read off disk, and
+ * how many bytes of them.
+ *
+ * They are local files rather than fetches, so the risk is memory rather than
+ * privacy: every one becomes a base64 `data:` URI in a string, which is a
+ * third larger than the file. A signature and a couple of screenshots is the
+ * real case; a message with two hundred embedded photographs is not, and the
+ * ones past the cap keep the behaviour every `cid:` image had before this —
+ * they stay invisible, which is a picture missing rather than a reader that
+ * cannot open the mail at all.
+ */
+const MAX_INLINE_IMAGES = 24
+const MAX_INLINE_BYTES = 12 * 1024 * 1024
+
+/**
+ * How far either scroller has to move before the reader's header shrinks.
+ *
+ * Non-zero on purpose: a touch scroller reports fractional offsets while a
+ * finger is still resting on it, and a 0px threshold made the bar flicker
+ * between its two heights without anybody having scrolled anything.
+ */
+const READER_COMPACT_AT = 12
+
+/** The list filters, all off — a stable identity so "reset" cannot re-render. */
+const NO_CHIPS = { unread: false, attachment: false, code: false, sender: null } as const
+type ChipFilters = { unread: boolean; attachment: boolean; code: boolean; sender: string | null }
+
+/** Inline pictures, none read yet — stable for the same reason `NO_CHIPS` is. */
+const NO_INLINE: { images: Record<string, string>; settled: boolean } = { images: {}, settled: false }
 
 /**
  * The plain text a message actually reads as.
@@ -328,7 +365,23 @@ export function InboxView({
   const [openBody, setOpenBody] = useState<InboxMessageBody | null>(null)
   const [loadingBody, setLoadingBody] = useState(false)
   const [syncingIds, setSyncingIds] = useState<Set<string>>(new Set())
+  /**
+   * The whole body, rebuilt with its pictures spliced in — the *fallback*, not
+   * the normal path any more.
+   *
+   * Setting this changes `MessageBodyFrame`'s `html`, which changes its
+   * `srcDoc`, which reloads the frame and re-parses the sender's markup from
+   * scratch. That used to happen every time a message's images finished
+   * loading. It now happens only when the frame reports that it could not
+   * place them into the document it already has (`onImagesUnplaced`), and the
+   * fallback is silent: it produces exactly the same picture, one reload
+   * later, so there is nothing for the reader to be told about.
+   */
   const [resolvedHtml, setResolvedHtml] = useState<string | null>(null)
+  /** Fetched remote images, by placeholder index — handed to the frame as-is. */
+  const [resolvedImages, setResolvedImages] = useState<Array<string | null> | null>(null)
+  /** This message's own inline (`cid:`) parts, once read off disk. */
+  const [inlineState, setInlineState] = useState(NO_INLINE)
   /**
    * Where this message's remote images have got to.
    *
@@ -352,6 +405,27 @@ export function InboxView({
   const [rawStyle, setRawStyle] = useState(false)
   /** Recipient + precise timestamp, folded away by default — reset in `openDetail`. */
   const [metaExpanded, setMetaExpanded] = useState(false)
+  /*
+   * Two scrollers, two booleans, one bar.
+   *
+   * A long message scrolls *inside* the body frame — the frame itself is a
+   * fixed box in the reader's column — while banners, date offers and the
+   * attachment list scroll the reader's own column around it. Either one
+   * means "reading", and one boolean fed by both would be cleared by whichever
+   * of them happened to be at the top.
+   */
+  const [outerScrolled, setOuterScrolled] = useState(false)
+  const [bodyScrolled, setBodyScrolled] = useState(false)
+  const readerBarRef = useRef<HTMLDivElement>(null)
+  /**
+   * Whether the date offers have been looked for yet — see `dateHits`.
+   *
+   * False on the render that first has a body, which is the whole of item 12:
+   * the extraction is six languages of matchers over the entire message and it
+   * used to run synchronously on exactly that render, so the body could not
+   * paint until it had finished.
+   */
+  const [datesReady, setDatesReady] = useState(false)
   const [findText, setFindText] = useState('')
   /**
    * Highlighting is deferred, the input is not — the same trade the message
@@ -408,6 +482,23 @@ export function InboxView({
    */
   const invertByDefault = readerIsDark && state.settings.readerDarkInvert !== false
   const nightOn = rawStyle ? !invertByDefault : invertByDefault
+
+  /**
+   * Everything that moves the palette the body frame has to be *told* about.
+   *
+   * The frame is a separate document, so none of the app's tokens reach it by
+   * cascade — `MessageBodyFrame` reads them out of this document and writes
+   * the resolved values in, and it needs to know when to read them again.
+   * Four settings can move them, and `readerIsDark` is here as well because
+   * `themeMode: 'system'` can be dark or light without any setting changing.
+   */
+  const readerThemeKey = [
+    state.settings.themeMode,
+    state.settings.visualStyle,
+    state.settings.accent,
+    state.settings.textScale ?? 'standard',
+    readerIsDark ? 'dark' : 'light',
+  ].join('|')
 
   /**
    * The verification code a row can show, by message id.
@@ -595,8 +686,84 @@ export function InboxView({
    * results are, which is the right way round.
    */
   const deferredQuery = useDeferredValue(query)
+  /**
+   * The quick filters over the list — item 20.
+   *
+   * Four questions people actually ask a mailbox ("what is new", "where is
+   * that file", "what was the code", "what has this sender sent me"), each of
+   * which was previously a scroll. They compose with AND, and with the search
+   * box and the account tabs, because a filter that silently replaced another
+   * one is a filter you cannot trust.
+   */
+  const [chips, setChips] = useState<ChipFilters>(NO_CHIPS)
+  const chipsActive = chips.unread || chips.attachment || chips.code || chips.sender !== null
+  const clearChips = useCallback(() => setChips(NO_CHIPS), [])
+
+  const accountMessages = useMemo(
+    () => (filter === 'all' ? allMessages : allMessages.filter((m) => m.accountId === filter)),
+    [allMessages, filter],
+  )
+  /** Unread *here* — the account the tabs have selected, not every mailbox. */
+  const unreadHere = useMemo(
+    () => accountMessages.reduce((n, m) => (m.seen ? n : n + 1), 0),
+    [accountMessages],
+  )
+  /**
+   * Whether the filters are worth offering at all.
+   *
+   * Under six messages there is nothing to narrow — the whole mailbox is on
+   * one screen — and a row of controls that cannot change what you are looking
+   * at is the kind of chrome the last two rounds of this screen were spent
+   * removing. `chipsActive` keeps it on regardless, or a filter could not be
+   * turned off once it had shortened the list past the threshold.
+   */
+  const showChips = chipsActive || accountMessages.length >= 6
+
+  /**
+   * The one sender worth offering a chip for: whoever has sent the most of
+   * what is currently on screen.
+   *
+   * "A specific sender" needs a specific sender, and asking for one costs a
+   * picker, a text field or a long press — three things this screen has spent
+   * two rounds removing. The mailbox already knows the answer: in a real inbox
+   * one address (a bank, a service, a mailing list) is a large fraction of the
+   * rows, and it is exactly the one somebody wants to isolate or skip past.
+   *
+   * Two or more, or it is not a filter, it is a message. Keyed on the *label*
+   * rather than the address so the chip can be read at a glance, and matched
+   * back the same way, so two addresses behind one display name group together
+   * the same way the rows do.
+   */
+  const topSender = useMemo(() => {
+    if (accountMessages.length < 6) return null
+    const counts = new Map<string, number>()
+    for (const m of accountMessages) {
+      const label = senderLabel(m.from)
+      counts.set(label, (counts.get(label) ?? 0) + 1)
+    }
+    let best: string | null = null
+    let bestCount = 1
+    for (const [label, n] of counts) {
+      if (n > bestCount) {
+        best = label
+        bestCount = n
+      }
+    }
+    return best === null ? null : { label: best, count: bestCount }
+  }, [accountMessages])
+
   const filteredMessages = useMemo(() => {
-    let list = filter === 'all' ? allMessages : allMessages.filter((m) => m.accountId === filter)
+    let list = accountMessages
+    if (chips.unread) list = list.filter((m) => !m.seen)
+    if (chips.attachment) list = list.filter((m) => m.hasAttachments)
+    // The same lookup the row's copy button uses, and deliberately not a
+    // second detector: `CodeCheckProvider` is where a verification code is
+    // decided, and this only asks whether it decided one for this message.
+    if (chips.code) list = list.filter((m) => codeByMessage.has(m.id))
+    if (chips.sender !== null) {
+      const wanted = chips.sender
+      list = list.filter((m) => senderLabel(m.from) === wanted)
+    }
     const q = deferredQuery.trim().toLowerCase()
     if (q) {
       /*
@@ -624,7 +791,7 @@ export function InboxView({
       list = list.filter(inField)
     }
     return [...list].sort((a, b) => b.date - a.date)
-  }, [allMessages, filter, deferredQuery, scope])
+  }, [accountMessages, chips, codeByMessage, deferredQuery, scope])
   const searchPending = deferredQuery !== query
 
   const unreadTotal = useMemo(() => allMessages.filter((m) => !m.seen).length, [allMessages])
@@ -679,8 +846,30 @@ export function InboxView({
   /** Mirrors `pull.armed` for the pointer-up handler, which closes over stale state. */
   const pullArmed = useRef(false)
   const [pull, setPull] = useState<PullState>({ progress: 0, armed: false })
+  /**
+   * Whether the list has been scrolled off its top — the signal the filter
+   * chips get out of the way on.
+   *
+   * Subscribed from the wrapper rather than passed to `VirtualList`, which
+   * owns the scroller and already has a scroll listener of its own for
+   * windowing; a second `onScroll` prop on that component would be a shared
+   * list primitive learning about one screen's chrome.
+   */
+  const [listScrolled, setListScrolled] = useState(false)
 
   const pullScroller = () => listWrapRef.current?.querySelector<HTMLElement>('.list-pane') ?? null
+
+  useEffect(() => {
+    const scroller = listWrapRef.current?.querySelector<HTMLElement>('.list-pane')
+    if (!scroller) return
+    const onScroll = () => setListScrolled(scroller.scrollTop > READER_COMPACT_AT)
+    onScroll()
+    scroller.addEventListener('scroll', onScroll, { passive: true })
+    return () => scroller.removeEventListener('scroll', onScroll)
+    // `filteredMessages.length` rather than the array: the pane is unmounted
+    // and replaced by the empty state when the list runs out, so the element
+    // this is attached to is not the same one it was.
+  }, [filteredMessages.length === 0])
 
   const onPullStart = (e: React.PointerEvent) => {
     if (e.pointerType === 'mouse' || !canCheckNow) return
@@ -1122,7 +1311,12 @@ export function InboxView({
         const failed = new Set(urls.filter((_, i) => resolved[i] === null)).size
         // Only now is `BROKEN_IMAGE` right: every URL has been tried, so a
         // null really is a failure rather than a fetch still in flight.
-        setResolvedHtml(resolveRemoteImages(html, resolved, BROKEN_IMAGE))
+        //
+        // Handed to the frame rather than spliced into the HTML — see
+        // `resolvedHtml` above for what that splice cost. `html` is still read
+        // at the top of this function because it is what proves there is a
+        // body to put pictures into at all.
+        setResolvedImages(resolved)
         setImageFailures(failed)
         setImageStage(failed > 0 ? 'failed' : 'done')
       } catch {
@@ -1151,6 +1345,113 @@ export function InboxView({
     if (imageStage !== 'blocked') return
     void loadRemoteImages()
   }, [openMessage, openBody, remoteImageCount, autoLoadImages, imageStage, loadRemoteImages])
+
+  // --- inline (`cid:`) images -----------------------------------------------
+  //
+  // A signature image, a pasted screenshot, the logo at the top of a receipt:
+  // parts of the message itself, referenced by `cid:`. Both sanitizers used to
+  // drop them outright — the `<img>` survived with no `src` at all, so the
+  // picture simply never appeared and nothing said why.
+  //
+  // They are *not* remote content and none of the remote-image machinery
+  // applies: no network, no policy question, no banner, no permission to ask
+  // for. The bytes are a file this app already wrote beside the message when
+  // it parsed it, and reading one is the same call the attachment preview
+  // makes. See `electron/sanitizeHtml.ts` for why that is not a hole in the
+  // rule that blocks remote pictures.
+
+  /** Which inline parts this body actually asks for. Reading the rest is waste. */
+  const inlineCids = useMemo(
+    () => inlineCidsOf(openBody?.sanitizedHtml ?? ''),
+    [openBody?.sanitizedHtml],
+  )
+  /** The same "which load is current" counter `imageRun` is, for this path. */
+  const inlineRun = useRef(0)
+
+  useEffect(() => {
+    const run = ++inlineRun.current
+    setInlineState(NO_INLINE)
+    if (inlineCids.length === 0) return
+    const read = bridge?.readAttachment
+    const byCid = new Map<string, Attachment>()
+    for (const a of openBody?.attachments ?? []) {
+      // No `path` means the bytes are not on this device yet — an Android
+      // inbox attachment before its first tap. Fetching one to satisfy a
+      // picture nobody asked for would spend somebody's mobile data on
+      // decoration, which is the same trade `withBytes` already refuses to
+      // make on their behalf. Those references stay unresolved, which is
+      // exactly what every `cid:` image did before this existed.
+      if (!a.cid || !a.path) continue
+      byCid.set(normalizeCid(a.cid), a)
+    }
+    if (!read || byCid.size === 0) {
+      // Settled with nothing found: the frame drops the leftover `src`, so an
+      // unresolvable reference goes back to being invisible rather than a
+      // blank placeholder pixel sitting in the layout.
+      setInlineState({ images: {}, settled: true })
+      return
+    }
+    void (async () => {
+      const images: Record<string, string> = {}
+      let bytes = 0
+      for (const cid of inlineCids.slice(0, MAX_INLINE_IMAGES)) {
+        const a = byCid.get(cid)
+        if (!a || bytes + a.size > MAX_INLINE_BYTES) continue
+        try {
+          const result = await read(a.path)
+          if (run !== inlineRun.current) return
+          if (result && result.mime.startsWith('image/')) {
+            images[cid] = result.dataUrl
+            bytes += a.size
+          }
+        } catch {
+          // An unreadable part is an unresolved reference, not an error worth
+          // a toast: the picture is missing, the message is not.
+        }
+      }
+      if (run !== inlineRun.current) return
+      setInlineState({ images, settled: true })
+    })()
+  }, [inlineCids, openBody?.attachments, bridge])
+
+  /**
+   * Everything the frame still has to place, as one stable object.
+   *
+   * Memoised because it is a dependency of an effect that walks the frame's
+   * document: a fresh object per render would re-walk the whole body on every
+   * keystroke in the find box.
+   */
+  const frameImages = useMemo<FrameImages | undefined>(() => {
+    if (!resolvedImages && !inlineState.settled) return undefined
+    return {
+      remote: resolvedImages ?? undefined,
+      remoteFallback: BROKEN_IMAGE,
+      inline: inlineState.images,
+      inlineSettled: inlineState.settled,
+    }
+  }, [resolvedImages, inlineState])
+
+  /**
+   * The fallback: rebuild the whole body with the pictures spliced in.
+   *
+   * Reached only from `MessageBodyFrame`'s `onImagesUnplaced`, i.e. when the
+   * in-place swap found nothing to swap. Silent by design — it is a slower
+   * route to the identical result, not a failure — and idempotent, because the
+   * rebuilt string is what the frame then reloads with and the frame will
+   * report "unplaced" again the moment it does (there are no placeholders left
+   * in it). `setResolvedHtml` with an equal string is a no-op in React, so
+   * that second report ends the loop rather than starting one.
+   */
+  const rebuildImages = useCallback(() => {
+    const base = openBody?.sanitizedHtml
+    if (!base) return
+    let next = base
+    if (resolvedImages) next = resolveRemoteImages(next, resolvedImages, BROKEN_IMAGE)
+    const inline = new Map(Object.entries(inlineState.images))
+    if (inline.size > 0) next = resolveInlineImages(next, inline)
+    if (next === base) return
+    setResolvedHtml(next)
+  }, [openBody?.sanitizedHtml, resolvedImages, inlineState])
 
   /**
    * "Always show pictures from this sender."
@@ -1195,14 +1496,24 @@ export function InboxView({
     async (m: InboxMessage) => {
       setOpenMessage(m)
       setResolvedHtml(null)
+      setResolvedImages(null)
+      setInlineState(NO_INLINE)
       setImageStage('blocked')
       setImageFailures(0)
       setRawStyle(false)
+      // The date offers are looked for again from scratch, after this
+      // message's body has painted — see `datesReady`.
+      setDatesReady(false)
+      // A new message starts at the top of both scrollers, so the reader's
+      // header starts at its full height again.
+      setOuterScrolled(false)
+      setBodyScrolled(false)
       // Retires any image load still in flight for the message being left. It
       // has to happen here and not only when the next load starts: a message
       // with no pictures never starts one, and the previous message's result
       // would arrive to find nothing had superseded it.
       imageRun.current += 1
+      inlineRun.current += 1
       const run = ++bodyRun.current
       setPreview(null)
       setLightboxPath(null)
@@ -1440,6 +1751,17 @@ export function InboxView({
    * produces nothing but a list of offers. No mail is created here.
    */
   const dateHits = useMemo<DateHit[]>(() => {
+    // Item 12, and the only line of it that is in this memo.
+    //
+    // Everything below this point is unchanged and still runs exactly once per
+    // message; what changed is *which render* it runs on. It used to be the
+    // render that first had a body, so `bodyAsText`'s eleven passes over the
+    // whole HTML string and `extractDates`' six languages of matchers were
+    // both between the message arriving and any of it reaching the screen —
+    // on the main thread, ahead of the frame's own parse. `datesReady` is
+    // flipped from an idle callback after that paint, so the body is on screen
+    // first and the offers arrive into a reader somebody is already reading.
+    if (!datesReady) return []
     if (!openMessageId || openReceivedAt === 0) return []
     const body = bodyAsText(openText, openHtml)
     if (!body && !openSubject) return []
@@ -1452,7 +1774,66 @@ export function InboxView({
       icsParts: openIcsParts,
       locale: platformLocale(),
     })
-  }, [openMessageId, openSubject, openReceivedAt, openText, openHtml, openIcsParts])
+  }, [datesReady, openMessageId, openSubject, openReceivedAt, openText, openHtml, openIcsParts])
+
+  /**
+   * Look for the dates once the body is on screen, and not before.
+   *
+   * `requestIdleCallback` rather than a timeout, with a timeout as the
+   * fallback: idle is exactly the right priority for work nobody is waiting
+   * for, and its 600ms cap is what stops "idle" meaning "never" on a busy
+   * main thread. Either way this lands after the paint that put the message
+   * up, which is the point.
+   *
+   * The result is *not* rendered above the body — see the note beside
+   * `.reader__dates` in the reader. An offer strip that appears above a
+   * message a moment after it paints pushes the first paragraph down under
+   * the reader's eye, and the whole purpose of this change was to get that
+   * paragraph on screen sooner.
+   */
+  useEffect(() => {
+    if (datesReady) return
+    if (!openMessage || !openBody) return
+    const idle = (window as typeof window & {
+      requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number
+      cancelIdleCallback?: (handle: number) => void
+    }).requestIdleCallback
+    const run = () => setDatesReady(true)
+    if (idle) {
+      const handle = idle(run, { timeout: 600 })
+      return () => (window as typeof window & { cancelIdleCallback?: (h: number) => void })
+        .cancelIdleCallback?.(handle)
+    }
+    const handle = window.setTimeout(run, 0)
+    return () => window.clearTimeout(handle)
+  }, [datesReady, openMessage, openBody])
+
+  /**
+   * The reader's own column, for the sticky header — item 19.
+   *
+   * Found from the bar rather than passed down: the element belongs to
+   * `Modal` in the dialog case and to `ReaderShell` in the two-pane one, and
+   * threading a ref out of both would make two components know about a third
+   * one's header. `closest` asks the DOM the question the CSS already
+   * answers — sticky positions against the nearest scrolling ancestor, and
+   * this listens to the same one.
+   */
+  useEffect(() => {
+    if (!openMessage) return
+    const scroller = readerBarRef.current?.closest<HTMLElement>('.modal__body, .detailpane__body')
+    if (!scroller) return
+    const onScroll = () => setOuterScrolled(scroller.scrollTop > READER_COMPACT_AT)
+    onScroll()
+    scroller.addEventListener('scroll', onScroll, { passive: true })
+    return () => scroller.removeEventListener('scroll', onScroll)
+  }, [openMessage])
+
+  const onBodyScroll = useCallback((top: number) => {
+    setBodyScrolled(top > READER_COMPACT_AT)
+  }, [])
+
+  /** Either scroller has moved, so the reader's header stands down to 34px. */
+  const readerCompact = outerScrolled || bodyScrolled
 
   /**
    * Reminders already made from this message, keyed by moment *and* lead time.
@@ -2049,9 +2430,24 @@ export function InboxView({
                 description of a mailbox. */}
             <EmptyState
               icon={<IconInbox size={24} />}
-              title={enabledInboxes.length === 0 ? t('inbox.noAccountsEmpty') : t('inbox.empty')}
+              title={
+                chipsActive
+                  ? t('inboxchips.none')
+                  : enabledInboxes.length === 0
+                    ? t('inbox.noAccountsEmpty')
+                    : t('inbox.empty')
+              }
               action={
-                enabledInboxes.length === 0 && onGoToAccounts ? (
+                /* A filter that has emptied the list has to offer the way back
+                   out of itself. The chip row is hidden while the pane is
+                   scrolled, and an empty pane cannot be scrolled — but the
+                   mailbox still looks empty, and "my mail is gone" is the one
+                   conclusion this screen must never invite. */
+                chipsActive ? (
+                  <Button variant="secondary" onClick={clearChips}>
+                    {t('inboxchips.clear')}
+                  </Button>
+                ) : enabledInboxes.length === 0 && onGoToAccounts ? (
                   <Button variant="primary" onClick={onGoToAccounts}>
                     {t('compose.addAccount')}
                   </Button>
@@ -2067,11 +2463,92 @@ export function InboxView({
           <div
             className="pullwrap"
             ref={listWrapRef}
+            /* Both read by `24-inbox.css`, which is where the whole of the
+               chip row's "cannot cost the list a row" arithmetic is written
+               down. `data-chips` reserves the strip inside the scroller's own
+               padding — which `clientHeight` includes, so the pane's capacity
+               is untouched — and the other two are what the strip gets out of
+               the way for. */
+            data-chips={showChips ? 'true' : undefined}
+            data-chips-away={(listScrolled && !chipsActive) || pull.progress > 0 ? 'true' : undefined}
             onPointerDown={onPullStart}
             onPointerMove={onPullMove}
             onPointerUp={onPullEnd}
             onPointerCancel={onPullEnd}
           >
+            {/*
+              Quick filters — item 20.
+
+              Absolutely positioned over the strip of scroller padding
+              `data-chips` reserves, rather than laid out as a band above the
+              list. That is not a trick to get past `layout-probe.mjs`'s 9-row
+              floor, it is the only arrangement that genuinely leaves the floor
+              alone: a band above the pane takes height *out* of the pane
+              (`clientHeight` falls, so does the number of rows that fit), and
+              padding *inside* the scroller does not (`clientHeight` includes
+              padding). The strip scrolls out of the way like a list header
+              instead of permanently costing a message.
+
+              It hides on scroll — unless a filter is on, in which case it
+              stays, because a filter you cannot see is a mailbox that has
+              silently lost mail.
+            */}
+            {showChips ? (
+              <div className="inboxchips" role="group" aria-label={t('inboxchips.label')}>
+                <button
+                  type="button"
+                  className="chip chip--toggle inboxchips__chip"
+                  aria-pressed={chips.unread}
+                  onClick={() => setChips((c) => ({ ...c, unread: !c.unread }))}
+                >
+                  <span className="chip__text">{t('inboxchips.unread', { n: unreadHere })}</span>
+                </button>
+                <button
+                  type="button"
+                  className="chip chip--toggle inboxchips__chip"
+                  aria-pressed={chips.attachment}
+                  onClick={() => setChips((c) => ({ ...c, attachment: !c.attachment }))}
+                >
+                  <IconPaperclip size={13} />
+                  <span className="chip__text">{t('inboxchips.attachment')}</span>
+                </button>
+                <button
+                  type="button"
+                  className="chip chip--toggle inboxchips__chip"
+                  aria-pressed={chips.code}
+                  onClick={() => setChips((c) => ({ ...c, code: !c.code }))}
+                >
+                  <span className="chip__text">{t('inboxchips.code')}</span>
+                </button>
+                {topSender ? (
+                  <button
+                    type="button"
+                    className="chip chip--toggle inboxchips__chip"
+                    aria-pressed={chips.sender !== null}
+                    onClick={() =>
+                      setChips((c) => ({
+                        ...c,
+                        sender: c.sender === null ? topSender.label : null,
+                      }))
+                    }
+                  >
+                    <span className="chip__text">
+                      {t('inboxchips.sender', { name: topSender.label, n: topSender.count })}
+                    </span>
+                  </button>
+                ) : null}
+                {chipsActive ? (
+                  <button
+                    type="button"
+                    className="chip inboxchips__chip inboxchips__clear"
+                    onClick={clearChips}
+                  >
+                    <IconX size={13} />
+                    <span className="chip__text">{t('inboxchips.clear')}</span>
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
             <div
               className="pull"
               style={{ height: Math.round(pull.progress * PULL_THRESHOLD_PX) }}
@@ -2401,7 +2878,30 @@ export function InboxView({
       >
         {openMessage ? (
           <>
-            <div className="reader__meta">
+            {/*
+              The sticky reader header — item 19.
+
+              It is the same row it always was, promoted: `reader__meta` stays
+              the class so nothing that already styled it has to be restated,
+              and `24-inbox.css` adds the two things that make it a header —
+              it sticks to the top of whichever column it is in, and it drops
+              from 48px to 34px once either scroller has moved.
+
+              Why it needed to stick at all, given the modal's own header is
+              always visible: that header carries the *subject* and the action
+              row. Who sent it and when were in the column, so on a long
+              message — and this app now folds the quoted history, which makes
+              long messages longer, not shorter — the two facts you check a
+              message against scrolled away and the only way back was to
+              scroll up.
+
+              The three actions here are a shortcut, never the only route: tag
+              and delete are also in the header above, and find is in the
+              header on a desktop and in its overflow menu on a phone. They
+              are duplicated deliberately, and this row is the one that stays
+              under the thumb.
+            */}
+            <div className="reader__meta" ref={readerBarRef} data-compact={readerCompact || undefined}>
               <span className="reader__avatar" aria-hidden="true">
                 {senderInitial(openSenderSplit.name, openSenderSplit.address)}
               </span>
@@ -2416,9 +2916,27 @@ export function InboxView({
                   <span className="reader__senderAddress">{openSenderSplit.address}</span>
                 ) : null}
               </span>
-              <span>{formatDateTime(openMessage.date)}</span>
-              <span className="chip">
+              <span className="reader__when">{formatDateTime(openMessage.date)}</span>
+              <span className="chip reader__account">
                 <span className="chip__text">{accountLabel(openMessage.accountId)}</span>
+              </span>
+              <span className="reader__quick">
+                <IconButton label={t('inbox.find')} onClick={() => setFindOpen((v) => !v)}>
+                  <IconSearch size={16} />
+                </IconButton>
+                <IconButton label={t('inbox.tagAs')} onClick={() => cycleTag(openMessage)}>
+                  <IconFlag size={16} />
+                </IconButton>
+                <IconButton
+                  label={t('common.delete')}
+                  onClick={() => {
+                    const id = openMessage.id
+                    setOpenMessage(null)
+                    void deleteIdSet(new Set([id]))
+                  }}
+                >
+                  <IconTrash size={16} />
+                </IconButton>
               </span>
               <IconButton
                 label={metaExpanded ? t('inbox.hideDetails') : t('inbox.showDetails')}
@@ -2531,15 +3049,60 @@ export function InboxView({
                   </Banner>
                 ) : null}
 
+                <MessageBodyFrame
+                  html={resolvedHtml ?? openBody.sanitizedHtml ?? textAsHtml(openBody.text ?? t('inbox.noBody'))}
+                  find={findOpen ? deferredFind : ''}
+                  onLinkClick={openLinkSafely}
+                  nightFilter={nightOn}
+                  themeKey={readerThemeKey}
+                  /* The pictures, placed into the document the frame already
+                     has rather than by rebuilding it — see `resolvedHtml` and
+                     `rebuildImages` for what that rebuild used to cost and
+                     when it still happens. */
+                  images={frameImages}
+                  onImagesUnplaced={rebuildImages}
+                  /* The message scrolls inside the frame, so this is the only
+                     way the sticky header above knows it is being read. */
+                  onScroll={onBodyScroll}
+                  /* Both branches of that `??` above go through the same fold:
+                     a reply quoted with `>` in a text/plain part and one quoted
+                     as `<blockquote>` in an HTML part are the same message to
+                     the person reading it, and only one of them being foldable
+                     would look like the feature working intermittently. */
+                  foldQuotes={state.settings.readerFoldQuotes !== false}
+                />
+
                 {/*
                   B4 — the moment this message is about, offered in the reader.
 
-                  Above the body rather than in a dialog: an offer that
-                  interrupts the message is an offer made before the reader has
-                  seen what it refers to, and this one has to be checkable
-                  against the text right below it. Nothing here has done
-                  anything yet — pressing a lead time is what creates a
-                  reminder, and that press is the only path to one.
+                  ## Why this is below the body and not above it
+
+                  It was above, and the reason given was that an offer has to
+                  be checkable against the text it was read from. It still is —
+                  the text is now directly above it rather than directly below.
+                  What moved it is item 12: the extraction no longer runs on
+                  the render that first has a body (see `datesReady`), so this
+                  strip *arrives* a moment after the message is already on
+                  screen. Above the frame, that arrival pushed the first
+                  paragraph down under the reader's eye — which would have
+                  spent the whole point of making the body paint sooner.
+
+                  Below it, nothing moves. The frame is the one `flex: 1` child
+                  of the reader's column and every other child is `flex: none`,
+                  so a strip appearing underneath takes its height out of the
+                  frame's box instead of out of its position: the message's own
+                  text does not shift by a pixel. That is the "reserve the
+                  space" requirement met by construction rather than by
+                  guessing at a height, which could not have been guessed —
+                  the strip is one card or four.
+
+                  It is still visible without scrolling for the same reason:
+                  the frame gives way, so the offers sit on screen under the
+                  message rather than below the fold.
+
+                  Nothing here has done anything yet — pressing a lead time is
+                  what creates a reminder, and that press is the only path to
+                  one.
                 */}
                 {dateHits.length > 0 ? (
                   <div className="reader__dates">
@@ -2558,19 +3121,6 @@ export function InboxView({
                     ))}
                   </div>
                 ) : null}
-
-                <MessageBodyFrame
-                  html={resolvedHtml ?? openBody.sanitizedHtml ?? textAsHtml(openBody.text ?? t('inbox.noBody'))}
-                  find={findOpen ? deferredFind : ''}
-                  onLinkClick={openLinkSafely}
-                  nightFilter={nightOn}
-                  /* Both branches of that `??` above go through the same fold:
-                     a reply quoted with `>` in a text/plain part and one quoted
-                     as `<blockquote>` in an HTML part are the same message to
-                     the person reading it, and only one of them being foldable
-                     would look like the feature working intermittently. */
-                  foldQuotes={state.settings.readerFoldQuotes !== false}
-                />
 
                 {attachments.length > 0 ? (
                   <div className="reader__attachments">

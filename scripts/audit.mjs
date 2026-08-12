@@ -535,7 +535,36 @@ check('INBOX-07', "Remote-image fetch validates the server's Content-Type agains
 check('INBOX-08', 'resolveRemoteImages re-validates the data URI before splicing into sanitized HTML', () => {
   const placeholder = read('src/core/mail/remoteImagePlaceholder.ts')
   if (!placeholder) return { severity: 'info', detail: 'No inbox pipeline yet.', fix: '' }
-  if (!/DATA_IMAGE_URI/.test(placeholder) || !/dataUri &&.*test\(dataUri\)/.test(placeholder)) {
+  /*
+   * Two conditions, and both are about what the code *does*.
+   *
+   * This used to require the literal `dataUri && …test(dataUri)`, which is a
+   * test of a variable's name. The round that gave the in-place image swap its
+   * own path factored the same check into an exported `safeImageDataUri(value)`
+   * so both paths could not drift apart — strictly better, and it failed this
+   * rule, which then reported HTML injection against code that validates. A
+   * gate that fails on a rename and passes on a rewrite is not guarding the
+   * thing it names.
+   *
+   * So: the pattern has to exist, and every splice has to go through it —
+   * either inline or through the shared helper. Verified to still fail by
+   * deleting the guard from `resolveRemoteImages` and re-running.
+   */
+  const guards = /DATA_IMAGE_URI\s*=/.test(placeholder)
+  /*
+   * Just this function's body, and that bound is the whole check.
+   *
+   * Slicing from the declaration to end-of-file passed with the guard deleted:
+   * `safeImageDataUri(` also appears in the `cid:` splice further down, so the
+   * pattern matched a *different* function and the rule could not fail. Caught
+   * by deleting the guard and re-running, which is the only way this kind of
+   * mistake ever shows up.
+   */
+  const from = placeholder.indexOf('function resolveRemoteImages')
+  const after = placeholder.indexOf('\n}', from)
+  const body = from < 0 ? '' : placeholder.slice(from, after < 0 ? undefined : after)
+  const validated = /safeImageDataUri\(|DATA_IMAGE_URI\.test\(/.test(body)
+  if (!guards || !validated) {
     return {
       severity: 'high',
       detail:

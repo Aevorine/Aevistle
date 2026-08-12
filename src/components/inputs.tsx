@@ -269,7 +269,14 @@ export function TagField({
           }}
           onPaste={(e) => {
             const pasted = e.clipboardData.getData('text')
-            if (/[,;\s]/.test(pasted)) {
+            /* The full-width separators and the angle brackets belong here for
+               the same reason they belong in `parseAddressList`: a list copied
+               out of a Chinese document is joined by `，` and `、`, and one
+               copied out of a mail client arrives as `Name <addr>`. Neither
+               contains an ASCII comma, so neither used to reach the splitter —
+               the whole blob went in as a single chip that looked like a
+               recipient and could not be delivered to. */
+            if (/[,;\s，；、]|</.test(pasted)) {
               e.preventDefault()
               commit(pasted)
             }

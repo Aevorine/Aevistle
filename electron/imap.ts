@@ -42,7 +42,13 @@ import { classifyError, type InboxMessageBody } from '../src/core/platform/bridg
 import { accessTokenForAccount, hasOAuthGrant, noteOAuthAuthFailure } from './oauth'
 import { resolveHostCached } from './mailer'
 import { sanitizeMessageHtml } from './sanitizeHtml'
-import { readMessageBody, writeInboxAttachments, writeMessageBody } from './inboxStore'
+import {
+  peekMessageBody,
+  readMessageBody,
+  writeInboxAttachments,
+  writeMessageBody,
+  type CachedBody,
+} from './inboxStore'
 
 const INBOX_PATH = 'INBOX'
 /**
@@ -53,10 +59,40 @@ const INBOX_PATH = 'INBOX'
  * this file on the exact value rather than a copy of it.
  */
 const LIST_FETCH_LIMIT = INBOX_LIST_FETCH_LIMIT
-/** Of those, how many also get their body downloaded and cached eagerly. */
+/**
+ * Of those, how many the sync itself waits for before it can answer.
+ *
+ * Unchanged at fifteen. What changed is that they now arrive in one batched
+ * `FETCH` rather than fifteen sequential `fetchOne` calls, and that everything
+ * *past* fifteen is covered too — by `PREFETCH_TAIL_LIMIT` below, after the
+ * list is already on screen.
+ */
 const BODY_PREFETCH_LIMIT = 15
+/**
+ * And how many of the listed messages end up cached in total, counting the
+ * background pass.
+ *
+ * The whole page. Messages 16 to 50 were never prefetched by any earlier
+ * build, so opening one paid a full connection — TCP, TLS, greeting,
+ * CAPABILITY, LOGIN, the post-login CAPABILITY, SELECT — before a byte of the
+ * message moved. Six to eight sequential round trips for one tap, on a page of
+ * mail the user can reach with one scroll.
+ */
+const PREFETCH_TAIL_LIMIT = INBOX_LIST_FETCH_LIMIT
 /** Skip eager prefetch above this size; the message is still listed, its body just loads on demand. */
 const PREFETCH_MAX_BYTES = 5 * 1024 * 1024
+/**
+ * What the background pass may spend in one go.
+ *
+ * A ceiling on work that never used to happen at all, so nothing is being
+ * tightened here — the foreground tranche above is bounded exactly as it always
+ * was, by count and by `PREFETCH_MAX_BYTES` per message. This exists because
+ * "the rest of the page" is up to 35 messages, and 35 at the five-megabyte
+ * per-message ceiling is a number worth refusing to reach in one background
+ * pass. Whatever falls outside it is still listed, still opens, and is picked
+ * up by the next sync.
+ */
+const PREFETCH_TAIL_MAX_BYTES = 40 * 1024 * 1024
 /**
  * How much of a prefetched body becomes the list-row `snippet`.
  *
@@ -345,7 +381,86 @@ export function buildClient(
   return client
 }
 
-async function runSync(client: ImapFlow, config: InboxAccountState): Promise<InboxAccountState> {
+/**
+ * The first line of a cached body, for a list row that has none.
+ *
+ * Prefers `text`, falls back to stripping tags out of the sanitized HTML. That
+ * is the same order `parseCacheAndReturn` produced the original snippet in, and
+ * stripping tags from already-sanitized markup cannot reintroduce anything the
+ * sanitizer took out.
+ */
+function snippetFromCached(body: CachedBody): string {
+  const source = body.text ?? (body.sanitizedHtml ?? '').replace(/<[^>]+>/g, ' ')
+  return source.replace(/\s+/g, ' ').trim().slice(0, SNIPPET_MAX_CHARS)
+}
+
+/**
+ * Download and cache a set of message bodies in one conversation.
+ *
+ * This is the change that fixes "opening a mail is slow" for the messages a
+ * sync was already meant to cover. The loop it replaces called
+ * `client.fetchOne(uid, { source: true })` once per message, awaiting each
+ * reply before sending the next request: fifteen messages meant fifteen
+ * sequential round trips, spent inside the sync, before the inbox list could
+ * paint. One `FETCH <uid set> (UID BODY.PEEK[])` is one request and one reply
+ * stream for all of them — the same bytes, none of the waiting.
+ *
+ * The generator form rather than `fetchAll`: each message is parsed, sanitized
+ * and written to disk as it arrives, so peak memory is one message rather than
+ * the whole batch, which matters at a per-message ceiling of five megabytes.
+ *
+ * No `break` out of the loop, deliberately. Abandoning a FETCH mid-stream
+ * leaves imapflow holding a partly-read response on a connection this function
+ * does not own, so the size budget is applied by the *caller*, when it decides
+ * which uids to ask for — by which point the sizes are already known from the
+ * list fetch and cost nothing to check.
+ *
+ * Returns what each message turned out to contain, for the rows that want it.
+ * A message that fails to parse is simply absent from the result and loads on
+ * demand later, exactly as an unfetched one would.
+ */
+async function fetchBodies(
+  client: ImapFlow,
+  accountId: string,
+  folderPath: string,
+  uids: number[],
+): Promise<Map<number, { snippet: string; hasAttachments: boolean }>> {
+  const out = new Map<number, { snippet: string; hasAttachments: boolean }>()
+  if (uids.length === 0) return out
+
+  for await (const message of client.fetch(
+    uids.join(','),
+    { uid: true, source: true },
+    { uid: true },
+  )) {
+    const uid = message.uid
+    if (!uid || !message.source) continue
+    try {
+      const cached = await parseCacheAndReturn(accountId, folderPath, uid, message.source)
+      out.set(uid, {
+        snippet: (cached.text ?? '').slice(0, SNIPPET_MAX_CHARS),
+        hasAttachments: cached.hasAttachments,
+      })
+    } catch {
+      // One message's body is never worth failing a sync over — it just loads
+      // on demand instead, which is what every message did before prefetching
+      // existed.
+    }
+  }
+
+  return out
+}
+
+/**
+ * @param tailUids filled with the messages this sync wants cached but is not
+ *        going to wait for. Drained by `syncInbox` once the connection is done
+ *        with, so that the list can paint while the rest of the page downloads.
+ */
+async function runSync(
+  client: ImapFlow,
+  config: InboxAccountState,
+  tailUids: number[],
+): Promise<InboxAccountState> {
   const lock = await client.getMailboxLock(INBOX_PATH)
   try {
     // `mailbox` is typed `MailboxObject | false` — `false` only outside an
@@ -430,16 +545,73 @@ async function runSync(client: ImapFlow, config: InboxAccountState): Promise<Inb
       bodyStructure: true,
     })
 
+    /*
+     * What is already on disk, for the rows whose own record does not say.
+     *
+     * The background pass below writes bodies to the cache and to nowhere else
+     * — it deliberately does not reach back into a message list that a later
+     * sync is going to rebuild anyway — so `bodyCached` and `snippet` on a
+     * prior row are exactly the fields that go stale. Asking the disk is how
+     * they catch up, and it is also what stops this sync from re-downloading a
+     * body the last one's tail already fetched.
+     *
+     * Skipped entirely for a row that already claims both, so this is one file
+     * read per message ever, not one per message per sync.
+     */
+    const onDisk = new Map<number, CachedBody>()
+    for (const row of rows) {
+      const uid = row.uid
+      if (!uid) continue
+      const prior = priorByUid.get(uid)
+      if (prior?.bodyCached && prior.snippet) continue
+      const cached = await peekMessageBody(config.accountId, INBOX_PATH, uid)
+      if (cached) onDisk.set(uid, cached)
+    }
+
     // Newest first, and only the ones cheap enough to be worth downloading
     // eagerly — a code from thirty seconds ago is the point of this feature,
     // one from last week is not worth a synchronous fetch on every sync.
-    const prefetchUids = new Set(
-      [...rows]
-        .sort((a, b) => (b.uid ?? 0) - (a.uid ?? 0))
-        .filter((m) => (m.size ?? 0) <= PREFETCH_MAX_BYTES)
-        .slice(0, BODY_PREFETCH_LIMIT)
-        .map((m) => m.uid),
-    )
+    const newestFirst = [...rows]
+      .sort((a, b) => (b.uid ?? 0) - (a.uid ?? 0))
+      .filter((m): m is typeof m & { uid: number } => typeof m.uid === 'number' && m.uid > 0)
+      .filter((m) => (m.size ?? 0) <= PREFETCH_MAX_BYTES)
+
+    const uncached = (uid: number) => !(priorByUid.get(uid)?.bodyCached || onDisk.has(uid))
+
+    /*
+     * The tranche the sync waits for: whichever of the newest
+     * `BODY_PREFETCH_LIMIT` *rows* still have no body.
+     *
+     * Sliced before the cached ones are filtered out, not after, and that order
+     * is load-bearing. Filtering first would mean "the fifteen newest uncached
+     * messages", which can reach much further down the page — so a sync that
+     * arrived with the top of the list already cached and a gap below it would
+     * suddenly have fifteen bodies to download in the foreground where the
+     * previous build had none. This way the foreground can only ever do less
+     * work than it used to, never more; the gap is the background pass's job.
+     */
+    const prefetchUids = newestFirst
+      .slice(0, BODY_PREFETCH_LIMIT)
+      .filter((m) => uncached(m.uid))
+      .map((m) => m.uid)
+
+    /*
+     * The rest of the page, for the background pass.
+     *
+     * Bounded here rather than there because the sizes are already in hand from
+     * the list fetch — `fetchBodies` cannot stop partway through a FETCH it has
+     * started, so the budget has to be spent choosing what to ask for.
+     */
+    let tailBudget = PREFETCH_TAIL_MAX_BYTES
+    for (const m of newestFirst.slice(BODY_PREFETCH_LIMIT, PREFETCH_TAIL_LIMIT)) {
+      if (!uncached(m.uid)) continue
+      const size = m.size ?? 0
+      if (size <= 0 || size > tailBudget) continue
+      tailBudget -= size
+      tailUids.push(m.uid)
+    }
+
+    const fetched = await fetchBodies(client, config.accountId, INBOX_PATH, prefetchUids)
 
     const messages: InboxMessage[] = []
     let unreadCount = 0
@@ -453,22 +625,20 @@ async function runSync(client: ImapFlow, config: InboxAccountState): Promise<Inb
       const existing = priorByUid.get(uid)
       let bodyCached = existing?.bodyCached ?? false
       let hasAttachments = hasAttachmentPart(row.bodyStructure)
-      let tag: InboxTag = existing?.tag ?? 'none'
+      const tag: InboxTag = existing?.tag ?? 'none'
       let snippet = existing?.snippet ?? ''
 
-      if (prefetchUids.has(uid) && !bodyCached) {
-        try {
-          const full = await client.fetchOne(uid, { source: true }, { uid: true })
-          if (full && full.source) {
-            const cached = await parseCacheAndReturn(config.accountId, INBOX_PATH, uid, full.source)
-            bodyCached = true
-            hasAttachments = cached.hasAttachments
-            snippet = (cached.text ?? '').slice(0, SNIPPET_MAX_CHARS)
-          }
-        } catch {
-          // The message just loads on demand instead — never worth failing
-          // the whole sync over one message's body.
-        }
+      const cachedOnDisk = onDisk.get(uid)
+      if (cachedOnDisk) {
+        bodyCached = true
+        if (!snippet) snippet = snippetFromCached(cachedOnDisk)
+      }
+
+      const justFetched = fetched.get(uid)
+      if (justFetched) {
+        bodyCached = true
+        hasAttachments = justFetched.hasAttachments
+        snippet = justFetched.snippet
       }
 
       messages.push({
@@ -503,6 +673,60 @@ async function runSync(client: ImapFlow, config: InboxAccountState): Promise<Inb
   }
 }
 
+/**
+ * Accounts whose background body pass is running right now.
+ *
+ * A guard, not a queue. Two syncs in quick succession would otherwise stack
+ * their passes behind each other, each deciding what to fetch from a cache the
+ * one in front of it is still writing to. A skipped pass costs nothing:
+ * whatever it would have fetched is still missing at the next sync, and the
+ * next sync lists it again.
+ */
+const tailRunning = new Set<string>()
+
+/**
+ * Download the bodies the sync did not wait for.
+ *
+ * Fire and forget, on purpose. Nothing on screen depends on it — every one of
+ * these messages still opens exactly as it did before, just slower — and
+ * `syncInbox`'s caller is the renderer waiting to paint a list. Awaiting this
+ * would put the whole point of the split back where it was.
+ *
+ * On its own connection, because this file has no connection pool by design
+ * (see the header) and `withConnection` logs out when its body returns. One
+ * extra handshake buys thirty-five messages that would otherwise each cost a
+ * handshake of their own, and only when there is genuinely a page of new mail
+ * to catch up on: on a steady mailbox the tail is empty and this never runs.
+ */
+function schedulePrefetchTail(
+  config: InboxAccountState,
+  secret: string | null,
+  uids: number[],
+): void {
+  if (uids.length === 0) return
+  if (tailRunning.has(config.accountId)) return
+  tailRunning.add(config.accountId)
+
+  void withConnection(config, secret, async (client) => {
+    const lock = await client.getMailboxLock(INBOX_PATH, { readOnly: true })
+    try {
+      await fetchBodies(client, config.accountId, INBOX_PATH, uids)
+    } finally {
+      lock.release()
+    }
+  })
+    .catch((e) => {
+      // Logged rather than swallowed: a background pass that fails every time
+      // is the difference between this feature working and every message past
+      // the fifteenth still paying a full connection to open, with nothing
+      // anywhere on screen to say which of the two is happening.
+      console.error('[aevistle] background body prefetch failed:', e)
+    })
+    .finally(() => {
+      tailRunning.delete(config.accountId)
+    })
+}
+
 export async function syncInbox(
   config: InboxAccountState,
   secret: string | null,
@@ -515,7 +739,70 @@ export async function syncInbox(
   if (!(await hasCredential(config, secret))) {
     throw new Error('No IMAP password stored for this account')
   }
-  return withConnection(config, secret, (client) => runSync(client, config))
+  const tailUids: number[] = []
+  const state = await withConnection(config, secret, (client) =>
+    runSync(client, config, tailUids),
+  )
+  schedulePrefetchTail(config, secret, tailUids)
+  return state
+}
+
+/**
+ * Cache the bodies of the messages either side of the one just opened.
+ *
+ * Reading mail is a sequence, not a set of independent taps: the message after
+ * this one is the single most likely thing to be opened next, and the one
+ * before it is second. Both are known the instant the reader opens anything,
+ * and both cost one batched fetch — so the choice is between paying for them
+ * now, while somebody is reading, or paying a full connection for one of them
+ * in a moment, while somebody is waiting.
+ *
+ * The renderer decides what "adjacent" means, because its list may be
+ * filtered, searched or sorted in ways this side cannot see. What it does not
+ * get to decide is how many: two, whatever it passes, so this cannot be turned
+ * into a bulk downloader by a call site that grows a feature later.
+ *
+ * Never throws and returns nothing worth waiting on. This is a guess about what
+ * somebody will tap next; there is no failure here a user could act on, and a
+ * caller that awaited it would have turned a speculative fetch into a second
+ * thing slowing down the message they actually opened.
+ *
+ * The Android side of this (`MailFetcher.prefetchAdjacent`) additionally
+ * refuses to run on a metered connection. There is no equivalent check here
+ * because there is no equivalent signal: Electron exposes no metered-network
+ * API, and a laptop on a phone hotspot is indistinguishable from one on
+ * Ethernet. Stated rather than silently skipped.
+ */
+export async function prefetchAdjacentBodies(
+  config: InboxAccountState,
+  secret: string | null,
+  folderPath: string,
+  uids: number[],
+): Promise<void> {
+  if (!config.enabled || uids.length === 0) return
+  if (!(await hasCredential(config, secret))) return
+
+  const want: number[] = []
+  for (const uid of uids) {
+    if (want.length >= 2) break
+    if (!Number.isInteger(uid) || uid <= 0 || want.includes(uid)) continue
+    if (await peekMessageBody(config.accountId, folderPath, uid)) continue
+    want.push(uid)
+  }
+  if (want.length === 0) return
+
+  try {
+    await withConnection(config, secret, async (client) => {
+      const lock = await client.getMailboxLock(folderPath, { readOnly: true })
+      try {
+        await fetchBodies(client, config.accountId, folderPath, want)
+      } finally {
+        lock.release()
+      }
+    })
+  } catch (e) {
+    console.error('[aevistle] adjacent body prefetch failed:', e)
+  }
 }
 
 /** How many mailboxes a test reports on, largest first. */

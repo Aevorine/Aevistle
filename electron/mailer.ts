@@ -619,14 +619,47 @@ export async function sendMail(
     // is genuinely in progress would be worse than waiting.
     const budget = Math.max(totalTimeoutMs ?? totalBudgetMs(account.timeoutMs / 1000), 45_000)
 
-    const deliver = async (transporter: Transporter) => {
-      const accepted: string[] = []
-      const rejected: string[] = []
-      let messageId: string | undefined
+    /*
+     * Recipients this send has already handed to a server.
+     *
+     * Shared across every call to `deliver` below rather than rebuilt inside
+     * it, and that is the whole reason it exists. `deliver` is called a second
+     * time when the pooled connection turns out to have died — see the retry
+     * just below, which is a real and necessary recovery — and for a single
+     * message to a whole recipient list that retry is free, because either the
+     * message went or it did not. For `individualDelivery` it was not: the
+     * second call started the loop again from the first address, so a
+     * connection that dropped at recipient six sent recipients one to five a
+     * second copy of the same mail.
+     *
+     * "Started" rather than "delivered" on purpose. A `sendMail` that rejected
+     * after the message reached the wire is in an unknown state — the server
+     * may have accepted it and lost the connection before saying so — and the
+     * only safe reading of unknown is "do not send it again". An address listed
+     * in both To and Cc is covered by the same set, which is the other way one
+     * person used to get two copies.
+     */
+    const handedToServer = new Set<string>()
+    /*
+     * The tally lives out here for the same reason `handedToServer` does.
+     *
+     * With the retry resuming rather than restarting, the second call to
+     * `deliver` only handles the recipients the first one never reached — so a
+     * tally rebuilt per call would report the last few addresses and quietly
+     * drop the ones that went out before the connection died. Nothing is
+     * double-counted by accumulating: a `sendMail` that throws never returns an
+     * `info` to push, and a recipient in `handedToServer` is never sent to twice.
+     */
+    const accepted: string[] = []
+    const rejected: string[] = []
+    let messageId: string | undefined
 
+    const deliver = async (transporter: Transporter) => {
       if (draft.individualDelivery) {
         // One message per recipient so nobody sees anyone else's address.
         for (const address of [...draft.to, ...draft.cc, ...draft.bcc]) {
+          if (handedToServer.has(address)) continue
+          handedToServer.add(address)
           const info = await transporter.sendMail({ ...base, to: address })
           accepted.push(...(info.accepted as string[]).map(String))
           rejected.push(...(info.rejected as string[]).map(String))
@@ -643,8 +676,6 @@ export async function sendMail(
         rejected.push(...(info.rejected as string[]).map(String))
         messageId = info.messageId
       }
-
-      return { accepted, rejected, messageId }
     }
 
     /**
@@ -655,14 +686,17 @@ export async function sendMail(
      * up as a write error on a socket that looked fine. One silent reconnect
      * turns a confusing failure into a slightly slower success — but only
      * once, so a genuinely broken account still fails fast.
+     *
+     * It *resumes* rather than restarts — see `handedToServer` above. That distinction
+     * is the difference between a recovery and a second copy of the same mail
+     * in five people's inboxes.
      */
     const credential = await resolveCredential(account, secret)
     let warmed = await warmConnection(account, credential, budget)
     let attempts = warmed.attempts
-    let result
 
     try {
-      result = await withDeadline(
+      await withDeadline(
         () => deliver(warmed.warm.transporter),
         budget,
         () => invalidateConnection(account.id),
@@ -680,7 +714,7 @@ export async function sendMail(
       // with the token that just died would spend the retry on a certainty.
       warmed = await warmConnection(account, await resolveCredential(account, secret), budget)
       attempts += warmed.attempts
-      result = await withDeadline(
+      await withDeadline(
         () => deliver(warmed.warm.transporter),
         budget,
         () => invalidateConnection(account.id),
@@ -688,7 +722,6 @@ export async function sendMail(
     }
 
     touchWarm(account.id)
-    const { accepted, rejected, messageId } = result
     return {
       ok: rejected.length === 0 && accepted.length > 0,
       messageId,

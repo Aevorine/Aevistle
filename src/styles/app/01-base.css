@@ -58,9 +58,13 @@ body {
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
   overscroll-behavior: none;
-  /* Neither Times New Roman nor SimSun ships a variable weight axis, so the
-     renderer has to synthesise bold. Left to itself it would also synthesise
-     oblique, which shears Chinese glyphs into something unreadable. */
+  /* `weight`, and deliberately not `none`.
+     Chrome is `--font-sans` now, whose leading faces (Segoe UI Variable,
+     PingFang SC) carry real weights, so synthesis is rarely reached there.
+     Prose is still Times New Roman + 宋体 and neither ships a variable weight
+     axis, so a bold in a message body is still synthesised and still has to
+     be allowed. What is forbidden either way is the oblique, which shears
+     Chinese glyphs into something unreadable. */
   font-synthesis: weight;
   /* Figures line up in columns — sizes, counts, timestamps, ports. */
   font-variant-numeric: tabular-nums;
@@ -95,6 +99,52 @@ select,
 textarea {
   font: inherit;
   color: inherit;
+}
+
+/*
+ * The one place in the app that is prose rather than chrome and is not inside
+ * the reader's iframe: the compose message box.
+ *
+ * It sits here, next to `body { font-family: var(--font-sans) }` above,
+ * because the two declarations are one decision. `body` says "the interface is
+ * a sans"; this says "and the thing you are writing is not part of the
+ * interface, it is the message". Putting them in the same block of the same
+ * file is what stops the second from being lost the next time compose is
+ * restyled — every other rule about this box lives in 14-growth.css and
+ * 22-compose.css and is about its *size*, which is a different subject that
+ * has already been rewritten three times.
+ *
+ * Specificity: `textarea.textarea--body` is (0,1,1), and it has to be.
+ *
+ * This was written as the bare class, (0,1,0), on the reasoning that it is
+ * "later in the file and more specific" than the `font: inherit` above it.
+ * Both halves were wrong about the rule it actually competes with:
+ * `04-forms.css:318` sets `.textarea { font-family: inherit }`, which is also
+ * (0,1,0) and lives in partial 04 against this one's 01 — later in the
+ * *cascade*, so it won every time.
+ *
+ * It won invisibly, because `--font-sans` used to resolve to the same Times
+ * New Roman and 宋体 this token names: the losing rule and the winning rule
+ * painted identical text, and nothing on screen said which had applied. The
+ * round that made `--font-sans` a real sans is what turned a dead rule into a
+ * visible one — the compose message box came out in Segoe UI, measured, with
+ * the ruled lines still drawn for 宋体 underneath it.
+ *
+ * The element selector is the cheapest way to outrank a class in a later
+ * partial without moving this rule away from the paragraph that explains it.
+ * It also still beats `.textarea:focus`, which sets `background` and never
+ * `font-family`, so there is nothing there to lose to.
+ *
+ * The reader's other half is not reachable from CSS at all: `MessageBodyFrame`
+ * renders received mail into a sandboxed iframe, a separate document that
+ * neither this stylesheet nor the app's @font-face rules cross. It names its
+ * own serif stack in TypeScript (`READER_FONT_STACK`), which already resolves
+ * to Times New Roman + SimSun on Windows — the same two faces this token
+ * reaches — so the two prose surfaces already match without this rule and
+ * cannot be unified by adding one.
+ */
+textarea.textarea--body {
+  font-family: var(--font-prose);
 }
 
 /* The one focus ring.

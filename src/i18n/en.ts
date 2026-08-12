@@ -6,6 +6,9 @@
 export const en = {
   'nav.compose': 'Compose',
   'compose.warnFold': '{n} checks before sending',
+  "compose.ready": "Ready to send",
+  "compose.readyAttach": "{n} attachments · {size} total · ready to send",
+  "compose.readyAttachOver": "{n} attachments · {size} total · over the limit, will not send",
   'compose.quickCustom': 'Custom…',
   'quick.friday': 'This Friday 18:00',
   'nav.home': 'Home',
@@ -13,11 +16,6 @@ export const en = {
   'home.greetMorning': 'Good morning',
   'home.greetAfternoon': 'Good afternoon',
   'home.greetEvening': 'Good evening',
-  'home.heroArmed': '{n} waiting to go out — all kept on this device',
-  'home.heroClear': 'Nothing waiting to go out',
-  'home.statArmed': 'Waiting',
-  'home.statSent': 'Sent',
-  'home.statErrors': 'Errors',
   'home.tomorrow': 'Tomorrow',
   'home.more': 'More',
   'home.moreTitle': 'More features',
@@ -91,6 +89,13 @@ export const en = {
   'inboxbar.pull': 'Pull down to check for mail',
   'inboxbar.pullRelease': 'Release to check',
   'inboxbar.attachment': 'Has an attachment',
+  'inboxchips.label': 'Quick filters',
+  'inboxchips.unread': 'Unread ({n})',
+  'inboxchips.attachment': 'Attachment',
+  'inboxchips.code': 'Has a code',
+  'inboxchips.sender': 'From {name} ({n})',
+  'inboxchips.clear': 'Clear filters',
+  'inboxchips.none': 'No message matches these filters',
   'nav.schedule': 'Scheduled',
   'nav.contacts': 'Contacts',
   'nav.templates': 'Templates',
@@ -165,6 +170,10 @@ export const en = {
   'compose.subject': 'Subject',
   'compose.subjectPlaceholder': 'What is this reminder about?',
   'compose.body': 'Message',
+  "compose.headerFoldOpen": "Show sender, recipients and subject",
+  "compose.foldToN": "{first} and {n} in total",
+  "compose.foldToNone": "No recipients yet",
+  "compose.foldNoSubject": "No subject",
   'markup.title': 'Formatting',
   'markup.bold': 'Bold',
   'markup.italic': 'Italic',
@@ -488,6 +497,11 @@ export const en = {
   'settings.inboxCache': 'Downloaded mail kept on this device',
   'settings.inboxCacheMaxMb': 'Use at most',
   'settings.inboxCacheRetentionDays': 'Keep downloaded mail for',
+  'settings.inboxPrefetch': 'Download mail before you open it',
+  'settings.inboxPrefetchWifi': 'Only on Wi-Fi',
+  'settings.inboxPrefetchAlways': 'On any connection',
+  'settings.inboxPrefetchHint':
+    'A message already on this device opens instantly. On Wi-Fi the whole list is downloaded either way — this only decides what happens on mobile data. Phones only: a computer cannot tell the two apart.',
   'settings.dataLocation': 'Your data lives at',
   'settings.resetAll': 'Reset everything',
   'settings.resetConfirm': 'This deletes all accounts, schedules, contacts and logs on this device. It cannot be undone.',
@@ -840,6 +854,8 @@ export const en = {
   "health.allClear": "All reminders healthy",
   "health.more": "and {n} more",
   "health.go": "Fix",
+  "health.expand": "More",
+  "health.less": "Less",
 
   // --- multi-stage reminders ---
   "chain.title": "Remind more than once",
@@ -1832,6 +1848,45 @@ export const en = {
   'settings.readerFoldQuotesHint': 'The quoted copy of the previous message collapses to one line you can open again at any time.',
   'settings.composePreflight': 'Confirm before sending',
   'settings.composePreflightHint': 'One card first — who it goes to, how many, how big, and when. Turn this off to send straight away.',
+
+  'codes.bigDigits': 'Big digits',
+  'codes.bigDigitsExit': 'Back to the list',
+
+  'home.todayQueued': '{n} to send today',
+  'home.todayFailed': '{n} failed today',
+  "home.todaySent": "{n} sent today",
+  'home.cellEdit': 'Rename {name}, or change its icon',
+  'home.cellName': 'Name',
+  'home.cellIcon': 'Icon',
+  'home.cellIconDefault': 'The usual icon',
+
+  'settings.offlineQueue': 'Hold a mail that could not go out, and try again later',
+  'settings.offlineQueueHint':
+    'When there is no network, or the server turns the message away for a reason that could pass, it waits in the outbox and is sent again by itself. Turn this off and a send that fails simply fails.',
+
+  'settings.searchPlaceholder': 'Search settings',
+  'settings.searchEmpty': 'Nothing here matches that.',
+  'settings.searchCount': '{n} found',
+  /* Search keywords, never shown on screen — see `SECTION_SEARCH_KEYS` in
+     SettingsView. What a person types, not what the row is called. */
+  'settings.search.appearance':
+    'theme dark light colour accent style font text size language density vibration one-handed reader',
+  'settings.search.notifications': 'notification alert sound tray badge popup code new mail',
+  'settings.search.sending':
+    'send outbox retry queue offline quiet hours night attachment size limit timeout recipients',
+  'settings.search.accounts': 'account mailbox password smtp imap oauth sign in sender address',
+  'settings.search.privacy': 'privacy remote images tracking log retention redact history',
+  'settings.search.digest': 'daily digest summary report every day',
+  'settings.search.greetings': 'holiday greeting festival country new year',
+  'settings.search.backup': 'backup restore export import save copy',
+  'settings.search.transfer': 'transfer move to another device hand over reminders',
+  'settings.search.devices': 'pair device phone computer link sync',
+  'settings.search.calendarsub': 'calendar subscribe publish ics share working days',
+  'settings.search.data': 'data folder location storage disk where are my files',
+  'settings.search.pairingfile': 'pairing file key encrypted export',
+  'settings.search.control': 'remote control interface port token api',
+  'settings.search.update': 'update version upgrade download new release',
+  'settings.search.about': 'about version licence open source repository reset everything',
 } as const
 
 export type TranslationKey = keyof typeof en

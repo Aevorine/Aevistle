@@ -161,7 +161,7 @@
    same reason the focus-mode rule needs it, and it is the same fault: an
    inline `height` beats every rule in this file. `ComposeView` also clears it
    on the way in, so this is the belt to that pair of braces. */
-.view--compose[data-narrow] .compose-layout > .field:has(.textarea--body) > .textarea--body {
+.view--compose[data-narrow] .compose-layout > .field--body > .textarea--body {
   min-height: 0;
   height: auto !important;
   resize: none;
@@ -186,13 +186,13 @@
    `display: none` so the textarea keeps its accessible name.
 
    Result, measured the same way: 569.6px of 662, 86%. */
-.view--compose[data-narrow] .compose-layout > .field:has(.textarea--body) > .field__labelrow {
+.view--compose[data-narrow] .compose-layout > .field--body > .field__labelrow {
   flex-wrap: nowrap;
   gap: var(--sp-2);
 }
 .view--compose[data-narrow]
   .compose-layout
-  > .field:has(.textarea--body)
+  > .field--body
   > .field__labelrow
   > .field__label {
   position: absolute;
@@ -210,7 +210,7 @@
    arrives, there are two `flex: none` items on it (the toggle at ~70px and the
    count at ~80px against 320px of row) and it never wraps, so the narrow
    layout's height is unchanged by allowing it to. */
-.view--compose[data-narrow] .compose-layout > .field:has(.textarea--body) .field__tools {
+.view--compose[data-narrow] .compose-layout > .field--body .field__tools {
   flex: 1 1 auto;
   min-width: 0;
   flex-wrap: wrap;
@@ -219,7 +219,7 @@
 /* "0 字 · 0 B" wrapped to two lines at 360px, and two lines of 16px text is
    52.8px — taller than the 44px buttons beside it, so the count, not the
    toolbar, was setting the row height. Measured: 52.8 → 44. */
-.view--compose[data-narrow] .compose-layout > .field:has(.textarea--body) .field__count {
+.view--compose[data-narrow] .compose-layout > .field--body .field__count {
   flex: 0 0 auto;
   white-space: nowrap;
 }
@@ -269,7 +269,7 @@
  * from. Measured after: row 44px -> 23.8px, box 566 -> 586.4, share 85.5% ->
  * 88.6%.
  */
-.view--compose[data-narrow] .compose-layout > .field:has(.textarea--body) .markup__toggle {
+.view--compose[data-narrow] .compose-layout > .field--body .markup__toggle {
   position: relative;
   display: inline-flex;
   align-items: center;
@@ -284,7 +284,7 @@
 }
 .view--compose[data-narrow]
   .compose-layout
-  > .field:has(.textarea--body)
+  > .field--body
   .markup__toggle::after {
   content: "";
   position: absolute;
@@ -296,7 +296,7 @@
    contributes to this row's height or to the width the count has to share. */
 .view--compose[data-narrow]
   .compose-layout
-  > .field:has(.textarea--body)
+  > .field--body
   .markup__toggle[aria-expanded="false"]
   + .markup {
   display: none;
@@ -308,7 +308,7 @@
    toggle-then-strip, which is the order someone operating it needs. */
 .view--compose[data-narrow]
   .compose-layout
-  > .field:has(.textarea--body)
+  > .field--body
   .markup__toggle[aria-expanded="true"]
   + .markup {
   flex: 1 1 100%;
@@ -337,7 +337,7 @@
 }
 .view--compose[data-narrow]
   .compose-layout
-  > .field:has(.textarea--body)
+  > .field--body
   .markup::-webkit-scrollbar {
   display: none;
 }
@@ -355,7 +355,7 @@
    was 46 + 4 + 44 + 8 = 102px of chrome around a 560px box, i.e. 84.6% — 0.4%
    under a floor this screen exists to clear. The 44px summary bar above and this
    gap are the 6px: 96px of chrome, 566px of box, 85.5%. */
-.view--compose[data-narrow] .compose-layout > .field:has(.textarea--body) {
+.view--compose[data-narrow] .compose-layout > .field--body {
   gap: var(--sp-1);
 }
 

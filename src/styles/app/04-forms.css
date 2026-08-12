@@ -323,7 +323,7 @@
   font-family: inherit;
 }
 /* The compose body's own sizing lives with the compose layout — see
-   `.compose-layout > .field:has(.textarea--body)`. There were three sets of
+   `.compose-layout > .field--body`. There were three sets of
    rules for this one box at one point, two of them dead: the most specific
    won, and the `min-height: 320px` here and the `max(45vh, 300px)` further
    down had no effect on anything while reading as though they did. */

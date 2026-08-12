@@ -26,7 +26,7 @@
  */
 
 import sanitizeHtmlLib from 'sanitize-html'
-import { BLANK_PIXEL } from '../src/core/mail/remoteImagePlaceholder'
+import { inlinePlaceholder, normalizeCid, remotePlaceholder } from '../src/core/mail/remoteImagePlaceholder'
 
 export interface SanitizeResult {
   html: string
@@ -141,13 +141,37 @@ export function sanitizeMessageHtml(rawHtml: string): SanitizeResult {
           // (which would have to guess at attribute order and quoting).
           // Browsers ignore a `#fragment` on a `data:` URI, so this still
           // renders as the same blank pixel until resolved.
-          return { tagName, attribs: { ...attribs, src: `${BLANK_PIXEL}#${index}` } }
+          return { tagName, attribs: { ...attribs, src: remotePlaceholder(index) } }
         }
-        // `cid:` inline images and anything else unrecognised: dropped, not
-        // resolved. Inlining `cid:` attachments is a real feature some
-        // messages would benefit from — deliberately deferred rather than
-        // half-built, since it needs cross-referencing against the parsed
-        // attachment list at sanitize time, not just here.
+        /*
+         * `cid:` — one of *this message's own* MIME parts.
+         *
+         * Parked on the same blank pixel a remote image gets, with a `#cid=`
+         * fragment naming the part, and resolved by the renderer against the
+         * attachment list it already has. It is worth being exact about why
+         * that is not a hole in the rule the rest of this file enforces:
+         *
+         *   · no network. The bytes are a file this app already wrote to its
+         *     own attachment directory when the message was parsed. Nothing
+         *     is fetched, so there is no read receipt and no address to leak
+         *     — the entire reason remote images are blocked does not apply.
+         *   · no new scheme. The `cid:` URL never survives; what reaches the
+         *     frame is the same `data:` pixel every blocked image gets, and
+         *     what replaces it is a `data:image/...` URI validated a second
+         *     time by `safeImageDataUri`. `img-src 'self' data: blob:` is
+         *     untouched, and so is the sandbox.
+         *   · unresolvable means invisible. A reference to a part that is not
+         *     there keeps the blank pixel (and the in-place path drops the
+         *     `src` outright), which is what this app did with every `cid:`
+         *     image before this — so the failure mode is exactly the old
+         *     behaviour rather than a broken-image icon.
+         *
+         * The id is normalised here rather than at resolve time so both ends
+         * of the convention spell it the same way; see `normalizeCid`.
+         */
+        const cid = /^cid:/i.test(src) ? normalizeCid(src.slice(4)) : ''
+        if (cid) return { tagName, attribs: { ...attribs, src: inlinePlaceholder(cid) } }
+        // Anything else unrecognised: dropped, not resolved.
         const { src: _drop, ...rest } = attribs
         return { tagName, attribs: rest }
       },

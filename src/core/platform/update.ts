@@ -296,18 +296,33 @@ export async function runUpdateCheck(
   check: () => Promise<UpdateInfo>,
   current: string,
 ): Promise<UpdateInfo> {
+  /* Every caller reads a field off the result, so "no result" has to become a
+     result rather than reaching them. `catch` covered the bridge *throwing*
+     and nothing covered it *resolving to nothing* — an implementation that
+     stubs the method (`async () => {}`), an older main process without it, or
+     a platform where it is not wired returns `undefined`, and the startup
+     effect in `App.tsx` then threw `Cannot read properties of null (reading
+     'available')` from inside a `.then` with no `catch` after it. Caught by
+     `open-mail-probe.mjs`, whose stand-in bridge does exactly that; the point
+     of this function is that an update check cannot break anything else, and
+     half of it was doing that job. */
+  const fallback = (reason: string): UpdateInfo => ({
+    current,
+    latest: current,
+    available: false,
+    pageUrl: RELEASES_PAGE,
+    checkedAt: Date.now(),
+    error: reason,
+  })
   let info: UpdateInfo
   try {
-    info = await check()
+    const result = await check()
+    info =
+      result !== null && typeof result === 'object' && 'available' in result
+        ? result
+        : fallback(`the update check returned ${result === undefined ? 'nothing' : String(result)}`)
   } catch (e) {
-    info = {
-      current,
-      latest: current,
-      available: false,
-      pageUrl: RELEASES_PAGE,
-      checkedAt: Date.now(),
-      error: e instanceof Error ? e.message : String(e),
-    }
+    info = fallback(e instanceof Error ? e.message : String(e))
   }
   lastCheck = info
   // Copied first: a listener that unsubscribes on notify would otherwise

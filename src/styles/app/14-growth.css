@@ -53,7 +53,7 @@
 /* ...and inside it, the body box is the one that grows. Everything else on
    this form is one or two rows tall by nature; the body is the message.
    The growth rules themselves live with the rest of the compose layout — see
-   `.compose-layout > .field:has(.textarea--body)`; there is exactly one body
+   `.compose-layout > .field--body`; there is exactly one body
    box in the application and two sets of rules for it was one too many. */
 .form-rows {
   display: flex;
@@ -2053,11 +2053,11 @@
 /* --- band 2: the message -------------------------------------------------- */
 
 /* The one field allowed to grow, and the reason the card is a flex column. */
-.compose-layout > .field:has(.textarea--body) {
+.compose-layout > .field--body {
   flex: 1 1 auto;
   min-height: 0;
 }
-.compose-layout > .field:has(.textarea--body) > .textarea--body {
+.compose-layout > .field--body > .textarea--body {
   flex: 1 1 auto;
   /*
    * A floor, not a height. In the normal case the box grows well past this —
@@ -2121,10 +2121,13 @@
     .health__item[data-level='danger']
   )
   .compose-layout
-  > .field:has(.textarea--body)
+  > .field--body
   > .textarea--body {
   min-height: min(240px, 32vh);
 }
+
+/* The floor that undoes it lives in 22-compose.css, which is late enough in
+   the cascade to survive `15-compose-narrow.css`'s `min-height: 0`. */
 
 /* --- reclaiming height for the message, part 2 ---------------------------- */
 
@@ -2170,7 +2173,7 @@
 .view--compose[data-focus='true'] .compose-card {
   flex: 1 1 auto;
 }
-.view--compose[data-focus='true'] .compose-layout > .field:has(.textarea--body) > .textarea--body {
+.view--compose[data-focus='true'] .compose-layout > .field--body > .textarea--body {
   min-height: 0;
   /* Beats the remembered drag height, which is an inline style. Without this
      a box that had once been dragged to 220px would stay 220px in a mode whose

@@ -282,6 +282,22 @@
   flex-direction: column;
   flex: 1;
   min-height: 0;
+  /* The chip strip is positioned against this box — see `.inboxchips`. */
+  position: relative;
+  /*
+   * How tall the strip is, in exactly one place.
+   *
+   * The strip's own height and the padding that reserves room for it are the
+   * same number by construction: if they could drift, the chips would either
+   * float over the first row or leave a gap above it, and both look like a
+   * bug rather than like a setting.
+   *
+   * `--ctl-sm` is 36px, the small control on the ladder, plus `--sp-2` of air
+   * under it. On a phone it is `--tap-min` instead, because `17-phone.css`
+   * pins every `.chip--toggle` to 48px there and a strip shorter than its own
+   * chips would clip them.
+   */
+  --inbox-chips-h: calc(var(--ctl-sm) + var(--sp-2));
 }
 .view--list .pullwrap > .list-pane {
   overscroll-behavior-y: contain;
@@ -290,6 +306,218 @@
    take a share of the height it is animating. */
 .pullwrap > .pull {
   flex: none;
+}
+
+/* --- the quick filters ----------------------------------------------------
+ *
+ * Unread / has an attachment / carries a verification code / from the sender
+ * you have most mail from. Four questions people ask a mailbox, each of which
+ * was a scroll before this.
+ *
+ * ## Why this is padding inside the scroller and not a band above it
+ *
+ * `scripts/layout-probe.mjs` holds this screen to nine visible rows at
+ * 360x800, and it computes them as `floor(paneH / pitch)` where `paneH` is the
+ * live `.list-pane`'s `clientHeight`. The arithmetic, from `.job__code`'s note
+ * above: the row is 61.0px, the list gap 4.0px, so the pitch is 65.0px, and
+ * the pane is 629px — 629 / 65.0 = 9.67. Nine fit, with 44px of slack before
+ * the tenth-of-a-row margin is gone and the count falls to eight.
+ *
+ * A band above the pane spends that slack and then some. It is a flex sibling
+ * inside `.view--list .view__inner`, whose `gap` is `--sp-2`, so the cheapest
+ * possible chip row — 36px — costs 44px of pane, landing exactly on
+ * 585 / 65.0 = 9.00. Exactly on a floor is not on it: the pane is not always
+ * 629px to the pixel, and a tenth of a pixel the wrong way makes it eight. On
+ * a phone it is worse, because `17-phone.css` pins `.chip--toggle` to the 48px
+ * tap floor and the band would be 56px — 573 / 65.0 = 8.8, i.e. eight rows,
+ * and the gate fails as it should.
+ *
+ * `clientHeight` *includes* padding. So the strip lives in a band of padding
+ * at the top of the scroller instead: the pane's height, and therefore its
+ * capacity and therefore the gate's number, are bit-identical to what they
+ * were. This is not a way around the floor — it is the arrangement that
+ * genuinely does not touch it, and it is what a list header does everywhere
+ * else in this app's neighbourhood.
+ *
+ * The honest cost, stated rather than hidden: at rest the first row starts
+ * one strip further down, so ~8.2 rows are *in view* until the list is
+ * scrolled by the height of a thumb. Nine still fit the pane; the strip
+ * occupies scrollable content, not viewport.
+ *
+ * ## What it gets out of the way for
+ *
+ *   · a scroll. The list is being read, not filtered.
+ *   · a pull. `.pull` grows from zero at the top of the same wrapper, and two
+ *     things in the same place is how a gesture stops reading as one.
+ *
+ * And what it does *not* get out of the way for: an active filter. A filter
+ * that scrolls out of sight is a mailbox that appears to have lost mail, which
+ * is the single worst thing a list screen can imply. `data-chips-away` is only
+ * set while nothing is filtered.
+ * ------------------------------------------------------------------------- */
+
+.pullwrap[data-chips='true'] > .list-pane {
+  padding-block-start: var(--inbox-chips-h);
+}
+.inboxchips {
+  position: absolute;
+  z-index: 2;
+  inset-inline: 0;
+  top: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: var(--inbox-chips-h);
+  padding-block-end: var(--sp-2);
+  /* They scroll sideways rather than wrapping, for the reason the search
+     scopes do: this strip has one height and a second line would take it out
+     of the list. */
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  /* Opaque, or the first row shows through the strip it is scrolling under. */
+  background: var(--bg);
+  transition:
+    opacity var(--dur-fast) var(--ease),
+    transform var(--dur) var(--ease);
+}
+.pullwrap[data-chips-away='true'] > .inboxchips {
+  opacity: 0;
+  transform: translateY(calc(var(--inbox-chips-h) * -1));
+  pointer-events: none;
+}
+.inboxchips__chip {
+  flex: 0 0 auto;
+}
+/* The way out, in the same row as the way in. Neutral rather than accented:
+   it is not one more filter, and a fifth lit pill would read as one. */
+.inboxchips__clear {
+  cursor: pointer;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-2);
+  color: var(--text-2);
+}
+.inboxchips__clear:hover {
+  color: var(--text-1);
+  border-color: var(--accent);
+}
+.inboxchips__chip:focus-visible {
+  outline: var(--ring);
+  outline-offset: 1px;
+}
+
+/* ==========================================================================
+   The reader
+
+   Two changes live here rather than in `14-growth.css`, which owns the rest of
+   the reader: this file is loaded after it and after `16-mail.css`,
+   `17-phone.css` and `18-calendar.css`, so a rule of equal specificity here
+   wins — which is the direction a newer layer should win in, and the reason
+   these files are ordered the way `app.css`'s header describes.
+   ========================================================================== */
+
+/*
+ * The frame's own background, before its document has painted.
+ *
+ * `.reader__frame` is `background: #fff` in `14-growth.css`, which was right
+ * while every message was rendered on white paper. It is not any more — the
+ * frame takes the app's own ground now (see `MessageBodyFrame`'s `readPalette`)
+ * — and a white rectangle for the frame or two it takes a `srcDoc` to parse is
+ * a flash of full-brightness white in a dark room, at exactly the moment
+ * somebody opens a message.
+ */
+.reader__frame {
+  background: var(--surface-1);
+}
+
+/* --- the sticky header ----------------------------------------------------
+ *
+ * Sender, time and — from the tablet up — the three actions a message is most
+ * often opened to perform, in a bar that stays put while the message scrolls.
+ *
+ * ## Why it had to stick, given the dialog's header never moves
+ *
+ * That header carries the *subject* and the action row. Who sent it and when
+ * were ordinary content in the scrolling column, so on a long message they
+ * scrolled away — and the quoted-history fold makes long messages more common,
+ * not less, because a folded thread invites reading the whole reply. Checking
+ * "who is this actually from" then meant scrolling to the top and back.
+ *
+ * ## The two heights
+ *
+ * 48px is `--ctl-md`, the same tap floor the two icon buttons inside it stand
+ * at, so at rest the bar costs nothing the buttons were not already taking.
+ * 34px is the compact height: enough for one line of `--text-sm` at
+ * `--leading-tight` (18.2px) plus 8px of air, and *not* a token because it is
+ * not a control ladder step — a bar that is not being interacted with does not
+ * need a thumb's worth of height, it needs to still be readable.
+ *
+ * The switch is `data-compact`, set from JavaScript because the message
+ * scrolls inside the body frame — a separate document — and no CSS query can
+ * see that. See `readerCompact` in `InboxView.tsx`.
+ * ------------------------------------------------------------------------- */
+
+.modal__body--reader > .reader__meta {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  /* Full-bleed, because a sticky bar with side margins lets the content
+     scrolling underneath show through the gaps at both ends. The inset the
+     margin used to provide becomes padding, so nothing moves horizontally. */
+  margin-inline: 0;
+  padding-inline: var(--sp-4);
+  padding-block: var(--sp-2);
+  margin-block-start: 0;
+  min-height: var(--ctl-md);
+  background: var(--surface-1);
+  border-block-end: 1px solid var(--border-subtle);
+  /* One line, always. It used to wrap, which is acceptable for content and not
+     for a header — a bar that changes height as the sender's name changes
+     length is a bar that moves the message under the reader's eye. */
+  flex-wrap: nowrap;
+  transition:
+    min-height var(--dur) var(--ease),
+    padding-block var(--dur) var(--ease);
+}
+.modal__body--reader > .reader__meta[data-compact] {
+  min-height: 34px;
+  padding-block: var(--sp-1);
+}
+/* What gives way when it shrinks, in the order it is least missed. The address
+   and the account are both *identification*, and identification is what the
+   full-height bar is for; while scrolling, the name and the time are what a
+   glance is checking. Both come straight back at the top of the message. */
+.reader__meta[data-compact] .reader__senderAddress,
+.reader__meta[data-compact] .reader__account {
+  display: none;
+}
+.reader__meta[data-compact] .reader__avatar {
+  width: var(--icon-md);
+  height: var(--icon-md);
+}
+.reader__sender {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* The name is the one item on the row whose length is arbitrary, so it is the
+   one that truncates; the address below it still breaks rather than clipping,
+   because an address with its tail cut off is worse than no address. */
+.reader__senderName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.reader__when {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  font-variant-numeric: var(--numeric);
+}
+.reader__quick {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  margin-inline-start: auto;
 }
 
 /* ==========================================================================
@@ -510,6 +738,35 @@
    full text colour while the glyph beside them steps back. */
 .job__codeValue {
   letter-spacing: var(--tracking-tight);
+}
+
+@media (max-width: 599.98px) {
+  /*
+   * `17-phone.css` pins every `.chip--toggle` to `--tap-min` (48px) at this
+   * width, which is right — a filter is a thumb target. The strip has to be
+   * told, or it would be 36px tall with 48px chips inside it and clip them,
+   * and the padding that reserves room for it would be short by the same 12px.
+   * One variable, so the two cannot disagree.
+   */
+  .pullwrap {
+    --inbox-chips-h: calc(var(--tap-min) + var(--sp-2));
+  }
+  /*
+   * The reader bar's three actions are not offered at this width, and that is
+   * a measurement rather than a preference. Inside 360px the content column is
+   * 328px; the bar already spends 32px on the avatar, 12px of gap, ~60px on
+   * the timestamp and 48px on the details disclosure, and three more 48px
+   * targets would leave the sender's name about 60px — four characters. The
+   * name is the thing the bar exists to keep on screen.
+   *
+   * Nothing becomes unreachable: below 600px the reader is a full-screen
+   * dialog whose own header is pinned directly above this bar and never
+   * scrolls, and it carries tag, delete and (in its overflow) find — the same
+   * three, at full size, one row up.
+   */
+  .reader__quick {
+    display: none;
+  }
 }
 
 @media (max-width: 839.98px) {

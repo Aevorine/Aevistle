@@ -181,6 +181,40 @@
   flex: 1;
   min-width: 0;
 }
+/* Two lines, then a tap.
+
+   Nothing capped how tall one message could be, and this strip sits directly
+   on top of the compose message box. Measured at 360x800 with no account
+   configured: 79px at the standard text size, 131px at `larger`, and 341px at
+   `larger` plus a 1.3x Android system font scale — one message over seven
+   lines, which left the message box at 230px, 42.8% of the view against the
+   85% floor this screen is held to. `HealthBoard` only renders the control on
+   a row whose `scrollHeight` really exceeds its `clientHeight`, so a message
+   that fits is untouched and keeps no affordance it does not need.
+
+   `-webkit-line-clamp` rather than a `max-height` in `em`: the clamp is in
+   lines, which is the unit the problem is actually in, and it survives both
+   `--text-scale` and the system font scale stacking on top of it. The
+   prefixed form is the only form; it is what every engine implements. */
+.health__text[data-clamped='true'] {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+.health__expand {
+  flex: none;
+  align-self: flex-start;
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--accent);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
 /* A link, not a button: it navigates, and dressing navigation as a button
    makes the row look like it has a destructive action in it. */
 .health__go {

@@ -53,6 +53,46 @@
   gap: var(--sp-5);
 }
 
+/* --- searching the sixteen ------------------------------------------------
+ *
+ * The desktop half of the field. On a phone it is the first child of
+ * `.settingsindex` above and needs no rules of its own — the column already
+ * spaces its children and `.search` already knows how to be a field.
+ *
+ * `.view__inner--grid` is a grid whose cells are cards, and 14-growth.css
+ * spans the page head, the banners and the jump bar across all of its columns.
+ * This is the fourth thing that has to: a search field occupying one cell of a
+ * two-column grid would be a field the width of half a card with the first
+ * settings card sitting beside it, which is not a header, it is a card that
+ * happens to contain an input. Stated here rather than added to that file's
+ * list because this one loads last and owns everything this feature added.
+ */
+.view__inner--grid > .settingssearch {
+  grid-column: 1 / -1;
+}
+.settingssearch {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+/*
+ * "Nothing matched", at body size.
+ *
+ * `--text-base` and not the 14px data rank: this is a sentence, and the type
+ * floor in theme.css is that anything read as language is 16px whatever it sits
+ * under. It is centred because it stands in for a list and inherits the list's
+ * width, and a single short line hard against the left edge of an empty box
+ * reads as the first row of something that failed to load.
+ */
+.settingssearch__empty {
+  margin: 0;
+  padding: var(--sp-4);
+  color: var(--text-3);
+  font-size: var(--text-base);
+  text-align: center;
+}
+
 /* --- the identity card ----------------------------------------------------
  *
  * Not a seventeenth setting. Somebody opening Settings on a phone is usually

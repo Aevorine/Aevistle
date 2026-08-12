@@ -143,6 +143,32 @@ async function readCachedAttachments(
   return out
 }
 
+/**
+ * The cached body text alone — no attachment directory walk.
+ *
+ * `readMessageBody` below is what a reader wants: everything needed to render
+ * the message, attachment list included, which costs a `readdir` plus a `stat`
+ * per file. This is for the caller that only needs to know whether a body is on
+ * disk and what its first line says — the sync's snippet backfill, which asks
+ * that question about every row on the page and would otherwise turn one
+ * `readFile` into a directory scan per message.
+ *
+ * `null` for "not cached", including when the file is there but unreadable —
+ * either way there is nothing to show and the message loads on demand.
+ */
+export async function peekMessageBody(
+  accountId: string,
+  folderPath: string,
+  uid: number,
+): Promise<CachedBody | null> {
+  try {
+    const raw = await fs.readFile(bodyFile(accountId, folderPath, uid), 'utf8')
+    return JSON.parse(raw) as CachedBody
+  } catch {
+    return null
+  }
+}
+
 export async function readMessageBody(
   accountId: string,
   folderPath: string,
@@ -154,13 +180,8 @@ export async function readMessageBody(
   remoteImages: string[]
   icsParts?: string[]
 } | null> {
-  let cached: CachedBody
-  try {
-    const raw = await fs.readFile(bodyFile(accountId, folderPath, uid), 'utf8')
-    cached = JSON.parse(raw) as CachedBody
-  } catch {
-    return null
-  }
+  const cached = await peekMessageBody(accountId, folderPath, uid)
+  if (!cached) return null
   const attachments = await readCachedAttachments(accountId, folderPath, uid)
   return {
     text: cached.text,
@@ -222,63 +243,227 @@ export async function deleteAccountInboxCache(accountId: string): Promise<void> 
   await fs.rm(accountRoot(accountId), { recursive: true, force: true })
 }
 
-interface CacheEntry {
-  path: string
-  size: number
+// ---------------------------------------------------------------------------
+// Eviction
+//
+// `Settings.inboxCacheMaxMb` and `Settings.inboxCacheRetentionDays` are the two
+// numbers on the settings screen that say how much downloaded mail this device
+// keeps. Everything below is what makes them true, and three things about it
+// are deliberate:
+//
+//   - it evicts whole *messages*, not whole files. A body kept while its
+//     attachments were evicted is a message that opens with its paperclip
+//     silently gone — `readCachedAttachments` builds that list from whatever is
+//     on disk right now, so half an eviction is indistinguishable from a mail
+//     that never had an attachment;
+//   - the budget is global, matching what `inboxCacheMaxMb` has always
+//     claimed ("combined across accounts"). Applying it per account meant three
+//     mailboxes quietly cost three times the ceiling the user set;
+//   - it never runs on the path a caller is waiting on. See `pruneInboxCache`.
+//
+// Nothing here can lose data: the server still holds every message it touches,
+// so an eviction costs a re-download and never a message.
+// ---------------------------------------------------------------------------
+
+/** One cached message: its body file, its attachment files, and their combined weight. */
+interface CachedMessage {
+  files: string[]
+  bytes: number
+  /** The newest write across them — when this message was last put on disk. */
   mtimeMs: number
 }
 
-async function walk(dir: string): Promise<CacheEntry[]> {
-  let entries: import('node:fs').Dirent[]
+async function readdirSafe(dir: string): Promise<import('node:fs').Dirent[]> {
   try {
-    entries = await fs.readdir(dir, { withFileTypes: true })
+    return await fs.readdir(dir, { withFileTypes: true })
   } catch {
+    // A directory that does not exist yet contributes nothing, and one that
+    // cannot be read must not stop the rest of the sweep — a locked folder
+    // (antivirus, a backup tool) is a reason to skip it this time, not a
+    // reason to leave the whole cache unbounded.
     return []
   }
-  const out: CacheEntry[] = []
-  for (const entry of entries) {
-    const full = path.join(dir, entry.name)
-    if (entry.isDirectory()) {
-      out.push(...(await walk(full)))
-    } else if (entry.isFile()) {
-      const stat = await fs.stat(full).catch(() => null)
-      if (stat) out.push({ path: full, size: stat.size, mtimeMs: stat.mtimeMs })
-    }
+}
+
+async function note(
+  into: Map<string, CachedMessage>,
+  key: string,
+  file: string,
+): Promise<void> {
+  const stat = await fs.stat(file).catch(() => null)
+  if (!stat || !stat.isFile()) return
+  const existing = into.get(key)
+  if (existing) {
+    existing.files.push(file)
+    existing.bytes += stat.size
+    existing.mtimeMs = Math.max(existing.mtimeMs, stat.mtimeMs)
+  } else {
+    into.set(key, { files: [file], bytes: stat.size, mtimeMs: stat.mtimeMs })
   }
-  return out
 }
 
 /**
- * Evict oldest-touched cache files once an account's inbox cache is over
- * budget, by size or by age. Never touches `state.json`'s message rows —
- * only the body/attachment cache, which is always re-fetchable from the
- * server, so eviction here is a tidiness operation, not a data-loss risk.
+ * Every cached message across every account, keyed so that a body and its
+ * attachments land under the same entry.
+ *
+ * The uid is taken from the leading digits of the filename rather than by
+ * stripping `.json`, so a `.tmp` left behind by an interrupted
+ * `writeAtomicFile` is accounted to the message it belongs to and evicted with
+ * it — otherwise it would be a file nothing on earth ever deletes.
  */
-export async function pruneInboxCache(
+async function cachedMessages(): Promise<Map<string, CachedMessage>> {
+  const out = new Map<string, CachedMessage>()
+  const root = path.join(dataLocation(), INBOX_DIR)
+
+  for (const account of await readdirSafe(root)) {
+    if (!account.isDirectory()) continue
+
+    const bodies = path.join(root, account.name, BODIES_DIR)
+    for (const slug of await readdirSafe(bodies)) {
+      if (!slug.isDirectory()) continue
+      for (const file of await readdirSafe(path.join(bodies, slug.name))) {
+        if (!file.isFile()) continue
+        const uid = /^(\d+)/.exec(file.name)?.[1] ?? file.name
+        await note(
+          out,
+          `${account.name}\n${slug.name}\n${uid}`,
+          path.join(bodies, slug.name, file.name),
+        )
+      }
+    }
+
+    const attachments = path.join(root, account.name, ATTACHMENTS_DIR)
+    for (const slug of await readdirSafe(attachments)) {
+      if (!slug.isDirectory()) continue
+      for (const uid of await readdirSafe(path.join(attachments, slug.name))) {
+        if (!uid.isDirectory()) continue
+        for (const file of await readdirSafe(path.join(attachments, slug.name, uid.name))) {
+          if (!file.isFile()) continue
+          await note(
+            out,
+            `${account.name}\n${slug.name}\n${uid.name}`,
+            path.join(attachments, slug.name, uid.name, file.name),
+          )
+        }
+      }
+    }
+  }
+
+  return out
+}
+
+async function evict(message: CachedMessage): Promise<void> {
+  for (const file of message.files) await fs.rm(file, { force: true }).catch(() => {})
+}
+
+/**
+ * Do the eviction, now, on whatever is on disk.
+ *
+ * Age first, then size. Age is an instruction — "keep downloaded mail for 90
+ * days" means exactly that, whether or not the cache is anywhere near its
+ * ceiling — while size is a ceiling, so it only bites when it is reached and
+ * then takes the oldest-written messages until it stops biting.
+ *
+ * Both numbers are clamped to at least 1. A blank or nonsensical field on the
+ * settings screen arriving here as `0` or `NaN` must not read as "delete
+ * everything": `NaN` compares false against every timestamp, which would spare
+ * the whole cache, but a literal `0` would condemn all of it. Neither is a
+ * thing a person meant to ask for.
+ */
+async function runPrune(maxMb: number, retentionDays: number): Promise<void> {
+  const messages = await cachedMessages()
+  if (messages.size === 0) return
+
+  const days = Number.isFinite(retentionDays) ? Math.max(1, retentionDays) : 90
+  const megabytes = Number.isFinite(maxMb) ? Math.max(1, maxMb) : 500
+
+  const cutoff = Date.now() - days * 24 * 60 * 60 * 1000
+  const kept: CachedMessage[] = []
+  let total = 0
+  for (const message of messages.values()) {
+    if (message.mtimeMs < cutoff) {
+      await evict(message)
+      continue
+    }
+    total += message.bytes
+    kept.push(message)
+  }
+
+  const maxBytes = megabytes * 1024 * 1024
+  if (total <= maxBytes) return
+
+  kept.sort((a, b) => a.mtimeMs - b.mtimeMs)
+  for (const message of kept) {
+    if (total <= maxBytes) break
+    await evict(message)
+    total -= message.bytes
+  }
+}
+
+/** Long enough that a burst of syncs across several accounts becomes one sweep. */
+const PRUNE_DEBOUNCE_MS = 5_000
+/**
+ * And a floor under how often the sweep itself happens.
+ *
+ * Deciding anything means walking the whole cache — a `stat` per file — and the
+ * answer is almost always "nothing to do". Every five minutes is far more often
+ * than a cache measured in hundreds of megabytes can fill and far less often
+ * than the sync that asks. Starts at zero so the first request after launch
+ * always sweeps, which is when a machine that has been off for a month wants it.
+ */
+const PRUNE_MIN_INTERVAL_MS = 5 * 60_000
+
+let pruneTimer: ReturnType<typeof setTimeout> | null = null
+let pruneSettings: { maxMb: number; retentionDays: number } | null = null
+let lastPruneAt = 0
+
+/**
+ * Ask for the inbox cache to be trimmed. Returns before any of it has happened.
+ *
+ * That is the contract, and it is the point of the function rather than a
+ * shortcut. The only caller is the sync IPC handler, which `await`s it before
+ * answering the renderer — so every byte of work done here used to be time the
+ * inbox list spent not appearing, in exchange for housekeeping the user cannot
+ * see and has no reason to wait for. Now the request sets a timer and the
+ * handler returns; the sweep happens a few seconds later on nobody's clock.
+ *
+ * Coalescing rather than queueing. Several accounts syncing together produce
+ * several requests describing the same global budget, and running that sweep
+ * three times would just be the same walk three times over a cache the first
+ * one already brought under the ceiling.
+ *
+ * Failures are logged and dropped. There is no user-facing action for "the
+ * cache could not be trimmed", the next sync asks again, and turning a
+ * housekeeping failure into a failed sync would be trading a real feature for
+ * a tidy disk.
+ *
+ * @param accountId only the account whose sync triggered this. The sweep itself
+ *        is global — `inboxCacheMaxMb` is one ceiling for the whole cache, not
+ *        one per mailbox — so this is carried for the log line and nothing else.
+ */
+export function pruneInboxCache(
   accountId: string,
   maxMb: number,
   retentionDays: number,
 ): Promise<void> {
-  const root = accountRoot(accountId)
-  const files = await walk(root)
-  if (files.length === 0) return
+  pruneSettings = { maxMb, retentionDays }
+  if (pruneTimer) return Promise.resolve()
 
-  const cutoff = Date.now() - retentionDays * 24 * 60 * 60 * 1000
-  const byAge = files.filter((f) => f.mtimeMs < cutoff)
-  for (const f of byAge) await fs.rm(f.path, { force: true }).catch(() => {})
+  pruneTimer = setTimeout(() => {
+    pruneTimer = null
+    const settings = pruneSettings
+    if (!settings) return
+    if (Date.now() - lastPruneAt < PRUNE_MIN_INTERVAL_MS) return
+    lastPruneAt = Date.now()
+    void runPrune(settings.maxMb, settings.retentionDays).catch((e) => {
+      console.error(`[aevistle] could not trim the inbox cache (asked by ${accountId}):`, e)
+    })
+  }, PRUNE_DEBOUNCE_MS)
+  // Never a reason for the process to stay alive: this is housekeeping, and a
+  // pending sweep must not be what keeps Electron from quitting.
+  pruneTimer.unref?.()
 
-  const remaining = files.filter((f) => f.mtimeMs >= cutoff)
-  const maxBytes = maxMb * 1024 * 1024
-  let total = remaining.reduce((sum, f) => sum + f.size, 0)
-  if (total <= maxBytes) return
-
-  // Oldest-touched first, until back under budget.
-  const ordered = [...remaining].sort((a, b) => a.mtimeMs - b.mtimeMs)
-  for (const f of ordered) {
-    if (total <= maxBytes) break
-    await fs.rm(f.path, { force: true }).catch(() => {})
-    total -= f.size
-  }
+  return Promise.resolve()
 }
 
 function guessMime(fileName: string): string {

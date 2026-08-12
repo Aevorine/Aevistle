@@ -938,6 +938,45 @@ for (const band of [NARROW, TABLET]) {
     ok(`compose @ ${band.w}px: message box ${c.bodyShare}% of the compose view on first paint`)
   }
 
+  /*
+   * 1b — and the same box on the screen that is actually in front of someone.
+   *
+   * The measurement above hides three bands before taking it (`hideFirstRun`),
+   * on the argument that a configured install does not carry them. Half of
+   * that is true and the wrong half was load-bearing: `HealthBoard` renders
+   * for notifications being off, exact alarms being denied and saves failing,
+   * none of which is a first-run condition, and the strip has no height cap.
+   * Measured in a browser at 360x800 before this round: 79px at the standard
+   * text size, 131px at `larger`, and 341px at `larger` with a 1.3x Android
+   * system font scale — 42.8% of the view left for the message box, against an
+   * 85% floor the gate was reporting as met.
+   *
+   * So the simulation keeps its number and this asserts the real one. 55, not
+   * 85: with the strip up the box cannot reach 85 and pretending otherwise is
+   * how the floor gets quietly lowered. It is the number `22-compose.css`'s
+   * `min-height` is set to hold, and it fails if either the clamp on the strip
+   * or that floor is removed.
+   */
+  await hideFirstRun(false)
+  await sleep(250)
+  const real = await measure('.view--compose')
+  if (real.bodyShare === null) {
+    fail(`compose @ ${band.w}px: no .textarea--body to measure with the first-run bands shown`)
+  } else if (real.bodyShare < 55) {
+    fail(
+      `compose @ ${band.w}px: with the health strip and first-run banners on screen the message ` +
+        `box is ${real.bodyShare}% of the compose view, under the 55% floor it is held to in ` +
+        `that state`,
+    )
+  } else {
+    ok(
+      `compose @ ${band.w}px: ${real.bodyShare}% with the first-run bands SHOWN ` +
+        `(the state the 85% above simulates away)`,
+    )
+  }
+  await hideFirstRun(true)
+  await sleep(200)
+
   // The multi-account case, argued structurally rather than by configuring two
   // accounts in a scratch profile: the account `<select>` is inside
   // `.compose-head`, so a head that is not rendered cannot cost the message box

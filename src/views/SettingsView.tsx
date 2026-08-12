@@ -39,6 +39,7 @@ import {
   IconSun,
   IconTrash,
 } from '../components/icons'
+import { SearchInput } from '../components/inputs'
 import { AccountDialog } from '../components/AccountDialog'
 import { BackupCard } from './BackupCard'
 import { PairingFileCard } from './PairingFileCard'
@@ -171,9 +172,16 @@ type SettingsRowKind = 'panel' | 'action'
  * `scripts/layout-probe.mjs` finds them by — an id that drifted here would show
  * up immediately as a row that opens nothing.
  */
+interface SettingsRow {
+  id: string
+  labelKey: TranslationKey
+  icon: ReactNode
+  kind: SettingsRowKind
+}
+
 const SETTINGS_GROUPS: Array<{
   captionKey: TranslationKey
-  rows: Array<{ id: string; labelKey: TranslationKey; icon: ReactNode; kind: SettingsRowKind }>
+  rows: SettingsRow[]
 }> = [
   {
     captionKey: 'settings.group.common',
@@ -224,6 +232,47 @@ const SETTINGS_GROUPS: Array<{
 const SECTION_LABEL_KEYS: Record<string, TranslationKey> = Object.fromEntries(
   SETTINGS_GROUPS.flatMap((group) => group.rows.map((row) => [row.id, row.labelKey])),
 )
+
+/**
+ * Section id → the words that section is *about*, for search only.
+ *
+ * Sixteen rows and sixty-odd controls, and a row's own name is two words. Every
+ * search that fails on this screen fails the same way: somebody types the thing
+ * they want changed — 深色, dark, quiet, vibrate, 备份 — and none of those words
+ * is the name of any row, because the name of the row is where the setting
+ * *lives* and not what it *does*. So each row carries a line of the vocabulary
+ * a person would actually reach for.
+ *
+ * Not rendered. It is deliberately not shown under the row title in the index:
+ * `check-tap-targets.mjs` pools row heights across every screen in the app, and
+ * a second line would make these sixteen rows taller than every other row in
+ * the product to buy a sentence nobody reads twice. What it buys is that
+ * searching for 振动 finds 外观 — which is where the vibration switch actually
+ * is — and that is a better answer than a description.
+ *
+ * Explicit keys rather than a `settings.search.${id}` template, so a row added
+ * to `SETTINGS_GROUPS` without its keywords is a missing property TypeScript
+ * can be asked about, rather than a translation key invented at runtime that
+ * renders as itself.
+ */
+const SECTION_SEARCH_KEYS: Record<string, TranslationKey> = {
+  'set-appearance': 'settings.search.appearance',
+  'set-notifications': 'settings.search.notifications',
+  'set-sending': 'settings.search.sending',
+  'set-accounts': 'settings.search.accounts',
+  'set-privacy': 'settings.search.privacy',
+  'set-digest': 'settings.search.digest',
+  'set-greetings': 'settings.search.greetings',
+  'set-backup': 'settings.search.backup',
+  'set-transfer': 'settings.search.transfer',
+  'set-devices': 'settings.search.devices',
+  'set-calendarsub': 'settings.search.calendarsub',
+  'set-data': 'settings.search.data',
+  'set-pairingfile': 'settings.search.pairingfile',
+  'set-control': 'settings.search.control',
+  'set-update': 'settings.search.update',
+  'set-about': 'settings.search.about',
+}
 
 export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: boolean }) {
   const {
@@ -598,6 +647,144 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
     toast.push({ tone: 'info', title: t('common.done') })
   }
 
+  /* --- searching the sixteen ---------------------------------------------
+   *
+   * Sixteen rows, sixty-odd controls, and until now the only way to find one
+   * was to know which of the four groups it had been filed under. That is a
+   * guess, and it is the same guess a tabbed settings screen forces — the thing
+   * `SettingsSection`'s header argues against at length.
+   *
+   * What a query is matched against, per row:
+   *
+   *   the row's own name        设置 → 外观
+   *   the group it sits in      so 常用 finds the three rows under it
+   *   its keywords              `SECTION_SEARCH_KEYS` — the words a person
+   *                             types, which are almost never a row's name
+   *   its current value         so 22:00 finds the quiet-hours row, and
+   *                             "3 accounts" is findable by the number
+   *
+   * The value is the interesting one and it is free: `rowValues` is already
+   * computed for the right-hand side of every row, so searching it costs one
+   * string join and cannot drift from what is on screen.
+   *
+   * Case-folded with `toLowerCase` and matched as a substring. No token
+   * splitting, no fuzzy matching: three of the six locales do not put spaces
+   * between words, and a matcher that is clever in English and wrong in
+   * Chinese is worse than one that is plain in both.
+   */
+  const [settingsQuery, setSettingsQuery] = useState('')
+
+  /**
+   * What choosing a row does, which is not the same thing on the two layouts.
+   *
+   * On a phone and in the 600-839px band a row opens a section — the index is
+   * the screen, and `openSection` is how a section gets onto it. On a desktop
+   * every section is already on the page as a card, so there is nothing to
+   * open and the honest action is to *go there*: the same `scrollIntoView` the
+   * jump bar performs, against the same anchor ids, so search and the jump bar
+   * cannot land in two different places.
+   *
+   * The query is cleared either way. Searching is a thing you do to get
+   * somewhere; leaving the field full would leave the index filtered to one row
+   * behind a section you are already reading.
+   */
+  const openRow = useCallback(
+    (id: string) => {
+      setSettingsQuery('')
+      if (narrow || twoPane) {
+        setOpenSection(id)
+        return
+      }
+      document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    },
+    [narrow, twoPane],
+  )
+
+  /** The matches, in index order — or `null`, which means "not searching". */
+  const searchRows = useMemo<SettingsRow[] | null>(() => {
+    const q = settingsQuery.trim().toLowerCase()
+    if (!q) return null
+    const out: SettingsRow[] = []
+    for (const group of SETTINGS_GROUPS) {
+      for (const row of group.rows) {
+        const keywords = SECTION_SEARCH_KEYS[row.id]
+        const hay = [
+          t(row.labelKey),
+          t(group.captionKey),
+          keywords ? t(keywords) : '',
+          rowValues[row.id] ?? '',
+        ]
+          .join('\n')
+          .toLowerCase()
+        if (hay.includes(q)) out.push(row)
+      }
+    }
+    return out
+  }, [rowValues, settingsQuery, t])
+
+  /** One row of the index, drawn the same whether it is listed or found. */
+  const indexRow = (row: SettingsRow) => {
+    const value = rowValues[row.id]
+    return (
+      <button
+        key={row.id}
+        type="button"
+        className={`settingsrow settingsrow--${row.kind}`}
+        /* Beside a pane the row is no longer a door you go through and come
+           back from — it is a tab, and the one whose section is showing has to
+           say so, or tapping a row changes the right half of the screen and
+           nothing on the left half moves. Only in the band: on a phone the row
+           opens a dialog and there is nothing to mark as current once it
+           closes. */
+        aria-current={twoPane && selectedSection === row.id ? 'true' : undefined}
+        onClick={() => openRow(row.id)}
+      >
+        <span className="settingsrow__icon">{row.icon}</span>
+        <span className="settingsrow__label">{t(row.labelKey)}</span>
+        {/* An action row carries no value: "Backup and restore" has no current
+            state, it has a thing it does, and a grey word beside it would only
+            look like one. */}
+        {row.kind === 'panel' && value ? (
+          <span className="settingsrow__value">{value}</span>
+        ) : null}
+        <IconChevronRight size={16} className="settingsrow__chevron" />
+      </button>
+    )
+  }
+
+  const settingsSearch = (
+    <SearchInput
+      value={settingsQuery}
+      onChange={setSettingsQuery}
+      placeholder={t('settings.searchPlaceholder')}
+    />
+  )
+
+  /**
+   * The results, in one unlabelled group.
+   *
+   * Rows are drawn by `indexRow`, unchanged — same height, same value on the
+   * right, same chevron. A result that looked different from the row it stands
+   * for would be a second kind of thing to learn, and the row is already the
+   * thing that knows how to open itself.
+   *
+   * No grouping by caption. Four captions over one or two rows each is more
+   * chrome than answer, and the group a row belongs to is already one of the
+   * things the query matched against.
+   */
+  const searchResults = searchRows ? (
+    searchRows.length === 0 ? (
+      <p className="settingssearch__empty">{t('settings.searchEmpty')}</p>
+    ) : (
+      <div className="settingsgroup">
+        <div className="settingsgroup__caption">
+          {t('settings.searchCount', { n: searchRows.length })}
+        </div>
+        <div className="settingsgroup__list">{searchRows.map(indexRow)}</div>
+      </div>
+    )
+  ) : null
+
   /* --- the index --------------------------------------------------------
      Sixteen rows in four groups, and one card above them naming the account
      this app sends as. The card is not a sixteenth setting: it is the answer
@@ -611,70 +798,51 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
      of sixteen rows to keep in the same order. */
   const settingsIndex = (
     <div className="settingsindex">
-      <button
-        type="button"
-        className="settingsid"
-        onClick={() => setOpenSection('set-accounts')}
-      >
-        <span className="settingsid__avatar" aria-hidden="true">
-          <IconMail size={20} />
-        </span>
-        <span className="settingsid__body">
-          <span className="settingsid__name">
-            {defaultAccount ? accountLabel(defaultAccount) : t('settings.identityNoAccount')}
-          </span>
-          {defaultAccount ? (
-            <span className="settingsid__address">{defaultAccount.fromAddress}</span>
-          ) : null}
-        </span>
-        <StatusChip
-          tone={identityNeedsAttention ? 'warning' : 'success'}
-          label={
-            identityNeedsAttention
-              ? t('settings.identityAttention')
-              : t('settings.identityHealthy')
-          }
-          dot
-        />
-        <IconChevronRight size={16} className="settingsrow__chevron" />
-      </button>
+      {/* On a phone and in the band the index *is* the screen, so the field
+          belongs at the top of it. On a desktop the index is not rendered at
+          all and the same field is placed above the jump bar instead — see
+          where `settingsSearch` is used below. */}
+      {settingsSearch}
+      {searchRows ? (
+        searchResults
+      ) : (
+        <>
+          <button
+            type="button"
+            className="settingsid"
+            onClick={() => setOpenSection('set-accounts')}
+          >
+            <span className="settingsid__avatar" aria-hidden="true">
+              <IconMail size={20} />
+            </span>
+            <span className="settingsid__body">
+              <span className="settingsid__name">
+                {defaultAccount ? accountLabel(defaultAccount) : t('settings.identityNoAccount')}
+              </span>
+              {defaultAccount ? (
+                <span className="settingsid__address">{defaultAccount.fromAddress}</span>
+              ) : null}
+            </span>
+            <StatusChip
+              tone={identityNeedsAttention ? 'warning' : 'success'}
+              label={
+                identityNeedsAttention
+                  ? t('settings.identityAttention')
+                  : t('settings.identityHealthy')
+              }
+              dot
+            />
+            <IconChevronRight size={16} className="settingsrow__chevron" />
+          </button>
 
-      {SETTINGS_GROUPS.map((group) => (
-        <div className="settingsgroup" key={group.captionKey}>
-          <div className="settingsgroup__caption">{t(group.captionKey)}</div>
-          <div className="settingsgroup__list">
-            {group.rows.map((row) => {
-              const value = rowValues[row.id]
-              return (
-                <button
-                  key={row.id}
-                  type="button"
-                  className={`settingsrow settingsrow--${row.kind}`}
-                  /* Beside a pane the row is no longer a door you go through
-                     and come back from — it is a tab, and the one whose
-                     section is showing has to say so, or tapping a row
-                     changes the right half of the screen and nothing on the
-                     left half moves. Only in the band: on a phone the row
-                     opens a dialog and there is nothing to mark as current
-                     once it closes. */
-                  aria-current={twoPane && selectedSection === row.id ? 'true' : undefined}
-                  onClick={() => setOpenSection(row.id)}
-                >
-                  <span className="settingsrow__icon">{row.icon}</span>
-                  <span className="settingsrow__label">{t(row.labelKey)}</span>
-                  {/* An action row carries no value: "Backup and restore"
-                      has no current state, it has a thing it does, and a
-                      grey word beside it would only look like one. */}
-                  {row.kind === 'panel' && value ? (
-                    <span className="settingsrow__value">{value}</span>
-                  ) : null}
-                  <IconChevronRight size={16} className="settingsrow__chevron" />
-                </button>
-              )
-            })}
-          </div>
-        </div>
-      ))}
+          {SETTINGS_GROUPS.map((group) => (
+            <div className="settingsgroup" key={group.captionKey}>
+              <div className="settingsgroup__caption">{t(group.captionKey)}</div>
+              <div className="settingsgroup__list">{group.rows.map(indexRow)}</div>
+            </div>
+          ))}
+        </>
+      )}
     </div>
   )
 
@@ -747,6 +915,23 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
             list itself is built once per language change, above — written
             inline it was a new array on every render, and `SectionNav` keys an
             IntersectionObserver over eight elements on exactly that value. */}
+        {/* The same field, on the layout that has no index to put it in.
+            Above the jump bar rather than beside it: the bar is sixteen labels
+            in a strip that already scrolls sideways, and a field wedged into it
+            would be the seventeenth. Above, it reads as what it is — the way
+            *in* to sixteen cards, with the bar as the way *along* them.
+
+            Results are rendered here too, under the field, rather than
+            replacing the cards. On this layout every section is already on the
+            page; hiding fifteen of them would be answering "where is dark mode"
+            by throwing away the page it is on. Choosing a result scrolls to it
+            — see `openRow`. */}
+        {narrow ? null : (
+          <div className="settingssearch">
+            {settingsSearch}
+            {searchResults}
+          </div>
+        )}
         {narrow ? null : <SectionNav sections={navSections} />}
 
         {/* On a phone the index is the screen, so it belongs in the column
@@ -981,6 +1166,25 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
             title={t('inbox.push')}
             description={t('inbox.pushHint')}
           />
+          {/* How far ahead the bodies come down.
+              The list carries 50 messages and only the first 15 (metered) or
+              30 (unmetered) used to have their body fetched with it, so the
+              16th message opened paid a full IMAP ladder — the file's own note
+              puts that at six to eight sequential round trips. Covering all 50
+              is the fix and it costs data, so it is a choice rather than a new
+              default: 'wifi' keeps the metered budget and widens it only on an
+              unmetered link, which is what someone on a phone plan wants.
+              `MailFetcher.prefetchMode()` is the reader. */}
+          <Field label={t('settings.inboxPrefetch')} hint={t('settings.inboxPrefetchHint')}>
+            <select
+              className="select"
+              value={s.inboxPrefetchFull ?? 'wifi'}
+              onChange={(e) => patch({ inboxPrefetchFull: e.target.value as 'wifi' | 'always' })}
+            >
+              <option value="wifi">{t('settings.inboxPrefetchWifi')}</option>
+              <option value="always">{t('settings.inboxPrefetchAlways')}</option>
+            </select>
+          </Field>
         </Card>
         </SettingsSection>
 
@@ -1385,6 +1589,34 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
               onChange={(v) => patch({ snapshotAttachments: v })}
               title={t('settings.snapshotAttachments')}
               description={t('schedule.snapshotHint')}
+            />
+
+            {/*
+              The switch this setting never had.
+
+              `offlineQueueEnabled` has been read in three places since it was
+              added — `sendNow` and `flushOutbox` in `state/AppState.tsx`, and
+              the branch in `ComposeView` that reports "queued" instead of
+              "failed" — and there was no control for it anywhere in the
+              application. The only way to turn it off was to edit `state.json`
+              by hand, which means in practice it could not be turned off at
+              all, and the default behaviour was undocumented on screen.
+
+              `!== false`, not `=== true`: the field is optional and its default
+              is on, and all three read sites test it exactly this way. A
+              `=== true` here would draw the switch off on every install that
+              predates the field while the code went on queueing, which is a
+              control that lies about what the app is doing.
+
+              Worded for what happens, not for what it is called. Nobody looking
+              for this is looking for the word "queue" — they are looking for
+              why a mail they sent on a train did not come back as a failure.
+            */}
+            <Switch
+              checked={s.offlineQueueEnabled !== false}
+              onChange={(v) => patch({ offlineQueueEnabled: v })}
+              title={t('settings.offlineQueue')}
+              description={t('settings.offlineQueueHint')}
             />
 
             <div className="section-label" style={{ marginTop: 'var(--sp-2)' }}>

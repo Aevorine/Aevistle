@@ -180,12 +180,78 @@
   min-height: var(--ctl-md);
 }
 
-.homehero__greet {
+/* `.homehero__greet` used to be here — 18.67px bold, the top line of the band.
+   The greeting moved down to `.homehero__sub` and the rule went with it rather
+   than being left behind: a selector nothing renders is a rule the next person
+   has to prove is dead before they can touch anything near it. The rank it
+   carried did not move — `.homehero__fact` below is the same 18.67px bold in
+   the same position, which is why the band's contrast maths still holds. */
+
+/* --- what today looks like -------------------------------------------------
+ *
+ * Two pressable figures where the greeting used to be, at the same rank the
+ * greeting had. `--text-lg` bold is deliberately *not* raised to make them
+ * louder: the line is in the loudest position on the screen already, and the
+ * hero's contrast maths (see the tint section above) was computed for
+ * `--text-lg` bold on this band. A larger size here would be a fourth thing to
+ * re-measure across 189 accent x theme x style combinations for no gain.
+ *
+ * `flex-wrap` because two of these are much longer in Russian and French than
+ * in Chinese — «3 к отправке сегодня» against 今天待发 3 封 — and the row also
+ * carries a 48px search button. Wrapping costs the hero one line at those
+ * widths; the alternative, ellipsising a figure, would clip the number itself.
+ */
+.homehero__today {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0;
+  min-width: 0;
+}
+
+/*
+ * Each figure is a real button and it is `--ctl-md` tall, which is what keeps
+ * `.homehero__top`'s own 48px floor honest: the row is as tall as these are,
+ * not taller because of them.
+ *
+ * The 13% overlay is the same one `.homestats` paints under the three tiles
+ * below, so the two groups read as one family of "figures you can press"
+ * rather than as a pill and a panel that happen to share a screen. Mixed from
+ * `--accent-text` rather than named, for the reason the whole file gives: it is
+ * the one foreground guaranteed to read on every accent, in both themes, under
+ * all seven visual styles.
+ */
+.homehero__fact {
+  display: flex;
+  align-items: center;
+  min-height: var(--ctl-md);
+  padding: 0 var(--sp-3);
+  border: 0;
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--accent-text) 13%, transparent);
+  color: var(--accent-text);
   font-size: var(--text-lg);
   font-weight: var(--fw-bold);
   line-height: var(--leading-tight);
-  margin: 0;
-  min-width: 0;
+  cursor: pointer;
+}
+.homehero__fact:hover {
+  background: color-mix(in srgb, var(--accent-text) 20%, transparent);
+}
+/*
+ * Something failed today.
+ *
+ * A heavier overlay, not `--danger`. This band is `--accent` in one of seven
+ * hues and `--danger` has no contrast guarantee against any of them — the file
+ * header's whole argument. Weight is the signal instead, which survives every
+ * palette and does not depend on colour being seen at all.
+ */
+.homehero__fact[data-alert] {
+  background: color-mix(in srgb, var(--accent-text) 26%, transparent);
+}
+.homehero__fact[data-alert]:hover {
+  background: color-mix(in srgb, var(--accent-text) 32%, transparent);
 }
 
 .homehero__search {
@@ -595,6 +661,14 @@
 
 .homearrange__row {
   display: flex;
+  /* Wraps so the rename/icon editor can be a full-width child of the row it
+     edits rather than a sibling. That matters for more than tidiness:
+     `useReorder` finds a drop target with `closest('[data-reorder-id]')`, and
+     the attribute is on this row — an editor rendered as a sibling would be a
+     patch of the dialog that belongs to no row at all, and a pointer crossing
+     it during a drag would find nothing. Inside, every part of the open editor
+     still answers "this row". */
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--sp-2);
   /* `--ctl-lg`, the same floor `.homemod__row` and every other list row in the
@@ -605,6 +679,80 @@
   border: 1px solid var(--border-subtle);
   border-radius: var(--r-md);
   background: var(--surface-1);
+}
+
+/* --- renaming a cell, and changing its glyph ------------------------------
+ *
+ * Open under the row it belongs to, one at a time (`editingCell` in
+ * `HomeView`). `flex-basis: 100%` is what puts it on its own line inside the
+ * wrapping row above; the hairline is what says the two lines are one row
+ * rather than two.
+ */
+.homearrange__editor {
+  flex: 1 1 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  margin-top: var(--sp-1);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.homearrange__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+/*
+ * `--text-sm` is the data rank, and a field label is exactly that: a word
+ * looked at rather than read. The two in this editor are 名称 and 图标.
+ */
+.homearrange__fieldLabel {
+  font-size: var(--text-sm);
+  color: var(--text-3);
+}
+
+/* Seventeen swatches — the app's own glyph plus the sixteen in
+   `HOME_CELL_ICONS` — wrapped into rows of whatever fits. `auto-fill` rather
+   than a fixed column count, so the same rule holds at 328px inside a phone
+   dialog (six per row) and at 704px on a tablet. */
+.homearrange__icons {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--ctl-md), 1fr));
+  gap: var(--sp-2);
+}
+
+/*
+ * Every swatch is a full tap target. A 28px glyph button in a grid of
+ * seventeen is the control this whole round exists to stop appearing: it is
+ * reachable with a mouse and a coin toss with a thumb.
+ */
+.homearrange__icon {
+  display: grid;
+  place-items: center;
+  min-width: var(--ctl-md);
+  min-height: var(--ctl-md);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-md);
+  background: var(--surface-1);
+  color: var(--text-2);
+  cursor: pointer;
+}
+.homearrange__icon:hover {
+  background: var(--surface-hover);
+}
+/* The chosen one, said twice: a filled plate *and* a border in the accent. One
+   of the two alone is a difference somebody looking at a grid of seventeen
+   near-identical squares in bright sunlight will miss. */
+.homearrange__icon[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+}
+.homearrange__icon:focus-visible {
+  outline: var(--ring);
+  outline-offset: var(--ring-offset);
 }
 
 /*
@@ -628,7 +776,18 @@
  * dialog grew a horizontal scrollbar on the one screen size it exists for.
  */
 .homearrange__pick {
-  flex: 1 1 auto;
+  /*
+   * `flex-basis: 0`, not `auto`, and that changed when the row learned to wrap.
+   *
+   * With `auto` the basis is the select's own content width — the longest
+   * option, 更早的工作日历订阅 in Chinese and longer in Russian — and a wrapping
+   * row honours that by giving the select a line of its own and pushing the
+   * edit button onto a third. Measured at 390px: three lines where there had
+   * been one, with 200px of empty row beside the grip. From zero it takes the
+   * space that is left instead of asking for the space it wants, which is what
+   * `min-width: 0` was always there to allow.
+   */
+  flex: 1 1 0;
   min-width: 0;
 }
 

@@ -99,6 +99,86 @@
 }
 
 /*
+ * The same block, folded to one line while the message has the caret.
+ *
+ * Two rows is 88px of a 654px view spent on three answers given once per draft.
+ * Folded, all three are still on screen — who it leaves as, who it goes to,
+ * what it is about — and the message box gets the other 44px. Tapping the line
+ * unfolds it (`headerPinned` in ComposeView), so nothing is behind a gesture
+ * nobody would guess at.
+ *
+ * It is a `button` carrying `.composetop2`, so it inherits the block's own
+ * geometry and cannot drift from it; everything below re-states only what a
+ * button gets wrong by default. Height is the row height, not `--ctl-md`: this
+ * line replaces a 44px row and taking 48 would hand back four of the pixels it
+ * exists to free. It is a full-width bar, so the 44px is a floor on a target
+ * 328px wide.
+ *
+ * Every part is `min-width: 0` with its own ellipsis rather than one truncation
+ * across the line: with a single overflow the subject disappears entirely the
+ * moment the recipient is long, and the subject is the half that says which
+ * draft this is.
+ */
+.composetop2--fold {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  min-height: 44px;
+  padding: 0 var(--sp-4);
+  border: 0;
+  box-shadow: inset 0 -1px 0 0 var(--border-subtle);
+  background: transparent;
+  color: var(--text-1);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+/* Three items with three different rights to the row, because giving all three
+   `flex: 1 1 auto` truncated all three at once: screenshotted at 360px, the
+   line read "选... > 还没有收... 关于下周三的会..." — three ellipses and not one
+   readable fact, which is worse than the two rows it replaced.
+
+   So the order in which they give way is the order in which they matter least.
+   The account never shrinks (it is short, and a truncated account is the one
+   mistake this line exists to prevent). The recipient shrinks but not past
+   `min-width`, because who it goes to is the answer worth checking before
+   Send. The subject takes what is left and truncates first — it is the field
+   the caret was just in. */
+.composetop2__foldfrom {
+  flex: 0 0 auto;
+  max-width: 8em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-3);
+}
+.composetop2__foldarrow {
+  flex: none;
+  color: var(--text-3);
+}
+.composetop2__foldto {
+  flex: 0 1 auto;
+  min-width: 5em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Dimmer, and separated by a rule rather than by a space: with no separator
+   the recipient and the subject ran together into one string that read as a
+   single truncated sentence. */
+.composetop2__foldsubject {
+  flex: 1 1 0%;
+  min-width: 0;
+  padding-inline-start: var(--sp-2);
+  border-inline-start: 1px solid var(--border-subtle);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-3);
+}
+
+/*
  * One row, 44px, and its separator costs nothing.
  *
  * `box-shadow: inset` rather than `border-bottom`: a border is 1px of layout on
@@ -423,8 +503,8 @@
  * window would put it against whatever positioned ancestor happened to exist,
  * which is the page.
  */
-:root[data-shell='mobile'] .view--compose .compose-layout > .field:has(.textarea--body),
-.view--compose[data-narrow] .compose-layout > .field:has(.textarea--body) {
+:root[data-shell='mobile'] .view--compose .compose-layout > .field--body,
+.view--compose[data-narrow] .compose-layout > .field--body {
   position: relative;
 }
 
@@ -1069,6 +1149,16 @@
   box-shadow: var(--shadow-md);
   overflow-x: auto;
   scrollbar-width: none;
+  /* The strip scrolls and hides its scrollbar, which leaves a row of buttons
+     that ends at the edge with nothing saying it continues. Six of the seven
+     fit at 360px and all seven at 412px, so on the narrowest phones the last
+     one is invisible and unguessable. A fade on the trailing edge is the whole
+     hint; `-webkit-mask-image` rather than the unprefixed property because the
+     prefixed form is the one every WebView back to `minSdkVersion 24` has —
+     the same reason this file no longer uses `:has()` or `dvh`. It degrades to
+     no fade, never to a clipped strip. */
+  -webkit-mask-image: linear-gradient(to left, transparent 0, #000 var(--sp-6));
+  mask-image: linear-gradient(to left, transparent 0, #000 var(--sp-6));
 }
 .composeacts .markup::-webkit-scrollbar {
   display: none;
@@ -1091,7 +1181,7 @@
  * Written against the field rather than the row so there is nothing left in
  * between for a future edit to remove.
  */
-:root[data-shell='mobile'] .view--compose .compose-layout > .field:has(.textarea--body) > .field__label {
+:root[data-shell='mobile'] .view--compose .compose-layout > .field--body > .field__label {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -1103,8 +1193,51 @@
   border: 0;
 }
 /* And the gap that separated the box from a row that no longer exists. */
-:root[data-shell='mobile'] .view--compose .compose-layout > .field:has(.textarea--body) {
+:root[data-shell='mobile'] .view--compose .compose-layout > .field--body {
   gap: 0;
+}
+
+/* The message box's label, on one line, wherever it is visible.
+
+   There was no `white-space: nowrap` on `.field__label` anywhere in the
+   stylesheet, and two mechanisms could break this one across lines: it is a
+   flex item with `flex: 1 1 auto; min-width: 0` sitting next to the seven
+   markup buttons (04-forms.css:19-22), and `17-phone.css:211-218` gives it
+   `flex-wrap: wrap` under 600px while pushing `.field__tools` onto a row of
+   its own. The name of a field is not prose and has no business reflowing.
+
+   Scoped to compose rather than set on `.field__label` globally: settings
+   labels are full sentences in ru/fr/ar and are supposed to wrap. */
+.view--compose .field__label,
+.view--compose .field__labelrow > .field__label {
+  white-space: nowrap;
+}
+
+/* --- the floor under the message box -------------------------------------- */
+
+/*
+ * Late enough in the cascade to survive `15-compose-narrow.css`'s
+ * `min-height: 0`, which is what lets flex-grow hand this box whatever is
+ * left. That is right until something above it grows without a bound.
+ *
+ * Measured at 360x800, no account configured, so the health strip is up:
+ * 72.7% of the view at the standard text size, 58.7% at `larger`, and 42.8%
+ * at `larger` plus a 1.3x Android system font scale — the strip alone was
+ * 341px of a 654px view and the box was 230px. Clamping that strip to two
+ * lines (11-status.css) removes the cause; this is the guarantee, so the next
+ * band that grows without asking cannot repeat it.
+ *
+ * `calc((100vh - var(--kb)) * 0.46)` rather than `46dvh`: `dvh` is Chromium
+ * 108 against a `minSdkVersion 24` build — the same trap the `:has()`
+ * selectors were in, and the reason this file no longer uses either. `--kb`
+ * is the keyboard inset the shell already subtracts from its own height
+ * (02-shell.css), so the floor rises with the keyboard instead of pushing the
+ * form into scroll behind it. `min()` stops a tall tablet reserving more than
+ * the box can use.
+ */
+:root[data-shell='mobile'] .view--compose .compose-layout > .field--body > .textarea--body,
+.view--compose[data-narrow] .compose-layout > .field--body > .textarea--body {
+  min-height: min(calc((100vh - var(--kb)) * 0.46), 560px);
 }
 
 /*
@@ -1171,6 +1304,17 @@
   font-size: var(--text-base);
   text-align: start;
   cursor: pointer;
+}
+
+/* The same row with nothing to open.
+
+   `div`, not `button`, so it does not advertise a tap that does nothing, and
+   `cursor`/`text-align` are the only things it has to take back from the head
+   rule above. It keeps the 44px so the strip does not change height when a
+   draft crosses from "one warning" to "none" — a row that resizes as you type
+   moves the message box under your caret. */
+.warnfold__head--static {
+  cursor: default;
 }
 
 .warnfold__icon {

@@ -61,9 +61,46 @@ export function sanitizeHeader(value: string): string {
   return value.replace(CONTROL_CHARS, ' ').trim()
 }
 
-/** Split a pasted blob of addresses on commas, semicolons and whitespace. */
+/**
+ * Full-width separators, normalised to their ASCII equivalents first.
+ *
+ * A list copied out of a Chinese document, a WeChat message or a spreadsheet
+ * is separated by `，`, `；` or `、`, not by `,` and `;`. Splitting on the
+ * ASCII set alone left the entire blob as one token, so pasting twelve
+ * addresses produced one chip reading like a paragraph — and the chip looked
+ * enough like a recipient that the mistake was only visible on the bounce.
+ */
+const FULLWIDTH_SEPARATORS = /[，；、．。]/g
+
+/** `Name <addr@example.com>`, the form every mail client puts on the clipboard. */
+const ANGLE_ADDRESS = /<([^<>]+)>/g
+
+/**
+ * Split a pasted blob of addresses into individual recipients.
+ *
+ * Two paths, because the two kinds of paste need opposite treatment:
+ *
+ *  - A blob containing `<...>` came from a mail client or an exported contact
+ *    list, and the text outside the brackets is a display name. Splitting that
+ *    on whitespace turns `张三 <a@b.com>` into a recipient called `张三`, which
+ *    is a chip that cannot be delivered to and reads as if it can. So when
+ *    brackets are present, only what is inside them is taken.
+ *  - Anything else is a plain list, and every token is kept even when it does
+ *    not look like an address. Dropping the odd ones here would silently
+ *    swallow a typed word on the Enter path, which shares this function: a
+ *    recipient you can see and correct beats one that vanished.
+ */
 export function parseAddressList(raw: string): string[] {
-  return raw
+  const normalised = raw.replace(FULLWIDTH_SEPARATORS, ',')
+
+  const bracketed: string[] = []
+  for (const m of normalised.matchAll(ANGLE_ADDRESS)) {
+    const inner = m[1].trim()
+    if (inner) bracketed.push(inner)
+  }
+  if (bracketed.length > 0) return bracketed
+
+  return normalised
     .split(/[,;\s]+/)
     .map((s) => s.trim().replace(/^[<]|[>]$/g, ''))
     .filter(Boolean)

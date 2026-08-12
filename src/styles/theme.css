@@ -14,6 +14,29 @@
 /* ==========================================================================
    Typeface composition — 宋体 for Chinese, Times New Roman for everything else
 
+   WHERE THIS FACE IS USED, as of this round: prose only.
+
+   It was the whole interface until now, and that was a defect rather than a
+   decision. Measured in a real browser with canvas metrics: a probe string
+   that renders at 168px in Times New Roman rendered at exactly 168px in the
+   app's buttons, tab labels, settings rows and inbox rows — against 182.4px
+   for Arial and 196.7px for generic sans-serif. So every piece of chrome in
+   the app was set in Times New Roman, because `--font-sans` led with this
+   family and the name had stopped describing what it pointed at.
+
+   The split now is by *job*, and there are three faces:
+
+     --font-sans   the interface. Buttons, labels, tabs, list rows, settings.
+                   A real system sans (Segoe UI Variable / PingFang / Roboto).
+     --font-prose  what a person reads as a message. The reader, the compose
+                   message box. This family — Times New Roman + 宋体.
+     --font-code   machine text. Paths, URLs, cron strings, recovery keys,
+                   verification codes. A real monospace.
+
+   Nothing about the face below changed; only how far it reaches. Reverting
+   the whole thing is still one declaration — point `--font-sans` back at
+   "Aevistle Text" — which is the promise this was changed under.
+
    One family name, "Aevistle Text", made of two fonts split by codepoint.
    `unicode-range` lets the browser choose per *character* rather than per
    element, so "Aevistle 定时发送" takes its Latin from Times New Roman and its
@@ -62,15 +85,18 @@
    device pixels per CSS pixel, a 14px 宋体 horizontal stroke lands on well
    under one physical pixel and the rasteriser must either drop it or smear it
    grey. The defect is stroke *contrast*, not scale, so it is not reachable by
-   weight or line-height — only by not putting 宋体 at 14px. The scale below
-   already forbids that, and the unicode-range split is what makes it hold: the
-   14px rank is reserved for data — timestamps, counts, chips, column heads —
-   data is figures and Latin, and figures and Latin belong to the Times face.
-   So the small rank renders as Times New Roman numerals, and 宋体 starts at the
-   16px prose rank and only goes up. That guarantee is exactly as strong as the
-   content rule that keeps language off 14px; a 14px chip carrying a Chinese
-   label is the one case that still lands Songti on the small rank, and the fix
-   for it is to move that text up a rank, not to special-case the font here.
+   weight or line-height — only by not putting 宋体 at 14px.
+
+   That was previously held by a content rule — "the 14px rank is data, data is
+   figures and Latin, and Latin belongs to the Times half of this family" —
+   with one standing hole in it: a 14px chip carrying a Chinese label landed
+   Songti on the small rank anyway, and there are several of those.
+
+   Scoping this family to prose closes the hole outright rather than
+   documenting it. Nothing below 16px is drawn in it any more, in any language,
+   because nothing below 16px is prose: the 14px rank is chrome and chrome is
+   `--font-sans`, whose CJK half is PingFang/雅黑 — even-stroked faces drawn for
+   screens, which is the one thing 宋体 at 14px could never be.
    ========================================================================== */
 
 @font-face {
@@ -185,9 +211,15 @@
    block.
 
    Heading-only by design — see the `[data-style="runecircuit"]` rules in
-   app.css that apply it, and never let this reach `--font-sans`. 楷体 at 小四
-   (16px) body size is markedly less legible than 宋体: thinner joins, more
-   slant, drawn to be read large rather than read for an hour. */
+   app.css that apply it, and never let this reach `--font-sans` or
+   `--font-prose`. 楷体 at 小四 (16px) body size is markedly less legible than
+   宋体: thinner joins, more slant, drawn to be read large rather than read for
+   an hour.
+
+   The claim above — "the family `--font-mono` already draws from" — was false
+   for four rounds, because `--font-mono` was an alias of the body serif for
+   all of them and the pairing this face was designed around silently did not
+   exist. `--font-code` is a real monospace again, so it is true again. */
 @font-face {
   font-family: "Aevistle Rune";
   font-style: normal;
@@ -265,57 +297,121 @@
      iOS and Android zoom the page when a focused field is under 16px, so the
      body step is an interaction requirement as well as a reading one. What
      comes down is only the one rank *below* prose, and it stops at 14px. */
-  --font-sans:
-    /* The pairing, and in practice the only entry that is ever reached for
-       Latin or Chinese: 'Aevistle Text' resolves per codepoint to Times New
-       Roman for Latin/digits/punctuation and to 宋体 for CJK. The name is a
-       historical misnomer now — it names the body face, not a sans — and is
-       kept because ~40 rules and the `--font-mono` alias below read it. */
-    "Aevistle Text",
-    /* Everything below is fallback, in two senses. Normally it is reached only
-       for codepoints neither @font-face declares a unicode-range for: Arabic
-       for the `ar` locale, and emoji. It is also the whole safety net if both
-       faces somehow fail to resolve, which is why the full platform stack is
-       kept rather than trimmed to the two scripts that still need it.
+  /* ---- the three faces ----
+     One token per job, and which token a rule gets is decided by what the text
+     *is*: chrome you operate, prose you read, machine text you transcribe.
+     `body` (app/01-base.css) sets `--font-sans`, so chrome is the default and
+     the other two are named at the handful of places that need them.
 
-       Latin, digits and punctuation — each platform's own interface face. */
-    -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI",
+     `font-variant-numeric: tabular-nums` is set once on `body` and inherits
+     everywhere, so digits already line up in all three faces — there is
+     nothing per-face to declare for it, and there was nothing to declare
+     before either. */
+
+  /* The interface. Buttons, tab labels, settings rows, list rows, chips,
+     headings — everything a person operates rather than reads.
+
+     Windows names lead. This app ships on Windows and Android, and the order
+     between the platform-exclusive names is otherwise arbitrary: "Segoe UI
+     Variable Text" does not resolve on macOS and `-apple-system` does not
+     resolve on Windows, so whichever is listed first, each machine reaches its
+     own. Leading with the one this app is actually developed and measured on
+     keeps the stack honest about which face the numbers in this file describe.
+
+     "Segoe UI Variable Text" is the *body* optical size of Windows 11's
+     variable Segoe, not a different family: Display is cut for large sizes and
+     Small for captions, and Text is the one drawn for the 14-16px band that is
+     nearly all of this interface. "Segoe UI" behind it is Windows 10. */
+  --font-sans:
+    /* Latin, digits and punctuation — each platform's own interface face. */
+    "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont,
     Roboto, "Helvetica Neue", Arial,
-    /* CJK. Reached only for codepoints the faces above have no glyph for. */
+    /* CJK, and not an afterthought: this is what the Chinese half of the
+       interface is actually set in now, not a gap-filler. All four leading
+       names are screen faces with even strokes — which is the whole reason
+       chrome may go down to the 14px rank at all (see the stroke-contrast note
+       at the head of this file). */
     "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", "微软雅黑",
     "Noto Sans CJK SC", "Source Han Sans SC", "Noto Sans SC",
     "HarmonyOS Sans SC", "Hiragino Sans GB", "Heiti SC",
-    /* The RTL locale, then emoji, then the generic. The generic is `serif`,
-       not the `sans-serif` that stood here while the sans experiment was in
-       force: a machine that has fallen this far has nothing named left to
-       offer, and a serif is the closer guess at what this file is asking for.
-       There is exactly one generic on purpose — a `sans-serif` ahead of it
-       would always match and make `serif` unreachable. */
-    "Noto Sans Arabic", "Segoe UI Emoji", "Noto Color Emoji", serif;
+    /* The RTL locale, then emoji, then the generic. Exactly one generic on
+       purpose: any generic always matches, so a second one behind it is
+       unreachable. */
+    "Noto Sans Arabic", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
+
+  /* Prose — the received message in the reader, and the message you are
+     writing in compose. The pairing this file's header documents at length:
+     'Aevistle Text' resolves per codepoint to Times New Roman for
+     Latin/digits/punctuation and to 宋体 for CJK.
+
+     Kept as a face, not removed, and kept reachable by one name so the choice
+     stays reversible in one place. Everything below it is fallback in two
+     senses: for codepoints neither @font-face declares a unicode-range for
+     (Arabic for the `ar` locale, and emoji), and as the whole safety net if
+     both faces fail to resolve. The generic is `serif` — a machine that has
+     fallen this far has nothing named left to offer, and a serif is the closer
+     guess at what this token is asking for. */
+  --font-prose:
+    "Aevistle Text",
+    "Times New Roman", Times, Tinos, "Liberation Serif", "Nimbus Roman",
+    "Noto Serif", "Droid Serif",
+    SimSun, "宋体", "Songti SC", STSong, "Noto Serif CJK SC", "Noto Serif SC",
+    "Source Han Serif SC",
+    "Noto Naskh Arabic", "Segoe UI Emoji", "Noto Color Emoji", serif;
+
+  /* Machine text: file paths, host:port readouts, URLs, cron expressions,
+     recovery keys, SSL error strings, verification codes.
+
+     A real monospace, restored. It was an alias of the body face for four
+     rounds under 应用的所有界面风格, 文字显示都要求统一（非常重要） — the argument
+     being that a second visible typeface is the largest single thing that can
+     be seen to contradict "make it uniform". That argument was sound while
+     the interface face *was* the prose face, because then there were only two
+     faces on screen and the mono would have been a third. It is not sound now:
+     the interface already distinguishes chrome from prose by face, so a third
+     face for machine text is the same rule applied a third time rather than an
+     exception to it. And what the mono buys is real — 0/O and 1/l/I drawn
+     apart, on strings that are transcribed by hand and where a
+     misread character is a failed sign-in.
+
+     "Cascadia Mono" ahead of "Cascadia Code": same face, no programming
+     ligatures. A ligature that fuses `!=` or `->` into one glyph is a feature
+     in an editor and a liability in a recovery key.
+
+     The CJK tail is not decoration. A Windows file path can contain Chinese
+     folder names, and `.path-row__value` / `.option__path` display exactly
+     those — with no CJK name in the stack, those characters fall through to
+     the generic `monospace`, which on Windows is a fixed-pitch face with no
+     ideographs at all. */
+  --font-code:
+    ui-monospace, "Cascadia Mono", "Cascadia Code", "SF Mono", Menlo,
+    Consolas, "Roboto Mono", "Noto Sans Mono", "DejaVu Sans Mono",
+    "Microsoft YaHei UI", "PingFang SC", "Noto Sans CJK SC", monospace;
 
   /*
-   * An alias, deliberately. The name is kept for its 17 call sites.
+   * An alias, kept for its 16 call sites, all of which are machine text and
+   * all of which were checked against the real stack when it was restored:
    *
-   * Those sites are verification codes, recovery keys, file paths, host:port
-   * readouts and SSL error strings — machine text, where a coding face earns
-   * its keep by drawing 0/O and 1/l/I apart. Against that: 应用的所有界面风格,
-   * 文字显示都要求统一（非常重要）, stated as the governing requirement of this
-   * round. A second visible typeface is the largest single thing that can be
-   * seen to contradict it, and it would be seen — a verification code is not a
-   * footnote, it is the entire content of its card.
+   *   .mono, .path-row__value, .option__path              (app/09-misc.css)
+   *   .textarea--mono                                     (app/04-forms.css)
+   *   .workcal__paste, kbd row, .ladder__endpoint         (app/13-panels.css)
+   *   .checkbar__raw, .codecard__url, .recoverykey__value,
+   *   .codewhy__alts code, .qrbox__url, .whenbar__cron    (app/14-growth.css)
+   *   .yearlist__url                                      (app/16-mail.css)
+   *   runecircuit numerals, .rune-numeral                 (app/19-runecircuit.css)
    *
-   * So the requirement wins and this resolves to the body face. What the mono
-   * was actually buying is kept by other means: body sets
-   * font-variant-numeric: tabular-nums (app.css), so digits keep one advance
-   * width and a column of counts still lines up; the code display groups 3+3
-   * and tracks wide, which stops a transcription slip far more effectively
-   * than glyph shape does.
+   * Two of those are worth naming. `.textarea--mono` is the paste box for a
+   * public-holiday list — a column of dates, which is the case tabular figures
+   * and a fixed pitch exist for. And the runecircuit numerals were written
+   * against "the coding monospace `--font-mono` already draws from", a claim
+   * that had been false for four rounds while this aliased the serif; it is
+   * true again now.
    *
-   * Reverting is this one declaration and nothing else — name a real mono here
-   * (ui-monospace, "Cascadia Code", Consolas, "Roboto Mono", monospace) and all
-   * 17 sites follow it.
+   * Not folded into `--font-code` because the two names say different things
+   * at the point of use: `--font-code` is "this is machine text", `--font-mono`
+   * is "this needs a fixed pitch". Today they resolve to one stack.
    */
-  --font-mono: var(--font-sans);
+  --font-mono: var(--font-code);
 
   /* 14px — the data rank, and the smallest size in the app: a timestamp, a
      chip, a count, a file-type tag. Never a sentence. It was 12.5px until the
@@ -356,47 +452,65 @@
   --text-xl: 1.5rem;        /* 24px  小二 — screen titles */
   --text-2xl: 1.8333rem;    /* 29.33px 二号 — hero */
 
-  /* 1.6 -> 1.65, back where it stood before the sans experiment, and for the
-     very reason that experiment gave for lowering it: a sans has even strokes,
-     so its lines separate on their own; 宋体 leans on the gap between lines to
-     stop the thin horizontals of one row reading as part of the row above.
-     With the serif restored, the row that was bought by taking the air out is
-     a row bought at the cost of the thing that made it legible.
+  /* 1.6 -> 1.65, and left at 1.65 now that chrome is a sans again.
 
-     Half a line per ten is about one list row per screen. That is the price,
-     stated, and it is the right way round: 界面使用时眼睛感到舒服 was asked
-     for; one more visible row was not. */
+     The argument for 1.65 is a property of 宋体: it leans on the gap between
+     lines to stop the thin horizontals of one row reading as part of the row
+     above. A sans has even strokes and separates on its own, so on the chrome
+     — which is now the sans — 1.6 would cost nothing legible and would buy
+     about one list row per screen.
+
+     Not taken, for two reasons that are both about where these numbers land.
+     `--leading-normal` is set on `body` and inherits into *everything*,
+     including the reader and the compose message box, which are still 宋体 and
+     are the two surfaces the argument was made for; splitting it would mean a
+     second leading token and a per-surface decision at every call site. And a
+     list row's height is set by its own rules, not by this — the row that
+     would be bought back is largely theoretical.
+
+     界面使用时眼睛感到舒服 was asked for; one more visible row was not. */
   --leading-tight: 1.3;
   --leading-normal: 1.65;
   --leading-relaxed: 1.75;
 
-  /* Negative tracking is a Latin trick, which is exactly the half of the
+  /* Negative tracking is a Latin trick, which is exactly the half of each
      pairing it is allowed to touch. Four heading sites name it —
      .brand__name, .page-title, .btn, and the card heading at app.css:2406 —
-     and -0.01em is 0.16px at 16px: it tightens a Times New Roman heading and
-     is imperceptible on the 宋体 in the same string, which is the only reason
-     it may be set globally at all. Body copy stays at 0; tightening full-width
-     glyphs collides them at any size. */
+     and -0.01em is 0.16px at 16px: it tightens the Latin and is imperceptible
+     on the CJK in the same string, which is the only reason it may be set
+     globally at all. All four sites are chrome, so what it now tightens is
+     Segoe UI Variable rather than Times New Roman; a variable sans has less
+     to gain from it than a serif did, and 0.16px is still under the threshold
+     at which either could be harmed. Body copy stays at 0; tightening
+     full-width glyphs collides them at any size. */
   --tracking-tight: -0.01em;
   --tracking-normal: 0;
   --tracking-wide: 0.06em;
 
   /* ---- weight ----
 
-     Read this together with the note on `strong, b` in app/01-base.css, which
-     states the outcome: in practice two weights render, the regular face and a
-     synthesised bold. Neither 宋体 nor Times New Roman ships a cut semibold,
-     so 500 and 600 both round to one of those two. That was true for the four
-     rounds before the sans experiment, it was briefly untrue during it, and it
-     is true again now that the pairing is back.
+     Read this together with the note on `strong, b` in app/01-base.css.
 
-     The four steps are kept anyway, and not out of inertia. They are an
-     authoring vocabulary: a rule that says `--fw-semibold` records "this is a
-     section name" at the point of use, which is information the next edit
-     needs and which `700` would not carry. They also become real the moment a
-     platform resolves the CJK half to a cut face — the bundled Noto Serif
-     declares a 100-900 range, so an Android device drawing from the bundle can
-     render steps a Windows machine drawing from SimSun cannot.
+     For four rounds the outcome there was "in practice two weights render, the
+     regular face and a synthesised bold", because neither 宋体 nor Times New
+     Roman ships a cut semibold and every step rounded to one of the two. That
+     statement is now only true of *prose*. Chrome is `--font-sans`, and the
+     faces at the head of that stack do carry the steps: Segoe UI Variable is a
+     variable font with a continuous weight axis, and PingFang SC ships cut
+     Light/Regular/Medium/Semibold. So on the interface — buttons, section
+     names, list rows, screen titles — 500 and 600 now render as 500 and 600
+     rather than both rounding to 400 or to a synthesised 700.
+
+     That makes these four steps load-bearing where they had been notation. It
+     is also the one place this change is visible beyond the letterforms: a
+     `--fw-medium` label beside a `--fw-normal` value used to be the same
+     weight and is now a step lighter than the semibold section name above it,
+     which is the hierarchy the ladder was written for.
+
+     The steps were kept through those four rounds as an authoring vocabulary —
+     a rule that says `--fw-semibold` records "this is a section name" at the
+     point of use, which `700` would not carry — and that is why nothing has to
+     be rewritten now that they resolve.
 
        normal    400  body copy, input text, anything read as a sentence
        medium    500  the label naming the control beside it

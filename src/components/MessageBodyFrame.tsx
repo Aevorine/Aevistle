@@ -30,6 +30,11 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useI18n } from '../i18n'
+import {
+  cidOfPlaceholder,
+  remoteIndexOfPlaceholder,
+  safeImageDataUri,
+} from '../core/mail/remoteImagePlaceholder'
 
 /**
  * The families received mail is set in, named literally.
@@ -64,26 +69,118 @@ import { useI18n } from '../i18n'
 const READER_FONT_STACK =
   '"Times New Roman", Times, "SimSun", "宋体", "Songti SC", "Noto Serif SC", "Noto Serif CJK SC", serif'
 
-/**
- * The same stack, single-quoted, for the one place it is written inside a
- * double-quoted HTML `style` attribute. Derived rather than typed twice: a
- * literal double quote there would close the attribute at "Times New Roman"
- * and silently drop every family after it.
- */
-const READER_FONT_STACK_ATTR = READER_FONT_STACK.replace(/"/g, "'")
-
 /** Wrap a plain-text body so it can go through the same frame the HTML does. */
 export function textAsHtml(text: string): string {
   const escaped = text
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-  // Named, not `font: inherit` — see `READER_FONT_STACK`. The size and
-  // leading are spelled out for the same reason the family is, and because
-  // `<pre>` carries a UA default (monospace, and the 13px monospace quirk
-  // with it) that has to be displaced by a real value rather than by a
-  // keyword that resolves to nothing useful in this document.
-  return `<pre style="white-space:pre-wrap;word-break:break-word;font-family:${READER_FONT_STACK_ATTR};font-size:16px;line-height:1.65;margin:0">${escaped}</pre>`
+  /*
+   * `font: inherit`, where the family, the size and the leading used to be
+   * written out.
+   *
+   * They were spelled out because `<pre>` carries a UA default — monospace,
+   * and the 13px monospace quirk with it — that a keyword resolving to
+   * nothing useful could not displace. `inherit` resolves to *this document's*
+   * `body`, which is now set by the injected sheet below, so the three values
+   * have one definition instead of two that can drift.
+   *
+   * It also has to stay a shorthand rather than three longhands, because the
+   * point is to be correct at both moments: before the sheet lands the `<pre>`
+   * inherits the UA's body (16px, not 13px monospace), and after it lands it
+   * inherits the reader's own type — including the user's `--text-scale`,
+   * which a hard `font-size:16px` here silently cancelled.
+   */
+  return `<pre style="white-space:pre-wrap;word-break:break-word;font:inherit;margin:0">${escaped}</pre>`
+}
+
+/* ==========================================================================
+   Colour, without a single literal
+
+   Everything this file paints — the ground, the ink, the fold button, the
+   find highlight — is read out of the app's own tokens at run time and
+   written into the frame as ordinary CSS values. The frame is a separate
+   document, so `var(--surface-1)` inside it resolves against *its* root,
+   which has no custom properties and never will (the same boundary
+   `READER_FONT_STACK` describes for fonts). Passing the resolved value in is
+   the only way the theme crosses it.
+
+   The two helpers below also carry the arithmetic for item 18 — adjusting a
+   sender's own colours for a dark ground instead of inverting the frame. They
+   parse what `getComputedStyle` hands back (always `rgb()`/`rgba()`) and the
+   hex forms a token file is written in, and nothing else: an unparseable
+   value is left exactly as the sender wrote it, which is the safe direction.
+   ========================================================================== */
+
+interface Rgb {
+  r: number
+  g: number
+  b: number
+  a: number
+}
+
+function parseColor(value: string): Rgb | null {
+  const text = value.trim().toLowerCase()
+  if (text === '' || text === 'transparent') return null
+  const hex = /^#([0-9a-f]{3,8})$/.exec(text)
+  if (hex) {
+    const digits = hex[1]
+    const wide = digits.length > 4
+    const step = wide ? 2 : 1
+    const at = (i: number) => {
+      const part = digits.slice(i * step, i * step + step)
+      const full = wide ? part : part + part
+      return parseInt(full, 16)
+    }
+    if (digits.length === 3 || digits.length === 6) return { r: at(0), g: at(1), b: at(2), a: 1 }
+    if (digits.length === 4 || digits.length === 8) return { r: at(0), g: at(1), b: at(2), a: at(3) / 255 }
+    return null
+  }
+  const fn = /^rgba?\(([^)]+)\)$/.exec(text)
+  if (!fn) return null
+  const parts = fn[1].split(/[\s,/]+/).filter(Boolean)
+  if (parts.length < 3) return null
+  const channel = (raw: string) =>
+    raw.endsWith('%') ? Math.round((parseFloat(raw) / 100) * 255) : Math.round(parseFloat(raw))
+  const r = channel(parts[0])
+  const g = channel(parts[1])
+  const b = channel(parts[2])
+  if ([r, g, b].some((n) => !Number.isFinite(n))) return null
+  const alpha = parts[3] === undefined ? 1 : parts[3].endsWith('%') ? parseFloat(parts[3]) / 100 : parseFloat(parts[3])
+  return { r, g, b, a: Number.isFinite(alpha) ? alpha : 1 }
+}
+
+/** WCAG relative luminance, 0 (black) to 1 (white). */
+function luminance({ r, g, b }: Rgb): number {
+  const channel = (v: number) => {
+    const s = v / 255
+    return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4
+  }
+  return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+}
+
+function toHsl({ r, g, b }: Rgb): { h: number; s: number; l: number } {
+  const rr = r / 255
+  const gg = g / 255
+  const bb = b / 255
+  const max = Math.max(rr, gg, bb)
+  const min = Math.min(rr, gg, bb)
+  const l = (max + min) / 2
+  if (max === min) return { h: 0, s: 0, l }
+  const d = max - min
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min)
+  let h: number
+  if (max === rr) h = ((gg - bb) / d + (gg < bb ? 6 : 0)) / 6
+  else if (max === gg) h = ((bb - rr) / d + 2) / 6
+  else h = ((rr - gg) / d + 4) / 6
+  return { h, s, l }
+}
+
+/** The same colour at a different lightness, hue and saturation untouched. */
+function atLightness(colour: Rgb, lightness: number): string {
+  const { h, s } = toHsl(colour)
+  const alpha = colour.a >= 1 ? '' : ` / ${Math.round(colour.a * 100)}%`
+  return `hsl(${Math.round(h * 360)} ${Math.round(s * 100)}% ${Math.round(lightness * 100)}%${alpha})`
 }
 
 /* ==========================================================================
@@ -534,6 +631,332 @@ function applyFold(doc: Document, labels: { show: (n: number) => string; hide: s
   }
 }
 
+/* ==========================================================================
+   The reading layout, and the palette that carries it
+
+   Three things cross the document boundary here, and all three have to be
+   *carried* rather than inherited: the type size the user chose, the colours
+   the app is painted in, and the measure. See `READER_FONT_STACK` for the
+   general shape of that boundary — a custom property declared on the app's
+   root is not visible in this document any more than a bundled font is.
+   ========================================================================== */
+
+interface Palette {
+  /** `light` or `dark`, so the frame's own form controls and scrollbar follow. */
+  scheme: 'light' | 'dark'
+  ground: string
+  ink: string
+  inkQuiet: string
+  line: string
+  panel: string
+  panelHover: string
+  mark: string
+  /** The type scale's own root size, in px, so `rem` in here means what it does out there. */
+  rootSize: string
+  pad: string
+  padTight: string
+  gap: string
+  radius: string
+  tap: string
+  /** Latin measure, from `--reading-max`. Empty when the token cannot be read. */
+  measure: string
+  /** Whether the sender's own colours need adjusting for this ground. */
+  night: boolean
+}
+
+/**
+ * Below this the ground counts as dark. Well clear of both ends: the light
+ * palettes' `--surface-1` sits at ~0.96 relative luminance and every dark
+ * one at ~0.012, so nothing real is anywhere near the line.
+ */
+const DARK_GROUND_BELOW = 0.4
+
+/**
+ * The measure for a CJK body.
+ *
+ * A Han character is one em wide, so `40em` is forty of them — the figure
+ * Chinese typography settles on for a comfortable line, and the same order of
+ * magnitude as `--reading-max`'s 68 Latin characters (a Latin character
+ * averages about half an em, so 68ch is ~34em). One token cannot serve both,
+ * because the two scripts disagree about what a "character" is by a factor of
+ * two; which one is used is decided from the message's own text.
+ */
+const CJK_MEASURE = '40em'
+
+/** The app's palette, as the frame has to receive it: resolved values, no `var()`. */
+function readPalette(night: boolean): Palette {
+  const paper: Palette = {
+    scheme: 'light',
+    // System keywords, not literals, and not the app's tokens either. Under
+    // `color-scheme: light` these are white and black whatever the OS is set
+    // to — which is exactly the paper the sender laid the message out on, and
+    // exactly what "show original colours" means.
+    ground: 'canvas',
+    ink: 'canvastext',
+    inkQuiet: 'color-mix(in srgb, canvastext 65%, canvas)',
+    line: 'color-mix(in srgb, canvastext 22%, canvas)',
+    panel: 'color-mix(in srgb, canvastext 6%, canvas)',
+    panelHover: 'color-mix(in srgb, canvastext 12%, canvas)',
+    mark: 'color-mix(in srgb, highlight 45%, transparent)',
+    rootSize: '',
+    pad: '1rem',
+    padTight: '0.75rem',
+    gap: '0.5rem',
+    radius: '8px',
+    tap: '48px',
+    measure: '',
+    night: false,
+  }
+  if (typeof window === 'undefined' || typeof document === 'undefined') return paper
+
+  const root = getComputedStyle(document.documentElement)
+  const token = (name: string) => root.getPropertyValue(name).trim()
+  const ground = token('--surface-1')
+  const ink = token('--text-1')
+  const parsed = parseColor(ground)
+  const appIsDark = parsed !== null && luminance(parsed) < DARK_GROUND_BELOW
+
+  const shared = {
+    rootSize: root.fontSize,
+    pad: token('--sp-4') || paper.pad,
+    padTight: token('--sp-3') || paper.padTight,
+    gap: token('--sp-2') || paper.gap,
+    radius: token('--r-sm') || paper.radius,
+    tap: token('--ctl-md') || paper.tap,
+    measure: token('--reading-max'),
+    mark: `color-mix(in srgb, ${token('--accent') || 'highlight'} 38%, transparent)`,
+  }
+
+  // "Show original colours" on a dark app is the one case the tokens cannot
+  // answer: they are the dark end by definition, and the request is for the
+  // light one. Paper it is — with the type, spacing and measure still coming
+  // from the app, because those are not what the reader asked to undo.
+  if (!night && appIsDark) return { ...paper, ...shared }
+  if (!ground || !ink) return { ...paper, ...shared }
+
+  return {
+    scheme: appIsDark ? 'dark' : 'light',
+    ground,
+    ink,
+    inkQuiet: token('--text-2') || ink,
+    line: token('--border') || paper.line,
+    panel: token('--surface-2') || paper.panel,
+    panelHover: token('--surface-3') || paper.panelHover,
+    ...shared,
+    night: night && appIsDark,
+  }
+}
+
+/**
+ * The palette, as a stylesheet on the frame's own root.
+ *
+ * Its own `<style>` rather than folded into the base sheet, for the same
+ * reason the night rules had one: the base sheet is written once per document
+ * and the palette changes under it — the theme, the accent, the text size, and
+ * the per-message "show original colours" toggle all move it without the frame
+ * reloading.
+ */
+function writeTheme(doc: Document, palette: Palette, cjk: boolean) {
+  let style = doc.getElementById('aev-theme') as HTMLStyleElement | null
+  if (!style) {
+    style = doc.createElement('style')
+    style.id = 'aev-theme'
+    doc.head?.appendChild(style)
+  }
+  const measure = cjk ? CJK_MEASURE : palette.measure
+  style.textContent =
+    ':root{' +
+    `color-scheme:${palette.scheme};` +
+    // The root size, so `rem` and the `--text-scale` the user picked mean the
+    // same thing in here as they do out there. Without it the frame is always
+    // 16px and the text-size setting stops at the frame's edge.
+    (palette.rootSize ? `font-size:${palette.rootSize};` : '') +
+    `--aev-ground:${palette.ground};` +
+    `--aev-ink:${palette.ink};` +
+    `--aev-ink-2:${palette.inkQuiet};` +
+    `--aev-line:${palette.line};` +
+    `--aev-panel:${palette.panel};` +
+    `--aev-panel-hover:${palette.panelHover};` +
+    `--aev-mark:${palette.mark};` +
+    `--aev-pad:${palette.pad};` +
+    `--aev-pad-2:${palette.padTight};` +
+    `--aev-gap:${palette.gap};` +
+    `--aev-radius:${palette.radius};` +
+    `--aev-tap:${palette.tap};` +
+    (measure ? `--aev-measure:${measure};` : '') +
+    '}'
+}
+
+/* --------------------------------------------------------------------------
+   The measure, and who is allowed one
+   ----------------------------------------------------------------------- */
+
+/** How much of the body is read to decide which script it is in. */
+const SCRIPT_SAMPLE_CHARS = 600
+const CJK_CHARS = /[぀-ヿ㐀-䶿一-鿿豈-﫿가-힯]/g
+
+/**
+ * Is this body one this app may set a measure on?
+ *
+ * Only plain text and simple HTML. A sender who built a fixed-width table
+ * layout has already decided how wide the message is, and clamping it would
+ * be this app inventing a design decision rather than repairing one — the
+ * same line `centreOuter` draws, from the other side. So anything carrying a
+ * table or a declared width is left exactly as it arrived.
+ *
+ * `<pre>` is included deliberately: `textAsHtml` produces exactly that, and a
+ * plain-text mail is the body that benefits most from a measure — it has no
+ * layout of its own at all, so on a 1474px window it ran the full width.
+ */
+function bodyTakesMeasure(doc: Document): boolean {
+  const body = doc.body
+  if (!body) return false
+  return body.querySelector('table, [style*="width"], [width]') === null
+}
+
+/** Whether the first few hundred characters read as CJK rather than Latin. */
+function bodyIsCjk(doc: Document): boolean {
+  const body = doc.body
+  if (!body) return false
+  const walker = doc.createTreeWalker(body, NodeFilter.SHOW_TEXT)
+  let sample = ''
+  let node: Node | null
+  while ((node = walker.nextNode()) && sample.length < SCRIPT_SAMPLE_CHARS) {
+    sample += node.textContent ?? ''
+  }
+  const sliced = sample.slice(0, SCRIPT_SAMPLE_CHARS)
+  const letters = sliced.replace(/\s/g, '').length
+  if (letters < 12) return false
+  return (sliced.match(CJK_CHARS)?.length ?? 0) / letters > 0.3
+}
+
+/* --------------------------------------------------------------------------
+   The sender's own colours, on a dark ground
+
+   What this replaces: `html{filter:invert(1) hue-rotate(180deg)}` with an
+   un-invert on `img`. That trick is one declaration and it is wrong in a way
+   no amount of tuning fixes — it does not adapt a message to a dark ground,
+   it photographically negates it. A logo in a brand colour comes out in the
+   complementary one; a scanned document comes out as a negative; a PNG with
+   an alpha channel comes out inverted *and* the un-invert rule then inverts
+   the parts of the page showing through it. The un-invert also only ever
+   covered `<img>`, which was true only because the sanitiser allows no other
+   way for a picture to be in the frame (see `ALLOWED_STYLES`) — a defence
+   resting on a list in another file.
+
+   So: the ground and the default ink come from the theme (above), pictures
+   are not touched at all, and a colour the *sender* declared is moved rather
+   than mirrored — same hue, same saturation, a lightness that works on this
+   ground. A red heading stays red. A photograph stays a photograph.
+
+   Both halves are recorded on the element, so "show original colours" is an
+   exact undo rather than a second guess at what the sender wrote.
+   ----------------------------------------------------------------------- */
+
+/**
+ * How many declared colours are examined.
+ *
+ * A hostile body can carry a hundred thousand elements with a `style` on each,
+ * and every one of them costs a resolved style read. The cap is the same
+ * discipline `MAX_SCAN_LINES` applies to the fold, and a real newsletter is
+ * two orders of magnitude under it.
+ */
+const MAX_RECOLOURED = 1500
+/** Ink at or below this luminance was written for white paper. */
+const INK_DARK_BELOW = 0.45
+/** …and is lifted to at least this lightness, keeping its hue. */
+const INK_TARGET_L = 0.72
+/** Under this saturation a colour is a grey, and greys become the theme's ink. */
+const GREY_BELOW_S = 0.12
+/** A background at or above this luminance is the sender's white paper. */
+const BG_LIGHT_ABOVE = 0.75
+/** A mid-tone panel is darkened to this instead of being replaced. */
+const BG_TARGET_L = 0.24
+/** Below this it is already dark enough to leave alone. */
+const BG_DARK_BELOW = 0.06
+
+function adjustSenderColours(doc: Document, palette: Palette) {
+  const body = doc.body
+  if (!body) return
+  const candidates = body.querySelectorAll<HTMLElement>('[style],font[color],[bgcolor]')
+  const limit = Math.min(candidates.length, MAX_RECOLOURED)
+  for (let i = 0; i < limit; i++) {
+    const el = candidates[i]
+    // Already adjusted — the effect re-runs on a re-fold and on a language
+    // change, and a second pass over its own output would lighten a colour
+    // twice and lose the original.
+    if (el.hasAttribute('data-aev-ink') || el.hasAttribute('data-aev-bg')) continue
+    const declaresInk = el.style.color !== '' || (el.tagName === 'FONT' && el.hasAttribute('color'))
+    const declaresBg = el.style.backgroundColor !== '' || el.hasAttribute('bgcolor')
+    if (!declaresInk && !declaresBg) continue
+    const computed = doc.defaultView?.getComputedStyle(el)
+    if (!computed) continue
+
+    if (declaresInk) {
+      const colour = parseColor(computed.color)
+      if (colour && colour.a > 0.1 && luminance(colour) < INK_DARK_BELOW) {
+        const { s, l } = toHsl(colour)
+        el.dataset.aevInk = el.style.color
+        el.style.color = s < GREY_BELOW_S ? palette.ink : atLightness(colour, Math.max(l, INK_TARGET_L))
+      }
+    }
+    if (declaresBg) {
+      const colour = parseColor(computed.backgroundColor)
+      if (colour && colour.a > 0.05) {
+        const lum = luminance(colour)
+        const { s, l } = toHsl(colour)
+        const next =
+          lum >= BG_LIGHT_ABOVE
+            ? // The sender's paper. Replaced outright rather than darkened, so
+              // the message sits on the *same* ground the frame does instead
+              // of on a near-black rectangle a shade off it.
+              palette.ground
+            : lum > BG_DARK_BELOW && s >= GREY_BELOW_S
+              ? atLightness(colour, Math.min(l, BG_TARGET_L))
+              : lum > BG_DARK_BELOW
+                ? palette.panel
+                : ''
+        if (next) {
+          el.dataset.aevBg = el.style.backgroundColor
+          el.style.backgroundColor = next
+        }
+      }
+    }
+  }
+}
+
+/** Put every colour this file moved back exactly where the sender had it. */
+function restoreSenderColours(doc: Document) {
+  for (const el of Array.from(doc.querySelectorAll<HTMLElement>('[data-aev-ink],[data-aev-bg]'))) {
+    if (el.hasAttribute('data-aev-ink')) {
+      // The empty string is a real recorded value: it means the sender set the
+      // colour with `<font color>` or `bgcolor` and had no inline style at
+      // all, so clearing the inline property is what restores the attribute.
+      el.style.color = el.dataset.aevInk ?? ''
+      el.removeAttribute('data-aev-ink')
+    }
+    if (el.hasAttribute('data-aev-bg')) {
+      el.style.backgroundColor = el.dataset.aevBg ?? ''
+      el.removeAttribute('data-aev-bg')
+    }
+  }
+}
+
+/**
+ * The pictures a message is still waiting for, and what to paint in their
+ * place — see `src/core/mail/remoteImagePlaceholder.ts` for the convention.
+ */
+export interface FrameImages {
+  /** Resolved remote images by placeholder index. `null` = fetched and failed. */
+  remote?: Array<string | null>
+  /** What a failed remote image becomes, once every URL has actually been tried. */
+  remoteFallback?: string
+  /** Resolved inline (`cid:`) parts, keyed by `normalizeCid`. */
+  inline?: Record<string, string>
+  /** Every inline part that could be read has been — drop whatever is left. */
+  inlineSettled?: boolean
+}
+
 export function MessageBodyFrame({
   html,
   find,
@@ -541,6 +964,10 @@ export function MessageBodyFrame({
   frameClassName = 'reader__frame',
   nightFilter = false,
   foldQuotes = false,
+  images,
+  onImagesUnplaced,
+  onScroll,
+  themeKey = '',
 }: {
   html: string
   find: string
@@ -548,19 +975,51 @@ export function MessageBodyFrame({
   /** Defaults to the inbox reader's own sizing; callers with a tighter budget (the calendar's row preview) pass their own. */
   frameClassName?: string
   /**
-   * Sender mail is always built on a white `#fff` body (see the injected
-   * style below) regardless of the app's own theme — reasonable in light
-   * mode, a lit rectangle in the middle of a dark one. This inverts the
-   * whole frame and un-inverts images/video so photos still look right; it
-   * cannot know which senders picked colours on purpose, which is why the
-   * caller offers a way back to the original per message rather than this
-   * component deciding for good.
+   * Paint the message for a dark room rather than for white paper.
+   *
+   * On, the frame takes the app's own dark tokens for its ground and ink and
+   * the sender's *declared* colours are moved onto that ground — see
+   * `adjustSenderColours`, which also records what this used to be (a whole-
+   * frame `filter: invert()`) and why that had to go. Off, the frame is the
+   * paper the sender laid the message out on, which is what "show original
+   * colours" means; pictures are never touched either way.
    *
    * The caller gates this on `settings.readerDarkInvert` *and* on the app
    * actually being in dark mode; this component is told the answer, it does
    * not read either.
    */
   nightFilter?: boolean
+  /**
+   * Pictures to place into the *already-parsed* document, rather than by
+   * rebuilding `html` and reloading the frame.
+   *
+   * Rebuilding was what this did, and the cost was not small: a new `srcDoc`
+   * throws away the parsed document, every image that had already decoded,
+   * the reader's scroll position inside the message, the fold's DOM state and
+   * the find highlighting — and re-runs the fold and find passes over the
+   * whole body. All of that to change one attribute per picture. The frame is
+   * same-origin, so the attributes are reachable from out here.
+   */
+  images?: FrameImages
+  /**
+   * Called when the swap above could not be made at all — the document was
+   * not reachable, or it holds none of the placeholders the caller resolved.
+   * The caller's answer is the old full rebuild, which is a fallback and not
+   * an error: it produces exactly the same picture, one reload later.
+   */
+  onImagesUnplaced?: () => void
+  /** The message's own scroll offset. The body scrolls *inside* this frame. */
+  onScroll?: (top: number) => void
+  /**
+   * Anything that moves the app's palette or type scale: the theme, the
+   * accent, the visual style, the text-size setting.
+   *
+   * A string rather than the values themselves, because this component does
+   * not know what a theme is — it reads whatever the tokens currently say and
+   * only needs to be told *when* to read them again. The frame is a separate
+   * document, so nothing here re-cascades on its own.
+   */
+  themeKey?: string
   /**
    * Collapse the quoted history behind one line — see the block comment above
    * `QUOTE_CLASS` for every rule this obeys and every shape it refuses.
@@ -598,6 +1057,18 @@ export function MessageBodyFrame({
   const linkRef = useRef(onLinkClick)
   linkRef.current = onLinkClick
 
+  /** Read by the frame's own scroll listener, for the same reason `linkRef` is. */
+  const scrollRef = useRef(onScroll)
+  scrollRef.current = onScroll
+
+  /**
+   * The current answer to "is this message being painted for a dark room",
+   * for `handleLoad` — which is registered once and would otherwise close over
+   * whatever the first render happened to say.
+   */
+  const nightRef = useRef(nightFilter)
+  nightRef.current = nightFilter
+
   useEffect(() => {
     const iframe = ref.current
     if (!iframe) return
@@ -626,6 +1097,21 @@ export function MessageBodyFrame({
         linkRef.current(target.href)
       }
       doc.addEventListener('click', handler)
+      /*
+       * The message's own scroll, forwarded out.
+       *
+       * The body scrolls *inside* this frame — the frame itself is a fixed box
+       * in the reader's column — so the reader has no other way to know that
+       * somebody is reading rather than looking. Its sticky header uses this
+       * to shrink. A listener on the document rather than on `contentWindow`
+       * because a viewport scroll is dispatched at the Document; passive
+       * because nothing here can or should cancel it.
+       */
+      doc.addEventListener(
+        'scroll',
+        () => scrollRef.current?.(doc.documentElement?.scrollTop ?? 0),
+        { passive: true },
+      )
       // The families are named literally rather than inherited, and the size
       // and leading with them — see `READER_FONT_STACK` for why `inherit`
       // could never have worked across a document boundary and for what this
@@ -650,7 +1136,9 @@ export function MessageBodyFrame({
       // plainly still gets the face they asked for; everything else — which
       // is nearly everything — lands on the stack above. `font-size` behaves
       // the same way: the sanitiser permits it, so a sender who sets one
-      // keeps it, and 16px is what the rest of the message reads at.
+      // keeps it, and `1rem` — the app's own body size, at whatever
+      // `--text-scale` the user picked — is what the rest of the message
+      // reads at.
       //
       // The `margin-inline: auto` run is the fix for the oldest-looking
       // complaint about this app: "only the left half of the window has
@@ -684,19 +1172,37 @@ export function MessageBodyFrame({
         'body>:is(div,center,section,article)[style*="width"]' +
         '{margin-inline:auto}'
       /*
+       * The measure — the one rule that changes how a message is *laid out*
+       * rather than only how it is coloured.
+       *
+       * A plain-text mail has no layout of its own, so before this it ran the
+       * full width of the frame: 1474px on a 1536px screen is roughly 180
+       * Latin characters a line, at which point the eye loses the start of the
+       * next one. The app has had one answer to that since it had prose at all
+       * (`--reading-max`), and this is that answer carried across the document
+       * boundary; `--aev-measure` is written by `writeTheme` because the value
+       * depends on which script the message is in.
+       *
+       * Gated on a class rather than applied outright: `bodyTakesMeasure`
+       * refuses any body that brought a layout with it. See its comment.
+       */
+      const measure = 'html.aev-measure body{max-width:var(--aev-measure);margin-inline:auto}'
+      /*
        * The fold's own rules live in this stylesheet rather than in a second
-       * one of their own, unlike the night filter: this sheet is written once
-       * per *document*, and a document is exactly the lifetime of a fold —
+       * one of their own, unlike the palette: this sheet is written once per
+       * *document*, and a document is exactly the lifetime of a fold —
        * changing `html` or `foldQuotes` replaces the srcDoc and reloads the
        * frame, so there is nothing here for a toggle to have to un-write.
        *
-       * Literal colours, like the three above them. This is a separate
-       * document: `var(--surface-2)` resolves against *its* root, which has no
-       * custom properties and never will — the theme cannot cross a document
-       * boundary any more than the bundled fonts can (see `READER_FONT_STACK`).
-       * The values are the neutral end of the light palette, and the night
-       * filter inverts them along with everything else, which is why the
-       * button is legible in both without a second rule.
+       * Every value here is a token, reached through the `--aev-*` custom
+       * properties `writeTheme` defines on this document's own root. That is
+       * the whole trick for a separate document: `var(--surface-2)` in here
+       * resolves against *this* root, which has none of the app's properties
+       * and never will — the theme cannot cross a document boundary any more
+       * than the bundled fonts can (see `READER_FONT_STACK`) — so the values
+       * are read out of the app's root and written in. Seven hex literals
+       * used to stand in for them, and they were the reason the button only
+       * looked right in one theme and had to be rescued by an `invert()`.
        *
        * `display:revert` rather than `block` or `inline`: the hidden run is a
        * `<div>` in an HTML body and a `<span>` inside the `<pre>` of a plain
@@ -706,96 +1212,178 @@ export function MessageBodyFrame({
         `.${QUOTE_CLASS}{display:none}` +
         `html.${QUOTE_OPEN_CLASS} .${QUOTE_CLASS}{display:revert}` +
         `.${QUOTE_BTN_CLASS}{display:block;box-sizing:border-box;width:100%;` +
-        'min-height:48px;margin:16px 0;padding:12px 14px;border:1px solid #d4d4d4;' +
-        'border-radius:8px;background:#f4f4f5;color:#3f3f46;font-family:inherit;' +
-        'font-size:16px;line-height:1.5;text-align:start;cursor:pointer}' +
-        `.${QUOTE_BTN_CLASS}:hover{background:#e8e8ea}` +
+        'min-height:var(--aev-tap);margin:var(--aev-pad) 0;' +
+        'padding:var(--aev-pad-2);border:1px solid var(--aev-line);' +
+        'border-radius:var(--aev-radius);background:var(--aev-panel);' +
+        'color:var(--aev-ink-2);font:inherit;line-height:1.5;' +
+        'text-align:start;cursor:pointer}' +
+        `.${QUOTE_BTN_CLASS}:hover{background:var(--aev-panel-hover)}` +
         '.aev-quotehide{display:none}' +
         `html.${QUOTE_OPEN_CLASS} .aev-quoteshow{display:none}` +
         `html.${QUOTE_OPEN_CLASS} .aev-quotehide{display:inline}`
       const style = doc.createElement('style')
       style.textContent =
-        'body{margin:0;padding:16px;font-family:' +
+        'body{margin:0;padding:var(--aev-pad);font-family:' +
         READER_FONT_STACK +
-        ';font-size:16px;line-height:1.65;color:#111;background:#fff;word-break:break-word}' +
+        ';font-size:1rem;line-height:1.65;color:var(--aev-ink,canvastext);' +
+        'background:var(--aev-ground,canvas);word-break:break-word}' +
         'img{max-width:100%;height:auto}table{max-width:100%}' +
         centreOuter +
-        'mark.aev-find{background:#ffe066;color:#111}' +
+        measure +
+        'mark.aev-find{background:var(--aev-mark);color:inherit}' +
         fold
       doc.head?.appendChild(style)
+
+      /*
+       * The palette and the measure decision are written here as well as in
+       * the effect below, and that is not a duplicate: `useEffect` runs after
+       * the browser has had a chance to paint, so leaving this to the effect
+       * alone showed one frame of an unthemed document — white, in a dark
+       * app, at the exact moment a message opens. `writeTheme` is idempotent
+       * and the effect simply overwrites what this wrote.
+       */
+      doc.documentElement.classList.toggle('aev-measure', bodyTakesMeasure(doc))
+      // Recorded as a class rather than recomputed: the palette effect below
+      // re-runs on every theme change and on every toggle of the night
+      // reading, and walking the body's text again each time to answer a
+      // question whose answer cannot have changed would be the find-box
+      // mistake in a different place.
+      const cjk = bodyIsCjk(doc)
+      doc.documentElement.classList.toggle('aev-cjk', cjk)
+      writeTheme(doc, readPalette(nightRef.current), cjk)
     }
     iframe.addEventListener('load', handleLoad)
     return () => iframe.removeEventListener('load', handleLoad)
   }, [])
 
   /**
-   * A second, dedicated `<style>` rather than folding this into the one
-   * above: that one is written once, in `handleLoad`, and never again for
-   * the life of this document — right for the fixed base rules, wrong for a
-   * filter the reader toggles on and off without the frame reloading.
+   * The palette, and the sender's own colours on it.
+   *
+   * ## What this replaces
+   *
+   * One declaration: `html{filter:invert(1) hue-rotate(180deg) contrast(0.92)
+   * brightness(0.94)}`, with `img,video,svg,canvas{filter:invert(1)
+   * hue-rotate(180deg)}` un-inverting the media again. It was cheap and it was
+   * wrong in a way tuning cannot reach — it does not adapt a message to a dark
+   * ground, it photographically negates one. The un-invert put photographs
+   * back only because the sanitiser happens to allow no `background-image`
+   * (see `ALLOWED_STYLES` in `electron/sanitizeHtml.ts`), so the defence rested
+   * on a list in another file; and a PNG with an alpha channel still came out
+   * inverted *and* let the negated page show through it. `svg` and `canvas`
+   * were named on the rule for tags the sanitiser does not even allow.
+   *
+   * ## What happens instead
+   *
+   *   · the ground and the default ink come from the app's own tokens, read
+   *     out of its root and written into this document by `writeTheme` — so a
+   *     dark reader is dark because the theme says so, not because a filter
+   *     turned a white one inside out;
+   *   · pictures are not touched at all, by anything, ever;
+   *   · a colour the *sender* declared is moved rather than mirrored — same
+   *     hue and saturation, a lightness that works on this ground. See
+   *     `adjustSenderColours`.
+   *
+   * ## Why it is still one toggle
+   *
+   * "Show original colours" is unchanged and now means exactly what it says:
+   * the palette goes back to paper (`readPalette`), and every colour this file
+   * moved is put back from the value recorded on the element itself, rather
+   * than by a second guess at what the sender wrote.
+   *
+   * `loaded` is in the dependency list because a reload replaces the document
+   * this wrote into; `html` because it replaces the elements
+   * `adjustSenderColours` recorded its undo values on.
    */
   useEffect(() => {
     const doc = ref.current?.contentDocument
     if (!doc?.head) return
-    let style = doc.getElementById('aev-night') as HTMLStyleElement | null
-    if (!nightFilter) {
-      style?.remove()
+    const palette = readPalette(nightFilter)
+    writeTheme(doc, palette, doc.documentElement.classList.contains('aev-cjk'))
+    // Always restore first. The two directions are not symmetrical — going
+    // dark records an undo value per element, coming back consumes it — and a
+    // pass that adjusted on top of its own output would lighten the same text
+    // twice and lose the original after two toggles.
+    restoreSenderColours(doc)
+    if (palette.night) adjustSenderColours(doc, palette)
+  }, [nightFilter, themeKey, loaded, html])
+
+  /**
+   * Put the resolved pictures into the document that is already on screen.
+   *
+   * This is the whole of item 13. What it replaces was a single line at the
+   * call site — `setResolvedHtml(resolveRemoteImages(...))` — and the cost of
+   * that line was a *new document*: changing `html` changes `srcDoc`, which
+   * reloads the frame, which re-parses the sender's markup, re-decodes every
+   * picture that had already arrived, loses the reader's place inside the
+   * message, and re-runs the fold and the find pass over the whole body. For a
+   * change of one attribute per image.
+   *
+   * The frame is `allow-same-origin`, so the attribute is reachable from out
+   * here — the same access the link interception, the fold and the find have
+   * always used, and nothing runs *inside* the frame to do it.
+   *
+   * Both kinds of parked picture are placed by the same walk, because they are
+   * the same convention with a different fragment: a remote image the reader
+   * (or the policy) asked to load, and an inline `cid:` part that was in the
+   * message all along. See `remoteImagePlaceholder.ts`.
+   *
+   * The fallback is deliberately narrow. "Placed nothing at all when there was
+   * something to place" is the honest test for *cannot* — a document that has
+   * lost one `<img>` to the sanitiser's empty-anchor filter has not failed,
+   * and reporting it would put back the very reload this exists to remove.
+   */
+  const unplacedRef = useRef(onImagesUnplaced)
+  unplacedRef.current = onImagesUnplaced
+
+  useEffect(() => {
+    if (!images) return
+    const doc = ref.current?.contentDocument
+    if (!doc?.body) {
+      unplacedRef.current?.()
       return
     }
-    if (!style) {
-      style = doc.createElement('style')
-      style.id = 'aev-night'
-      doc.head.appendChild(style)
+    const remote = images.remote
+    const inline = images.inline
+    let expected = 0
+    if (remote) {
+      for (const value of remote) {
+        if (safeImageDataUri(value) ?? images.remoteFallback) expected++
+      }
     }
-    // Invert the frame, then invert media back — the standard trick for
-    // adapting content nobody authored for a dark background. It changes
-    // colours the sender chose on purpose too, which is exactly what the
-    // "view original colors" toggle this is paired with exists to undo.
-    //
-    // ## Why no photograph comes out inverted, as a proof rather than a hope
-    //
-    // The usual objection to this technique is that `filter: invert()` on a
-    // container turns every photograph into a negative, and that un-inverting
-    // `img` only catches *some* of them because a picture can also arrive as a
-    // CSS `background-image`, which no element-level rule can reach.
-    //
-    // That second channel does not exist here, and it is closed upstream
-    // rather than patched over. `electron/sanitizeHtml.ts` allows exactly
-    // seven CSS properties (`ALLOWED_STYLES`), and its own comment gives the
-    // reason the list is written as an allowlist: every property on it "cannot
-    // embed a URL". There is no `background-image`, no `background`
-    // shorthand, no `border-image`, no `list-style-image`; `<style>` elements
-    // are dropped whole by `nonTextTags`, and no stylesheet can be linked
-    // because `link` is not an allowed tag. So the *only* way a picture can be
-    // in this frame at all is an `<img>` — every remote one rewritten to a
-    // blank data pixel until the reader loads it, every inline one a `data:`
-    // URI — and `img` is in the un-invert rule below.
-    //
-    // `video`, `svg` and `canvas` are on that rule too and are not in the
-    // sanitiser's `ALLOWED_TAGS`, so they cannot appear. They stay listed
-    // because this frame is also handed the app's own scheduled-draft HTML,
-    // and a rule that quietly depended on the mail allowlist for a body that
-    // did not come through it would be a trap for whoever widens either.
-    //
-    // ## Why the invert is inside the frame and not on the frame
-    //
-    // Because `filter` on the `<iframe>` element would invert the app's own
-    // chrome around it as well, and — the part that matters — it would be
-    // applied *outside* the document, where no rule of ours can reach in to
-    // put the pictures back. Inside, `html` and `img` are two selectors in one
-    // cascade and the second undoes the first exactly.
-    //
-    // `contrast(0.92) brightness(0.94)` after the invert, on the frame only
-    // (not the media rule): a plain white-background/#111-text message —
-    // most of them — inverts to pure #000 on #eee, ~18:1 contrast. The rest
-    // of this app's dark theme was deliberately backed off from ~15-16:1 to
-    // ~12-13:1 (see theme.css) because that flatter black-on-white extreme
-    // reads as glare over a longer read. This nudges the same pair to
-    // ~13.8:1 — inside that tuned range — without touching the mechanism.
-    style.textContent =
-      'html{filter:invert(1) hue-rotate(180deg) contrast(0.92) brightness(0.94)}' +
-      'img,video,svg,canvas{filter:invert(1) hue-rotate(180deg)}'
-  }, [nightFilter, loaded])
+    if (inline) expected += Object.keys(inline).length
+
+    let placed = 0
+    for (const img of Array.from(doc.querySelectorAll('img'))) {
+      const src = img.getAttribute('src') ?? ''
+      const index = remoteIndexOfPlaceholder(src)
+      if (index !== null) {
+        if (!remote || index >= remote.length) continue
+        // Validated a second time here rather than trusted from the fetch
+        // path, for the reason `resolveRemoteImages` gives: this is the last
+        // point before an attacker-influenced value re-enters an
+        // already-sanitized document.
+        const next = safeImageDataUri(remote[index]) ?? images.remoteFallback
+        if (!next) continue
+        img.setAttribute('src', next)
+        placed++
+        continue
+      }
+      const cid = cidOfPlaceholder(src)
+      if (cid === null) continue
+      const next = inline ? safeImageDataUri(inline[cid]) : null
+      if (next) {
+        img.setAttribute('src', next)
+        placed++
+      } else if (images.inlineSettled) {
+        // Every attachment that could be read has been, and this reference
+        // matched none of them. Dropping the `src` is exactly what both
+        // sanitizers did with every `cid:` image before they were resolvable
+        // at all — the failure mode is the old behaviour, silently.
+        img.removeAttribute('src')
+      }
+    }
+    if (placed === 0 && expected > 0) unplacedRef.current?.()
+  }, [images, loaded, html])
 
   /**
    * Fold the quoted history, or take a previous fold back out.

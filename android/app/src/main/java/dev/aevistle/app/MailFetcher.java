@@ -17,6 +17,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -65,77 +66,168 @@ final class MailFetcher {
      * What one sync is willing to spend pulling down bodies nobody has asked
      * for yet.
      *
-     * Three numbers rather than one, because the prefetch has two separate
-     * costs and they are not bounded by the same thing: how many messages it
-     * opens (round trips, now shared across one batched FETCH), and how many
-     * bytes it pulls (the user's data allowance). The per-message ceiling is
-     * the third because the batched fetch below asks for *whole* messages, so
-     * one mail with a photo attached could otherwise eat the entire byte
-     * budget on a file nobody opened.
+     * Five numbers rather than one, because the prefetch has costs that are not
+     * bounded by the same thing, and because it now happens in two stages that
+     * the user experiences completely differently:
+     *
+     *   - the *foreground* stage is what {@link #sync} itself waits for before
+     *     it can return a message list, so every byte in it is a byte the
+     *     inbox screen is blocked on;
+     *   - the *tail* is everything after that, fetched once the list is already
+     *     on screen, so its only cost is the user's data allowance.
+     *
+     * The per-message ceiling is shared by both because the batched fetch below
+     * asks for *whole* messages: one mail with a photo attached could otherwise
+     * eat an entire budget on a file nobody opened.
      */
     private static final class PrefetchBudget {
+        /** How many messages the sync itself waits for. */
+        final int foreground;
+        /** And how many bytes those may cost — the number the list paint waits on. */
+        final long foregroundBytes;
+        /** How many messages are worth having on disk in total, foreground included. */
         final int messages;
-        final long totalBytes;
+        /** What the background stage may spend on the rest of them. */
+        final long tailBytes;
         final long perMessageBytes;
 
-        PrefetchBudget(int messages, long totalBytes, long perMessageBytes) {
+        PrefetchBudget(int foreground, long foregroundBytes, int messages, long tailBytes,
+                       long perMessageBytes) {
+            this.foreground = foreground;
+            this.foregroundBytes = foregroundBytes;
             this.messages = messages;
-            this.totalBytes = totalBytes;
+            this.tailBytes = tailBytes;
             this.perMessageBytes = perMessageBytes;
         }
     }
 
     /**
-     * Fifteen messages, 2 MB, 256 KB each — what shipped, unchanged, for a
-     * phone on mobile data.
+     * Fifteen messages, 512 KB, 64 KB each, and no tail — what shipped,
+     * unchanged, for a phone on mobile data.
      *
-     * The count is the number this class has always used, and the byte
-     * ceilings are the ones it declared for years and never actually applied
-     * to anything. Keeping the metered figures at the shipped values is the
-     * whole point: the batched fetch below cannot spend a byte of anybody's
-     * data allowance that the previous build did not already spend.
+     * The count is the number this class has always used and the byte ceilings
+     * are the ones it has always declared. Keeping the metered figures at the
+     * shipped values is the whole point: with the default setting, this release
+     * cannot spend a byte of anybody's data allowance that the previous build
+     * did not already spend. Someone who wants the rest of the list on mobile
+     * data has to say so — see {@link #METERED_OPTED_IN}.
      *
      * The 64 KB per-message ceiling is tighter here than on Wi-Fi for the one
      * way whole-message fetching *can* cost more than the old part-by-part
      * path: an HTML mail with an inline image. Under 64 KB there is no room
      * for one large enough to matter.
      */
-    private static final PrefetchBudget METERED = new PrefetchBudget(15, 512L * 1024, 64L * 1024);
+    private static final PrefetchBudget METERED =
+            new PrefetchBudget(15, 512L * 1024, 15, 0L, 64L * 1024);
 
     /**
-     * Thirty messages, 2 MB, 256 KB each, on an unmetered connection.
+     * The same foreground, plus a tail, for someone who asked for it.
      *
-     * Thirty is about three phone screens of the inbox list — as far ahead as
-     * a scroll realistically gets before the next sync runs, which is the
-     * whole claim being made for prefetching further. 256 KB per message is
-     * comfortably above a long HTML newsletter and comfortably below anything
-     * with a real attachment on it, so a message that would cost more than its
-     * text is worth falls out of the batch and back onto the on-demand path.
+     * Reached only when {@code Settings.inboxPrefetchFull} is {@code 'always'},
+     * which is a switch the user has to find and turn on. The foreground half
+     * is byte-for-byte {@link #METERED}, so the part of a sync anybody waits on
+     * costs exactly what it did before; what the setting buys is the remaining
+     * 35 messages of the list arriving in the background afterwards.
+     *
+     * 4 MB and 128 KB rather than the Wi-Fi figures because this is still
+     * somebody's mobile plan. 128 KB is above a long HTML newsletter and below
+     * anything with a photo in it; 4 MB over 35 messages is roughly a
+     * newsletter each and stops well short of a number worth noticing on a bill.
+     * The budget is raised rather than removed on purpose: an account with a
+     * decade of mail and a phone plan is not a combination worth handing an
+     * unbounded download to.
      */
-    private static final PrefetchBudget UNMETERED = new PrefetchBudget(30, 2L * 1024 * 1024, 256L * 1024);
+    private static final PrefetchBudget METERED_OPTED_IN =
+            new PrefetchBudget(15, 512L * 1024, LIST_LIMIT, 4L * 1024 * 1024, 128L * 1024);
 
     /**
-     * Which of the two applies right now.
+     * Thirty messages in front, the rest of the list behind, on an unmetered
+     * connection.
      *
-     * There is no "download mail on mobile data" consent switch to consult:
-     * this app has no metered-network policy anywhere — {@link
-     * InboxSyncScheduler}'s only constraint is {@code NetworkType.CONNECTED},
-     * and nothing else asks. So the conservative reading is the only one
-     * available: never spend more on a metered link than the build before this
-     * one already did, and treat "could not tell" as metered, because guessing
-     * wrong the other way spends somebody's data allowance on mail they may
-     * never open.
+     * The foreground half is what shipped — thirty messages and 2 MB — and it
+     * stays that way because it is the half a person is waiting on. What is
+     * new is the tail: messages 31 to {@link #LIST_LIMIT}, which before this
+     * release were *never* prefetched at all, so opening any of them paid a
+     * full IMAP ladder (six to eight sequential round trips at 50-150 ms each)
+     * before a single byte of text moved. Covering the whole list is the point
+     * of the change; doing it after the list is on screen is what stops it
+     * costing anything the user can feel.
+     *
+     * 256 KB per message is comfortably above a long HTML newsletter and
+     * comfortably below anything with a real attachment on it, so a message
+     * that would cost more than its text is worth falls out of the batch and
+     * back onto the on-demand path. 8 MB of tail is 20 messages at that ceiling
+     * or 160 at the ~50 KB a plain message actually weighs — a real ceiling
+     * that the ordinary case never comes near.
+     */
+    private static final PrefetchBudget UNMETERED =
+            new PrefetchBudget(30, 2L * 1024 * 1024, LIST_LIMIT, 8L * 1024 * 1024, 256L * 1024);
+
+    /**
+     * Which of the three applies right now.
+     *
+     * Two questions, and only the first one costs anything: is this connection
+     * metered, and — if it is — has the user said to prefetch anyway.
+     * "Could not tell" is treated as metered, because guessing wrong the other
+     * way spends somebody's data allowance on mail they may never open.
      */
     private static PrefetchBudget prefetchBudget(Context context) {
+        if (!metered(context)) return UNMETERED;
+        return "always".equals(prefetchSetting(context)) ? METERED_OPTED_IN : METERED;
+    }
+
+    /**
+     * Is this connection one the user pays for by the megabyte?
+     *
+     * "Could not tell" answers yes, everywhere this is used. Guessing wrong in
+     * that direction costs a slower first open; guessing wrong in the other
+     * spends somebody's data allowance on mail they may never read.
+     */
+    private static boolean metered(Context context) {
         try {
             android.net.ConnectivityManager manager = (android.net.ConnectivityManager)
                     context.getSystemService(Context.CONNECTIVITY_SERVICE);
-            if (manager == null || manager.isActiveNetworkMetered()) return METERED;
-            return UNMETERED;
+            return manager == null || manager.isActiveNetworkMetered();
         } catch (Exception e) {
-            Log.w(TAG, "prefetchBudget: could not read the network's metered state", e);
-            return METERED;
+            Log.w(TAG, "metered: could not read the network's metered state; assuming metered", e);
+            return true;
         }
+    }
+
+    /**
+     * The app's own `Settings` object, or null if there is not one yet.
+     *
+     * Read straight out of the same {@link android.content.SharedPreferences}
+     * file {@link AppSettingsSignal} reads, for the same reason that class
+     * exists: {@link InboxSyncWorker} runs on WorkManager's schedule with no
+     * WebView in the process, so there is nobody to ask. The two constants are
+     * duplicated here rather than shared because {@code AppSettingsSignal}'s
+     * own reader is private; that file is the source of truth for what they
+     * mean, and this is a read — nothing here ever writes to that file.
+     *
+     * Null on a first launch with nothing saved, and null on a parse failure.
+     * Every caller answers null with the same default `src/core/types.ts`
+     * declares, so an install that predates a setting behaves like a fresh one.
+     */
+    private static JSONObject appSettings(Context context) {
+        try {
+            android.content.SharedPreferences prefs = context.getApplicationContext()
+                    // `PreferencesConfiguration.DEFAULTS.group` in @capacitor/preferences.
+                    .getSharedPreferences("CapacitorStorage", Context.MODE_PRIVATE);
+            // `STATE_KEY` in `src/core/bridge-android.ts`.
+            String raw = prefs.getString("aevistle.state.v1", null);
+            if (raw == null) return null;
+            return new JSONObject(raw).optJSONObject("settings");
+        } catch (Exception e) {
+            Log.w(TAG, "appSettings: could not read the app's own settings", e);
+            return null;
+        }
+    }
+
+    /** {@code Settings.inboxPrefetchFull} — {@code "wifi"} (the default) or {@code "always"}. */
+    private static String prefetchSetting(Context context) {
+        JSONObject settings = appSettings(context);
+        return settings == null ? "wifi" : settings.optString("inboxPrefetchFull", "wifi");
     }
 
     // -----------------------------------------------------------------------
@@ -725,13 +817,44 @@ final class MailFetcher {
      *
      * Returns the updated `InboxAccountState` JSON — same shape `syncInbox`
      * returns on the desktop, so `bridge-android.ts` needs no translation.
+     *
+     * The three-argument form runs the background stage — the rest of the
+     * bodies, and the cache trim — inline, before it returns. That is the right
+     * answer for {@link InboxSyncWorker}, which calls this one: once its {@code
+     * doWork()} returns, WorkManager is free to let the process be killed, so
+     * work handed to a background thread there is work that may simply never
+     * happen, on a connection {@code closeIdleConnections()} is about to take
+     * away. Nobody is looking at a screen during a background sync, so blocking
+     * costs nothing there.
      */
     static JSONObject sync(android.content.Context context, JSONObject config, String secret) throws Exception {
+        return sync(context, config, secret, false);
+    }
+
+    /**
+     * @param deferAfterSync true to hand the tail prefetch and the cache trim to
+     *        a background thread and return as soon as the message list is
+     *        ready. What the foreground caller — the Inbox screen pulling to
+     *        refresh — actually wants: the list paints off the first tranche of
+     *        bodies, and the other twenty arrive while it is being read.
+     */
+    static JSONObject sync(android.content.Context context, JSONObject config, String secret,
+                           boolean deferAfterSync) throws Exception {
         final String accountId = config.optString("accountId", "");
         JSONArray previousMessagesRaw = config.optJSONArray("messages");
         final JSONArray previousMessages = previousMessagesRaw == null ? new JSONArray() : previousMessagesRaw;
+        final PrefetchBudget budget = prefetchBudget(context);
+        /*
+         * Messages this pass wants a body for but is not going to wait around
+         * for. Filled inside the lambda and drained after it returns, which is
+         * why it is declared out here — and why it holds UIDs rather than
+         * `Message` objects: those belong to the Folder handle this operation
+         * is about to close, and reading one afterwards would either throw or
+         * silently reopen the mailbox.
+         */
+        final List<Long> tailUids = new ArrayList<>();
 
-        return withInbox(context, config, secret, Folder.READ_ONLY, (store, inbox) -> {
+        JSONObject synced = withInbox(context, config, secret, Folder.READ_ONLY, (store, inbox) -> {
             UIDFolder uidFolder = (UIDFolder) inbox;
             long uidValidity = uidFolder.getUIDValidity();
 
@@ -794,7 +917,6 @@ final class MailFetcher {
             // Bodies this pass wants, alongside the row each one has to write
             // its snippet back into. Collected first and fetched together
             // below, rather than one message at a time inside the loop.
-            PrefetchBudget budget = prefetchBudget(context);
             List<Message> wanted = new ArrayList<>();
             List<JSONObject> wantedRows = new ArrayList<>();
             List<Long> wantedUids = new ArrayList<>();
@@ -826,12 +948,39 @@ final class MailFetcher {
                         || InboxBodyStore.hasBody(context, accountId, "INBOX", uid);
                 row.put("bodyCached", alreadyCached);
 
+                /*
+                 * A body the background tail wrote after the previous sync
+                 * arrives here with a row that has no snippet on it.
+                 *
+                 * The tail deliberately writes to disk and nowhere else — see
+                 * {@link #prefetchTail} for why touching {@link InboxCache}
+                 * from a thread that outlives the sync is not worth the race —
+                 * so this is where the list row catches up. Without it the
+                 * snippet would stay empty forever: `alreadyCached` keeps the
+                 * message out of every future prefetch batch, so nothing would
+                 * ever parse it again.
+                 *
+                 * A local file read, not a round trip, and only for a row that
+                 * has a cached body and still no snippet — so it costs one read
+                 * per message ever, not one per sync.
+                 */
+                if (alreadyCached && row.optString("snippet", "").isEmpty()) {
+                    JSONObject cachedBody = InboxBodyStore.readBody(context, accountId, "INBOX", uid);
+                    if (cachedBody != null) row.put("snippet", snippetOf(cachedBody));
+                }
+
                 messages.put(row);
 
-                if (!alreadyCached && wanted.size() < budget.messages) {
-                    wanted.add(m);
-                    wantedRows.add(row);
-                    wantedUids.add(uid);
+                if (!alreadyCached) {
+                    if (wanted.size() < budget.foreground) {
+                        wanted.add(m);
+                        wantedRows.add(row);
+                        wantedUids.add(uid);
+                    } else if (wanted.size() + tailUids.size() < budget.messages) {
+                        // Past the tranche the list paint waits for. Noted by
+                        // UID and picked up after this connection is done with.
+                        tailUids.add(uid);
+                    }
                 }
             }
 
@@ -853,6 +1002,205 @@ final class MailFetcher {
             result.put("lastSyncAt", System.currentTimeMillis());
             result.remove("lastSyncError");
             return result;
+        });
+
+        afterSync(context, config, secret, accountId, tailUids, budget, deferAfterSync);
+        return synced;
+    }
+
+    // -----------------------------------------------------------------------
+    // The background half of a sync
+    //
+    // Two jobs that have no business making anyone wait for a message list:
+    // downloading the rest of the page's bodies, and trimming the cache back
+    // to the size and age the user set. Both are pure "do it when there is
+    // time" work — if the process dies first, the next sync picks up exactly
+    // where this one stopped, because both decide what to do by looking at
+    // what is already on disk rather than by remembering.
+    // -----------------------------------------------------------------------
+
+    /**
+     * How many bodies one batched FETCH asks for in the tail.
+     *
+     * The command count is not what this bounds — one FETCH for fifty messages
+     * is one round trip, which is the whole reason the tail is affordable at
+     * all. What it bounds is memory: a fetched `IMAPMessage` keeps its parsed
+     * body until the folder closes, so ten at the 256 KB per-message ceiling is
+     * about 2.5 MB in flight at once rather than the twelve the whole tail
+     * could reach.
+     */
+    private static final int TAIL_CHUNK = 10;
+
+    /** One background thread for every account, created on first use and daemon. */
+    private static ExecutorService background;
+
+    /**
+     * Accounts whose tail is running right now.
+     *
+     * A guard, not a queue. Two syncs a minute apart on a slow link would
+     * otherwise stack their tails up behind each other, each re-deciding what
+     * to fetch from a disk state the one in front of it is still changing. A
+     * skipped tail costs nothing: whatever it would have fetched is still
+     * missing at the next sync, and the next sync will list it again.
+     */
+    private static final java.util.Set<String> TAIL_RUNNING = new java.util.HashSet<>();
+
+    private static void afterSync(Context context, JSONObject config, String secret,
+                                  String accountId, List<Long> tailUids, PrefetchBudget budget,
+                                  boolean deferred) {
+        Runnable work = () -> {
+            try {
+                prefetchTail(context, config, secret, accountId, tailUids, budget);
+            } catch (Exception e) {
+                // Never fatal to a sync that has already produced its list. The
+                // messages this would have cached simply load on demand, which
+                // is what every build before this one did for all of them.
+                Log.w(TAG, "afterSync: background body prefetch failed", e);
+            }
+            try {
+                pruneCache(context);
+            } catch (Exception e) {
+                Log.w(TAG, "afterSync: could not trim the message cache", e);
+            }
+        };
+
+        if (!deferred) {
+            work.run();
+            return;
+        }
+
+        synchronized (TAIL_RUNNING) {
+            if (!TAIL_RUNNING.add(accountId)) return;
+            if (background == null) {
+                background = Executors.newSingleThreadExecutor(runnable -> {
+                    Thread thread = new Thread(runnable, "aevistle-imap-prefetch");
+                    thread.setDaemon(true);
+                    return thread;
+                });
+            }
+        }
+        background.execute(() -> {
+            try {
+                work.run();
+            } finally {
+                synchronized (TAIL_RUNNING) {
+                    TAIL_RUNNING.remove(accountId);
+                }
+            }
+        });
+    }
+
+    /**
+     * Download the bodies the sync did not wait for, in batches.
+     *
+     * These are messages 31 to {@link #LIST_LIMIT} of the list — the ones that
+     * before this release were never prefetched at all, so opening one paid the
+     * full ladder this file's "Connection reuse" section measures: six to eight
+     * sequential round trips before the first byte of text moved. There is
+     * nothing special about them other than being further down the page, and a
+     * page of fifty is one scroll.
+     *
+     * Runs on its own pass rather than inside the sync so that the message list
+     * is already on screen while this happens. It reuses the connection the
+     * sync parked, so the cost of a separate pass is a SELECT — one round trip —
+     * rather than another handshake.
+     *
+     * Writes to {@link InboxBodyStore} and to nothing else. Not to {@link
+     * InboxCache}: that store is a read-modify-write over one SharedPreferences
+     * blob, and a thread that outlives the sync updating it would be racing
+     * every later sync for the right to describe the same account. The list row
+     * catches up on the next sync instead, from disk, for free — see the
+     * snippet backfill in {@link #sync}. The one thing that must be true for
+     * that to be safe is that a body on disk is authoritative regardless of what
+     * a row says, and it already is: {@link #fetchBody} reads the cache before
+     * it opens anything.
+     */
+    private static void prefetchTail(Context context, JSONObject config, String secret,
+                                     String accountId, List<Long> uids, PrefetchBudget budget)
+            throws Exception {
+        if (uids.isEmpty() || budget.tailBytes <= 0) return;
+
+        final long[] want = new long[uids.size()];
+        for (int i = 0; i < want.length; i++) want[i] = uids.get(i);
+
+        withInbox(context, config, secret, Folder.READ_ONLY, (store, inbox) -> {
+            UIDFolder uidFolder = (UIDFolder) inbox;
+            // One `UID FETCH <set> (UID)` for the whole tail, not one lookup per
+            // message. `getMessagesByUID(long[])` answers positionally and puts
+            // a null where the server no longer has that UID — a message deleted
+            // from another client between the list fetch and now.
+            Message[] found = uidFolder.getMessagesByUID(want);
+
+            List<Message> live = new ArrayList<>();
+            List<Long> liveUids = new ArrayList<>();
+            for (int i = 0; i < found.length && i < want.length; i++) {
+                if (found[i] == null) continue;
+                // Re-checked rather than trusted from the sync's pass: an
+                // adjacent prefetch, or the on-demand open of a message the user
+                // scrolled to, may have cached this one in between.
+                if (InboxBodyStore.hasBody(context, accountId, "INBOX", want[i])) continue;
+                live.add(found[i]);
+                liveUids.add(want[i]);
+            }
+            if (live.isEmpty()) return null;
+
+            // Sizes for the whole tail in one command. Without this, the
+            // per-message ceiling below would cost a round trip per message to
+            // enforce — `FetchProfile.Item.ENVELOPE` is
+            // `ENVELOPE INTERNALDATE RFC822.SIZE`, so asking for it is how
+            // RFC822.SIZE arrives in bulk.
+            javax.mail.FetchProfile sizes = new javax.mail.FetchProfile();
+            sizes.add(javax.mail.FetchProfile.Item.ENVELOPE);
+            inbox.fetch(live.toArray(new Message[0]), sizes);
+
+            List<Message> batch = new ArrayList<>();
+            List<Long> batchUids = new ArrayList<>();
+            long remaining = budget.tailBytes;
+            for (int i = 0; i < live.size(); i++) {
+                int size;
+                try {
+                    size = live.get(i).getSize();
+                } catch (Exception e) {
+                    // A field read that threw means this message's metadata did
+                    // not arrive; without a size there is no way to hold it to
+                    // the ceiling, so it stays on the on-demand path.
+                    continue;
+                }
+                if (size <= 0 || size > budget.perMessageBytes) continue;
+                if (size > remaining) break;
+                remaining -= size;
+                batch.add(live.get(i));
+                batchUids.add(liveUids.get(i));
+            }
+
+            for (int from = 0; from < batch.size(); from += TAIL_CHUNK) {
+                int to = Math.min(from + TAIL_CHUNK, batch.size());
+                List<Message> chunk = batch.subList(from, to);
+                try {
+                    javax.mail.FetchProfile bodies = new javax.mail.FetchProfile();
+                    bodies.add(com.sun.mail.imap.IMAPFolder.FetchProfileItem.MESSAGE);
+                    inbox.fetch(chunk.toArray(new Message[0]), bodies);
+                } catch (Exception e) {
+                    // Same bargain as the foreground batch: the per-message loop
+                    // below still works, it is just slow again. Logged because a
+                    // batch that fails every time is the difference between this
+                    // being free and this being the most expensive thing the app
+                    // does, with nothing on screen to say which.
+                    Log.w(TAG, "prefetchTail: batched body fetch failed, falling back per message", e);
+                }
+                for (int i = from; i < to; i++) {
+                    try {
+                        Parsed parsed = extract(batch.get(i));
+                        InboxBodyStore.writeBody(context, accountId, "INBOX", batchUids.get(i),
+                                parsed.toBodyJson());
+                    } catch (Exception ignored) {
+                        // One body that will not parse is not worth abandoning
+                        // the rest of the tail over — it loads on demand later
+                        // exactly like an unprefetched one.
+                    }
+                }
+            }
+            return null;
         });
     }
 
@@ -888,6 +1236,12 @@ final class MailFetcher {
      *
      * A batch that fails costs nothing but the batch: every message still gets
      * its individual pass below, which is exactly what this code did before.
+     *
+     * Bounded by the *foreground* half of the budget, which is unchanged from
+     * what shipped — fifteen messages and 512 KB on mobile data, thirty and
+     * 2 MB on Wi-Fi. Everything this release added to the coverage lives in
+     * {@link #prefetchTail} instead, precisely so that the part of a sync
+     * somebody is waiting on did not get slower in exchange.
      */
     private static void prefetchBodies(Context context, String accountId, Folder inbox,
                                        PrefetchBudget budget, List<Message> wanted,
@@ -895,7 +1249,7 @@ final class MailFetcher {
         if (wanted.isEmpty()) return;
 
         List<Message> batch = new ArrayList<>();
-        long remaining = budget.totalBytes;
+        long remaining = budget.foregroundBytes;
         for (Message m : wanted) {
             int size;
             try {
@@ -940,6 +1294,116 @@ final class MailFetcher {
     }
 
     // -----------------------------------------------------------------------
+    // Cache trim
+    //
+    // `Settings.inboxCacheMaxMb` and `Settings.inboxCacheRetentionDays` have
+    // existed, been shown on the settings screen, and been saved to disk since
+    // the inbox shipped. On Android nothing had ever read either of them: the
+    // switches worked, the numbers persisted, and the cache grew until the user
+    // cleared the app's storage. This is the code that makes them mean
+    // something.
+    //
+    // What it deletes is *only* downloaded message bodies and downloaded
+    // attachments — the two directories named below and nothing else. That
+    // matters more than it looks: `DataRoot.dir()` also holds `attachments/`,
+    // which is the compose side's snapshots of files a *scheduled send* still
+    // needs, and deleting one of those would silently break a reminder that has
+    // not fired yet. The server still has every message this touches, so
+    // eviction here costs a re-download and never a loss.
+    // -----------------------------------------------------------------------
+
+    /** Written by `InboxBodyStore`: `inbox/<account>/<folder>/<uid>.json`. */
+    private static final String BODY_CACHE_DIR = "inbox";
+    /** Written by {@link #downloadAttachment}: `inbox-attachments/<account>/<folder>/<uid>/…`. */
+    private static final String ATTACHMENT_CACHE_DIR = "inbox-attachments";
+
+    /**
+     * How often the trim is worth running.
+     *
+     * It walks the whole cache to decide anything, so running it after every
+     * sync would mean a full directory scan every five minutes to discover, in
+     * the overwhelming majority of cases, that nothing is over budget. Half an
+     * hour is far more often than a cache measured in hundreds of megabytes can
+     * fill up and far less often than the disk cost of asking.
+     *
+     * Process-scoped rather than persisted: a fresh process trims once on its
+     * first sync, which is exactly when a phone that has been off for a week
+     * most wants it.
+     */
+    private static final long PRUNE_MIN_INTERVAL_MS = 30L * 60L * 1000L;
+
+    private static final Object PRUNE_LOCK = new Object();
+    private static long lastPruneAt;
+
+    /**
+     * Delete cached bodies and attachments that are over the age or size the
+     * user set. Never throws; a cache that could not be trimmed is not a
+     * reason to fail anything.
+     *
+     * Age first, then size, matching `pruneInboxCache` in
+     * `electron/inboxStore.ts` so the same two numbers mean the same thing on
+     * both platforms. Oldest-written first once the age pass is done, because
+     * the newest mail is the mail somebody is about to open.
+     */
+    static void pruneCache(Context context) {
+        synchronized (PRUNE_LOCK) {
+            long now = System.currentTimeMillis();
+            if (lastPruneAt != 0 && now - lastPruneAt < PRUNE_MIN_INTERVAL_MS) return;
+            lastPruneAt = now;
+        }
+
+        JSONObject settings = appSettings(context);
+        // The same defaults `DEFAULT_SETTINGS` declares in `src/core/types.ts`.
+        int maxMb = settings == null ? 500 : settings.optInt("inboxCacheMaxMb", 500);
+        int retentionDays = settings == null ? 90 : settings.optInt("inboxCacheRetentionDays", 90);
+        // A nonsensical number typed into the settings screen must not become a
+        // command to delete the whole cache. Both are clamped to something the
+        // user could plausibly have meant.
+        if (maxMb < 1) maxMb = 1;
+        if (retentionDays < 1) retentionDays = 1;
+
+        File root = DataRoot.dir(context);
+        List<File> files = new ArrayList<>();
+        collectFiles(new File(root, BODY_CACHE_DIR), files);
+        collectFiles(new File(root, ATTACHMENT_CACHE_DIR), files);
+        if (files.isEmpty()) return;
+
+        long cutoff = System.currentTimeMillis() - retentionDays * 24L * 60L * 60L * 1000L;
+        long total = 0L;
+        List<File> kept = new ArrayList<>(files.size());
+        for (File file : files) {
+            if (file.lastModified() < cutoff) {
+                //noinspection ResultOfMethodCallIgnored
+                file.delete();
+                continue;
+            }
+            total += file.length();
+            kept.add(file);
+        }
+
+        long maxBytes = maxMb * 1024L * 1024L;
+        if (total <= maxBytes) return;
+
+        java.util.Collections.sort(kept, (a, b) -> Long.compare(a.lastModified(), b.lastModified()));
+        for (File file : kept) {
+            if (total <= maxBytes) break;
+            long size = file.length();
+            //noinspection ResultOfMethodCallIgnored
+            if (file.delete()) total -= size;
+        }
+    }
+
+    /** Every regular file under `dir`, depth first. Missing directories contribute nothing. */
+    private static void collectFiles(File dir, List<File> out) {
+        File[] children = dir.listFiles();
+        if (children == null) return;
+        for (File child : children) {
+            if (child.isDirectory()) collectFiles(child, out);
+            else if (child.isFile()) out.add(child);
+        }
+    }
+
+    // -----------------------------------------------------------------------
     // Body fetch (on demand, for a message that was not prefetched)
     // -----------------------------------------------------------------------
 
@@ -957,6 +1421,125 @@ final class MailFetcher {
             InboxBodyStore.writeBody(context, config.optString("accountId", ""), folderPath, uid, body);
             return body;
         });
+    }
+
+    /**
+     * Cache the bodies of the messages either side of the one just opened.
+     *
+     * Reading mail is a sequence, not a set of independent taps: the message
+     * after this one is the single most likely thing to be opened next, and the
+     * one before it is second. Both are known the instant the reader opens
+     * anything, and both take a bounded, batched fetch on a connection this app
+     * is already holding — so the choice is between paying for them now, while
+     * somebody is reading, or paying a full ladder for one of them in a moment
+     * while somebody is waiting.
+     *
+     * Deliberately narrow:
+     *
+     *   - Wi-Fi only, with no setting to widen it. {@code inboxPrefetchFull}
+     *     governs how much of the *list* a sync downloads, which is a decision
+     *     about a background job; this fires on a tap, so on mobile data it
+     *     would be spending an allowance in response to something the user did
+     *     for a different reason. A metered link gets nothing here.
+     *   - at most two UIDs, whatever the caller passes. The renderer decides
+     *     what "adjacent" means — its list may be filtered or sorted in ways
+     *     this side cannot see — but it does not get to turn this into a
+     *     bulk downloader.
+     *   - anything already on disk, or over the per-message ceiling, is skipped.
+     *
+     * Best effort throughout: never throws, and the caller is expected to fire
+     * and forget. Nothing on screen depends on it — every one of these messages
+     * still opens exactly the way it did before, just slower.
+     *
+     * @return how many bodies this call actually wrote.
+     */
+    static int prefetchAdjacent(Context context, JSONObject config, String secret,
+                                String folderPath, long[] uids) {
+        if (uids == null || uids.length == 0) return 0;
+        if (metered(context)) return 0;
+
+        // Only the per-message ceiling is borrowed from the sync's budget — the
+        // foreground/tail counts describe a sync's two stages and mean nothing
+        // here. The ceiling is the same judgement in both places: a message
+        // heavy enough to cost more than its text is worth is not a message to
+        // download on a guess.
+        final long perMessageBytes = UNMETERED.perMessageBytes;
+
+        final String accountId = config.optString("accountId", "");
+        final List<Long> want = new ArrayList<>(2);
+        for (long uid : uids) {
+            if (want.size() >= 2) break;
+            if (uid <= 0 || want.contains(uid)) continue;
+            if (InboxBodyStore.hasBody(context, accountId, folderPath, uid)) continue;
+            want.add(uid);
+        }
+        if (want.isEmpty()) return 0;
+
+        try {
+            Integer written = withInbox(context, config, secret, Folder.READ_ONLY, (store, inbox) -> {
+                UIDFolder uidFolder = (UIDFolder) inbox;
+                long[] set = new long[want.size()];
+                for (int i = 0; i < set.length; i++) set[i] = want.get(i);
+
+                Message[] found = uidFolder.getMessagesByUID(set);
+                List<Message> live = new ArrayList<>(2);
+                List<Long> liveUids = new ArrayList<>(2);
+                for (int i = 0; i < found.length && i < set.length; i++) {
+                    if (found[i] != null) {
+                        live.add(found[i]);
+                        liveUids.add(set[i]);
+                    }
+                }
+                if (live.isEmpty()) return 0;
+
+                javax.mail.FetchProfile sizes = new javax.mail.FetchProfile();
+                sizes.add(javax.mail.FetchProfile.Item.ENVELOPE);
+                inbox.fetch(live.toArray(new Message[0]), sizes);
+
+                List<Message> batch = new ArrayList<>(2);
+                List<Long> batchUids = new ArrayList<>(2);
+                for (int i = 0; i < live.size(); i++) {
+                    int size;
+                    try {
+                        size = live.get(i).getSize();
+                    } catch (Exception e) {
+                        // No size means no way to hold it to the ceiling. It
+                        // stays on the on-demand path, which is where it was.
+                        continue;
+                    }
+                    if (size <= 0 || size > perMessageBytes) continue;
+                    batch.add(live.get(i));
+                    batchUids.add(liveUids.get(i));
+                }
+                if (batch.isEmpty()) return 0;
+
+                javax.mail.FetchProfile bodies = new javax.mail.FetchProfile();
+                bodies.add(com.sun.mail.imap.IMAPFolder.FetchProfileItem.MESSAGE);
+                inbox.fetch(batch.toArray(new Message[0]), bodies);
+
+                int count = 0;
+                for (int i = 0; i < batch.size(); i++) {
+                    try {
+                        Parsed parsed = extract(batch.get(i));
+                        InboxBodyStore.writeBody(context, accountId, folderPath, batchUids.get(i),
+                                parsed.toBodyJson());
+                        count++;
+                    } catch (Exception ignored) {
+                        // One neighbour that will not parse is not worth
+                        // failing the other one over.
+                    }
+                }
+                return count;
+            });
+            return written == null ? 0 : written;
+        } catch (Exception e) {
+            // A guess about what gets opened next is not worth a single line on
+            // screen when it goes wrong. Logged so a device where this fails
+            // every time is diagnosable from logcat rather than only visible as
+            // "opening the next mail is still slow".
+            Log.w(TAG, "prefetchAdjacent: could not cache the neighbouring messages", e);
+            return 0;
+        }
     }
 
     static void setSeen(Context context, JSONObject config, String secret, String folderPath,
@@ -1317,8 +1900,27 @@ final class MailFetcher {
     }
 
     private static String snippetOf(Parsed parsed) {
-        String source = parsed.text != null ? parsed.text
-                : parsed.html != null ? parsed.html.replaceAll("<[^>]+>", " ") : "";
+        return trimSnippet(parsed.text != null ? parsed.text
+                : parsed.html != null ? parsed.html.replaceAll("<[^>]+>", " ") : "");
+    }
+
+    /**
+     * The same snippet, from a body already on disk rather than one just
+     * parsed.
+     *
+     * Exists for the rows the background tail filled in — see the backfill in
+     * {@link #sync}. Reads `sanitizedHtml` rather than the original HTML
+     * because that is what the cache holds; the tag strip is the same either
+     * way, and stripping tags out of already-sanitized markup cannot reintroduce
+     * anything the sanitizer removed.
+     */
+    private static String snippetOf(JSONObject body) {
+        String text = body.optString("text", "");
+        if (!text.isEmpty()) return trimSnippet(text);
+        return trimSnippet(body.optString("sanitizedHtml", "").replaceAll("<[^>]+>", " "));
+    }
+
+    private static String trimSnippet(String source) {
         String collapsed = source.replaceAll("\\s+", " ").trim();
         return collapsed.length() > 180 ? collapsed.substring(0, 180) : collapsed;
     }

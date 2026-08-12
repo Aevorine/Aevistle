@@ -64,7 +64,9 @@ import { PreflightDialog, useFilePresence, usePreflight } from '../components/Pr
 import { SendResultDetails } from '../components/SendDetails'
 import {
   IconAlert,
+  IconCheckCircle,
   IconChevronDown,
+  IconChevronRight,
   IconClock,
   IconFileText,
   IconMail,
@@ -353,6 +355,16 @@ export function ComposeView({
    */
   const [bodyFocus, setBodyFocus] = useState(false)
   /**
+   * Holds the addressing block open while the message still has the caret.
+   *
+   * The block folds to one line the moment someone taps into the body, which
+   * is right until they want to add a recipient without leaving the sentence
+   * they are in. Tapping the folded line sets this; it is cleared on blur, so
+   * the fold is the default state of every visit rather than something the
+   * user has to re-fold by hand.
+   */
+  const [headerPinned, setHeaderPinned] = useState(false)
+  /**
    * When the draft was last written to disk, or `null` for "nothing to say".
    *
    * Derived rather than reported: `AppState` persists on a debounce and exposes
@@ -601,6 +613,14 @@ export function ComposeView({
     draft.body.trim().length > 0 ||
     draft.attachments.length > 0
   const rawBytes = totalAttachmentBytes(draft.attachments)
+  /**
+   * Over the hard limit, which is the size at which the send does not happen.
+   *
+   * Against `attachmentMaxMb`, not `attachmentWarnMb`: the warn threshold is
+   * already one of the things `warnCount` counts, and this flag exists for the
+   * state where there is nothing to warn about except the number itself.
+   */
+  const attachOver = rawBytes > state.settings.attachmentMaxMb * 1048576
 
   /*
    * "已保存 · 12:03", stamped when the typing stops and gone a few seconds later.
@@ -1622,6 +1642,52 @@ export function ComposeView({
               */}
               {narrow ? (
                 <>
+                  {/*
+                    Two rows while addressing, one row while writing.
+
+                    The two header rows are 88px of a 654px view, and they
+                    answer questions asked once per draft — who it is from, who
+                    it goes to, what it is about — against a box that is what
+                    the screen is for. So they fold to a single 44px line the
+                    moment the message takes the caret, and the line still
+                    carries all three answers.
+
+                    `onMouseDown` cancels the default so the tap does not pull
+                    focus out of the textarea on its way to this button: that
+                    would clear `bodyFocus`, unmount this line mid-click, and
+                    the click would land on whatever the re-render put in its
+                    place. Focus stays where it is and `headerPinned` opens the
+                    block instead.
+                  */}
+                  {bodyFocus && !headerPinned ? (
+                    <button
+                      type="button"
+                      className="composetop2 composetop2--fold"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => setHeaderPinned(true)}
+                      aria-label={t('compose.headerFoldOpen')}
+                      title={t('compose.headerFoldOpen')}
+                    >
+                      <span className="composetop2__foldfrom">
+                        {account ? accountShort : t('compose.fromNone')}
+                      </span>
+                      <IconChevronRight size={14} className="composetop2__foldarrow" />
+                      <span className="composetop2__foldto">
+                        {draft.to.length > 0
+                          ? draft.to.length === 1
+                            ? draft.to[0]
+                            : /* The count is the total, not the remainder: "3
+                                 people" is the number anyone would check
+                                 against, and "and 2 others" makes the reader
+                                 do the addition. */
+                              t('compose.foldToN', { first: draft.to[0], n: draft.to.length })
+                          : t('compose.foldToNone')}
+                      </span>
+                      <span className="composetop2__foldsubject">
+                        {draft.subject || t('compose.foldNoSubject')}
+                      </span>
+                    </button>
+                  ) : (
                   <div className="composetop2">
                     <div className="composetop2__row">
                       {/*
@@ -1700,6 +1766,7 @@ export function ComposeView({
                       />
                     </div>
                   </div>
+                  )}
 
                   {headerOpen ? (
                     <div className="compose-head compose-head--extra" id={headId}>
@@ -1859,6 +1926,13 @@ export function ComposeView({
                 label={t('compose.body')}
                 htmlFor={bodyId}
                 /*
+                 * Every rule that sizes the message box hangs off this class.
+                 * It used to hang off `.field:has(.textarea--body)`, which is
+                 * Chromium 105+ against a `minSdkVersion 24` build — see the
+                 * note on `Field`'s `className` prop for the measurement.
+                 */
+                className="field--body"
+                /*
                  * No tools row on a phone, and this is what pays for the two
                  * header rows above.
                  *
@@ -1965,7 +2039,10 @@ export function ComposeView({
                        could connect to what they just did. */
                     setPickOpen(false)
                   }}
-                  onBlur={() => setBodyFocus(false)}
+                  onBlur={() => {
+                    setBodyFocus(false)
+                    setHeaderPinned(false)
+                  }}
                 />
                 {/*
                   "已保存 · 12:03", in the corner the character count used to
@@ -2402,6 +2479,46 @@ export function ComposeView({
             cannot send this yet" and "have a look at this" do not look alike
             from across the room.
           */}
+          {/*
+            And the third state: the same row, saying nothing is wrong.
+
+            `11-status.css` records the rule this has to answer to — never a
+            permanent "all good" banner on a screen people open every day,
+            because a status line that always says the same thing is one nobody
+            reads on the day it changes. This is not that: it is gated on
+            `started`, so it appears once there is a draft to have an opinion
+            about and is absent on the empty screen. Mid-draft is exactly when
+            "is this sendable" is the question, and answering it in the row
+            that would otherwise carry the warning means the answer is always
+            in the same place — a glance at one strip, not a hunt for the
+            absence of one.
+
+            It also carries the attachment total, which is the other number
+            that decides whether a send succeeds. Red the moment the total is
+            over the hard limit, so the fact that a message will bounce is on
+            screen before Send rather than after.
+          */}
+          {started && warnCount === 0 ? (
+            <div
+              className={`banner banner--${attachOver ? 'danger' : 'success'} warnfold warnfold--ok`}
+            >
+              <div className="warnfold__head warnfold__head--static">
+                {attachOver ? (
+                  <IconAlert size={16} className="warnfold__icon" />
+                ) : (
+                  <IconCheckCircle size={16} className="warnfold__icon" />
+                )}
+                <span className="warnfold__count">
+                  {draft.attachments.length > 0
+                    ? t(attachOver ? 'compose.readyAttachOver' : 'compose.readyAttach', {
+                        n: draft.attachments.length,
+                        size: formatBytes(rawBytes),
+                      })
+                    : t('compose.ready')}
+                </span>
+              </div>
+            </div>
+          ) : null}
           {started && warnCount > 0 ? (
             <div
               className={`banner banner--${warnBlocking ? 'danger' : 'warning'} warnfold`}

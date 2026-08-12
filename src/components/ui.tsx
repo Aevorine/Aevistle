@@ -197,6 +197,7 @@ export function Field({
   optional,
   children,
   htmlFor,
+  className,
 }: {
   label?: string
   /** Guidance below the control. Costs a row of vertical space. */
@@ -220,6 +221,21 @@ export function Field({
   optional?: string
   children: ReactNode
   htmlFor?: string
+  /**
+   * Extra class on the `.field` wrapper, so a stylesheet can name this field
+   * instead of inferring it from what is inside.
+   *
+   * The compose message box used to be selected as
+   * `.field:has(.textarea--body)` — thirty rules across six partials, every one
+   * of them load-bearing for the box's height. `:has()` is Chromium 105+ and
+   * this app ships to `minSdkVersion 24`, so on a device whose System WebView
+   * predates it all thirty fail at once: measured in a browser with those rules
+   * removed, the box went from 475px to 128px (72.7% to 19.6% of the view) and
+   * the sr-only "Body" label became visible again — both of the two symptoms
+   * reported from a real phone, from one cause. A class costs nothing and
+   * cannot fail.
+   */
+  className?: string
 }) {
   const labelEl = label ? (
     <label className="field__label" htmlFor={htmlFor}>
@@ -230,7 +246,7 @@ export function Field({
   ) : null
 
   return (
-    <div className="field">
+    <div className={className ? `field ${className}` : 'field'}>
       {/*
         The wrapper appears only when there is something to put beside the
         label. Wrapping unconditionally looked tidier and cost 69px on the

@@ -122,7 +122,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactElement,
 } from 'react'
-import { Button, Modal } from '../components/ui'
+import { Button, IconButton, Modal } from '../components/ui'
 import { Skeleton } from '../components/Skeleton'
 import { useReorder } from '../components/useReorder'
 import { useI18n, type TranslationKey } from '../i18n'
@@ -152,10 +152,18 @@ import {
   IconClock,
   IconEdit,
   IconFileText,
+  IconFlag,
+  IconFolder,
+  IconGlobe,
   IconGrip,
+  IconHome,
+  IconInbox,
+  IconKey,
   IconLink,
+  IconMail,
   IconMore,
   IconSearch,
+  IconSend,
   IconShield,
   IconStar,
   IconUsers,
@@ -231,6 +239,44 @@ const FEATURE_ICONS: Record<HomeFeatureId, (p: { size?: number }) => ReactElemen
 function iconFor(id: DestId): ((p: { size?: number }) => ReactElement) | undefined {
   return FEATURE_ICONS[id as HomeFeatureId] ?? TILE_ICONS[id as ViewId]
 }
+
+/**
+ * The glyphs a cell can be given instead of the app's own.
+ *
+ * A closed list, not "any icon in `icons.tsx`". Two reasons, and the second is
+ * the one that matters. The visible reason is that a picker has to fit a phone
+ * dialog and sixteen 48px targets are four rows of four; the real one is that
+ * `Settings.homeGridIcons` is persisted, synced and read by code newer than the
+ * device that wrote it, so what goes in it has to be a name this file promises
+ * to keep — not whatever export happened to exist the day it was chosen. An id
+ * that is no longer here is ignored at render (see `glyphFor`), which leaves a
+ * cell looking ordinary rather than leaving the settings file unreadable.
+ *
+ * Ids are plain words rather than the component names, so an icon can be
+ * redrawn or renamed in `icons.tsx` without stranding every device that picked
+ * it. They are never shown to the user translated — the button's accessible
+ * name is the id, the same way the accent swatches in Settings are labelled by
+ * their colour id, because sixteen translated glyph names in six languages is a
+ * lot of prose to maintain for a control whose whole content is a picture.
+ */
+const HOME_CELL_ICONS: Array<{ id: string; Icon: (p: { size?: number }) => ReactElement }> = [
+  { id: 'clock', Icon: IconClock },
+  { id: 'calendar', Icon: IconCalendar },
+  { id: 'users', Icon: IconUsers },
+  { id: 'file', Icon: IconFileText },
+  { id: 'activity', Icon: IconActivity },
+  { id: 'star', Icon: IconStar },
+  { id: 'link', Icon: IconLink },
+  { id: 'shield', Icon: IconShield },
+  { id: 'mail', Icon: IconMail },
+  { id: 'send', Icon: IconSend },
+  { id: 'inbox', Icon: IconInbox },
+  { id: 'key', Icon: IconKey },
+  { id: 'globe', Icon: IconGlobe },
+  { id: 'folder', Icon: IconFolder },
+  { id: 'flag', Icon: IconFlag },
+  { id: 'home', Icon: IconHome },
+]
 
 /**
  * The grid order, decided once per app launch and then frozen.
@@ -366,6 +412,15 @@ export function HomeView({
   const [open, setOpen] = useState<DestId | null>(null)
   const [moreOpen, setMoreOpen] = useState(false)
   const [arranging, setArranging] = useState(false)
+  /**
+   * Which arrange row has its rename/icon editor open. At most one.
+   *
+   * One piece of state for the whole list rather than one flag per row, for the
+   * same reason `SettingsView` holds one `openSection`: "two editors open at
+   * once" is then not a thing that can happen, and on a 360px dialog eight open
+   * editors would be a screen nobody can find the Done button on.
+   */
+  const [editingCell, setEditingCell] = useState<DestId | null>(null)
 
   const close = () => setOpen(null)
 
@@ -378,7 +433,14 @@ export function HomeView({
   const isFeature = (id: DestId): id is HomeFeatureId =>
     HOME_FEATURES.some((f) => f.id === id)
 
-  const labelOf = useCallback(
+  /**
+   * What the app calls a destination, in the current language.
+   *
+   * Kept separate from `labelOf` because the rename editor needs both: the
+   * placeholder in the name field is this, so an empty field reads as "it will
+   * be called what it is called" rather than as a blank nobody can interpret.
+   */
+  const defaultLabelOf = useCallback(
     (id: DestId) => {
       const feature = HOME_FEATURES.find((f) => f.id === id)
       if (feature) return t(feature.labelKey)
@@ -386,6 +448,44 @@ export function HomeView({
       return item ? t(item.labelKey) : id
     },
     [t],
+  )
+
+  /**
+   * What *this device* calls it — the user's name if they gave one.
+   *
+   * Trimmed at read rather than at write. The field stores exactly what was
+   * typed so that a space in the middle of a name survives being typed (a
+   * write-time trim makes "工作 日历" impossible to enter: the trailing space is
+   * removed the instant it lands and the next character joins the previous
+   * word), and a name that is nothing but whitespace falls back to the default
+   * instead of drawing an empty cell.
+   *
+   * Used everywhere, not only on the grid: the arrange dialog's picker, the
+   * reorder announcements and the dialog titles all go through here, because a
+   * cell somebody renamed to 验证码 that is still announced as 定时发送 is a
+   * rename that only half happened.
+   */
+  const labelOf = useCallback(
+    (id: DestId) => {
+      const custom = state.settings.homeGridNames?.[id]?.trim()
+      return custom || defaultLabelOf(id)
+    },
+    [defaultLabelOf, state.settings.homeGridNames],
+  )
+
+  /**
+   * Which glyph a cell draws — the chosen one, or the app's own.
+   *
+   * An id that is not in `HOME_CELL_ICONS` any more falls through to the
+   * default rather than rendering nothing: see the note on that list.
+   */
+  const glyphFor = useCallback(
+    (id: DestId) => {
+      const chosen = state.settings.homeGridIcons?.[id]
+      const custom = chosen ? HOME_CELL_ICONS.find((i) => i.id === chosen)?.Icon : undefined
+      return custom ?? iconFor(id)
+    },
+    [state.settings.homeGridIcons],
   )
 
   /**
@@ -509,10 +609,59 @@ export function HomeView({
   /* Back to undefined, not back to today's ranking written out. The difference
      is the whole feature — see `Settings.homeGrid` — because an arrangement
      that has been cleared has to start following use again, and a grid frozen
-     into the shape it happened to have at the moment of the reset would not. */
+     into the shape it happened to have at the moment of the reset would not.
+
+     All three maps, not just the order. "恢复默认" is one promise and it is the
+     only one this dialog makes: a reset that put the cells back where they
+     started but left them wearing names and icons somebody chose would be a
+     screen that still does not look like a fresh install, with no remaining
+     control that would make it so. Names and icons are sparse override maps,
+     so clearing them is the same "never touched" state a new device is in —
+     including the part where the names follow the language picker again. */
   const resetGrid = useCallback(
-    () => dispatch({ type: 'patchSettings', patch: { homeGrid: undefined } }),
+    () =>
+      dispatch({
+        type: 'patchSettings',
+        patch: { homeGrid: undefined, homeGridNames: undefined, homeGridIcons: undefined },
+      }),
     [dispatch],
+  )
+
+  /**
+   * Rename a cell, or put its name back.
+   *
+   * An empty (or all-whitespace) name deletes the entry rather than storing
+   * `''`, and the map itself goes back to `undefined` once the last entry
+   * leaves. Both halves matter: "" would be a name, and would draw a cell with
+   * no label; an empty object would be an arrangement that has been touched,
+   * which is a different state from never having been touched — the same
+   * distinction `Settings.homeGrid` turns on.
+   */
+  const setCellName = useCallback(
+    (id: DestId, name: string) => {
+      const next = { ...(state.settings.homeGridNames ?? {}) }
+      if (name.trim()) next[id] = name
+      else delete next[id]
+      dispatch({
+        type: 'patchSettings',
+        patch: { homeGridNames: Object.keys(next).length > 0 ? next : undefined },
+      })
+    },
+    [dispatch, state.settings.homeGridNames],
+  )
+
+  /** The same rule for the glyph. `undefined` means "the app's own icon". */
+  const setCellIcon = useCallback(
+    (id: DestId, icon: string | undefined) => {
+      const next = { ...(state.settings.homeGridIcons ?? {}) }
+      if (icon) next[id] = icon
+      else delete next[id]
+      dispatch({
+        type: 'patchSettings',
+        patch: { homeGridIcons: Object.keys(next).length > 0 ? next : undefined },
+      })
+    },
+    [dispatch, state.settings.homeGridIcons],
   )
 
   /**
@@ -579,17 +728,82 @@ export function HomeView({
   }
 
   /*
-   * Sends and errors, counted off the same log the 发送记录 screen shows — so
-   * tapping a figure and reading the list it opens can never disagree about
-   * what the number meant. `kind === 'send'` alone would count failed sends as
-   * successes; `level === 'error'` alone would miss nothing but also spans
-   * kinds other than sends, which is correct for a figure captioned "errors".
+   * The all-time `sentCount` and `errorCount` that fed the three tiles are
+   * gone with the tiles — see `todaySent` below for what replaced them and
+   * why. The predicates they used are not lost: `todaySent` is the same
+   * `kind === 'send' && level !== 'error'` test and `todayFailed` the same
+   * `level === 'error'`, each narrowed to the current day, so a figure and the
+   * list it opens still cannot disagree about what the number meant.
    */
-  const sentCount = useMemo(
-    () => state.logs.filter((l) => l.kind === 'send' && l.level !== 'error').length,
-    [state.logs],
-  )
-  const errorCount = useMemo(() => state.logs.filter((l) => l.level === 'error').length, [state.logs])
+
+  /**
+   * The two figures the top of the hero now states, both scoped to today.
+   *
+   * They replace a greeting, and the reason is that 早上好 is the one line on
+   * this screen that is true whatever the app is doing: it says nothing about
+   * whether anything is about to go out, and nothing about whether anything
+   * broke overnight. Those are the two things somebody opening a mail app on a
+   * phone in the morning actually needs, and until now the only place either
+   * was stated was a tile captioned with an all-time total.
+   *
+   * Both are counted off sources already on this screen, deliberately — no new
+   * store, no new derivation, nothing that can disagree with what tapping the
+   * figure opens:
+   *
+   *   queued today  `state.jobs`, exactly as the "coming up" list below
+   *                 computes it — enabled jobs whose next occurrence is today.
+   *                 Paused jobs are excluded there and are excluded here, for
+   *                 the same reason: a paused reminder has occurrences and is
+   *                 not going to fire.
+   *   failed today  `state.logs` filtered by `level === 'error'`, which is the
+   *                 same predicate the third stat tile uses, narrowed to today.
+   *
+   * "Today" is a calendar day compared as local midnights (`daysAhead`), not a
+   * rolling 24 hours: the word means the day you are in, and a reminder set for
+   * 07:00 tomorrow is not "in 15 hours", it is tomorrow.
+   *
+   * Tapping either opens the screen that holds the underlying records — the
+   * schedule for the first, the log for the second. Neither of those screens is
+   * *filtered* to today, which is a real limitation and is why the figures are
+   * captioned rather than left as bare numbers: the number says today, and what
+   * opens is the full list it was counted from, newest first.
+   */
+  const todayQueued = useMemo(() => {
+    const now = Date.now()
+    return state.jobs.filter((j) => {
+      if (!j.enabled) return false
+      const at = j.occurrences.find((o) => o >= now)
+      return at !== undefined && daysAhead(at, now) === 0
+    }).length
+  }, [state.jobs])
+
+  const todayFailed = useMemo(() => {
+    const now = Date.now()
+    return state.logs.filter((l) => l.level === 'error' && daysAhead(l.at, now) === 0).length
+  }, [state.logs])
+
+  /**
+   * Sent today — the third figure, and the one that let the tile strip go.
+   *
+   * The hero stated two facts about today and the strip underneath it stated
+   * three all-time totals, and two of the five were the same fact twice in two
+   * visual languages: "今天要发 0 封" over "0 待发", "今天失败 0 次" over
+   * "0 错误". Screenshotted at 360px, that is one screen saying one thing twice
+   * in an 18.67px sentence and a 20px/14px tile, which is exactly the drift
+   * this round is meant to remove.
+   *
+   * So the strip goes and its one unduplicated figure — sends that went out —
+   * joins the other two, scoped to today like them. Same predicate as
+   * `sentCount` above, narrowed by `daysAhead`, so the two cannot disagree.
+   * The all-time totals are not lost: every figure still opens the screen that
+   * holds the records, and those screens are the full lists.
+   */
+  const todaySent = useMemo(() => {
+    const now = Date.now()
+    return state.logs.filter(
+      (l) => l.kind === 'send' && l.level !== 'error' && daysAhead(l.at, now) === 0,
+    ).length
+  }, [state.logs])
 
   /*
    * The next three sends, soonest first.
@@ -657,7 +871,10 @@ export function HomeView({
 
   /** The row shape the desktop keeps, and the 更多 sheet reuses. */
   const tileRow = (id: DestId) => {
-    const Icon = iconFor(id)
+    /* `glyphFor`, not `iconFor`: a destination somebody renamed and re-iconed
+       on the grid has to look the same in 更多 and on the desktop list, or the
+       same feature is two different things depending on which door you use. */
+    const Icon = glyphFor(id)
     return (
       <button
         key={id}
@@ -707,7 +924,54 @@ export function HomeView({
                 are one fact and are stamped from one variable. */}
             <header className="homehero" aria-label={t('nav.home')} data-tod={tod}>
               <div className="homehero__top">
-                <p className="homehero__greet">{t(GREETING_KEY[tod])}</p>
+                {/*
+                  What the top line says, and why it stopped being a greeting.
+
+                  早上好 is true at 07:00 whatever the app is doing. These two
+                  figures are not: they are how many sends are set for today and
+                  how many things failed today, and they are the two facts that
+                  decide whether this screen needs anything from you. The
+                  greeting keeps its words and moves down one line, where the
+                  sub-line was — it is still worth saying, it was just never
+                  worth the loudest line on the screen.
+
+                  Each figure is a button, and each opens the screen that holds
+                  the records it was counted from — the schedule, and the log.
+                  That is the rule the three tiles below already follow, and the
+                  reason neither of these is allowed to be a number this screen
+                  computed on its own: a figure you cannot press through to is a
+                  figure nobody can check.
+
+                  The failures button is drawn the same whether the count is
+                  zero or nine, and it is drawn at all when it is zero. "0 failed
+                  today" is information — it is the answer to the question the
+                  person is opening the app with — and a control that appears
+                  only on bad days is one nobody learns the position of.
+                */}
+                <p className="homehero__today">
+                  <button
+                    type="button"
+                    className="homehero__fact"
+                    onClick={() => openDest('schedule')}
+                  >
+                    {t('home.todayQueued', { n: todayQueued })}
+                  </button>
+                  <button
+                    type="button"
+                    className="homehero__fact"
+                    onClick={() => openDest('logs')}
+                  >
+                    {t('home.todaySent', { n: todaySent })}
+                  </button>
+                  <button
+                    type="button"
+                    className="homehero__fact"
+                    data-alert={todayFailed > 0 || undefined}
+                    onClick={() => openDest('logs')}
+                  >
+                    {t('home.todayFailed', { n: todayFailed })}
+                  </button>
+                </p>
                 <button
                   type="button"
                   className="homehero__search"
@@ -717,28 +981,18 @@ export function HomeView({
                   <IconSearch size={19} />
                 </button>
               </div>
-              <p className="homehero__sub">
-                {armedCount > 0 ? t('home.heroArmed', { n: armedCount }) : t('home.heroClear')}
-              </p>
-              <div className="homestats">
-                <button type="button" className="homestat" onClick={() => openDest('schedule')}>
-                  <span className="homestat__n">{armedCount}</span>
-                  <span className="homestat__k">{t('home.statArmed')}</span>
-                </button>
-                <button type="button" className="homestat" onClick={() => openDest('logs')}>
-                  <span className="homestat__n">{sentCount}</span>
-                  <span className="homestat__k">{t('home.statSent')}</span>
-                </button>
-                <button type="button" className="homestat" onClick={() => openDest('logs')}>
-                  <span className="homestat__n">{errorCount}</span>
-                  <span className="homestat__k">{t('home.statErrors')}</span>
-                </button>
-              </div>
+              {/* The greeting, at the rank it is worth: one line of ordinary
+                  body type under the two figures that are not. */}
+              <p className="homehero__sub">{t(GREETING_KEY[tod])}</p>
+              {/* The three all-time tiles that used to sit here are gone; see
+                  `todaySent` for the measurement. Two of the three repeated a
+                  figure the line above already states, and the third is now up
+                  there with them, scoped to today like its neighbours. */}
             </header>
 
             <nav className="homegrid" aria-label={t('nav.home')}>
               {gridCells.map((id) => {
-                const Icon = iconFor(id)
+                const Icon = glyphFor(id)
                 return (
                   <button
                     key={id}
@@ -900,16 +1154,35 @@ export function HomeView({
         <Modal
           open
           title={t('home.arrangeTitle')}
-          onClose={() => setArranging(false)}
+          /* The open editor closes with the dialog. Left set, re-opening the
+             arranger would show one row already expanded for a reason that
+             happened three days ago. */
+          onClose={() => {
+            setEditingCell(null)
+            setArranging(false)
+          }}
           closeLabel={t('common.close')}
           fullscreen
           bodyClassName="modal__body--settings"
           footer={
             <>
-              <Button variant="ghost" onClick={resetGrid}>
+              {/* Order, names and icons all at once — see `resetGrid`. */}
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  setEditingCell(null)
+                  resetGrid()
+                }}
+              >
                 {t('home.arrangeReset')}
               </Button>
-              <Button variant="primary" onClick={() => setArranging(false)}>
+              <Button
+                variant="primary"
+                onClick={() => {
+                  setEditingCell(null)
+                  setArranging(false)
+                }}
+              >
                 {t('common.done')}
               </Button>
             </>
@@ -967,6 +1240,94 @@ export function HomeView({
                     </option>
                   ))}
                 </select>
+                {/*
+                  The second thing a cell can be: not only *which* destination,
+                  but what it is called and what it looks like.
+
+                  A disclosure inside the row rather than a dialog of its own.
+                  Eight rows each opening a modal on top of a modal is two close
+                  buttons deep on a phone, and the thing being edited — this row
+                  — would be behind the thing editing it. Inline, the row you are
+                  changing stays on screen and stays the row you held.
+                */}
+                <IconButton
+                  label={t('home.cellEdit', { name: labelOf(id) })}
+                  aria-expanded={editingCell === id}
+                  onClick={() => setEditingCell(editingCell === id ? null : id)}
+                >
+                  <IconEdit size={16} />
+                </IconButton>
+
+                {editingCell === id ? (
+                  <div className="homearrange__editor">
+                    <label className="homearrange__field">
+                      <span className="homearrange__fieldLabel">{t('home.cellName')}</span>
+                      {/*
+                        The app's own name is the placeholder, not the value.
+                        An empty field then reads as "it will be called what it
+                        is called" — and clearing the field is how you undo a
+                        rename, which is the only undo this editor needs.
+
+                        `maxLength` because the grid label is one line that
+                        ellipsises: past about sixteen characters every cell
+                        shows the same three dots and the rename has stopped
+                        being a rename. Not a floor being lowered — the cell was
+                        always one line.
+                      */}
+                      <input
+                        className="input"
+                        type="text"
+                        maxLength={16}
+                        value={state.settings.homeGridNames?.[id] ?? ''}
+                        placeholder={defaultLabelOf(id)}
+                        onChange={(event) => setCellName(id, event.target.value)}
+                      />
+                    </label>
+
+                    <div className="homearrange__field">
+                      <span className="homearrange__fieldLabel">{t('home.cellIcon')}</span>
+                      <div className="homearrange__icons">
+                        {/*
+                          The first swatch is the app's own icon and it is how
+                          the choice is undone. A toggle on the selected swatch
+                          would have been fewer controls and an undo nobody can
+                          see; this way "put it back" is a thing on the screen.
+                        */}
+                        {(() => {
+                          const Default = iconFor(id)
+                          return (
+                            <button
+                              type="button"
+                              className="homearrange__icon"
+                              aria-pressed={!state.settings.homeGridIcons?.[id]}
+                              aria-label={t('home.cellIconDefault')}
+                              title={t('home.cellIconDefault')}
+                              onClick={() => setCellIcon(id, undefined)}
+                            >
+                              {Default ? <Default size={20} /> : <IconStar size={20} />}
+                            </button>
+                          )
+                        })()}
+                        {HOME_CELL_ICONS.map(({ id: iconId, Icon }) => (
+                          <button
+                            key={iconId}
+                            type="button"
+                            className="homearrange__icon"
+                            aria-pressed={state.settings.homeGridIcons?.[id] === iconId}
+                            /* The id, untranslated — the same choice the accent
+                               swatches in Settings make, and for the same
+                               reason. See `HOME_CELL_ICONS`. */
+                            aria-label={iconId}
+                            title={iconId}
+                            onClick={() => setCellIcon(id, iconId)}
+                          >
+                            <Icon size={20} />
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
               </div>
             ))}
             <div className="homearrange__row homearrange__row--fixed">

@@ -832,6 +832,40 @@ export interface Settings {
    */
   inboxPush?: boolean
   /**
+   * How far a sync goes downloading message bodies nobody has asked for yet.
+   *
+   * Opening a message whose body was not prefetched costs a full IMAP ladder —
+   * six to eight sequential round trips at 50-150 ms each on a phone, before
+   * the first byte of text moves — so the coverage of this prefetch is
+   * essentially the whole "why is opening a mail slow" question. Both platforms
+   * list `INBOX_LIST_FETCH_LIMIT` messages and both now cover all of them on an
+   * unmetered link.
+   *
+   * The choice this setting offers is only about a *metered* one:
+   *
+   *   - `'wifi'` (the default, and what every build before this one did):
+   *     on mobile data, stay inside the small budget that shipped — a handful
+   *     of the newest messages and well under a megabyte. Everything else loads
+   *     when it is opened.
+   *   - `'always'`: cover the whole list on mobile data too, under a raised but
+   *     still real byte ceiling. For someone with a large allowance who would
+   *     rather spend it than wait.
+   *
+   * There is no "no limit" option on purpose: an account with a decade of mail
+   * and a phone plan is not a combination worth handing an unbounded download.
+   *
+   * Read on Android, where the OS can actually answer "is this connection
+   * metered". The desktop has no such signal — Electron exposes none, and a
+   * laptop on a phone hotspot looks exactly like one on Ethernet — so the
+   * desktop treats every link as unmetered and this setting changes nothing
+   * there. Stated rather than quietly implemented, because a switch that does
+   * nothing on the platform someone is looking at is worse than no switch.
+   *
+   * Optional so an install written by an older build keeps working: absent
+   * means `'wifi'`.
+   */
+  inboxPrefetchFull?: 'wifi' | 'always'
+  /**
    * Raise a system notification when a verification code arrives, carrying the
    * code itself so it can be read without opening anything.
    *
@@ -873,6 +907,21 @@ export interface Settings {
    * correction is that it survives the mail it was made in being deleted.
    */
   codeRules?: CodeRule[]
+  /**
+   * Show the codes screen as one code at screen width, instead of a list.
+   *
+   * Off by default, because the list is the honest default: it shows every
+   * code that arrived, and a screen that shows exactly one is a screen that
+   * cannot answer "did the second one come through". What it buys is the case
+   * the whole feature exists for — reading six digits off a phone held at
+   * arm's length, or by someone who cannot read 29px comfortably — and for
+   * that case the list is the thing in the way.
+   *
+   * A preference rather than a per-visit toggle: somebody who needs the digits
+   * large needs them large every time, and a mode that reset on every launch
+   * would be a mode they had to turn on before every code.
+   */
+  codesBigDigits?: boolean
   /**
    * Row height across the list screens. `standard` is the default; `compact`
    * fits about a third more rows, `roomy` is for reading at a distance.
@@ -967,6 +1016,35 @@ export interface Settings {
    * its note above. A phone's eight and a desktop's eight are different eights.
    */
   homeGrid?: string[]
+  /**
+   * What each Home cell is called, when the app's own name for it is not what
+   * this person calls it. Keyed by the same `ViewId | HomeFeatureId` ids
+   * `homeGrid` holds; an id with no entry keeps the translated default.
+   *
+   * A sparse override map rather than a name per cell, and that is the whole
+   * design: an eight-entry array of names would have to be re-filled every
+   * time the grid was rearranged, would go stale against the language picker
+   * (a name written out in English stays English when the app is set to
+   * Chinese), and would make "reset" ambiguous. Absent means "call it whatever
+   * this locale calls it", which is the state every fresh install is in and
+   * the state `home.arrangeReset` puts it back to.
+   *
+   * Loose `Record<string, string>` for the same reason as `navUsage` — see its
+   * note. Persisted data outlives the ids it names.
+   */
+  homeGridNames?: Record<string, string>
+  /**
+   * Which glyph each Home cell draws, when the app's own choice is not the one
+   * this person recognises. Same keys and same sparse-override rule as
+   * `homeGridNames`; the value is an id from `HOME_CELL_ICONS` in
+   * `views/HomeView.tsx`.
+   *
+   * An unknown value is ignored at render rather than corrected on load, which
+   * is the same read-time tolerance `sanitiseHomeGrid` gives the grid itself:
+   * an icon retired in a later version must leave a cell looking ordinary, not
+   * leave the settings file unparseable.
+   */
+  homeGridIcons?: Record<string, string>
   /**
    * Show the one-card summary — who, how many, how big, when — before a send
    * actually goes. Default on. Off is for people who send the same message to
@@ -1105,10 +1183,15 @@ export const DEFAULT_SETTINGS: Settings = {
   inboxCacheRetentionDays: 90,
   inboxSyncMinutes: 5,
   inboxPush: true,
+  // Wi-Fi, deliberately. See the field's doc: the whole list is prefetched on
+  // an unmetered link either way, and this default is what keeps a phone on
+  // mobile data spending exactly what the build before this one spent.
+  inboxPrefetchFull: 'wifi',
   notifyOnCode: true,
   notifyOnNewMail: true,
   autoCopyCode: true,
   codeRules: [],
+  codesBigDigits: false,
   listDensity: 'standard',
   textScale: 'standard',
   oneHand: false,
@@ -1125,6 +1208,11 @@ export const DEFAULT_SETTINGS: Settings = {
      had already been made, and would freeze the order for people who never
      opened the editor. */
   homeGrid: undefined,
+  /* Absent for the same reason `homeGrid` is: "never renamed" and "renamed to
+     exactly the default" are different states, and only the first one follows
+     the language picker. `home.arrangeReset` clears all three together. */
+  homeGridNames: undefined,
+  homeGridIcons: undefined,
   composePreflight: true,
   readerDarkInvert: true,
   readerFoldQuotes: true,

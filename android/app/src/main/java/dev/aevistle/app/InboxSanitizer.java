@@ -36,7 +36,50 @@ final class InboxSanitizer {
     private static final String BLANK_PIXEL =
             "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==";
 
+    /** Mirrors `INLINE_MARK` in `src/core/mail/remoteImagePlaceholder.ts`. */
+    private static final String INLINE_MARK = "#cid=";
+
     private static final Pattern HTTP_URL = Pattern.compile("^https?://", Pattern.CASE_INSENSITIVE);
+    private static final Pattern CID_URL = Pattern.compile("^cid:", Pattern.CASE_INSENSITIVE);
+
+    /**
+     * `encodeURIComponent`, character for character.
+     *
+     * Not {@code URLEncoder.encode}: that one is written for
+     * `application/x-www-form-urlencoded` and turns a space into `+` while
+     * leaving `*` alone — two differences that are invisible in a test with a
+     * well-behaved Content-ID and produce a placeholder the renderer's
+     * `decodeURIComponent` reads back as a different string the moment a
+     * sender writes either character. The unreserved set below is the one
+     * `encodeURIComponent` is specified to leave untouched.
+     */
+    private static String encodeComponent(String value) {
+        StringBuilder out = new StringBuilder(value.length() + 8);
+        byte[] bytes = value.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        for (byte raw : bytes) {
+            int b = raw & 0xff;
+            boolean unreserved =
+                    (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z') || (b >= '0' && b <= '9')
+                            || b == '-' || b == '_' || b == '.' || b == '!' || b == '~'
+                            || b == '*' || b == '\'' || b == '(' || b == ')';
+            if (unreserved) {
+                out.append((char) b);
+            } else {
+                out.append('%');
+                out.append(Character.toUpperCase(Character.forDigit((b >> 4) & 0xf, 16)));
+                out.append(Character.toUpperCase(Character.forDigit(b & 0xf, 16)));
+            }
+        }
+        return out.toString();
+    }
+
+    /** Mirrors `normalizeCid` in `src/core/mail/remoteImagePlaceholder.ts`. */
+    private static String normalizeCid(String raw) {
+        String cid = raw.trim();
+        if (cid.startsWith("<")) cid = cid.substring(1);
+        if (cid.endsWith(">")) cid = cid.substring(0, cid.length() - 1);
+        return cid.toLowerCase(java.util.Locale.ROOT);
+    }
 
     /** Mirrors `ALLOWED_STYLES` in `electron/sanitizeHtml.ts` — same properties, same value patterns. */
     private static final Pattern COLOR_VALUE = Pattern.compile("^[a-zA-Z#][a-zA-Z0-9(),.%\\s#]*$");
@@ -160,9 +203,26 @@ final class InboxSanitizer {
                 int index = remoteImages.size();
                 remoteImages.add(src);
                 img.attr("src", BLANK_PIXEL + "#" + index);
+            } else if (CID_URL.matcher(src).find()) {
+                // One of this message's own MIME parts. Parked on the same
+                // blank pixel a blocked remote image gets, with a `#cid=`
+                // fragment naming the part, and resolved by the renderer from
+                // the attachment list — no network, no new scheme, and the
+                // CSP and WebView settings untouched. See the long note in
+                // `electron/sanitizeHtml.ts`, which this mirrors.
+                //
+                // A reference the renderer cannot match keeps the pixel, i.e.
+                // it stays invisible — the same thing removing the `src` did
+                // before this, rather than a broken-image icon.
+                String cid = normalizeCid(src.substring(4));
+                if (cid.isEmpty()) {
+                    img.removeAttr("src");
+                } else {
+                    img.attr("src", BLANK_PIXEL + INLINE_MARK + encodeComponent(cid));
+                }
             } else {
-                // cid: inline images and anything else unrecognised: dropped,
-                // not resolved — same as the desktop sanitizer.
+                // Anything else unrecognised: dropped, not resolved — same as
+                // the desktop sanitizer.
                 img.removeAttr("src");
             }
         }

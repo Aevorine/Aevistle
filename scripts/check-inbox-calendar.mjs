@@ -66,8 +66,13 @@ const BREAKAGES = [
   },
   {
     name: 'extraction put back on the typing path',
-    from: '  }, [openMessageId, openSubject, openReceivedAt, openText, openHtml, openIcsParts])',
-    to: '  }, [openMessageId, openSubject, openReceivedAt, openText, openHtml, openIcsParts, findText])',
+    from: '  }, [datesReady, openMessageId, openSubject, openReceivedAt, openText, openHtml, openIcsParts])',
+    to: '  }, [datesReady, openMessageId, openSubject, openReceivedAt, openText, openHtml, openIcsParts, findText])',
+  },
+  {
+    name: 'extraction put back on the first-paint path',
+    from: '    if (!datesReady) return []',
+    to: '    if (false) return []',
   },
   {
     name: 'the low-confidence question removed',
@@ -226,9 +231,55 @@ ok(
   'they are rendered in the reader, not as an interrupting dialog',
   /className="reader__dates"/.test(view),
 )
+/*
+ * This used to assert the opposite — that `reader__dates` appeared *before*
+ * `<MessageBodyFrame` in the source, i.e. above the body on screen. That was
+ * the right shape while the extraction ran synchronously on the render that
+ * first had a body: the strip and the message appeared together, so putting
+ * the strip first cost nothing.
+ *
+ * It stopped being the right shape when the extraction moved off that render
+ * (see `datesReady` in the view, and the assertion below it). The offers now
+ * arrive a beat *after* the message is on screen, and above the frame that
+ * arrival pushed the first paragraph down under the reader's eye — which
+ * would have spent the whole point of making the body paint sooner.
+ *
+ * So what is asserted is what actually matters, and it is two things rather
+ * than one:
+ *
+ *   1. the strip cannot delay the body — the extraction is behind a readiness
+ *      flag, and the flag is set from an idle callback rather than during the
+ *      render that first has a body;
+ *   2. the strip cannot *move* the body — it is rendered after the frame, in
+ *      a column where the frame is the only element that grows, so a strip
+ *      appearing underneath takes its height out of the frame's box instead
+ *      of out of its position.
+ *
+ * Neither of the original guarantees is dropped: the offers are still inside
+ * the open message (asserted above), still carry their evidence, and still
+ * create nothing without a press.
+ */
 ok(
-  'the offers sit inside the open message, above its body',
-  view.indexOf('reader__dates') < view.indexOf('<MessageBodyFrame'),
+  'the offers sit inside the open message, under its body',
+  // The rendered element, not the first mention of the name: the effect that
+  // schedules the extraction explains this arrangement in a comment, and a
+  // bare `reader__dates` search finds that comment first.
+  view.indexOf('<MessageBodyFrame') < view.indexOf('className="reader__dates"'),
+  'above the frame, a strip that arrives after first paint pushes the message down',
+)
+ok(
+  'the extraction cannot run on the render that first paints the body',
+  /if \(!datesReady\) return \[\]/.test(view) && /const \[datesReady, setDatesReady\]/.test(view),
+  'the body is the thing the reader is waiting for; the offers are not',
+)
+ok(
+  'the readiness flag is set after a paint, not during one',
+  /requestIdleCallback/.test(view) && /setDatesReady\(true\)/.test(view),
+  'a flag flipped in render would put the extraction straight back on the critical path',
+)
+ok(
+  'and it is reset per message, so the next one is not offered the last one’s dates',
+  /setDatesReady\(false\)/.test(view),
 )
 ok(
   'the resolved moment is shown',

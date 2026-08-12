@@ -258,9 +258,44 @@
   outline: var(--ring);
   outline-offset: calc(-1 * var(--ring-offset));
 }
-/* Tabular figures, and grouped 3+3 in the markup — never on the clipboard,
-   where a space is a rejected code. */
+/*
+ * Tabular figures, and grouped 3+3 in the markup — never on the clipboard,
+ * where a space is a rejected code.
+ *
+ * ## The face
+ *
+ * `--font-code` is defined by this round's theme work (theme.css), and it is
+ * the reason this rule exists at all. Until it did, `--font-mono` was a literal
+ * alias of `--font-sans` — which resolves to Times New Roman for Latin and
+ * digits — so these digits inherited a *proportional serif*: 0 and O drawn as
+ * the same oval, 1 with a serifed foot that reads as 7 at a glance, and every
+ * figure a different width. That is the wrong typeface for the one string in
+ * this application whose entire job is to be transcribed correctly into
+ * somebody else's login form.
+ *
+ * Named here rather than left to inherit, because inheriting is exactly how it
+ * went unnoticed: nothing on this card ever asked for a face, so it silently
+ * took the body one.
+ *
+ * ## The spacing
+ *
+ * 0/O and 1/7 are told apart by *shape*, and the shape comes from the
+ * monospace above — a slashed or dotted zero, a 1 with a base bar. The tracking
+ * does the other half of the job: at 29.33px bold, adjacent figures set solid
+ * fuse into pairs when read quickly, and `--tracking-wide` (0.06em, so 1.76px
+ * here) is the ladder's own answer to that. A hand-typed em value would be one
+ * more number outside the token system for a difference nobody can measure.
+ *
+ * `--numeric` is `tabular-nums lining-nums` (theme.css). The tabular half is
+ * what is wanted here — every figure the same advance, so a code does not
+ * change width as it counts — and the token is used rather than spelling
+ * `tabular-nums` inline so this card and the ~40 other numeric sites in the app
+ * cannot drift apart. On a monospace it is belt and braces; on the fallback
+ * stack, which a machine with no coding font installed still lands on, it is
+ * the thing keeping the columns straight.
+ */
 .codehero__digits {
+  font-family: var(--font-code);
   font-size: var(--text-2xl);
   font-weight: var(--fw-bold);
   line-height: var(--leading-tight);
@@ -320,8 +355,15 @@
   justify-content: space-between;
   gap: var(--sp-2);
 }
+/* `flex: 1 1 auto` since the ring joined this row. The foot is
+   `space-between`, and with three children that would have put the ring at one
+   edge, the chips floating in the middle and the button at the other — the ring
+   and the countdown chip say the same thing and have to sit together. Growing
+   the chips takes up the slack instead, so the order reads ring, countdown,
+   then "why this one" at the far end. */
 .codehero__chips {
   display: flex;
+  flex: 1 1 auto;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--sp-2);
@@ -331,6 +373,207 @@
   display: flex;
   align-items: center;
   gap: var(--sp-2);
+}
+
+/* --- the expiry ring ------------------------------------------------------
+ *
+ * `CountdownRing` from the schedule screen, unchanged and not re-implemented —
+ * a second ring would be a second set of ticker, observer and state rules to
+ * keep in agreement with the first. What it needs from this screen is a slot.
+ *
+ * ## Why a wrapper at all
+ *
+ * Two reasons, and neither is decoration.
+ *
+ * The box is `--tap-min` square. The ring draws at `--ctl-xs` (28px) and, in
+ * its inert form, is not a control — but it sits in a row where everything
+ * else is aimed at with a thumb, and a 28px island in a line of 48px targets is
+ * how a row ends up with a hole in it. The ring is centred in the box rather
+ * than stretched: the drawing stays 28px, the slot is 48.
+ *
+ * `pointer-events: none` is the second reason. `CountdownRing` sets its own
+ * `title` from `ring.waiting` / `ring.soon` / `ring.overdue`, and those three
+ * strings are written about a *send* ("已过发送时间，仍未发出"). On a code card
+ * that sentence is simply false, and the component is owned elsewhere this
+ * round, so the tooltip cannot be corrected at its source. Taking the ring out
+ * of hit-testing means the wrapper's own `title` is the one a pointer lands on.
+ * Nothing is lost: the inert ring is `aria-hidden` by design — the chip beside
+ * it already says the remaining time in words, which is what a screen reader
+ * should read — so it was never a target for anything.
+ */
+.codering {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: var(--tap-min);
+  height: var(--tap-min);
+}
+.codering .sendring {
+  pointer-events: none;
+}
+
+/* --- big-digit mode -------------------------------------------------------
+ *
+ * One code, at the width of the screen, and nothing else on it.
+ *
+ * The list is the honest default and stays the default: it can answer "did the
+ * second one arrive". This mode answers a different question — "what are the
+ * six digits" — for a phone held at arm's length, or read by someone for whom
+ * 29.33px is not comfortable. It is a preference (`Settings.codesBigDigits`),
+ * not a per-visit toggle, because somebody who needs the digits large needs
+ * them large every time.
+ *
+ * ## The one off-ladder type size in this file, and the arithmetic behind it
+ *
+ * The ladder tops out at 29.33px, which is the hero card. A mode whose entire
+ * definition is "the digits fill the width" cannot be expressed on it, so this
+ * is a deliberate exception and it is bounded on both sides:
+ *
+ *   floor  `--text-2xl` — never smaller than the hero card it replaces, so
+ *          turning the mode on can never make the digits smaller;
+ *   cap    4.5rem — 72px at the standard text size, and it scales with the
+ *          text-size setting because it is a rem. Past this the digits stop
+ *          being large and start being a wall.
+ *
+ * Between the two it is measured from the code's own length, which is written
+ * inline as `--code-len` by `CodesView` (the *rendered* length, so the space in
+ * `482 913` counts — it takes a full advance in a monospace).
+ *
+ *   usable width      ~88vw   (360px screen: 316px of a 328px card)
+ *   cost per figure   0.66em  (0.6em advance + 0.06em of `--tracking-wide`)
+ *   so                font-size = 88vw / (len x 0.66) = 133vw / len
+ *
+ * 120, not 133: the 10% is headroom for a face whose advance is wider than
+ * 0.6em, and for the card padding at the two or three widths where it is
+ * proportionally largest. Measured at 360px with a six-digit code (len 7):
+ * 17.1vw = 61.7px, and the line comes out 285px inside 296px of content box.
+ * An eight-character code lands at 54px and 285px — the same width, which is
+ * the point of dividing by the length rather than picking one size.
+ *
+ * `overflow-wrap: anywhere` is the last resort under all of that: a value
+ * longer than anything this screen has ever produced wraps to a second line
+ * instead of running off the side.
+ */
+.codebig {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  padding: var(--sp-5) var(--sp-4);
+  background: var(--surface-1);
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--border));
+  border-radius: var(--r-lg);
+  box-shadow: inset 3px 0 0 0 var(--accent);
+}
+.codebig[data-copied] {
+  border-color: var(--success);
+  background: var(--success-bg);
+  box-shadow: inset 3px 0 0 0 var(--success);
+}
+
+/* The whole block is the copy button, the same contract the hero card makes —
+   see `.codehero__body`. Full width so there is no edge of it to miss. */
+.codebig__body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  min-height: var(--ctl-lg);
+  padding: var(--sp-3);
+  border: 0;
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  color: inherit;
+  cursor: pointer;
+  transition: transform var(--dur-fast) var(--ease);
+}
+.codebig__body:active {
+  transform: scale(0.995);
+}
+.codebig__body:focus-visible {
+  outline: var(--ring);
+  outline-offset: calc(-1 * var(--ring-offset));
+}
+
+.codebig__digits {
+  --code-len: 7;
+  max-width: 100%;
+  font-family: var(--font-code);
+  font-size: clamp(var(--text-2xl), calc(120vw / var(--code-len)), 4.5rem);
+  font-weight: var(--fw-bold);
+  line-height: var(--leading-tight);
+  letter-spacing: var(--tracking-wide);
+  font-variant-numeric: var(--numeric);
+  color: var(--text-1);
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+.codebig[data-expired] .codebig__digits {
+  color: var(--text-3);
+  text-decoration: line-through;
+  text-decoration-thickness: 2px;
+}
+
+.codebig__cta {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  color: var(--accent);
+  font-size: var(--text-sm);
+  font-weight: var(--fw-medium);
+}
+.codebig[data-copied] .codebig__cta {
+  color: var(--success);
+}
+
+/*
+ * Who it came from and when, at the ordinary body rank.
+ *
+ * Deliberately not shrunk to make the digits look larger by contrast: this is
+ * the line that tells you the code you are about to paste came from the site
+ * you are actually logging in to, and the mode exists for people who find
+ * small type hard. `--text-base` is the floor for anything read as language.
+ */
+.codebig__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: center;
+  gap: var(--sp-2);
+  width: 100%;
+  min-width: 0;
+  font-size: var(--text-base);
+  color: var(--text-2);
+  text-align: center;
+}
+.codebig__from {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: var(--fw-medium);
+  color: var(--text-1);
+}
+.codebig__subject {
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-sm);
+  color: var(--text-3);
+}
+
+/* The ring, the countdown in words, and the way out of the mode. One row, and
+   it is the only chrome on the screen. */
+.codebig__foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  width: 100%;
 }
 
 /* The two facts that moved off the face of the hero card, at the top of the

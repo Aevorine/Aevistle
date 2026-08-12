@@ -64,8 +64,17 @@ import {
   IconShield,
   IconTrash,
   IconX,
+  IconZoomIn,
+  IconZoomOut,
 } from '../components/icons'
 import { VirtualList } from '../components/VirtualList'
+/* The schedule screen's ring, reused rather than reimplemented. It brings its
+   own shared ticker, its own IntersectionObserver and its own render bailout —
+   see the header of `CountdownRing.tsx` — none of which a second ring written
+   for this screen would have, and all of which this screen would eventually
+   need. What it is given here is one fact it did not have before: a code's
+   expiry is a deadline exactly like a send's. */
+import { CountdownRing } from '../components/CountdownRing'
 import { useMobileShell } from '../components/useNarrow'
 import { useApp } from '../state/AppState'
 import { useCodeCheck, WAIT_PRESETS, type CheckOutcome } from '../state/CodeCheck'
@@ -212,34 +221,69 @@ export function CodesView({ onGoToInbox }: { onGoToInbox?: () => void }) {
 
   const foundKeys = useMemo(() => new Set(check.lastFoundKeys), [check.lastFoundKeys])
 
-  /* Only tick while something is genuinely counting down. */
-  const counting =
-    check.waitingUntil !== undefined ||
-    visible.some((h) => h.expiresAt !== undefined && h.expiresAt > now)
-  useTick(counting)
-
   /**
-   * The one card drawn large: the newest code that has not been read yet.
+   * The newest code on the screen, read or not, on every shell.
    *
-   * Computed over `state.codeHits` rather than over `visible`, so a filter or a
-   * search cannot promote a *different* card to hero — and rendered where the
-   * hit already sits in the list rather than moved to the top, because nothing
-   * on this screen is allowed to reorder (see the note on `visible` above).
-   * In the ordinary case, newest-first ordering already puts it first.
-   *
-   * "Newest code, if unread" rather than "newest unread code": once it has been
-   * dealt with the hero goes away instead of promoting an older one, which
-   * would be a large card appearing halfway down a list nobody asked to change.
+   * Split out of `heroId` because big-digit mode needs the same answer for a
+   * different question, and two loops over `codeHits` looking for "the newest
+   * code" would be two places for that definition to drift. Computed over
+   * `state.codeHits` rather than over `visible`, so a filter or a search cannot
+   * promote a different card — see the note on `visible` above.
    */
-  const heroId = useMemo(() => {
-    if (!phone) return undefined
+  const newestCode = useMemo(() => {
     let newest: CodeHit | undefined
     for (const hit of state.codeHits) {
       if (hit.kind !== 'code') continue
       if (!newest || hit.date > newest.date) newest = hit
     }
-    return newest && !newest.readAt ? newest.id : undefined
-  }, [state.codeHits, phone])
+    return newest
+  }, [state.codeHits])
+
+  /**
+   * The one card drawn large: the newest code that has not been read yet.
+   *
+   * Rendered where the hit already sits in the list rather than moved to the
+   * top, because nothing on this screen is allowed to reorder (see the note on
+   * `visible` above). In the ordinary case, newest-first ordering already puts
+   * it first.
+   *
+   * "Newest code, if unread" rather than "newest unread code": once it has been
+   * dealt with the hero goes away instead of promoting an older one, which
+   * would be a large card appearing halfway down a list nobody asked to change.
+   */
+  const heroId = phone && newestCode && !newestCode.readAt ? newestCode.id : undefined
+
+  /**
+   * Big-digit mode: one code at the width of the screen, and no list.
+   *
+   * A stored preference (`Settings.codesBigDigits`) rather than a per-visit
+   * toggle — somebody who needs the digits large needs them large every time,
+   * and a mode that reset on launch would have to be switched on before every
+   * code. `=== true` rather than `!== false` because the default is off: the
+   * list is what can answer "did the second one arrive", and only a person who
+   * has said otherwise should lose it.
+   *
+   * `bigMode` is the flag everything else reads, and it is deliberately not the
+   * same as the setting. With no code to show there is nothing for the mode to
+   * be, so the screen falls through to its ordinary empty state — which names
+   * the next thing to do — instead of rendering a large empty box.
+   */
+  const bigDigits = state.settings.codesBigDigits === true
+  const bigMode = bigDigits && newestCode !== undefined
+  const setBigDigits = (on: boolean) =>
+    dispatch({ type: 'patchSettings', patch: { codesBigDigits: on } })
+
+  /* Only tick while something is genuinely counting down.
+     Moved below `newestCode` when big-digit mode arrived, and the third clause
+     is why: in that mode the list is not rendered, so a `filter` left over from
+     before the mode was switched on could exclude the one card that *is* on
+     screen — and `visible.some(...)` would then say nothing is counting while a
+     countdown ticked in front of the user. */
+  const counting =
+    check.waitingUntil !== undefined ||
+    visible.some((h) => h.expiresAt !== undefined && h.expiresAt > now) ||
+    (bigMode && newestCode?.expiresAt !== undefined && newestCode.expiresAt > now)
+  useTick(counting)
 
   /**
    * The filter only exists when there is something to filter.
@@ -511,6 +555,99 @@ export function CodesView({ onGoToInbox }: { onGoToInbox?: () => void }) {
           : 'codes.sourceBody',
     )
 
+  /**
+   * The whole of big-digit mode: one code, the two facts that say it is the
+   * right one, and the way out.
+   *
+   * Built here rather than inline in the tree below so the list branch stays
+   * readable — the render already carries two card shapes and a virtual list.
+   * Wrapped in `.list-pane` like the empty state is, because that class is what
+   * gives this screen its scroller; without it the block sits in the flex column
+   * and the foot row can be pushed under the tab bar at 125% text.
+   *
+   * The sender and the time stay at the ordinary body rank. That is the point of
+   * them: they are what says the code you are about to paste came from the site
+   * you are actually signing in to, and this mode exists for people who find
+   * small type hard — shrinking them to make the digits look bigger by contrast
+   * would be taking away the half of the card that has to be read to be safe.
+   */
+  const bigCard = (() => {
+    if (!bigMode || !newestCode) return null
+    const hit = newestCode
+    const { name, address } = splitFrom(hit.from)
+    const copied = justCopied === hit.id
+    const expiresAt = hit.expiresAt
+    const remaining = expiresAt !== undefined ? expiresAt - now : undefined
+    const expired = remaining !== undefined && remaining <= 0
+    /* The rendered string, spaces included: `482 913` costs seven advances in a
+       monospace, and it is the rendered width the size has to be measured from
+       — see `--code-len` in 23-codes.css. */
+    const shown = grouped(hit.value)
+    const timerLabel =
+      remaining === undefined
+        ? undefined
+        : expired
+          ? t('codes.expired')
+          : t('codes.expiresIn', { time: formatRemaining(remaining) })
+
+    return (
+      <div className="list-pane">
+        <div
+          className="codebig"
+          data-copied={copied || undefined}
+          data-expired={expired || undefined}
+        >
+          <button
+            type="button"
+            className="codebig__body"
+            title={t('codes.readHint')}
+            onClick={() => void copy(hit)}
+          >
+            <span
+              className="codebig__digits"
+              style={{ '--code-len': String(shown.length) } as CSSProperties}
+            >
+              {shown}
+            </span>
+            <span className="codebig__cta">
+              {copied ? <IconCheck size={20} /> : <IconCopy size={20} />}
+              <span>{copied ? t('common.copied') : t('codes.tapToCopy')}</span>
+            </span>
+          </button>
+
+          <div className="codebig__meta">
+            <span className="codebig__from">{name || address}</span>
+            <span title={formatDateTime(hit.date)}>{formatAgo(hit.date)}</span>
+          </div>
+          <div className="codebig__subject">{hit.subject || t('inbox.noSubject')}</div>
+
+          <div className="codebig__foot">
+            {/* Only when the mail actually said how long the code lasts. A ring
+                with a guessed duration would be a picture of a number nobody
+                supplied — see the note on the hero card's ring. */}
+            {expiresAt !== undefined ? (
+              <>
+                <span className="codering" title={timerLabel}>
+                  <CountdownRing fireAt={expiresAt} armedAt={hit.date} size="sm" />
+                </span>
+                <span className={expired ? 'chip chip--warning' : 'chip chip--timer'}>
+                  {timerLabel}
+                </span>
+              </>
+            ) : null}
+            <Button
+              variant="ghost"
+              icon={<IconZoomOut size={16} />}
+              onClick={() => setBigDigits(false)}
+            >
+              {t('codes.bigDigitsExit')}
+            </Button>
+          </div>
+        </div>
+      </div>
+    )
+  })()
+
   return (
     /* `data-screen` names this screen for `scripts/layout-probe.mjs`: Inbox and
        Codes both render `.view.view--list` and are indistinguishable from
@@ -617,6 +754,31 @@ export function CodesView({ onGoToInbox }: { onGoToInbox?: () => void }) {
                           <span>{t('codes.wait')}</span>
                         </button>
                       )}
+                      {/* Big-digit mode's phone door.
+                          In the menu rather than in the head because the head
+                          has exactly two 48px targets and this is not the third
+                          thing a thumb reaches for — but it has to be pressable
+                          from *somewhere* that is always on screen, because it
+                          is a stored preference and a person who turned it on
+                          by accident needs a way back that does not involve
+                          finding Settings.
+                          `menuitemcheckbox`, not `menuitem`: this one reports a
+                          state rather than performing an action, and a screen
+                          reader should say "on"/"off" rather than read a label
+                          that changes underneath it. */}
+                      <button
+                        type="button"
+                        role="menuitemcheckbox"
+                        aria-checked={bigDigits}
+                        className="codesmenu__item"
+                        onClick={() => {
+                          setMenuOpen(false)
+                          setBigDigits(!bigDigits)
+                        }}
+                      >
+                        {bigDigits ? <IconZoomOut size={16} /> : <IconZoomIn size={16} />}
+                        <span>{t('codes.bigDigits')}</span>
+                      </button>
                       {unread > 0 ? (
                         <button
                           type="button"
@@ -706,6 +868,19 @@ export function CodesView({ onGoToInbox }: { onGoToInbox?: () => void }) {
                     {t('codes.wait')}
                   </Button>
                 )}
+                {/* The same mode as the phone's menu item, as an ordinary
+                    labelled button — this row has the width for it, and a
+                    desktop has no overflow menu to hide it in. `aria-pressed`
+                    rather than a label that flips, so the control keeps one
+                    name and reports its own state. */}
+                <Button
+                  variant="ghost"
+                  icon={bigDigits ? <IconZoomOut size={15} /> : <IconZoomIn size={15} />}
+                  aria-pressed={bigDigits}
+                  onClick={() => setBigDigits(!bigDigits)}
+                >
+                  {t('codes.bigDigits')}
+                </Button>
                 {unread > 0 ? (
                   <Button
                     variant="ghost"
@@ -765,7 +940,12 @@ export function CodesView({ onGoToInbox }: { onGoToInbox?: () => void }) {
         {/* Three buttons that answer a question nobody has while every hit on
             the screen is a code. `canFilter` is the whole rule: a link has to
             be here beside a code before the choice means anything. */}
-        {canFilter ? (
+        {/* Both of these operate the list, and in big-digit mode there is no
+            list — a filter or a search field that changes nothing visible is
+            worse than one that is not there. The `filter` value is left alone
+            rather than reset, so leaving the mode puts the screen back exactly
+            as it was found. */}
+        {canFilter && !bigMode ? (
           <Segmented
             value={filter}
             onChange={setFilter}
@@ -781,7 +961,7 @@ export function CodesView({ onGoToInbox }: { onGoToInbox?: () => void }) {
         {/* On a phone the field is what the magnifier opens; on a desktop it
             stays where it has always been, because that row has the width and
             a pointer has nothing better to do with it. */}
-        {state.codeHits.length > 0 && (!phone || searchOpen) ? (
+        {state.codeHits.length > 0 && !bigMode && (!phone || searchOpen) ? (
           <SearchInput value={query} onChange={setQuery} placeholder={t('codes.searchPlaceholder')} />
         ) : null}
 
@@ -798,7 +978,13 @@ export function CodesView({ onGoToInbox }: { onGoToInbox?: () => void }) {
           </div>
         ) : null}
 
-        {visible.length === 0 ? (
+        {/* Big-digit mode replaces the list outright. It is deliberately *not*
+            allowed to replace the empty state — `bigMode` is false when there is
+            no code to show, so a screen with nothing on it still says what to do
+            next instead of drawing a large empty box. */}
+        {bigCard ? (
+          bigCard
+        ) : visible.length === 0 ? (
           <div className="list-pane">
             {/*
               One line, and it has to be something to *do*.
@@ -936,6 +1122,37 @@ export function CodesView({ onGoToInbox }: { onGoToInbox?: () => void }) {
                     <div className="codehero__subject">{hit.subject || t('inbox.noSubject')}</div>
 
                     <div className="codehero__foot">
+                      {/*
+                        The countdown as a shape, beside the same countdown in
+                        words — never instead of it. The ring is read in the time
+                        it takes to see it ("nearly gone" / "plenty left"); the
+                        chip is what a screen reader gets and what tells you the
+                        actual figure. Same arrangement `ScheduleView` uses, and
+                        the reason the ring itself is `aria-hidden`.
+
+                        Only when `hit.expiresAt` exists. A code whose mail never
+                        said how long it lasts has no denominator, and the two
+                        available fakes — assume ten minutes, or fill the arc
+                        from arrival — are both a picture of a number nobody
+                        supplied. Nothing is drawn instead, which is the truth.
+
+                        `hit.expiresAt` in the test rather than the `remaining`
+                        computed from it, so TypeScript narrows the prop below;
+                        `armedAt` is when the mail arrived, which is genuinely
+                        when this wait started.
+                      */}
+                      {hit.expiresAt !== undefined ? (
+                        <span
+                          className="codering"
+                          title={
+                            expired
+                              ? t('codes.expired')
+                              : t('codes.expiresIn', { time: formatRemaining(remaining ?? 0) })
+                          }
+                        >
+                          <CountdownRing fireAt={hit.expiresAt} armedAt={hit.date} />
+                        </span>
+                      ) : null}
                       <div className="codehero__chips">
                         {remaining !== undefined ? (
                           <span className={expired ? 'chip chip--warning' : 'chip chip--timer'}>

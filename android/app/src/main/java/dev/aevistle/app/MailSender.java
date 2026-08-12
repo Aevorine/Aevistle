@@ -413,20 +413,34 @@ final class MailSender {
             Exception last = null;
             int attempts = 0;
 
+            final boolean individual = draft.optBoolean("individualDelivery", false);
+            /*
+             * Every recipient this call has handed to a server, across every
+             * endpoint on the ladder and both delivery paths below.
+             *
+             * The one invariant that matters more than speed here: nobody gets
+             * the same message twice. Two ways that could happen, and this set
+             * closes both. A failed rung used to re-run the whole recipient
+             * list on the next one, so a connection that died at recipient
+             * three sent recipients one and two a second copy. And an address
+             * that appears in both To and Cc was two entries in `everyone` and
+             * therefore two sends.
+             *
+             * "Started" rather than "delivered" on purpose. A send that threw
+             * after the message was on the wire is in an unknown state — the
+             * server may have taken it and lost the connection before saying so
+             * — and the only safe reading of unknown is "do not send it again".
+             */
+            java.util.Set<String> handedToServer = new java.util.LinkedHashSet<>();
+
             for (Endpoint endpoint : rungs) {
                 attempts++;
                 try {
                     Session session = buildSession(account, credential, endpoint);
 
-                    if (draft.optBoolean("individualDelivery", false)) {
-                        for (String address : everyone) {
-                            MimeMessage message =
-                                    compose(session, draft, account, single(address), null, null,
-                                            overrideMessageId);
-                            Transport.send(message);
-                            result.accepted.add(address);
-                            result.messageId = message.getMessageID();
-                        }
+                    if (individual) {
+                        individualDelivery(session, draft, account, everyone, overrideMessageId,
+                                handedToServer, result);
                     } else {
                         MimeMessage message = compose(session, draft, account, to, cc, bcc, overrideMessageId);
                         Transport.send(message);
@@ -453,9 +467,19 @@ final class MailSender {
                     // it only burns the provider's lockout budget.
                     if (!negotiable(classify(message))) break;
                     // Partial progress from a failed rung must not leak into
-                    // the next one's tally.
-                    result.accepted.clear();
-                    result.rejected.clear();
+                    // the next one's tally — one message either went to the
+                    // whole recipient list or it did not.
+                    //
+                    // The individual path is the exception, and it is why the
+                    // clear is conditional now. There `accepted` is not a
+                    // provisional tally: it names people whose copy really did
+                    // leave this device. Wiping it and letting the next rung
+                    // start over is precisely the double-send `handedToServer` exists
+                    // to prevent, so the tally has to survive alongside it.
+                    if (!individual) {
+                        result.accepted.clear();
+                        result.rejected.clear();
+                    }
                 }
             }
 
@@ -481,6 +505,233 @@ final class MailSender {
 
         result.durationMs = System.currentTimeMillis() - started;
         return result;
+    }
+
+    // -----------------------------------------------------------------------
+    // Individual delivery — one message each, over one connection
+    // -----------------------------------------------------------------------
+
+    /**
+     * Send one copy of the message to each recipient, over a single
+     * authenticated connection, without ever sending to anybody twice.
+     *
+     * This used to be a three-line loop around {@code Transport.send(message)},
+     * which is a static convenience that opens a connection, sends, and logs
+     * out. Ten recipients therefore meant ten TCP handshakes, ten TLS
+     * handshakes and ten AUTH exchanges — six to eight sequential round trips
+     * each, before the first byte of the message moved — for a payload that
+     * takes one. On a phone at 80 ms per round trip that is most of the time
+     * "sending" spends on screen, and none of it is the mail.
+     *
+     * One connection, N `sendMessage` calls, is what SMTP is for: RFC 5321's
+     * transaction is MAIL FROM / RCPT TO / DATA, repeatable on the same
+     * session, and every server this app can reach implements it. Each
+     * recipient still gets a separately composed message, so the addresses
+     * stay hidden from each other exactly as before.
+     *
+     * Everything else here is about the failure mode, because the failure mode
+     * is what makes this the most dangerous change in the file. Three rules:
+     *
+     *   - **Fall back, do not abort.** A connection that dies mid-batch drops
+     *     the shared transport and every remaining recipient goes over the
+     *     shipped one-connection-each path. Slower, and known to work.
+     *   - **Never twice.** A recipient is added to `handedToServer` immediately
+     *     *before* its send, never after, and a recipient in `handedToServer` is
+     *     skipped forever — on the fallback path, on the next rung of the
+     *     endpoint ladder, and on a duplicate entry across To/Cc/Bcc. A send
+     *     that threw is in an unknown state, and re-sending an unknown is how
+     *     somebody gets two copies of the same reminder.
+     *   - **A connection that never opened has sent nothing.** That case adds
+     *     nothing to `handedToServer`, so those recipients stay eligible for the next
+     *     endpoint — which is the whole point of having a ladder.
+     *
+     * Throws when it could not confirm every recipient, so {@link #send}
+     * reports the failure exactly as it did before. The recipients it *did*
+     * confirm are still named in the thrown message's place in `result` for the
+     * duration of the ladder; only the shared failure path at the end of
+     * {@code send} clears them, which is the behaviour that shipped.
+     */
+    private static void individualDelivery(Session session, JSONObject draft, JSONObject account,
+                                           List<String> recipients, String overrideMessageId,
+                                           java.util.Set<String> handedToServer, Result result)
+            throws Exception {
+        /*
+         * How many messages one connection carries before it is replaced.
+         *
+         * `MailAccount.poolMaxMessages` exists precisely for this and has never
+         * been read by anything, because until now no connection here ever
+         * carried more than one message. Providers do rate-limit per session —
+         * it is why the field was added — so going from one message per
+         * connection to fifty is exactly the change that makes honouring it
+         * matter. Floored at 1 so a zero saved by an older build behaves like
+         * the per-recipient path rather than dividing by nothing.
+         */
+        final int perConnection = Math.max(1, account.optInt("poolMaxMessages", 50));
+
+        Transport shared = null;
+        int sentOnShared = 0;
+        // False once the shared connection has failed; the rest go one each.
+        boolean shareable = true;
+        // A failure held until the batch is finished, so the recipients after
+        // it still get their turn before the ladder is told.
+        Exception deferred = null;
+
+        try {
+            for (String address : recipients) {
+                // Already handed to a server by an earlier rung, an earlier
+                // recipient list entry, or the fallback below.
+                if (handedToServer.contains(address)) continue;
+
+                if (shareable && shared != null && sentOnShared >= perConnection) {
+                    // Not a failure — the account's own per-session ceiling.
+                    // Closed cleanly and reopened below.
+                    closeQuietly(shared);
+                    shared = null;
+                    sentOnShared = 0;
+                }
+
+                if (shareable && shared == null) {
+                    try {
+                        shared = connected(session);
+                    } catch (Exception e) {
+                        shared = null;
+                        // Nothing has gone anywhere: this failed before a
+                        // single MAIL FROM. A refused password or a rejected
+                        // token fails identically on a per-recipient
+                        // connection, so there is nothing to fall back to and
+                        // trying would only spend the provider's lockout
+                        // budget — the ladder decides that, not this.
+                        if (!negotiable(classify(readable(e)))) throw e;
+                        shareable = false;
+                        deferred = e;
+                    }
+                }
+
+                MimeMessage message = compose(session, draft, account, single(address), null, null,
+                        overrideMessageId);
+
+                if (shared != null) {
+                    handedToServer.add(address);
+                    try {
+                        shared.sendMessage(message, message.getAllRecipients());
+                        sentOnShared++;
+                    } catch (Exception e) {
+                        closeQuietly(shared);
+                        shared = null;
+                        sentOnShared = 0;
+                        shareable = false;
+                        deferred = e;
+                        // This recipient is spent either way — the message was
+                        // already on the wire, so it is not retried here or
+                        // anywhere. The rest of the batch still gets its turn
+                        // on the fallback path.
+                        if (!negotiable(classify(readable(e)))) throw e;
+                        continue;
+                    }
+                } else {
+                    /*
+                     * The shipped path, written out rather than left to
+                     * `Transport.send`.
+                     *
+                     * Same three calls in the same order — get, connect, send,
+                     * close — but split so that a failure to *connect* can be
+                     * told from a failure to *send*. `Transport.send` wraps
+                     * both in one throw, and the difference decides whether
+                     * this recipient may be tried again on the next endpoint:
+                     * a connection that never opened has delivered nothing.
+                     */
+                    Transport own = connected(session);
+                    try {
+                        handedToServer.add(address);
+                        own.sendMessage(message, message.getAllRecipients());
+                    } finally {
+                        closeQuietly(own);
+                    }
+                }
+
+                result.accepted.add(address);
+                result.messageId = message.getMessageID();
+            }
+        } finally {
+            closeQuietly(shared);
+        }
+
+        /*
+         * Who did not get a confirmation, counting every rung of the ladder and
+         * not just this pass.
+         *
+         * Checked *before* `deferred` is thrown, which is the order that
+         * matters. A shared connection that failed to open and was then routed
+         * around successfully, recipient by recipient, is not a failed send —
+         * everybody has their copy, and reporting it as failed is how somebody
+         * sends the whole thing a second time by hand and gives all of them two.
+         */
+        List<String> unconfirmed = new ArrayList<>();
+        for (String address : recipients) {
+            if (!result.accepted.contains(address) && !unconfirmed.contains(address)) {
+                unconfirmed.add(address);
+            }
+        }
+        if (unconfirmed.isEmpty()) return;
+
+        // The real error where there is one: it carries the classification the
+        // ladder reads to decide whether another endpoint is worth trying, and
+        // the wording the account dialog knows how to explain.
+        if (deferred != null) throw deferred;
+
+        /*
+         * Otherwise: nothing failed on *this* pass, but a recipient handed to a
+         * server on an earlier one was never confirmed.
+         *
+         * Reached on the second rung of the ladder after a mid-batch drop —
+         * every remaining recipient is in `handedToServer`, so the loop above
+         * does nothing at all, and returning quietly would report the whole send
+         * as a success with one person silently missing from it.
+         *
+         * Deliberately not another attempt. That copy may already be sitting in
+         * their inbox, and a duplicate reminder is worse than an honest "could
+         * not confirm" — the wording is what tells the user which of the two
+         * they are looking at, and the word "recipients" is what files it under
+         * the classification whose UI branch says so.
+         */
+        throw new IllegalStateException(
+                "The connection dropped mid-send, so Aevistle did not retry these recipients "
+                        + "in case their copy had already gone: "
+                        + TextUtils.join(", ", unconfirmed));
+    }
+
+    /**
+     * An authenticated SMTP connection from this session's own settings.
+     *
+     * No arguments on purpose: `Transport.send` resolves host, port and
+     * credential from exactly these properties and this Authenticator, so a
+     * bare `connect()` is the same connection it would have made rather than a
+     * second opinion about how to make one.
+     */
+    private static Transport connected(Session session) throws Exception {
+        Transport transport = session.getTransport("smtp");
+        try {
+            transport.connect();
+        } catch (Exception e) {
+            closeQuietly(transport);
+            throw e;
+        }
+        return transport;
+    }
+
+    private static void closeQuietly(Transport transport) {
+        if (transport == null) return;
+        try {
+            transport.close();
+        } catch (Exception ignored) {
+            // The connection is going either way; QUIT is a courtesy to the
+            // server, not something with a caller waiting on the answer. The
+            // real outcome of the send is already recorded.
+        }
+    }
+
+    private static String readable(Exception e) {
+        return e.getMessage() == null ? e.toString() : e.getMessage();
     }
 
     /**

@@ -919,7 +919,13 @@ public class AevistleNativePlugin extends Plugin {
                     Permissions.notePromptDue(getContext());
                 }
 
-                JSONObject updated = MailFetcher.sync(getContext(), configJson, secret);
+                // `true` — hand the background half of the sync (the rest of
+                // the page's bodies, and the cache trim) to MailFetcher's own
+                // thread and resolve as soon as the message list is ready.
+                // Correct here and wrong in `InboxSyncWorker`, which calls the
+                // three-argument form for exactly that reason: see the doc on
+                // MailFetcher.sync.
+                JSONObject updated = MailFetcher.sync(getContext(), configJson, secret, true);
                 cache.upsert(updated);
                 InboxSyncScheduler.rearm(getContext());
                 call.resolve(JSObject.fromJSONObject(updated));
@@ -948,6 +954,49 @@ public class AevistleNativePlugin extends Plugin {
                 call.resolve(JSObject.fromJSONObject(body));
             } catch (Exception e) {
                 call.reject("Could not fetch the message: " + e.getMessage(), e);
+            }
+        });
+    }
+
+    /**
+     * Cache the messages either side of the one just opened, in the background.
+     *
+     * The renderer decides what "either side" means — its list may be filtered,
+     * searched or sorted in ways this side cannot see — so it passes the UIDs
+     * rather than asking for "the next one". {@link MailFetcher#prefetchAdjacent}
+     * clamps to two whatever arrives, and does nothing at all on a metered
+     * connection.
+     *
+     * Resolves immediately, before any of the work has happened. That is the
+     * contract, not a shortcut: this is a guess about what somebody will tap
+     * next, nothing on screen is waiting for it, and a caller that awaited it
+     * would have turned a speculative fetch into a second thing slowing the
+     * message they actually opened. It resolves rather than rejects for the
+     * same reason — there is no failure here a user could act on.
+     */
+    @PluginMethod
+    public void prefetchAdjacent(final PluginCall call) {
+        final JSObject config = call.getObject("config");
+        final String folderPath = call.getString("folderPath", "INBOX");
+        final JSArray uidsArg = call.getArray("uids");
+        call.resolve();
+        if (config == null || uidsArg == null || uidsArg.length() == 0) return;
+
+        io.execute(() -> {
+            try {
+                JSONObject configJson = new JSONObject(config.toString());
+                long[] uids = new long[uidsArg.length()];
+                for (int i = 0; i < uidsArg.length(); i++) {
+                    uids[i] = uidsArg.optLong(i, -1L);
+                }
+                MailFetcher.prefetchAdjacent(getContext(), configJson,
+                        inboxSecret(configJson.optString("accountId", "")), folderPath, uids);
+            } catch (Exception e) {
+                // The call has already resolved and nothing is waiting on this.
+                // Logged so a device where the guess never lands is diagnosable
+                // from logcat rather than only visible as "the next mail is
+                // still slow to open".
+                Log.w(TAG, "prefetchAdjacent: could not cache the neighbouring messages", e);
             }
         });
     }
