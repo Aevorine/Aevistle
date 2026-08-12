@@ -38,6 +38,45 @@ export interface CachedBody {
    * on the second open, like everything else here.
    */
   icsParts?: string[]
+  /**
+   * What each attachment file next to this body actually is.
+   *
+   * The bytes on disk stay the truth about *which* attachments exist; this is
+   * only the table beside them saying which file answers which `cid`, what
+   * type the sending client declared it to be, and whether the part was meant
+   * to be embedded in the body or listed as a paperclip. None of those three
+   * facts survives in a filename, and nothing recorded them until this field:
+   * `readCachedAttachments` rebuilt the list by scanning the directory, which
+   * can only produce attachments with no `cid` at all, `inline` always false,
+   * and a type guessed from an extension that an embedded image frequently
+   * does not have.
+   *
+   * That is the whole of "pictures in an opened message do not appear". The
+   * reader drops every `<img src="cid:…">` it cannot match to an attachment,
+   * silently, because a stripped `src` is also how remote-image blocking
+   * looks. And because the sync prefetches bodies into this cache, the path
+   * that lost the ids was the one taken the *first* time a message was opened,
+   * not the second — there was no working case to compare against.
+   *
+   * Optional because every body file written before this field existed has no
+   * such key, and those messages have to keep opening: see the fallback in
+   * `readCachedAttachments`.
+   */
+  attachments?: CachedAttachmentMeta[]
+}
+
+/**
+ * One row of that table.
+ *
+ * `name` is the name the file was actually written under — after the
+ * de-duplication in `writeInboxAttachments`, not the name the sender chose —
+ * because its only job is to be the key back to the file on disk.
+ */
+export interface CachedAttachmentMeta {
+  name: string
+  mime: string
+  inline: boolean
+  cid?: string
 }
 
 export interface MailparserAttachment {
@@ -96,11 +135,24 @@ export async function writeMessageBody(
   await writeAtomicFile(bodyFile(accountId, folderPath, uid), JSON.stringify(body))
 }
 
-/** Attachments already on disk for a message, read fresh rather than trusted from a side-index — the files are the truth. */
+/**
+ * Attachments already on disk for a message.
+ *
+ * The directory listing still decides *which* attachments exist — the files are
+ * the truth, and a body whose attachments were evicted must not conjure up rows
+ * for bytes that are gone. What `meta` adds is everything a filename cannot
+ * carry: the `cid` an embedded `<img>` has to match, whether the part was
+ * inline, and the type the sender declared.
+ *
+ * A file with no matching entry falls back to guessing from its extension,
+ * which is exactly what every attachment did before this table was written —
+ * so a cache from an older build reads as it always did rather than as empty.
+ */
 async function readCachedAttachments(
   accountId: string,
   folderPath: string,
   uid: number,
+  meta: CachedAttachmentMeta[] | undefined,
 ): Promise<Attachment[]> {
   const dir = attachmentDir(accountId, folderPath, uid)
   let names: string[]
@@ -120,21 +172,24 @@ async function readCachedAttachments(
     console.error(`[aevistle] could not list attachments in ${dir}:`, e)
     return []
   }
+  const known = new Map((meta ?? []).map((m) => [m.name, m]))
   const out: Attachment[] = []
   for (const name of names) {
     const full = path.join(dir, name)
     try {
       const stat = await fs.stat(full)
       if (!stat.isFile()) continue
+      const recorded = known.get(name)
       out.push({
         id: `inbox-att_${uid}_${name}`,
         name,
         size: stat.size,
-        mime: guessMime(name),
+        mime: recorded?.mime || guessMime(name),
         source: 'path',
         path: full,
         addedAt: stat.mtimeMs,
-        inline: false,
+        inline: recorded?.inline ?? false,
+        cid: recorded?.cid,
       })
     } catch {
       /* the file vanished between readdir and stat — skip it */
@@ -182,7 +237,7 @@ export async function readMessageBody(
 } | null> {
   const cached = await peekMessageBody(accountId, folderPath, uid)
   if (!cached) return null
-  const attachments = await readCachedAttachments(accountId, folderPath, uid)
+  const attachments = await readCachedAttachments(accountId, folderPath, uid, cached.attachments)
   return {
     text: cached.text,
     sanitizedHtml: cached.sanitizedHtml,
@@ -193,9 +248,47 @@ export async function readMessageBody(
 }
 
 /**
+ * One filename per attachment, within one message.
+ *
+ * Two parts called `image.png` is ordinary — two screenshots pasted into the
+ * same reply arrive exactly like that — and both used to be written to the same
+ * path, so the second silently replaced the first: one attachment's bytes were
+ * lost, and whichever `cid` pointed at the loser now resolved to the winner's
+ * picture. Numbered the way the save-as dialog in `main.ts` numbers a collision,
+ * before the extension rather than after, so the file still opens in the right
+ * application.
+ *
+ * The set is per call and never consults the directory, which is what keeps a
+ * re-parse of the same message idempotent: the parts arrive in the same order
+ * and get the same names, overwriting their own files. Asking the disk instead
+ * would mint `image (2).png`, `image (3).png` … on every re-open, and every one
+ * of them would be a cached attachment nothing ever deletes.
+ */
+function uniqueAttachmentName(taken: Set<string>, name: string): string {
+  if (!taken.has(name)) {
+    taken.add(name)
+    return name
+  }
+  const ext = path.extname(name)
+  const stem = path.basename(name, ext)
+  for (let n = 2; ; n++) {
+    const candidate = `${stem} (${n})${ext}`
+    if (!taken.has(candidate)) {
+      taken.add(candidate)
+      return candidate
+    }
+  }
+}
+
+/**
  * Write parsed attachment buffers to disk and return them in the same
  * `Attachment` shape the compose screen already uses — so the existing
  * attachment-list UI needs no inbox-specific variant.
+ *
+ * The returned list is also the only place the `cid`/`inline`/declared-type
+ * facts exist, so a caller that intends the message to be readable from cache
+ * later has to put it through `attachmentMeta` into the body file. See
+ * `CachedBody.attachments`.
  */
 export async function writeInboxAttachments(
   accountId: string,
@@ -206,11 +299,16 @@ export async function writeInboxAttachments(
   const dir = attachmentDir(accountId, folderPath, uid)
   await fs.mkdir(dir, { recursive: true })
   const out: Attachment[] = []
+  const taken = new Set<string>()
   for (const [i, a] of attachments.entries()) {
     // basename() so a maliciously crafted filename cannot write outside the
     // attachment directory — the same discipline `snapshotAttachments` in
-    // `main.ts` already applies on the outbound side.
-    const name = path.basename(a.filename || `attachment-${i}`)
+    // `main.ts` already applies on the outbound side. `.` and `..` survive
+    // basename() and would name the directory itself, so they fall back to the
+    // positional name alongside the unnamed parts they resemble.
+    const proposed = path.basename(a.filename || '')
+    const safe = proposed && proposed !== '.' && proposed !== '..' ? proposed : `attachment-${i}`
+    const name = uniqueAttachmentName(taken, safe)
     const target = path.join(dir, name)
     await fs.writeFile(target, a.content, { mode: 0o600 })
     const stat = await fs.stat(target)
@@ -227,6 +325,70 @@ export async function writeInboxAttachments(
     })
   }
   return out
+}
+
+/**
+ * The half of a freshly written attachment list that has to be cached: what a
+ * later directory scan could not work out for itself.
+ *
+ * Size, path and id are all recoverable from the file, so they are not stored —
+ * and must not be, since `path` embeds the data folder, which the user can move.
+ */
+export function attachmentMeta(attachments: Attachment[]): CachedAttachmentMeta[] {
+  return attachments.map((a) => ({
+    name: a.name,
+    mime: a.mime,
+    inline: a.inline,
+    cid: a.cid,
+  }))
+}
+
+/**
+ * The type an attachment file was declared to have, found from its path alone.
+ *
+ * `readAttachment` in `main.ts` is handed a path by the renderer and nothing
+ * else, and guessing from the extension is what stopped embedded images from
+ * previewing: a `cid` image usually arrives with no filename, is written as
+ * `attachment-3`, and an extensionless name guesses to `application/octet-
+ * stream` — which the preview allowlist then, correctly, refuses. The type the
+ * sending client stated has been on disk beside the body since
+ * `CachedBody.attachments` existed; this reads it back.
+ *
+ * Derived from the layout rather than from a lookup through the account list:
+ * an attachment lives at `…/<account>/attachments/<slug>/<uid>/<name>` and its
+ * body at `…/<account>/bodies/<slug>/<uid>.json`, so one is reachable from the
+ * other without knowing which IMAP folder the slug stands for — which is just
+ * as well, because a hash cannot be reversed into one.
+ *
+ * `null` for anything that is not an inbox attachment path and for a cache
+ * written before the table existed. The caller guesses in that case, exactly as
+ * it did for every file before this.
+ */
+export async function cachedAttachmentMime(filePath: string): Promise<string | null> {
+  const resolved = path.resolve(filePath)
+  const name = path.basename(resolved)
+  const uidDir = path.dirname(resolved)
+  const slugDir = path.dirname(uidDir)
+  const attachmentsRoot = path.dirname(slugDir)
+  if (path.basename(attachmentsRoot) !== ATTACHMENTS_DIR) return null
+
+  const body = path.join(
+    path.dirname(attachmentsRoot),
+    BODIES_DIR,
+    path.basename(slugDir),
+    `${path.basename(uidDir)}.json`,
+  )
+  try {
+    const cached = JSON.parse(await fs.readFile(body, 'utf8')) as CachedBody
+    const recorded = cached.attachments?.find((a) => a.name === name)
+    if (!recorded?.mime) return null
+    // `text/plain; charset=utf-8` is a legitimate thing for a sender to write,
+    // and the allowlist this feeds is anchored — the parameters have to come
+    // off here or a perfectly previewable text part is refused.
+    return recorded.mime.split(';')[0].trim().toLowerCase() || null
+  } catch {
+    return null
+  }
 }
 
 export async function deleteMessageCache(

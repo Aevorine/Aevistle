@@ -73,8 +73,16 @@ final class InboxSanitizer {
         return out.toString();
     }
 
-    /** Mirrors `normalizeCid` in `src/core/mail/remoteImagePlaceholder.ts`. */
-    private static String normalizeCid(String raw) {
+    /**
+     * Mirrors `normalizeCid` in `src/core/mail/remoteImagePlaceholder.ts`.
+     *
+     * Package-private rather than private because {@link MailFetcher} has to
+     * fold a part's `Content-ID` header the same way this folds the body's
+     * `cid:` URLs — the two strings are compared against each other, and a
+     * second copy of these two rules is exactly how an embedded image that
+     * *is* in the message ends up rendering as nothing.
+     */
+    static String normalizeCid(String raw) {
         String cid = raw.trim();
         if (cid.startsWith("<")) cid = cid.substring(1);
         if (cid.endsWith(">")) cid = cid.substring(0, cid.length() - 1);

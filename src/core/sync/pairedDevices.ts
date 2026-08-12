@@ -40,12 +40,22 @@ export interface PairedDevice {
   /** Pointer into the secret store — see the module doc. Never the key itself. */
   keyRef: string
   /**
-   * Where `core/syncLoop.ts` last reached this device — the LAN address
-   * learned at pairing time. Not re-discovered afterwards (this app does no
-   * mDNS/SSDP discovery, by design — see `core/pairing.ts`'s module doc), so
-   * a device that changes networks stops syncing until it is paired again.
-   * That is a documented limitation, not a bug: the alternative is a
-   * discovery protocol broadcasting this device's presence to the whole LAN.
+   * Where `core/syncLoop.ts` should reach this device.
+   *
+   * Seeded at pairing time on the joiner's side only — the QR code carries
+   * the host's address, and the handshake tells the host nothing about the
+   * joiner — and kept current afterwards by the peer *announcing* it, inside
+   * the encrypted envelope, as `SyncExchangePayload.selfAddress`. Still no
+   * mDNS/SSDP discovery, by design (see `core/pairing.ts`'s module doc):
+   * nothing is broadcast, and the only party that ever learns this is one
+   * that already holds the pairing key.
+   *
+   * Until that announcement existed this was written once and never again, so
+   * a new DHCP lease — a phone rejoining Wi-Fi, an overnight reboot — ended
+   * the pairing permanently and silently, and re-pairing was the only cure.
+   * Absent on the host side of a fresh pairing until the joiner has initiated
+   * once; `SyncLoop.runCycle` reports such a device as `'noAddress'` rather
+   * than reaching out to nowhere.
    */
   lastAddress?: PairedDeviceAddress
   /**
@@ -107,6 +117,19 @@ export function touchSynced(
   devices: PairedDevice[],
   id: string,
   syncedAt: number,
+  /**
+   * `SyncApplyPatch.remoteAddress` — where the peer said it is listening, if
+   * that differs from what is already stored. Every caller passed `undefined`
+   * here for as long as nothing produced the value, which is precisely how
+   * `lastAddress` came to be write-once; see that field's own doc.
+   *
+   * Already narrowed by `lanAddress.ts`'s `toStorableAddress` on the way in
+   * (`performExchange` does it), so what arrives here is a private IPv4
+   * literal with a usable port or nothing at all. `undefined` keeps whatever
+   * is stored rather than clearing it: a peer that has stopped announcing —
+   * an older build reconnecting, or one whose listener is down this minute —
+   * must not cost this device the last address that worked.
+   */
   address?: PairedDeviceAddress,
   /** See `PairedDevice.remoteDeviceId`. Only ever moves forward — a peer that stops sending it (an older build reconnecting) must not erase what an earlier exchange already learned. */
   remoteDeviceId?: string,

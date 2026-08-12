@@ -23,6 +23,7 @@ import type {
   MessageDraft,
   ScheduledJob,
   SecretKind,
+  SeenFlagResult,
   SendResult,
   SharePayload,
 } from '../types'
@@ -263,7 +264,7 @@ export interface DesktopApi {
     folderPath: string,
     uid: number,
     patch: { seen?: boolean; tag?: InboxTag },
-  ): Promise<void>
+  ): Promise<SeenFlagResult>
   /** Forget locally: cache files only, the mailbox is not touched. */
   deleteInboxMessages(
     accountId: string,

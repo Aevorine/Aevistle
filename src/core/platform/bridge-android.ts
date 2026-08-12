@@ -48,6 +48,7 @@ import type {
   MailAccount,
   MessageDraft,
   ScheduledJob,
+  SeenFlagResult,
   SecretKind,
   SendResult,
   SharePayload,
@@ -345,7 +346,7 @@ interface AevistleNativePlugin extends AndroidPermissionApi {
     folderPath: string
     uid: number
     patch: { seen?: boolean; tag?: InboxTag }
-  }): Promise<void>
+  }): Promise<SeenFlagResult>
   deleteInboxMessages(opts: {
     accountId: string
     items: Array<{ folderPath: string; uid: number }>

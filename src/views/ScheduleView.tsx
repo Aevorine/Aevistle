@@ -49,7 +49,55 @@ function byNextRun(a: ScheduledJob, b: ScheduledJob) {
   return an - bn
 }
 
-export function ScheduleView({ onCompose }: { onCompose: () => void }) {
+/**
+ * A narrowing this screen can be *opened* with, rather than one the reader has
+ * to reproduce by hand once they get here.
+ *
+ * One value so far, and it is Home's 今天要发 figure. A named type rather than a
+ * boolean because the second one — "this week", "failed", "this chain" — is
+ * then another value here instead of a second flag that can contradict the
+ * first.
+ */
+export type ScheduleFocus = 'today'
+
+const DAY_MS = 86_400_000
+
+/**
+ * Whether `at` falls on the calendar day `now` is in — compared as local
+ * midnights, so 23:30 → 00:30 is a different day rather than "half an hour, so
+ * the same one".
+ *
+ * A local copy of the rule `HomeView`'s `daysAhead` applies, deliberately not
+ * imported from it: `HomeView` reaches this screen through `lazy(() =>
+ * import('./ScheduleView'))`, so a static import back the other way would drag
+ * the whole home screen — and the eleven modules it lazily owns — into the
+ * chunk that `App.tsx` loads when the schedule tab is opened on a desktop that
+ * never renders Home at all. Five lines duplicated is the cheaper of the two.
+ * The two definitions have to agree, and the thing that would notice if they
+ * stopped is the count in the chip below sitting under a figure that says
+ * something else.
+ */
+function isToday(at: number, now: number): boolean {
+  const a = new Date(at)
+  const b = new Date(now)
+  a.setHours(0, 0, 0, 0)
+  b.setHours(0, 0, 0, 0)
+  return Math.round((a.getTime() - b.getTime()) / DAY_MS) === 0
+}
+
+export function ScheduleView({
+  onCompose,
+  focus,
+}: {
+  onCompose: () => void
+  /**
+   * Optional, and every existing caller omits it — `App.tsx`'s own tab opens
+   * this screen at its full list, as it always has. Only Home's 今天要发 figure
+   * passes anything, and what it passes is the narrowing that makes the list
+   * under the figure the records the figure counted.
+   */
+  focus?: ScheduleFocus
+}) {
   const { state, dispatch, toggleJob, deleteJob, runJobNow, pushUndo, scheduleDraft } = useApp()
   const { t, formatDateTime, formatRelative, formatAgo } = useI18n()
   const toast = useToast()
@@ -91,6 +139,19 @@ export function ScheduleView({ onCompose }: { onCompose: () => void }) {
    */
   const [showDone, setShowDone] = useState(false)
 
+  /**
+   * The narrowing this screen was opened with, held as state so it can be let
+   * go of.
+   *
+   * A prop read straight into the render would be a filter with no off switch:
+   * the reader would arrive at four rows, have no way to see the other thirty,
+   * and — worse — no way to tell that thirty were being withheld. Seeded once
+   * from `focus` (this screen is mounted fresh each time Home's dialog opens,
+   * so there is no second seeding to worry about) and cleared by the chip that
+   * announces it, or by either tab.
+   */
+  const [focused, setFocused] = useState<ScheduleFocus | null>(focus ?? null)
+
   /*
    * Memoised, and not for the sort.
    *
@@ -111,7 +172,36 @@ export function ScheduleView({ onCompose }: { onCompose: () => void }) {
     () => state.jobs.filter((j) => isFinished(j)).sort((a, b) => (b.lastRunAt ?? 0) - (a.lastRunAt ?? 0)),
     [state.jobs],
   )
-  const jobs = showDone ? done : active
+
+  /**
+   * The rows Home's 今天要发 figure counted — the same predicate, over the same
+   * array.
+   *
+   * Written against `state.jobs` rather than as `active.filter(...)` on
+   * purpose. `active` also drops `status === 'done'`, and a figure that counted
+   * a job the list it opens then hides is exactly the disagreement this whole
+   * change exists to remove: the number would say four and four rows would not
+   * be there. The two predicates have to be read side by side to stay equal —
+   * `HomeView.tsx`'s `todayQueued` is the other half, and the chip below prints
+   * this count so any drift shows up as two different numbers on one screen
+   * rather than as nothing at all.
+   *
+   * `enabled`, and the first occurrence *at or after now*: a paused reminder
+   * has occurrences and is not going to fire, and one whose 08:00 send already
+   * went out this morning is not still "to send today".
+   */
+  const todayJobs = useMemo(() => {
+    const now = Date.now()
+    return state.jobs
+      .filter((j) => {
+        if (!j.enabled) return false
+        const at = j.occurrences.find((o) => o >= now)
+        return at !== undefined && isToday(at, now)
+      })
+      .sort(byNextRun)
+  }, [state.jobs])
+
+  const jobs = showDone ? done : focused ? todayJobs : active
 
   /**
    * The actual removal from `state.jobs`, ceremonial-delete-aware.
@@ -339,11 +429,19 @@ export function ScheduleView({ onCompose }: { onCompose: () => void }) {
         */}
         {done.length > 0 ? (
           <div className="segmented" role="group" aria-label={t('schedule.title')}>
+            {/* Either tab also clears the narrowing. A reader who reaches for
+                "已完成" while looking at today's four rows is asking to see a
+                different set, not today's completed four, and a tab that
+                silently kept an invisible filter on would be the same trap the
+                chip below exists to avoid. */}
             <button
               type="button"
               className="segmented__item"
-              aria-pressed={!showDone}
-              onClick={() => setShowDone(false)}
+              aria-pressed={!showDone && !focused}
+              onClick={() => {
+                setFocused(null)
+                setShowDone(false)
+              }}
             >
               {t('schedule.tabActive', { n: active.length })}
             </button>
@@ -351,9 +449,43 @@ export function ScheduleView({ onCompose }: { onCompose: () => void }) {
               type="button"
               className="segmented__item"
               aria-pressed={showDone}
-              onClick={() => setShowDone(true)}
+              onClick={() => {
+                setFocused(null)
+                setShowDone(true)
+              }}
             >
               {t('schedule.tabDone', { n: done.length })}
+            </button>
+          </div>
+        ) : null}
+
+        {/*
+          What the list is currently narrowed to, said out loud, as the control
+          that undoes it.
+
+          The wording is `home.todayQueued` — the very sentence on the figure
+          that was tapped to get here — with the count taken from this screen's
+          own filtered list rather than passed in. That is the correspondence
+          made checkable instead of asserted: if the two predicates ever drift
+          apart, Home says one number and this chip says another on the next
+          screen, which somebody notices. A `--toggle` chip because it is a
+          state that is on and can be turned off, drawn pressed, tapped to
+          release — the same control the chain-stage picker and the inbox use,
+          and already pinned to the 48px touch floor on a phone.
+        */}
+        {focused ? (
+          /* Wrapped, because `.view__inner` is a flex *column* and stretches
+             its children — a bare chip here would be a full-width bar. Same
+             reason `.segmented` carries `align-self: start`; `.btn-row` is the
+             wrapper the log screen's receipt chips already use for this. */
+          <div className="btn-row">
+            <button
+              type="button"
+              className="chip chip--toggle"
+              aria-pressed="true"
+              onClick={() => setFocused(null)}
+            >
+              {t('home.todayQueued', { n: todayJobs.length })}
             </button>
           </div>
         ) : null}
@@ -362,9 +494,13 @@ export function ScheduleView({ onCompose }: { onCompose: () => void }) {
 
         {jobs.length === 0 ? (
           <div className="list-pane">
+            {/* "还没有定时提醒" is false when there are thirty and none of them
+                is today, so a narrowed list says the neutral thing instead. The
+                chip above is still on screen saying which narrowing, and is
+                still the way out of it. */}
             <EmptyState
               icon={<IconClock size={24} />}
-              title={t('schedule.empty')}
+              title={focused ? t('common.empty') : t('schedule.empty')}
               action={
                 <Button variant="secondary" onClick={onCompose}>
                   {t('nav.compose')}

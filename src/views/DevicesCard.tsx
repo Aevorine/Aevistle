@@ -122,7 +122,7 @@
  * where the viewfinder was, rather than leaving a dialog with nothing in it.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import {
   Banner,
   Button,
@@ -155,7 +155,13 @@ import { useApp } from '../state/AppState'
 import { useI18n, type TranslationKey } from '../i18n'
 import type { PairedDevice, PairedDevicePlatform } from '../core/sync/pairedDevices'
 import { joinPairing, type OngoingPairingSecret, type PairingPayload } from '../core/sync/pairing'
-import { SYNC_SERVER_PORT, type SyncListenerError } from '../core/sync/syncLoop'
+import { syncNow } from '../core/sync/activeSyncLoop'
+import {
+  SYNC_SERVER_PORT,
+  type SyncCycleReport,
+  type SyncDeviceReport,
+  type SyncListenerError,
+} from '../core/sync/syncLoop'
 import { SYNC_SCOPE_KEYS, type SyncScopeKey } from '../core/sync/syncScope'
 import { newId } from '../core/types'
 
@@ -165,6 +171,23 @@ const LISTENER_ERROR_KEYS: Record<SyncListenerError, TranslationKey> = {
   blocked: 'devices.syncBlocked',
   failed: 'devices.syncListenFailed',
 }
+
+/** How long "Synced" stays on the button before it goes back to offering the action. Long enough to be read, short enough not to look like a disabled state. */
+const SYNC_DONE_MS = 4_000
+
+/**
+ * What the last press of "sync now" produced.
+ *
+ * `'unavailable'` and `'threw'` are not the same thing as a cycle that ran and
+ * went badly, and flattening all three into one "sync failed" is exactly the
+ * unactionable message this button exists to avoid: one means the loop is not
+ * running on this device yet, one means the attempt itself broke, and the
+ * third has a per-device answer for each device.
+ */
+type SyncNowResult =
+  | { kind: 'unavailable' }
+  | { kind: 'threw'; detail: string }
+  | { kind: 'report'; report: SyncCycleReport }
 
 /** Which handshake the open panel is running — the two differ only in what the `connected` event is allowed to write. */
 type HostSession =
@@ -273,6 +296,150 @@ export function DevicesCard() {
    */
   const [editingScopes, setEditingScopes] = useState<PairedDevice | null>(null)
   const [draftScopes, setDraftScopes] = useState<Set<SyncScopeKey>>(() => new Set())
+
+  /**
+   * "Sync now" — the only way to start a cycle on purpose.
+   *
+   * Until this existed, everything on this screen was governed by
+   * `SYNC_POLL_INTERVAL_MS`: change something, then wait up to ninety seconds
+   * with nothing on screen distinguishing "it is about to go" from "it has
+   * been quietly failing since you changed networks last Tuesday". A pairing
+   * that has silently stopped working looks identical to one that is simply
+   * between polls, and a user has no way to ask.
+   *
+   * Three states rather than a boolean, because "just finished" has to be
+   * visible for a moment or a successful press is indistinguishable from a
+   * press that did not register — a cycle over a LAN with nothing to exchange
+   * finishes faster than the eye can follow the spinner.
+   */
+  const [syncPhase, setSyncPhase] = useState<'idle' | 'running' | 'done'>('idle')
+  const [syncResult, setSyncResult] = useState<SyncNowResult | null>(null)
+  /**
+   * Bumped on every press, and used as the result banner's `key`.
+   *
+   * `Banner` fades an `info`/`success` message out on its own timer and only
+   * resets that when its `title` or `tone` changes — so pressing twice in a
+   * row, with the same outcome both times, would show nothing the second
+   * time. A key that changes per press is what makes the second press a new
+   * banner rather than the same, already-dismissed one.
+   */
+  const [syncRun, setSyncRun] = useState(0)
+  const syncDoneTimer = useRef<number | null>(null)
+  useEffect(
+    () => () => {
+      if (syncDoneTimer.current !== null) window.clearTimeout(syncDoneTimer.current)
+    },
+    [],
+  )
+
+  const runSyncNow = async () => {
+    if (syncPhase === 'running') return
+    if (syncDoneTimer.current !== null) window.clearTimeout(syncDoneTimer.current)
+    setSyncRun((n) => n + 1)
+    setSyncPhase('running')
+    setSyncResult(null)
+
+    // `null` rather than a rejected promise when there is no loop: see
+    // `core/sync/activeSyncLoop.ts` for why the loop is reached this way at
+    // all, and which builds never register one.
+    const pending = syncNow()
+    if (!pending) {
+      setSyncResult({ kind: 'unavailable' })
+      setSyncPhase('idle')
+      return
+    }
+
+    let result: SyncNowResult
+    try {
+      result = { kind: 'report', report: await pending }
+    } catch (e) {
+      // `runCycle` catches every per-device failure itself and reports it in
+      // the result, so anything arriving here broke outside of any one
+      // device's exchange. Rare, and worth saying out loud rather than
+      // rendering as an empty "0 devices" success.
+      result = { kind: 'threw', detail: e instanceof Error ? e.message : String(e) }
+    }
+    setSyncResult(result)
+
+    // The button says "Synced" only when every device actually did. A cycle
+    // where one of three peers was unreachable is not a success, and the
+    // banner below is the part worth reading in that case — so the label goes
+    // straight back to offering the action rather than claiming an outcome.
+    const clean =
+      result.kind === 'report' && result.report.ran && result.report.devices.every((d) => d.outcome === 'synced')
+    if (clean) {
+      setSyncPhase('done')
+      syncDoneTimer.current = window.setTimeout(() => setSyncPhase('idle'), SYNC_DONE_MS)
+    } else {
+      setSyncPhase('idle')
+    }
+  }
+
+  /**
+   * One device's outcome, in a sentence that names what to do about it.
+   *
+   * Every branch supplies exactly the placeholders its own string uses —
+   * `translate` leaves a `{slot}` it was given no value for standing on screen
+   * as literal braces, so a shared "pass everything" call would print
+   * `{address}` into the two messages that have no address to print.
+   */
+  const syncProblemLine = (report: SyncDeviceReport): string => {
+    const device = report.device.label
+    switch (report.outcome) {
+      case 'noAddress':
+        return t('devices.syncNowNoAddress', { device })
+      case 'unreachable':
+        return t('devices.syncNowUnreachable', {
+          device,
+          address: report.address ? `${report.address.host}:${report.address.port}` : '',
+        })
+      case 'refused':
+        return t('devices.syncNowRefused', { device, detail: report.detail ?? '' })
+      // 'synced' never reaches here — the caller filters it out — but naming
+      // it keeps this switch exhaustive, so a new `SyncDeviceOutcome` is a
+      // compile error here rather than a device that silently says nothing.
+      case 'synced':
+      case 'failed':
+        return t('devices.syncNowFailed', { device, detail: report.detail ?? '' })
+    }
+  }
+
+  const syncNowBanner = () => {
+    if (!syncResult) return null
+    if (syncResult.kind === 'unavailable') {
+      return <Banner tone="warning">{t('devices.syncNowUnavailable')}</Banner>
+    }
+    if (syncResult.kind === 'threw') {
+      return (
+        <Banner tone="danger" title={t('devices.syncNowResult')}>
+          {t('devices.syncNowFailed', { device: t('devices.thisDevice'), detail: syncResult.detail })}
+        </Banner>
+      )
+    }
+    const { report } = syncResult
+    // `keep`, because this one is a report on something the user asked for
+    // and a phone hides every un-kept `info` banner outright — see `Banner`.
+    if (!report.ran) {
+      return (
+        <Banner tone="info" keep>
+          {t('devices.syncNowBusy')}
+        </Banner>
+      )
+    }
+    const problems = report.devices.filter((d) => d.outcome !== 'synced')
+    const synced = report.devices.length - problems.length
+    if (problems.length === 0) {
+      return <Banner tone="success">{t('devices.syncNowOk', { n: synced })}</Banner>
+    }
+    return (
+      <Banner tone="warning" title={t('devices.syncNowResult')}>
+        {synced > 0 ? <div>{t('devices.syncNowOk', { n: synced })}</div> : null}
+        {problems.map((problem) => (
+          <div key={problem.device.id}>{syncProblemLine(problem)}</div>
+        ))}
+      </Banner>
+    )
+  }
 
   const canHost = Boolean(bridge?.startPairingHost)
   const canJoin = Boolean(bridge?.pairingJoinRequest)
@@ -792,8 +959,35 @@ export function DevicesCard() {
             </>
           )}
 
+          {/* Both halves of the same subject: what sync does on its own, and
+              the one control for making it happen now. The button is drawn
+              only alongside an 'ongoing' pairing — a list of `'once'` rows has
+              nothing for a cycle to reach, and a button that could only ever
+              report "0 devices" is worse than no button. */}
           {state.pairedDevices.some((d) => d.mode === 'ongoing') ? (
-            <Banner tone="info">{t('devices.ongoingHint')}</Banner>
+            <>
+              <Banner tone="info">{t('devices.ongoingHint')}</Banner>
+              <div className="btn-row">
+                <Button
+                  icon={<IconRefresh size={15} />}
+                  loading={syncPhase === 'running'}
+                  onClick={() => void runSyncNow()}
+                >
+                  {syncPhase === 'running'
+                    ? t('devices.syncNowRunning')
+                    : syncPhase === 'done'
+                      ? t('devices.syncNowDone')
+                      : t('devices.syncNow')}
+                </Button>
+              </div>
+              <div className="field__hint">{t('devices.syncNowHint')}</div>
+              {/* A keyed `Fragment` rather than a wrapper element: `.form-rows`
+                  spaces its children with `gap`, so an empty `<div>` standing
+                  in for "no result yet" would open a hole under the hint. See
+                  `syncRun` for why the key is what makes a second press
+                  visible at all. */}
+              <Fragment key={syncRun}>{syncNowBanner()}</Fragment>
+            </>
           ) : null}
 
           {syncListener?.error ? (

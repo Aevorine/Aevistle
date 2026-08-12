@@ -51,6 +51,7 @@ import { SearchInput } from '../components/inputs'
 import {
   IconAlert,
   IconCheck,
+  IconCheckCircle,
   IconClock,
   IconCopy,
   IconExternal,
@@ -451,6 +452,42 @@ export function CodesView({ onGoToInbox }: { onGoToInbox?: () => void }) {
     if (ok) void bridge?.openExternal(hit.value)
   }
 
+  /**
+   * Every card on this screen, marked as dealt with, in one press.
+   *
+   * ## What it does and does not reach
+   *
+   * `markAllCodesRead` walks `state.codeHits` — the whole code history, which
+   * is exactly what this screen lists — and stamps `readAt` on every entry that
+   * has none. It reaches cards the current filter or search is hiding, which is
+   * why the count on the button comes from `unread` (computed over all of
+   * `state.codeHits`) and not from `visible`: a button that says "3" and clears
+   * 40 would be lying about its own scope.
+   *
+   * It does *not* touch the mailbox. A code hit is this app's own note that it
+   * found something in a message; the message it came from stays unread in the
+   * inbox until the inbox is told otherwise. That is the whole content of
+   * `codes.markAllReadScope`, and it is in the toast rather than on the button
+   * because it is the thing somebody wants to know immediately *after*
+   * pressing, not a caption to read before.
+   *
+   * (The 24-hour / 20-message window in `CodeCheck` bounds which *new* mail is
+   * examined for codes. It has nothing to do with this: the history is already
+   * found, already on the screen, and all of it is marked.)
+   *
+   * One dispatch, not one per card — the reducer maps the array once.
+   */
+  const markAllRead = () => {
+    const n = unread
+    if (n === 0) return
+    dispatch({ type: 'markAllCodesRead' })
+    toast.push({
+      tone: 'success',
+      title: t('codes.markAllReadDone', { n }),
+      detail: t('codes.markAllReadScope'),
+    })
+  }
+
   const clearAll = async () => {
     const ok = await confirm({
       title: t('codes.clearConfirm', { n: state.codeHits.length }),
@@ -689,6 +726,32 @@ export function CodesView({ onGoToInbox }: { onGoToInbox?: () => void }) {
             subtitle={headNote}
             action={
               <>
+                {/*
+                  一键已读, promoted out of the overflow menu.
+
+                  It was a menu item, which is three presses (open the menu,
+                  find it, press it) for something whose entire value is being
+                  one. The head can afford it here in a way `InboxView`'s band
+                  cannot: `17-phone.css` gives `.page-head__actions` its own
+                  full-width row on a phone, so a third 44px target costs no
+                  width from the title.
+
+                  Only while something is unread, and pressing it is what makes
+                  it go away — so the row is back to two targets the moment
+                  there is nothing for a third to do.
+
+                  `IconCheckCircle`, matching the inbox's twin of this button.
+                  `IconCheck` is already the "copied ✓" mark on every card
+                  below.
+                */}
+                {unread > 0 ? (
+                  <IconButton
+                    label={t('codes.markAllReadNow', { n: unread })}
+                    onClick={markAllRead}
+                  >
+                    <IconCheckCircle size={17} />
+                  </IconButton>
+                ) : null}
                 <IconButton
                   label={t('codes.search')}
                   aria-expanded={searchOpen}
@@ -779,20 +842,10 @@ export function CodesView({ onGoToInbox }: { onGoToInbox?: () => void }) {
                         {bigDigits ? <IconZoomOut size={16} /> : <IconZoomIn size={16} />}
                         <span>{t('codes.bigDigits')}</span>
                       </button>
-                      {unread > 0 ? (
-                        <button
-                          type="button"
-                          role="menuitem"
-                          className="codesmenu__item"
-                          onClick={() => {
-                            setMenuOpen(false)
-                            dispatch({ type: 'markAllCodesRead' })
-                          }}
-                        >
-                          <IconCheck size={16} />
-                          <span>{t('codes.markAllRead')}</span>
-                        </button>
-                      ) : null}
+                      {/* 全部标为已读 used to be here. It moved to the head
+                          beside the magnifier, where it is one press instead of
+                          three; leaving a copy behind would be a second door to
+                          a room already visible from the corridor. */}
                       {state.codeHits.length > 0 ? (
                         <button
                           type="button"
@@ -881,13 +934,16 @@ export function CodesView({ onGoToInbox }: { onGoToInbox?: () => void }) {
                 >
                   {t('codes.bigDigits')}
                 </Button>
+                {/* The same one press as the phone's head button, with the room
+                    to print the count on its face rather than only in its
+                    accessible name. */}
                 {unread > 0 ? (
                   <Button
                     variant="ghost"
-                    icon={<IconCheck size={15} />}
-                    onClick={() => dispatch({ type: 'markAllCodesRead' })}
+                    icon={<IconCheckCircle size={15} />}
+                    onClick={markAllRead}
                   >
-                    {t('codes.markAllRead')}
+                    {t('codes.markAllReadNow', { n: unread })}
                   </Button>
                 ) : null}
                 {state.codeHits.length > 0 ? (

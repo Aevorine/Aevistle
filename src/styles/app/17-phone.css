@@ -248,13 +248,14 @@
        - `.monthgrid__day` is 38x44 for the same reason: seven columns, 360px.
          A wider cell means a horizontally scrolling month. */
 
-  /* Both of these were pinned to numbers that stopped being true when the bar
-     below them learned to wrap. */
-  .toasts {
-    bottom: calc(
-      var(--sp-4) + var(--nav-h) + env(safe-area-inset-bottom, 0px) + var(--actionbar-h)
-    );
-  }
+  /* The toast offset used to be restated here, identically, because the
+     `max-width: 839.98px` copy of it was a magic 64px and this was the repair.
+     Both copies now say the same thing, so this one has moved up to that block
+     — the boundary where the bottom tab bar it is avoiding actually appears.
+     Left as a note rather than deleted silently: an override that vanishes
+     from the phone layer looks like a regression unless the file says where it
+     went. See `.toasts` in `10-narrow-shell.css`; `--actionbar-h` is still
+     raised to 96px by this file's `:root` block above, and that rule reads it. */
 }
 
 /* Buttons in a dialog footer may wrap at any width — three of them in a 278px

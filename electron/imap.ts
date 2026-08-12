@@ -27,6 +27,7 @@ import {
   type InboxFolder,
   type InboxMessage,
   type InboxTag,
+  type SeenFlagResult,
   type SendResult,
 } from '../src/core/types'
 import {
@@ -43,6 +44,7 @@ import { accessTokenForAccount, hasOAuthGrant, noteOAuthAuthFailure } from './oa
 import { resolveHostCached } from './mailer'
 import { sanitizeMessageHtml } from './sanitizeHtml'
 import {
+  attachmentMeta,
   peekMessageBody,
   readMessageBody,
   writeInboxAttachments,
@@ -148,6 +150,26 @@ function formatAddress(a: { name?: string; address?: string } | undefined): stri
   return a.address ?? a.name ?? ''
 }
 
+/**
+ * Every address on one envelope header, each formatted the way `formatAddress`
+ * formats one.
+ *
+ * The whole list has always been in the FETCH reply — `envelope: true` asks for
+ * it and the server sends it — and only the first entry was ever read. A message
+ * addressed to five people therefore looked, in the reader, exactly like one
+ * addressed to one, with no sign that anything had been dropped.
+ *
+ * Entries that format to nothing are removed rather than kept as blanks: an
+ * envelope group ("undisclosed-recipients:;") arrives as an address object with
+ * neither name nor address, and rendering it as an empty recipient would be
+ * inventing a person.
+ */
+function formatAddressList(
+  list: Array<{ name?: string; address?: string }> | undefined,
+): string[] {
+  return (list ?? []).map(formatAddress).filter((s) => s.length > 0)
+}
+
 /** `internalDate` is typed `Date | string` — imapflow's own docs show both shapes in the wild. */
 function internalDateMs(value: Date | string | undefined): number {
   if (!value) return Date.now()
@@ -221,6 +243,13 @@ async function parseCacheAndReturn(
     sanitizedHtml: sanitized?.html,
     remoteImages,
     icsParts,
+    // The one moment the `cid`, `inline` and declared-type facts exist. This
+    // parse is where they were being thrown away: the bytes went to disk and
+    // everything that said what those bytes *were* stayed in this scope, so the
+    // read path had nothing left to match `<img src="cid:…">` against. Written
+    // even when empty, so a body file can be told apart from one an older build
+    // wrote — for that one, absent means unknown, not "no attachments".
+    attachments: attachmentMeta(attachments),
   })
 
   return {
@@ -622,6 +651,18 @@ async function runSync(
       const seen = row.flags?.has('\\Seen') ?? false
       if (!seen) unreadCount++
 
+      /*
+       * Empty means "this header was not on the message", and that has to be
+       * `undefined` rather than `[]` for two reasons. `state.json` is rewritten
+       * whole on every save and carries fifty of these rows per account, so an
+       * empty array on each is pure weight saying nothing; and the reader is
+       * entitled to treat a missing list as "we never captured it" (see
+       * `InboxMessage.toAll`) rather than having to distinguish two spellings
+       * of the same absence.
+       */
+      const toAll = formatAddressList(row.envelope?.to)
+      const cc = formatAddressList(row.envelope?.cc)
+
       const existing = priorByUid.get(uid)
       let bodyCached = existing?.bodyCached ?? false
       let hasAttachments = hasAttachmentPart(row.bodyStructure)
@@ -650,6 +691,8 @@ async function runSync(
         messageId: row.envelope?.messageId ?? undefined,
         from: formatAddress(row.envelope?.from?.[0]),
         to: formatAddress(row.envelope?.to?.[0]),
+        toAll: toAll.length > 0 ? toAll : undefined,
+        cc: cc.length > 0 ? cc : undefined,
         subject: row.envelope?.subject ?? '',
         date: internalDateMs(row.internalDate),
         snippet,
@@ -1004,10 +1047,28 @@ export async function fetchMessageBody(
 }
 
 /**
- * Best-effort mirror of the read state to the server's `\Seen` flag. Never
- * throws — the caller always applies the change to local state regardless,
- * and a server that is briefly unreachable should not block "mark as read"
- * in the UI the user is looking at right now.
+ * Re-exported so `main.ts` goes on importing it from beside the function that
+ * produces it. The definition, and what each `reason` means, lives in
+ * `src/core/types.ts` — shared with the Android plugin, which answers the same
+ * question over a completely separate code path, and with the renderer, which
+ * is the one place both answers arrive.
+ */
+export type { SeenFlagResult }
+
+/**
+ * Mirror the read state to the server's `\Seen` flag, and say whether it
+ * landed.
+ *
+ * Still never throws, and the caller still applies the change locally either
+ * way — a server that is briefly unreachable must not block "mark as read" in
+ * the window the user is looking at. What changed is that it no longer *lies*.
+ * The old version returned `void`, no-op'd when there were no credentials, and
+ * swallowed every error into an empty catch, so the caller had no way to
+ * distinguish "the mailbox now agrees" from "nothing happened at all".
+ * Both spellings of failure end the same way: the next sync reads the
+ * server's flags back, the message returns to unread, and the user watches a
+ * mail they have read mark itself unread again — with nothing in any log to say
+ * why.
  */
 export async function setServerSeenFlag(
   config: InboxAccountState,
@@ -1015,8 +1076,13 @@ export async function setServerSeenFlag(
   folderPath: string,
   uid: number,
   seen: boolean,
-): Promise<void> {
-  if (!(await hasCredential(config, secret))) return
+): Promise<SeenFlagResult> {
+  if (!(await hasCredential(config, secret))) {
+    console.error(
+      `[aevistle] cannot mirror \\Seen for ${config.accountId} ${folderPath}:${uid} — no password or OAuth grant for this mailbox`,
+    )
+    return { ok: false, reason: 'no-credential' }
+  }
   try {
     await withConnection(config, secret, async (client) => {
       const lock = await client.getMailboxLock(folderPath)
@@ -1027,8 +1093,16 @@ export async function setServerSeenFlag(
         lock.release()
       }
     })
-  } catch {
-    /* best-effort — see doc comment */
+    return { ok: true }
+  } catch (e) {
+    // Enough to act on: which mailbox, which message, which direction, and the
+    // error itself. A bare "flag update failed" would be one more line nobody
+    // can do anything with.
+    console.error(
+      `[aevistle] could not set \\Seen=${seen} on ${config.accountId} ${folderPath}:${uid}:`,
+      e,
+    )
+    return { ok: false, reason: 'failed' }
   }
 }
 

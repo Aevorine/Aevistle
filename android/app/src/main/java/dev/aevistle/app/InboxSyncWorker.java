@@ -76,7 +76,16 @@ public class InboxSyncWorker extends Worker {
             String accountId = config.optString("accountId", "");
             try {
                 String secret = secrets.get(accountId, "imap");
+                // Before the listing, never after: a sync writes the server's
+                // `\Seen` onto every row, so a "Mark as read" that has not
+                // reached the server yet is a mark this run would erase. Opens
+                // nothing when there is nothing queued, which is every run but
+                // the rare one. See MailFetcher#flushPendingSeen.
+                MailFetcher.flushPendingSeen(context, config, secret);
                 JSONObject updated = MailFetcher.sync(context, config, secret);
+                // And for whatever the flush could not push — no network, a
+                // server refusing — the queue still outranks what came back.
+                cache.applyPendingSeen(updated);
                 cache.upsert(updated);
                 /*
                  * After the cache is written, never before.

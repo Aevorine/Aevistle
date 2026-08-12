@@ -8,6 +8,10 @@
  *     refused and handed to the OS browser instead
  *   - `openExternal` only accepts http/https, so a crafted settings import
  *     cannot make the app run `file://` or a custom protocol handler
+ *   - and underneath all of that, `hardenSession` cancels any renderer request
+ *     that leaves this machine and refuses every permission the app does not
+ *     use — the layer that holds even if the sanitizer or the CSP is one day
+ *     wrong
  */
 
 import {
@@ -20,6 +24,7 @@ import {
   nativeImage,
   nativeTheme,
   powerMonitor,
+  session,
   shell,
   Tray,
 } from 'electron'
@@ -116,9 +121,21 @@ import {
   useOAuthSecretStore,
 } from './oauth'
 import type { OAuthAccountStatus, OAuthConsentResult } from '../src/core/mail/oauth'
-import { fetchMessageBody, purgeMessages, setServerSeenFlag, syncInbox, testInbox } from './imap'
+import {
+  fetchMessageBody,
+  purgeMessages,
+  setServerSeenFlag,
+  syncInbox,
+  testInbox,
+  type SeenFlagResult,
+} from './imap'
 import { stopAllInboxWatchers, watchInboxes } from './imapIdle'
-import { deleteAccountInboxCache, deleteMessageCache, pruneInboxCache } from './inboxStore'
+import {
+  cachedAttachmentMime,
+  deleteAccountInboxCache,
+  deleteMessageCache,
+  pruneInboxCache,
+} from './inboxStore'
 import { clearImageCache, downloadRemoteImage } from './remoteImage'
 import { sanitizeMessageHtml } from './sanitizeHtml'
 import { fetchFeed } from './feedFetch'
@@ -974,7 +991,152 @@ function scheduleWindowSave(): void {
   saveWindowTimer = setTimeout(saveWindowState, 400)
 }
 
+/**
+ * Schemes that never leave this machine, so nothing about them is worth
+ * inspecting: the packaged renderer itself (`file:`), sanitized inline images
+ * and attachment previews (`data:`), the Blob a "back up" hands to the download
+ * handler (`blob:`), and the DevTools front end, which is a page Chromium loads
+ * from inside itself.
+ */
+const LOCAL_SCHEMES = new Set([
+  'file:',
+  'data:',
+  'blob:',
+  'about:',
+  'devtools:',
+  'chrome:',
+  'chrome-extension:',
+])
+
+/** Every spelling of "this machine" a URL can carry. `new URL()` keeps the brackets on an IPv6 literal. */
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1'])
+
+/**
+ * The dev server's host, when there is one.
+ *
+ * `npx vite --host` legitimately binds a LAN address, and the window is then
+ * loaded from it — refusing that would mean this guard breaks development while
+ * changing nothing about the packaged build, where `DEV_SERVER` is undefined and
+ * this is `null`.
+ */
+const DEV_SERVER_HOST = ((): string | null => {
+  if (!DEV_SERVER) return null
+  try {
+    return new URL(DEV_SERVER).hostname
+  } catch {
+    return null
+  }
+})()
+
+function isLocalRequest(url: string): boolean {
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    // Unparseable is not "harmless" — it is "unknown", and the whole point of
+    // this function is to answer only for what it can actually read.
+    return false
+  }
+  if (LOCAL_SCHEMES.has(parsed.protocol)) return true
+  if (!/^(https?|wss?):$/.test(parsed.protocol)) return false
+  return LOOPBACK_HOSTS.has(parsed.hostname) || parsed.hostname === DEV_SERVER_HOST
+}
+
+/**
+ * The network backstop, and the permission one.
+ *
+ * Three things already stop a received message from phoning home: the sanitizer
+ * rewrites every remote `src` out of the HTML, the CSP in `index.html` allows
+ * `self`/`data:`/`blob:` and nothing else, and the body frame has no scripts to
+ * run. All three live in the renderer's own document, which is to say all three
+ * are one mistake away from being bypassed — an unsanitized string reaching
+ * `innerHTML`, a CSP directive loosened for some future feature — and until now
+ * there was nothing underneath them. This is the layer that does not care how a
+ * request was formed, only where it is going.
+ *
+ * It cannot affect anything the main process fetches. Remote images
+ * (`remoteImage.ts`), feeds (`feedFetch.ts`), update checks (`updater.ts`) and
+ * OAuth token exchange (`oauth.ts`) all go through Node's own `http`/`https`/
+ * `fetch`, which never touches an Electron session — verified across those four
+ * files, not assumed. The OAuth consent page opens in the user's browser and its
+ * reply arrives on a loopback listener, also outside this. What remains is the
+ * renderer, which by design makes no network requests at all: the only `fetch`
+ * in `src/` reads a `data:` URL back into a Blob.
+ *
+ * Requests with no `webContentsId` are left alone. Those are Chromium's own —
+ * the spellcheck dictionary being the one that matters here, since
+ * `spellcheck: true` is on — and cancelling browser-initiated traffic to stop
+ * renderer-initiated traffic would be trading a working feature for nothing.
+ *
+ * Safe to call again: a session takes one `onBeforeRequest` listener and one
+ * permission handler, and a second call replaces rather than stacks.
+ */
+function hardenSession(): void {
+  const ses = session.defaultSession
+
+  ses.webRequest.onBeforeRequest((details, callback) => {
+    if (details.webContentsId === undefined || isLocalRequest(details.url)) {
+      callback({ cancel: false })
+      return
+    }
+    // Worth a line every time. If the sanitizer and the CSP are both doing
+    // their jobs this never fires, so a single occurrence is the news — and
+    // without the URL there would be no way to tell a tracking pixel from a
+    // feature somebody added without noticing it needed the network.
+    console.error(
+      `[aevistle] blocked a ${details.resourceType} request from the renderer to ${details.url.slice(0, 200)}`,
+    )
+    callback({ cancel: true })
+  })
+
+  ses.setPermissionRequestHandler((_contents, permission, callback, details) => {
+    /*
+     * The camera, and only the camera.
+     *
+     * A mail client has no use for one, but this window also hosts
+     * `PairingScanner` — "join with a code" points a webcam at another device's
+     * QR — so a blanket refusal would break a feature that works today. Electron
+     * spends one permission on camera and microphone together, and `mediaTypes`
+     * is how they are told apart: video is asked for by the scanner, audio by
+     * nothing in this app.
+     */
+    if (permission === 'media') {
+      const wanted = 'mediaTypes' in details ? (details.mediaTypes ?? []) : []
+      const cameraOnly = wanted.length > 0 && wanted.every((type) => type === 'video')
+      if (!cameraOnly) {
+        console.error(`[aevistle] denied a media permission request for [${wanted.join(', ')}]`)
+      }
+      callback(cameraOnly)
+      return
+    }
+
+    /*
+     * Writing to the clipboard, sanitized. "Copy image" in the lightbox goes
+     * through `navigator.clipboard.write`, which asks for this. The read side is
+     * deliberately not here: nothing in the app reads the clipboard through the
+     * async API, and granting it would let a page take whatever the user last
+     * copied — frequently a password.
+     */
+    if (permission === 'clipboard-sanitized-write') {
+      callback(true)
+      return
+    }
+
+    // Everything else. Geolocation, notifications (the app posts its own from
+    // the main process), microphone, MIDI, HID, serial, USB, screen capture,
+    // idle detection, window management — none of them has a caller in this
+    // codebase, so a request for one is either a mistake or something that got
+    // in, and both are worth a line in the log rather than a silent grant.
+    console.error(`[aevistle] denied a "${permission}" permission request`)
+    callback(false)
+  })
+}
+
 function createWindow(): void {
+  // Before the window exists, so there is no frame-shaped gap during which the
+  // renderer's first requests are unguarded.
+  hardenSession()
+
   const saved = readWindowState()
   mainWindow = new BrowserWindow({
     // Sized for the serif type scale: 16 px body text needs more line length
@@ -1908,7 +2070,28 @@ function registerIpc(): void {
     const resolved = path.resolve(target)
     const root = path.resolve(dataLocation())
     if (!isInside(resolved, root)) return null
-    const mime = guessMime(resolved)
+    /*
+     * What the sender said it was, before what the extension suggests.
+     *
+     * `guessMime` alone is why embedded images did not preview: a `cid` image
+     * routinely arrives with no filename at all, gets written as
+     * `attachment-3`, and an extensionless name maps to
+     * `application/octet-stream` — which the allowlist below then refuses, and
+     * the picture disappears with no error. The declared type is on disk beside
+     * the body; `cachedAttachmentMime` reads it.
+     *
+     * `application/octet-stream` is not preferred even when recorded, because
+     * it is exactly what a sending client writes when it did not know either —
+     * treating that as an answer would newly break the extensionful files the
+     * old guess got right.
+     *
+     * Neither the confinement above nor the allowlist below is relaxed by this:
+     * the type is only ever *identified* more accurately, and a type outside
+     * `PREVIEWABLE_MIME` is still refused however it was arrived at.
+     */
+    const declared = await cachedAttachmentMime(resolved)
+    const mime =
+      declared && declared !== 'application/octet-stream' ? declared : guessMime(resolved)
     if (!PREVIEWABLE_MIME.test(mime)) return null
     try {
       const stat = await fs.stat(resolved)
@@ -2113,6 +2296,17 @@ function registerIpc(): void {
    */
   ipcMain.handle(IPC.sanitizeHtml, async (_e, html: string) => sanitizeMessageHtml(html).html)
 
+  /**
+   * Mirror a read/unread change to the mailbox, and answer whether it landed.
+   *
+   * The answer is the point. This handler used to return `undefined` whatever
+   * happened underneath — no credentials, unreachable server, server refusal —
+   * so the renderer marked the row read locally and had every reason to believe
+   * the mailbox agreed. It often did not, and the next sync read the server's
+   * flags back over the top: a message the user had read marking itself unread
+   * again, minutes later, with nothing anywhere saying why. See
+   * `SeenFlagResult` in `imap.ts` for what the reasons mean.
+   */
   ipcMain.handle(
     IPC.setMessageFlags,
     async (
@@ -2121,13 +2315,13 @@ function registerIpc(): void {
       folderPath: string,
       uid: number,
       patch: { seen?: boolean; tag?: InboxTag },
-    ) => {
+    ): Promise<SeenFlagResult> => {
       // `tag` never reaches here — it is local-only by design (see `InboxTag`
       // in types.ts) and the renderer never sends it over this channel for
       // anything but `seen`.
-      if (patch.seen === undefined) return
+      if (patch.seen === undefined) return { ok: false, reason: 'not-requested' }
       const secret = await getInboxSecret(config.accountId)
-      await setServerSeenFlag(config, secret, folderPath, uid, patch.seen)
+      return setServerSeenFlag(config, secret, folderPath, uid, patch.seen)
     },
   )
 

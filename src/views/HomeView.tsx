@@ -169,6 +169,14 @@ import {
   IconUsers,
 } from '../components/icons'
 
+/*
+ * Type-only, so the `lazy()` boundaries below survive: `import type` is erased
+ * entirely at build, which is what lets this file name the two screens' focus
+ * unions without linking either module into the home chunk.
+ */
+import type { ScheduleFocus } from './ScheduleView'
+import type { LogsFocus } from './LogsView'
+
 const ScheduleView = lazy(() =>
   import('./ScheduleView').then((m) => ({ default: m.ScheduleView })),
 )
@@ -215,6 +223,21 @@ const ReliabilityView = lazy(() =>
 )
 
 type DestId = ViewId | HomeFeatureId
+
+/**
+ * What a destination can be opened *already narrowed to*.
+ *
+ * `import type`, so nothing here defeats the `lazy()` boundaries above: the
+ * two unions are erased at build and neither screen's module is pulled into
+ * this chunk to satisfy them.
+ *
+ * The union is flat rather than `{ dest, focus }` because the pair is already
+ * checked at the point it is spent — the schedule branch of the dialog below
+ * only forwards the values `ScheduleView` accepts, and the log branch only the
+ * two `LogsView` does, so a value can never reach a screen that has no meaning
+ * for it.
+ */
+type DestFocus = ScheduleFocus | LogsFocus
 
 /** Icons for the five `HOME_SECTIONS` tiles, keyed by the same ids. */
 const TILE_ICONS: Partial<Record<ViewId, (p: { size?: number }) => ReactElement>> = {
@@ -410,6 +433,19 @@ export function HomeView({
   const { t, formatDateTime } = useI18n()
   const { state, dispatch } = useApp()
   const [open, setOpen] = useState<DestId | null>(null)
+  /**
+   * What the open destination was opened *for*, when it was opened for
+   * something narrower than itself.
+   *
+   * Separate state rather than part of `open` because it is separate
+   * information: every tile and every grid cell opens a destination with no
+   * focus at all, and only the three figures in the hero pass one. Read once,
+   * at the moment the screen inside the dialog mounts — it is that screen's
+   * seed, not a filter this one keeps applying (see `focused` in
+   * `ScheduleView` and `LogsView`, which is where it becomes a thing the
+   * reader can turn off).
+   */
+  const [focus, setFocus] = useState<DestFocus | null>(null)
   const [moreOpen, setMoreOpen] = useState(false)
   const [arranging, setArranging] = useState(false)
   /**
@@ -422,7 +458,14 @@ export function HomeView({
    */
   const [editingCell, setEditingCell] = useState<DestId | null>(null)
 
-  const close = () => setOpen(null)
+  const close = () => {
+    setOpen(null)
+    // Cleared with the dialog rather than left to be overwritten on the next
+    // open: the screen inside reads this once as it mounts, and a stale value
+    // surviving until the next `openDest` is one re-render away from seeding a
+    // filter nobody asked for.
+    setFocus(null)
+  }
 
   /** Compose is a tab; reaching it means leaving Home, so the dialog closes first. */
   const goCompose = () => {
@@ -501,13 +544,16 @@ export function HomeView({
    * `appearanceUpdatedAt` or push anything over the sync scope — see the
    * appearance-key list in `state/AppState.tsx`.
    */
-  const openDest = (id: DestId) => {
+  const openDest = (id: DestId, dest?: DestFocus) => {
     const usage = state.settings.navUsage
     dispatch({
       type: 'patchSettings',
       patch: { navUsage: { ...usage, [id]: (usage?.[id] ?? 0) + 1 } },
     })
     setMoreOpen(false)
+    /* Set unconditionally, so a tile opened with no focus clears whatever the
+       last figure left behind rather than inheriting it. */
+    setFocus(dest ?? null)
     setOpen(id)
   }
 
@@ -948,18 +994,28 @@ export function HomeView({
                   person is opening the app with — and a control that appears
                   only on bad days is one nobody learns the position of.
                 */}
+                {/*
+                  Each figure now opens its screen *already narrowed to itself*
+                  — see `DestFocus`. Before this, pressing 今天失败 3 次 opened
+                  the whole activity log, newest first, and left the reader to
+                  find the three among a few hundred rows they had just been
+                  told the count of. The figure and the list it opens are one
+                  claim, so they are now filtered by one predicate, and each
+                  screen repeats the figure's own sentence in a chip above the
+                  rows so the two counts can be read off the same screen.
+                */}
                 <p className="homehero__today">
                   <button
                     type="button"
                     className="homehero__fact"
-                    onClick={() => openDest('schedule')}
+                    onClick={() => openDest('schedule', 'today')}
                   >
                     {t('home.todayQueued', { n: todayQueued })}
                   </button>
                   <button
                     type="button"
                     className="homehero__fact"
-                    onClick={() => openDest('logs')}
+                    onClick={() => openDest('logs', 'sentToday')}
                   >
                     {t('home.todaySent', { n: todaySent })}
                   </button>
@@ -967,7 +1023,7 @@ export function HomeView({
                     type="button"
                     className="homehero__fact"
                     data-alert={todayFailed > 0 || undefined}
-                    onClick={() => openDest('logs')}
+                    onClick={() => openDest('logs', 'failedToday')}
                   >
                     {t('home.todayFailed', { n: todayFailed })}
                   </button>
@@ -1352,11 +1408,21 @@ export function HomeView({
           bodyClassName={isFeature(open) ? 'modal__body--settings' : 'modal__body--screen'}
         >
           <Suspense fallback={<Skeleton shape="list" rows={6} />}>
-            {open === 'schedule' ? <ScheduleView onCompose={goCompose} /> : null}
+            {/* Each branch forwards only the focus values its own screen
+                accepts, which is what keeps `DestFocus` safe as a flat union:
+                'sentToday' cannot reach the schedule and 'today' cannot reach
+                the log, because neither branch will pass it. */}
+            {open === 'schedule' ? (
+              <ScheduleView onCompose={goCompose} focus={focus === 'today' ? focus : undefined} />
+            ) : null}
             {open === 'contacts' ? <ContactsView /> : null}
             {open === 'templates' ? <TemplatesView onApplied={goCompose} /> : null}
             {open === 'workcal' ? <WorkCalendarView onCompose={goCompose} /> : null}
-            {open === 'logs' ? <LogsView /> : null}
+            {open === 'logs' ? (
+              <LogsView
+                focus={focus === 'sentToday' || focus === 'failedToday' ? focus : undefined}
+              />
+            ) : null}
             {open === 'digest' ? <DigestCard /> : null}
             {open === 'greetings' ? <GreetingsCard /> : null}
             {open === 'calendarsub' ? <CalendarSubscribeCard /> : null}

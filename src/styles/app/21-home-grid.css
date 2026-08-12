@@ -1,5 +1,5 @@
 /* ==========================================================================
-   21 — The phone Home screen: hero, stat strip, function grid, module cards
+   21 — The phone Home screen: hero, function grid, module cards
 
    Round 6 of 界面要统一, and the one structural change in it. Home was eleven
    identical rows in a scrolling list: five screens a phone can only reach from
@@ -215,12 +215,16 @@
  * `.homehero__top`'s own 48px floor honest: the row is as tall as these are,
  * not taller because of them.
  *
- * The 13% overlay is the same one `.homestats` paints under the three tiles
- * below, so the two groups read as one family of "figures you can press"
- * rather than as a pill and a panel that happen to share a screen. Mixed from
- * `--accent-text` rather than named, for the reason the whole file gives: it is
- * the one foreground guaranteed to read on every accent, in both themes, under
- * all seven visual styles.
+ * The 13% overlay is what makes the three of them read as one family of
+ * "figures you can press" rather than as three words that happen to be bold.
+ * Mixed from `--accent-text` rather than named, for the reason the whole file
+ * gives: it is the one foreground guaranteed to read on every accent, in both
+ * themes, under all seven visual styles.
+ *
+ * These pills *are* the figures. There used to be a second, separate strip of
+ * three stat tiles under the hero painted in the same overlay — that is what
+ * this note used to point at, and it is gone: the numbers moved up into the
+ * hero's own line, where they sit beside the greeting instead of below it.
  */
 .homehero__fact {
   display: flex;
@@ -277,7 +281,8 @@
  * Not `--text-xs`. This is a sentence a person reads, and the type floor says
  * anything read as language is 16px or larger no matter what it sits under —
  * see the ladder's doc in theme.css. 14px on this screen is reserved for the
- * three stat captions below, which are labels on figures rather than prose.
+ * things that are labels on something rather than prose: a cell's caption under
+ * its icon, the count on a plate, a module card's field names.
  */
 .homehero__sub {
   font-size: var(--text-base);
@@ -290,66 +295,15 @@
   color: var(--hero-ink);
 }
 
-/* --- the three figures ---------------------------------------------------- */
-.homestats {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  margin-top: var(--sp-4);
-  border-radius: var(--r-md);
-  background: color-mix(in srgb, var(--accent-text) 13%, transparent);
-  overflow: hidden;
-}
-
-/*
- * Exactly `--ctl-lg`, not "at least" it. The padding is `--sp-1` rather than
- * `--sp-2` because at `--sp-2` the content stack (a 20px figure at 1.15 and a
- * 14px caption at 1.3) came to 59px and pushed past the 56px floor — a 59
- * among 48s and 56s, which is precisely the kind of drift `check:tap` counts
- * and precisely how seventeen different control heights accumulated the last
- * time. The floor is the height; nothing inside is allowed to raise it.
- */
-.homestat {
-  min-height: var(--ctl-lg);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 2px;
-  padding: var(--sp-1) var(--sp-1);
-  border: 0;
-  border-left: 1px solid color-mix(in srgb, var(--accent-text) 16%, transparent);
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-  text-align: center;
-}
-.homestat:first-child {
-  border-left: 0;
-}
-.homestat:hover {
-  background: color-mix(in srgb, var(--accent-text) 8%, transparent);
-}
-
-/*
- * `--text-value`, the 20px rank, and this is what that rank is for: a single
- * figure that is the entire content of its own box. It is the only step on the
- * ladder between body and a screen title, and using body size here would make
- * the number no louder than the word under it.
- */
-.homestat__n {
-  font-size: var(--text-value);
-  font-weight: var(--fw-bold);
-  line-height: 1.15;
-}
-.homestat__k {
-  font-size: var(--text-sm);
-  line-height: var(--leading-tight);
-  /* The same dimmed ink as the sub-line, not a second percentage a hair away
-     from it. This one is read against `.homestats`' 13% overlay rather than
-     against the bare band, which is why it measures lower — 2.56:1 at the
-     worst, against 2.33:1 for the 76% it used to carry. */
-  color: var(--hero-ink);
-}
+/* The three-tile stat strip that used to sit here — `.homestats`, `.homestat`,
+   `.homestat__n`, `.homestat__k` — is gone. `HomeView` renders its three
+   numbers as `.homehero__fact` buttons on the hero's own line and has done
+   since this screen was rebuilt as a grid; the strip's rules survived the
+   rebuild and matched nothing in any of the six languages, at any width, in
+   any of the seven styles. Removed rather than left: 60 lines of plausible,
+   well-commented CSS for an element that does not exist is the most expensive
+   kind of dead code, because the next person to read it has to prove that
+   before they can change anything near it. */
 
 /* --- the eight-cell grid --------------------------------------------------
    Pulled up into the hero's bottom padding so the card overlaps the colour —

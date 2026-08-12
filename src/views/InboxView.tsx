@@ -54,6 +54,7 @@ import {
 import {
   IconCalendar,
   IconCheck,
+  IconCheckCircle,
   IconChevronDown,
   IconClock,
   IconCopy,
@@ -107,7 +108,6 @@ import { haptic } from '../core/haptics'
 import type { InboxMessageBody } from '../core/platform/bridge'
 import {
   DEFAULT_RETRY,
-  INBOX_LIST_FETCH_LIMIT,
   REMOVED_RETENTION_MS,
   defaultRecurrence,
   effectiveImagePolicy,
@@ -124,6 +124,19 @@ import {
 type AccountFilter = 'all' | string
 
 type SearchScope = 'all' | 'from' | 'subject' | 'body'
+
+/**
+ * The four ways fetching a message's remote pictures can end badly, as far
+ * apart as this screen can actually tell them apart.
+ *
+ * `resolveWithCache` collapses every per-URL rejection into `null` (see
+ * `core/mail/imageCache`), so the reason cannot come from *which* URL failed —
+ * it comes from what was true at the call site. That is enough for the three
+ * that matter: `noProxy` is a platform with no fetch path at all and no retry
+ * worth offering, `offline` is this device, and `error` is the one that
+ * carries the raw message with it.
+ */
+type ImageFailReason = 'noProxy' | 'offline' | 'fetch' | 'error'
 
 /** Kept in step with `REMOVED_RETENTION_MS`; shown so the bin says how long it keeps things. */
 const BIN_DAYS = Math.round(REMOVED_RETENTION_MS / 86_400_000)
@@ -262,6 +275,54 @@ function senderInitial(name: string, address: string): string {
 }
 
 /**
+ * How many recipients one line of the reader's details prints before folding.
+ *
+ * A class list, a team announcement or a supplier's mailshot puts sixty
+ * addresses in `To`, and this block sits directly under the reader's *sticky*
+ * header — an unfolded sixty would push the message itself off a phone screen
+ * and stay there while you scrolled. Three is the number because it is above
+ * the case the fold would be an annoyance for: a mail to you and two
+ * colleagues shows all three and never offers a control at all.
+ */
+const RECIPIENT_PREVIEW = 3
+
+/**
+ * The sentence that goes with each way an image load can end badly.
+ *
+ * Typed `TranslationKey` rather than `string` so a reason added to the union
+ * without a matching line in `en.ts` fails the build instead of rendering its
+ * own key on screen — the same contract `CodesView.purposeKey` holds.
+ */
+function imageFailKey(reason: ImageFailReason): TranslationKey {
+  switch (reason) {
+    case 'noProxy':
+      return 'inbox.imagesFailNoProxy'
+    case 'offline':
+      return 'inbox.imagesFailOffline'
+    case 'error':
+      return 'inbox.imagesFailError'
+    default:
+      return 'inbox.imagesFailFetch'
+  }
+}
+
+/**
+ * Every `To` recipient, or the one-line `to` when this message predates the
+ * field.
+ *
+ * `toAll` arrived with the recipient list; every message already in the local
+ * store was written before it existed and has only `to`. Falling back keeps
+ * those readable instead of showing them an empty recipient line, which would
+ * look exactly like a bug in the new feature. An empty array — not `['']` —
+ * when there is nothing at all, so the caller's `length` test means what it
+ * says.
+ */
+function toRecipients(message: InboxMessage): string[] {
+  if (message.toAll?.length) return message.toAll
+  return message.to ? [message.to] : []
+}
+
+/**
  * What a row should call the sender.
  *
  * The list used to print the raw `From` header, so a row began
@@ -394,6 +455,20 @@ export function InboxView({
   const [imageStage, setImageStage] = useState<'blocked' | 'loading' | 'done' | 'failed'>('blocked')
   /** How many distinct URLs the last attempt could not fetch. */
   const [imageFailures, setImageFailures] = useState(0)
+  /**
+   * *Why* the last attempt failed, in the four shapes that are distinguishable
+   * from here — reset in `openDetail`.
+   *
+   * "N images could not be loaded" was the whole message, which is a count of
+   * a problem rather than a description of one, and it read identically whether
+   * this platform has no image proxy at all (Android, where the button can
+   * never work and retrying is pointless), the device is offline, the sender's
+   * server refused, or the fetch layer threw. Those need four different next
+   * actions from the reader, so they get four different sentences.
+   */
+  const [imageFailReason, setImageFailReason] = useState<ImageFailReason | null>(null)
+  /** The raw error, when there was one — shown verbatim under the sentence. */
+  const [imageFailDetail, setImageFailDetail] = useState('')
   /** Reading starts full-screen; Escape steps out before it closes. */
   const [immersive, setImmersive] = useState(true)
   const [findOpen, setFindOpen] = useState(false)
@@ -405,6 +480,8 @@ export function InboxView({
   const [rawStyle, setRawStyle] = useState(false)
   /** Recipient + precise timestamp, folded away by default — reset in `openDetail`. */
   const [metaExpanded, setMetaExpanded] = useState(false)
+  /** …and, inside that, the full recipient list rather than the first three. */
+  const [recipientsExpanded, setRecipientsExpanded] = useState(false)
   /*
    * Two scrollers, two booleans, one bar.
    *
@@ -588,29 +665,11 @@ export function InboxView({
 
   const allMessages = useMemo(() => enabledInboxes.flatMap((i) => i.messages), [enabledInboxes])
 
-  /**
-   * The biggest gap, among the accounts this screen is currently showing,
-   * between "messages on the server" (`InboxFolder.totalCount`) and
-   * "messages this app fetched" (`INBOX_LIST_FETCH_LIMIT`) — 0 when every
-   * visible account's whole INBOX fits inside that limit already.
-   *
-   * There is no pagination yet (see that constant's own comment), so this is
-   * the one honest thing the list can say about mail it does not show:
-   * *how much* is missing, for whichever account(s) `filter` has selected
-   * right now — switching the tab changes what "the most recent 50" is
-   * relative to, and the banner below has to track that rather than always
-   * describing "all accounts".
-   */
-  const inboxServerTotal = useMemo(() => {
-    const relevant =
-      filter === 'all' ? enabledInboxes : enabledInboxes.filter((i) => i.accountId === filter)
-    let max = 0
-    for (const account of relevant) {
-      const total = account.folders.find((f) => f.path === 'INBOX')?.totalCount ?? 0
-      if (total > max) max = total
-    }
-    return max
-  }, [enabledInboxes, filter])
+  /* The "showing the most recent 50 of N" banner and the `inboxServerTotal`
+     memo that fed it were removed on request (2026-08-12). The limit itself is
+     unchanged — `INBOX_LIST_FETCH_LIMIT` still bounds what a sync fetches — but
+     a permanent band above the list restating it on every visit was not worth
+     the row it cost. */
 
   const accountLabel = useCallback(
     (accountId: string) => {
@@ -971,9 +1030,27 @@ export function InboxView({
     )
   }
 
+  /**
+   * Every unread message in every enabled account, in one press.
+   *
+   * The count is read *before* the await and reported afterwards: by the time
+   * the marks have landed the messages are no longer unread, so counting then
+   * would always say nothing happened. It goes in the toast's detail rather
+   * than replacing the existing title, which six locales already translate.
+   *
+   * `markSet` groups by account and sends one call per account, not one per
+   * message — a mailbox with 300 unread is three hundred rows changed by two
+   * requests. That grouping is the reason this stays a single `await`.
+   */
   const markAllRead = async () => {
-    await markSet(new Set(allMessages.filter((m) => !m.seen).map((m) => m.id)), true)
-    toast.push({ tone: 'success', title: t('inbox.markAllReadDone') })
+    const unread = allMessages.filter((m) => !m.seen)
+    if (unread.length === 0) return
+    await markSet(new Set(unread.map((m) => m.id)), true)
+    toast.push({
+      tone: 'success',
+      title: t('inbox.markAllReadDone'),
+      detail: t('inbox.markAllReadCount', { n: unread.length }),
+    })
   }
 
   const deleteIdSet = async (ids: Set<string>) => {
@@ -1242,6 +1319,64 @@ export function InboxView({
     [confirm, bridge, t],
   )
 
+  // --- who else got this message ---
+  //
+  // "QQ 邮箱 shows me everyone it went to and this does not" was the complaint,
+  // and it was accurate: the reader printed `openMessage.to`, which is the
+  // *first* recipient and has been since the field was a one-line summary.
+  // `toAll` and `cc` are the honest version (see `core/types.ts`), and every
+  // message fetched before they existed still has neither — hence the fallback
+  // in `toRecipients` rather than a bare `openMessage.toAll ?? []`.
+  //
+  // Bcc is deliberately absent and always will be. A blind copy is stripped by
+  // the sending server before delivery, so it is not in the message this app
+  // received and no mail client on earth can show it. The note under the list
+  // says that rather than leaving a gap people read as a missing feature.
+
+  const openToAll = useMemo(
+    () => (openMessage ? toRecipients(openMessage) : []),
+    [openMessage],
+  )
+  const openCc = openMessage?.cc ?? []
+  const recipientTotal = openToAll.length + openCc.length
+  /** True only when folding actually hides something on at least one line. */
+  const recipientsFoldable =
+    openToAll.length > RECIPIENT_PREVIEW || openCc.length > RECIPIENT_PREVIEW
+  const shownTo =
+    recipientsExpanded || openToAll.length <= RECIPIENT_PREVIEW
+      ? openToAll
+      : openToAll.slice(0, RECIPIENT_PREVIEW)
+  const shownCc =
+    recipientsExpanded || openCc.length <= RECIPIENT_PREVIEW
+      ? openCc
+      : openCc.slice(0, RECIPIENT_PREVIEW)
+
+  /**
+   * The whole list on the clipboard, folded or not.
+   *
+   * This is what the request was actually for: the addresses are wanted in a
+   * reply, a spreadsheet or another compose window, and reading sixty of them
+   * off a screen is not a way to get them there. Comma-and-space is the
+   * separator every recipient field in every mail client parses, including this
+   * app's own — see `RecipientPicker` — so what lands can be pasted straight
+   * back in.
+   *
+   * `To` and `Cc` are joined into one list rather than copied separately: the
+   * distinction is about how the mail was sent, and a person collecting
+   * addresses to write to wants all of them.
+   */
+  const copyRecipients = async () => {
+    const all = [...openToAll, ...openCc]
+    if (all.length === 0) return
+    if (await copyText(all.join(', '))) {
+      toast.push({ tone: 'success', title: t('inbox.recipientsCopied', { n: all.length }) })
+      haptic('copy', state.settings.haptics)
+    } else {
+      toast.push({ tone: 'error', title: t('inbox.copyFailed') })
+      haptic('fail', state.settings.haptics)
+    }
+  }
+
   // --- remote images ---
 
   /** The receiving account the open message belongs to — where its image policy lives. */
@@ -1296,11 +1431,15 @@ export function InboxView({
       // leaving the placeholders in place with nothing to explain them.
       if (!bridge?.fetchRemoteImage) {
         setImageFailures(new Set(urls).size)
+        setImageFailReason('noProxy')
+        setImageFailDetail('')
         setImageStage('failed')
         return
       }
       setImageStage('loading')
       setImageFailures(0)
+      setImageFailReason(null)
+      setImageFailDetail('')
       try {
         // Cached by URL, deduplicated, and persisted in the main process —
         // see `core/imageCache` and `electron/remoteImage.ts`.
@@ -1318,10 +1457,20 @@ export function InboxView({
         // body to put pictures into at all.
         setResolvedImages(resolved)
         setImageFailures(failed)
+        // `navigator.onLine` is a weak signal in general — it says the machine
+        // has *a* network, not that it can reach the internet — but it is
+        // decisive in the direction it is used here: false means every one of
+        // those fetches was doomed before it left, and "you are offline" is a
+        // far more useful sentence than "the sender's server refused".
+        if (failed > 0) setImageFailReason(navigator.onLine === false ? 'offline' : 'fetch')
         setImageStage(failed > 0 ? 'failed' : 'done')
-      } catch {
+      } catch (e) {
         if (run !== imageRun.current) return
         setImageFailures(urls.length)
+        setImageFailReason('error')
+        // Verbatim, like the body-load failure toast above: an error nobody can
+        // quote is an error nobody can report.
+        setImageFailDetail(e instanceof Error ? e.message : String(e))
         setImageStage('failed')
       }
     },
@@ -1500,6 +1649,8 @@ export function InboxView({
       setInlineState(NO_INLINE)
       setImageStage('blocked')
       setImageFailures(0)
+      setImageFailReason(null)
+      setImageFailDetail('')
       setRawStyle(false)
       // The date offers are looked for again from scratch, after this
       // message's body has painted — see `datesReady`.
@@ -1521,6 +1672,9 @@ export function InboxView({
       setFindText('')
       setImmersive(true)
       setMetaExpanded(false)
+      // Folded again for the next message: "show all 60" is an answer to the
+      // message it was pressed on, not a preference about every mail after it.
+      setRecipientsExpanded(false)
       if (!m.seen) void markInboxMessagesRead(m.accountId, [m.id], true)
 
       // No `run !== bodyRun.current` guard needed here: everything above this
@@ -2050,6 +2204,48 @@ export function InboxView({
             </p>
           </div>
           <div className="inboxbar__actions">
+            {/*
+              一键已读 — the whole of "mark everything read", one press, on the
+              resting screen.
+
+              It used to live inside 编辑 mode, which meant: open the overflow,
+              press 编辑, find it among six bulk actions, press it, press 完成.
+              Four presses for the thing people do every morning. That copy is
+              still there — the mode is where the *rest* of the bulk actions
+              live and it would be odd without it — but it is no longer the
+              only way in.
+
+              Only while `unreadTotal > 0`. A button that is permanently there
+              and permanently disabled is a control people stop seeing, and this
+              one has a natural moment to leave: the press that empties the
+              count also removes the button, which is its own confirmation.
+
+              `IconButton`, not a labelled `Button`: `.icon-btn` is a fixed
+              44px square on a touch shell (16-mail.css), so a third one costs
+              44px of the 328px this band has at 360px and the two icons that
+              were already here still leave the title its width. A labelled
+              `.btn` would cost an estimated 130-160px depending on the
+              language — that is an estimate from the string lengths, not a
+              measurement — and the title has nothing like that to give.
+
+              So the count is not on its face. It is not lost either:
+              `.inboxbar__status`, the line directly under the title, already
+              reads "12 unread · checked 5 minutes ago", and the number is in
+              this button's own accessible name for a screen reader or a
+              hovering pointer.
+
+              `IconCheckCircle` rather than `IconCheck`, which in this same bar
+              already means 编辑 (see the overflow menu below) — two controls a
+              thumb apart wearing one glyph is how the wrong one gets pressed.
+            */}
+            {unreadTotal > 0 ? (
+              <IconButton
+                label={t('inbox.markAllReadNow', { n: unreadTotal })}
+                onClick={() => void markAllRead()}
+              >
+                <IconCheckCircle size={16} />
+              </IconButton>
+            ) : null}
             <IconButton
               label={searchOpen ? t('inboxbar.searchClose') : t('inboxbar.search')}
               aria-expanded={searchOpen}
@@ -2240,22 +2436,6 @@ export function InboxView({
                   ))}
                 </div>
               </div>
-            ) : null}
-
-            {/*
-              What "the most recent 50" leaves out, said before someone goes
-              looking for older mail that is not here and concludes the app
-              lost it. `keep` because a phone is exactly where a missing
-              message is most likely to be noticed and least likely to be
-              explained by anything else on screen.
-            */}
-            {inboxServerTotal > INBOX_LIST_FETCH_LIMIT ? (
-              <Banner tone="info" keep>
-                {t('inbox.recentLimitNote', {
-                  limit: INBOX_LIST_FETCH_LIMIT,
-                  total: inboxServerTotal,
-                })}
-              </Banner>
             ) : null}
 
             {/*
@@ -2949,12 +3129,88 @@ export function InboxView({
                   message ever opened. The shortcuts are unchanged; the sentence
                   about them is not something anyone reads twice. */}
             </div>
+            {/*
+              Everyone this message went to, not just the first of them.
+
+              `.reader__details` is a wrapping flex row of `<span>`s. To and Cc
+              each claim a whole line (`flexBasis: 100%`) rather than being left
+              to wrap on their own, because a two-recipient To and a
+              one-recipient Cc would otherwise share a line and read as one
+              five-address list with two labels in the middle of it. The
+              timestamp and the controls keep the old behaviour and share the
+              last line when they fit.
+
+              The inline widths are here rather than in a class for the reason
+              this whole change is scoped to one file: the stylesheets were
+              being edited elsewhere in the same round, and a rule and its
+              markup arriving from two directions is how one of them ships
+              without the other.
+            */}
             {metaExpanded ? (
               <div className="reader__details">
-                <span>
-                  <strong>{t('compose.to')}</strong> {openMessage.to}
+                <span style={{ flexBasis: '100%' }}>
+                  <strong>{t('compose.to')}</strong>{' '}
+                  {shownTo.length > 0 ? shownTo.join(', ') : t('inbox.recipientsUnknown')}
+                  {/* The count of what the fold is hiding, on the line it is
+                      hiding it from — the button below says "show all", which
+                      does not say how many "all" is. */}
+                  {shownTo.length < openToAll.length
+                    ? ` ${t('inbox.recipientsHidden', { n: openToAll.length - shownTo.length })}`
+                    : ''}
                 </span>
+                {/* No empty Cc line. A message with no copies has nothing to
+                    say here, and a label with nothing after it reads as a
+                    value that failed to load. */}
+                {openCc.length > 0 ? (
+                  <span style={{ flexBasis: '100%' }}>
+                    <strong>{t('compose.cc')}</strong> {shownCc.join(', ')}
+                    {shownCc.length < openCc.length
+                      ? ` ${t('inbox.recipientsHidden', { n: openCc.length - shownCc.length })}`
+                      : ''}
+                  </span>
+                ) : null}
                 <span>{formatDateTime(openMessage.date, { dateStyle: 'full', timeStyle: 'medium' })}</span>
+                {/* Both controls in one `.btn-row` so the 48px buttons cannot
+                    stretch the text spans beside them, and so a phone gets the
+                    horizontal scroll `17-phone.css` already gives that class
+                    inside a list view rather than a second wrapped row.
+                    The row is not rendered at all when neither control is —
+                    a zero-height flex item in a gapped column still costs the
+                    gap, which is the note on `.codespull` in `CodesView`. */}
+                {recipientTotal > 0 ? (
+                  <div className="btn-row" style={{ flexBasis: '100%' }}>
+                    {recipientsFoldable ? (
+                      <Button
+                        variant="ghost"
+                        aria-expanded={recipientsExpanded}
+                        onClick={() => setRecipientsExpanded((v) => !v)}
+                      >
+                        {recipientsExpanded
+                          ? t('inbox.recipientsShowFewer')
+                          : t('inbox.recipientsShowAll', { n: recipientTotal })}
+                      </Button>
+                    ) : null}
+                    <Button
+                      variant="ghost"
+                      icon={<IconCopy size={15} />}
+                      onClick={() => void copyRecipients()}
+                    >
+                      {t('inbox.copyRecipients')}
+                    </Button>
+                  </div>
+                ) : null}
+                {/*
+                  Why there is no Bcc line, said once, here, and nowhere else.
+
+                  A blind copy is removed by the sender's own server before the
+                  message is handed on, so it is not in the bytes this app
+                  received — no mail client can show it, and this one is not
+                  going to imply it could if you upgraded. It sits inside the
+                  fold rather than on the resting reader because it answers a
+                  question only somebody already reading the recipient list has
+                  thought to ask.
+                */}
+                <span style={{ flexBasis: '100%' }}>{t('inbox.bccNotDelivered')}</span>
               </div>
             ) : null}
 
@@ -3014,10 +3270,18 @@ export function InboxView({
                   </Banner>
                 ) : null}
 
+                {/* A count of a problem is not a description of one. The
+                    sentence after it names which of the four failures this was,
+                    and the raw error follows when there was one — the same
+                    treatment the body-load toast already gives. */}
                 {remoteImageCount > 0 && imageStage === 'failed' ? (
                   <Banner
                     tone="danger"
                     action={
+                      /* No retry where retrying cannot work. Without
+                         `fetchRemoteImage` there is no path to the network for
+                         pictures in this build at all, so the button would fail
+                         identically every time it was pressed. */
                       bridge?.fetchRemoteImage ? (
                         <Button variant="ghost" onClick={() => void loadRemoteImages({ retry: true })}>
                           {t('inbox.imagesRetry')}
@@ -3026,26 +3290,62 @@ export function InboxView({
                     }
                   >
                     {t('inbox.imagesFailed', { n: imageFailures })}
+                    {imageFailReason ? ` ${t(imageFailKey(imageFailReason))}` : ''}
+                    {imageFailDetail ? ` ${imageFailDetail}` : ''}
                   </Banner>
                 ) : null}
 
+                {/*
+                  The bar people now see on most messages, so it had to stop
+                  being an alarm.
+
+                  Remote pictures default to *not* loading (`DEFAULT_IMAGE_POLICY`
+                  is 'never'), which turned this from an occasional bar on a
+                  mailbox somebody had deliberately locked down into the ordinary
+                  state of ordinary mail. `warning` was right when it meant "this
+                  message is behaving unusually" and is wrong now that it means
+                  "this app is behaving normally" — a red-adjacent bar on every
+                  newsletter teaches people to stop reading bars.
+
+                  `keep` because `tone="info"` is culled on phones (see the
+                  760px block in app.css): info banners are usually explanations
+                  of how a screen works, and this one is a control.
+
+                  The two actions in the order they are wanted: show them now is
+                  what the press is for, and "always, from this sender" is the
+                  answer for the newsletter you have now decided to trust —
+                  `allowSenderImages` writes the domain into the account's
+                  allowlist, which is the only thing that makes a future message
+                  from them load without this bar.
+                */}
                 {remoteImageCount > 0 && imageStage === 'blocked' && !autoLoadImages ? (
                   <Banner
-                    tone="warning"
+                    tone="info"
+                    keep
                     action={
                       <div className="btn-row">
+                        <Button variant="secondary" onClick={() => void loadRemoteImages()}>
+                          {t('inbox.loadImages', { n: remoteImageCount })}
+                        </Button>
                         {openSender && openInbox ? (
                           <Button variant="ghost" onClick={allowSenderImages}>
                             {t('inbox.alwaysAllowSender', { domain: openSender })}
                           </Button>
                         ) : null}
-                        <Button variant="ghost" onClick={() => void loadRemoteImages()}>
-                          {t('inbox.loadImages', { n: remoteImageCount })}
-                        </Button>
                       </div>
                     }
                   >
-                    {t('inbox.remoteImagesBlocked')}
+                    {t('inbox.remoteImagesHeld', { n: remoteImageCount })}
+                    {/* Only when this message actually has inline parts. The
+                        pictures that came *with* the mail are already on this
+                        disk, cost no request and leak nothing, so they are not
+                        affected by any of this — and a bar that says "images
+                        are not loaded" over a body that is visibly showing
+                        some is a bar that looks like it is lying. Saying so
+                        unconditionally would be its own confusion: most
+                        messages have no inline parts to reassure anyone
+                        about. */}
+                    {inlineCids.length > 0 ? ` ${t('inbox.inlineImagesUnaffected')}` : ''}
                   </Banner>
                 ) : null}
 

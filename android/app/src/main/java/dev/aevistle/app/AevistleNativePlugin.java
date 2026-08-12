@@ -925,7 +925,17 @@ public class AevistleNativePlugin extends Plugin {
                 // Correct here and wrong in `InboxSyncWorker`, which calls the
                 // three-argument form for exactly that reason: see the doc on
                 // MailFetcher.sync.
+                // Before the listing, never after: a sync writes the server's
+                // `\Seen` onto every row, so a notification's "Mark as read"
+                // that has not reached the server yet is a mark this refresh
+                // would erase. Costs nothing when nothing is queued — see
+                // MailFetcher#flushPendingSeen.
+                if (enabled) MailFetcher.flushPendingSeen(getContext(), configJson, secret);
+
                 JSONObject updated = MailFetcher.sync(getContext(), configJson, secret, true);
+                // And whatever the flush could not push — no network, a server
+                // refusing — still outranks what the server just said.
+                cache.applyPendingSeen(updated);
                 cache.upsert(updated);
                 InboxSyncScheduler.rearm(getContext());
                 call.resolve(JSObject.fromJSONObject(updated));
@@ -1012,27 +1022,50 @@ public class AevistleNativePlugin extends Plugin {
             return;
         }
 
-        // `seen` is best-effort against the server; local state already
-        // updated on the JS side regardless (see PlatformBridge.setMessageFlags'
-        // doc comment) — so this always resolves rather than rejecting on a
-        // network failure the user has no action to take on.
+        /*
+         * Resolves either way, and says which.
+         *
+         * The rejection is still not wanted: local state is already updated on
+         * the JS side (see `PlatformBridge.setMessageFlags`' doc comment), and
+         * a throw there would turn a flag that did not reach the server into
+         * an error on a screen the user was doing something else on.
+         *
+         * But a bare `resolve()` told the web layer the push had worked, on
+         * every failure, forever — there was no value in the result and
+         * nothing to inspect. So the answer is now
+         * `{ ok, pushed, reason? }`: `ok` false is a change the server does
+         * not know about and the caller may retry, `pushed` false with `ok`
+         * true is a patch with nothing server-side in it (a local-only `tag`),
+         * and `reason` is the failure put through `MailSender.classify` — the
+         * same closed vocabulary the send path reports (`auth`, `network`,
+         * `timeout`, `tls`, `handshake`, … , `unknown`), never the exception
+         * text, which can carry an address or a server's own echo of what it
+         * was sent.
+         */
         io.execute(() -> {
-            if (patch != null && patch.has("seen")) {
-                try {
-                    JSONObject configJson = new JSONObject(config.toString());
-                    String secret = inboxSecret(configJson.optString("accountId", ""));
-                    MailFetcher.setSeen(getContext(), configJson, secret, folderPath, uidArg,
-                            patch.optBoolean("seen", true));
-                } catch (Exception e) {
-                    // Best-effort against the server, per the comment above —
-                    // local state is already updated on the JS side either
-                    // way, so this must not reject. Logged so a server that
-                    // is silently rejecting every flag update is still
-                    // diagnosable from logcat instead of just never syncing.
-                    Log.e(TAG, "setInboxMessageFlags: server-side seen update failed", e);
-                }
+            JSObject result = new JSObject();
+            boolean wantsServer = patch != null && patch.has("seen");
+            result.put("pushed", wantsServer);
+            if (!wantsServer) {
+                result.put("ok", true);
+                call.resolve(result);
+                return;
             }
-            call.resolve();
+            try {
+                JSONObject configJson = new JSONObject(config.toString());
+                String secret = inboxSecret(configJson.optString("accountId", ""));
+                MailFetcher.setSeen(getContext(), configJson, secret, folderPath, uidArg,
+                        patch.optBoolean("seen", true));
+                result.put("ok", true);
+            } catch (Exception e) {
+                // Logged as well as reported: the caller sees a category, and
+                // a server that is silently rejecting every flag update is
+                // only diagnosable from the full trace in logcat.
+                Log.e(TAG, "setInboxMessageFlags: server-side seen update failed", e);
+                result.put("ok", false);
+                result.put("reason", MailSender.classify(e.getMessage()));
+            }
+            call.resolve(result);
         });
     }
 

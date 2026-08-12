@@ -103,9 +103,12 @@ import { createI18n, detectLocale, localeMeta, useLocaleReady, type I18n, type T
 import { findPairedDevice, recordSyncSeq, touchSynced, type PairedDevice } from '../core/sync/pairedDevices'
 import { pushConflictSnapshots, type ConflictSnapshot } from '../core/sync/syncConflict'
 import { applySyncAction } from './services/syncReducer'
+import { parseAddress } from '../core/sync/lanAddress'
+import { registerSyncLoop } from '../core/sync/activeSyncLoop'
 import {
   respondToSyncRequest,
   SyncLoop,
+  SYNC_SERVER_PORT,
   type PerformExchangeResult,
   type SyncApplyPatch,
   type SyncListenerStatus,
@@ -503,6 +506,40 @@ async function forgetSecrets(
   return failures.length ? failures.join('; ') : null
 }
 
+/**
+ * Does a bridge call's return value *say* it failed?
+ *
+ * `PlatformBridge.setMessageFlags` is declared `Promise<void>`, and both
+ * implementations behind it have resolved whether or not the server actually
+ * agreed — which is how a `\Seen` push could fail while the screen went on
+ * showing the message as read. The two platform sides are being taught to
+ * report the truth, and this reads whatever they end up returning without
+ * pinning the renderer to one field name:
+ *
+ *   - `false`                                → failed
+ *   - `{ ok: false }` / `{ success: false }` → failed
+ *   - `{ failed: true }`                     → failed
+ *   - `{ error: <anything non-empty> }`      → failed, whatever else it carries
+ *   - anything else, `undefined` included    → not known to have failed
+ *
+ * The default is optimistic on purpose. `undefined` is exactly what today's
+ * `Promise<void>` signature resolves to, so reading "this platform told us
+ * nothing" as a failure would queue every message the user opens for retry
+ * forever, on every platform that never reports anything. A queue that never
+ * drains is worse than no queue at all: it also pins read state that ought to
+ * be free to follow the server again. Guessing optimistically and being wrong
+ * costs one lost push, and `mergeSeenFlags` rule 2 below still keeps the local
+ * "read" from being undone.
+ */
+function looksFailed(result: unknown): boolean {
+  if (result === false) return true
+  if (typeof result !== 'object' || result === null) return false
+  const r = result as Record<string, unknown>
+  if (r.ok === false || r.success === false || r.failed === true) return true
+  if (typeof r.error === 'string') return r.error.length > 0
+  return r.error !== undefined && r.error !== null
+}
+
 function initialState(): AppState {
   return {
     accounts: [],
@@ -528,6 +565,31 @@ function initialState(): AppState {
   }
 }
 
+/**
+ * A `\Seen` change this device has already applied locally and has not yet had
+ * the server confirm.
+ *
+ * Handed to the reducer on the action rather than read out of a module-level
+ * variable, so `reducer` stays a pure function of `(state, action)`. The
+ * `scripts/check-*.mjs` gates drive it directly, and a hidden mutable input is
+ * precisely what lets such a gate stay green while the app misbehaves.
+ *
+ * `uidValidity` travels with the entry because `InboxMessage.id` is only
+ * `accountId:folderPath:uid` (see `messageRowId` in `electron/imap.ts`) — the
+ * very same string names a *different* message once the server rolls
+ * UIDVALIDITY, which `InboxFolder.uidValidity` explains. Matching on the id
+ * alone would pin one message's read state onto whatever later took its uid.
+ */
+type PendingSeenPush = {
+  /** `InboxMessage.id`, which is what the queue is keyed by. */
+  id: string
+  folderPath: string
+  uid: number
+  uidValidity: number
+  /** What this device believes the server should end up holding. */
+  seen: boolean
+}
+
 // ---------------------------------------------------------------------------
 // Actions
 // ---------------------------------------------------------------------------
@@ -550,7 +612,11 @@ type Action =
   | { type: 'log'; entry: LogEntry }
   | { type: 'clearLogs' }
   | { type: 'rebaseAttachments'; from: string; to: string }
-  | { type: 'upsertInboxAccount'; inbox: InboxAccountState; origin?: 'sync' }
+  // `pendingSeen` is only meaningful alongside `origin: 'sync'` — it is the
+  // `\Seen` pushes still unconfirmed when the result landed (see
+  // `mergeSeenFlags`). Kept on one line with the rest: `check-inbox-removal.mjs`
+  // asserts this member's exact text to prove a sync still identifies itself.
+  | { type: 'upsertInboxAccount'; inbox: InboxAccountState; origin?: 'sync'; pendingSeen?: readonly PendingSeenPush[] }
   | { type: 'removeInboxAccount'; accountId: string }
   | {
       type: 'patchInboxMessages'
@@ -594,6 +660,93 @@ type Action =
   | { type: 'commitSyncSeq'; deviceId: string; seq: number }
   | { type: 'restoreSyncConflict'; id: string }
   | { type: 'reset' }
+
+/**
+ * Decide each incoming message's `seen` flag from what this device already
+ * knew and what it is still trying to tell the server.
+ *
+ * This exists because read state was the one mailbox field this app changes
+ * *first* and reports *afterwards*, while `upsertInboxAccount` replaced the
+ * message list wholesale. The optimistic write lands in `patchInboxMessages`
+ * the instant a message is opened; the `\Seen` push leaves behind it; and syncs
+ * fire on a five-minute timer, on every IMAP IDLE push, and on every
+ * `visibilitychange` back to the foreground. A sync that started before the
+ * push arrived comes back carrying the server's pre-push answer, and writing
+ * that list in unchanged put the stale `false` back over the user's read. The
+ * symptom, reported on desktop and Android alike: "I read it, and a while later
+ * it was bold again."
+ *
+ * The failure path has the same shape: `syncInboxAccount`'s catch branch writes
+ * back `{...config}`, and `config` is the message list this closure captured
+ * when the sync *started* — older still than anything the server said.
+ *
+ * Two rules, in order:
+ *
+ *   1. A push the server has not confirmed wins outright, in both directions.
+ *      Its value is newer than anything a sync can be reporting, because the
+ *      server has not been told yet. Both directions, not just "read": a
+ *      deliberate mark-as-*unread* is undone by rule 2 for as long as its push
+ *      is in flight, and that is the same bug wearing the other hat.
+ *   2. Otherwise `seen` only ever moves from false to true. A server that says
+ *      "unread" about a message this device has locally read is, far more often
+ *      than not, answering from before a push it has not processed yet.
+ *
+ * The price of rule 2, stated plainly rather than discovered later: marking a
+ * message back to *unread* somewhere else — webmail, a phone's stock mail app —
+ * no longer reaches this device, which keeps showing it as read until the row
+ * ages out of the list. That is a rare, deliberate act whose loss is visible
+ * and undone with one click, traded against a frequent, silent one that made
+ * the read state untrustworthy. If the trade ever needs revisiting, the honest
+ * fix is a per-message "the server told us this at time T" stamp so the two
+ * answers can be ordered — not deleting this rule and going back to whichever
+ * reply happened to land last.
+ *
+ * Alignment is by `(folderPath, uid, uidValidity)`. A folder whose UIDVALIDITY
+ * changed has no comparable rows at all, so nothing is carried forward for it
+ * and the server's answer stands — the alternative is pinning one message's
+ * read state onto a different message that now holds the same uid, which is the
+ * exact hazard `InboxFolder.uidValidity` is documented against.
+ *
+ * Takes the whole action, and owns the `origin` test itself, so that the call
+ * site inside the reducer stays one short expression: `check-inbox-removal.mjs`
+ * measures the *characters* between `case 'upsertInboxAccount'` and
+ * `withoutRemoved(`, and that budget was already nearly spent before this
+ * existed. The explanation lives here, where it costs nothing.
+ */
+function mergeSeenFlags(
+  action: Extract<Action, { type: 'upsertInboxAccount' }>,
+  prior: InboxAccountState | undefined,
+): InboxMessage[] {
+  const incoming = action.inbox.messages
+  // A non-sync write is left alone: a settings edit or an image-policy toggle
+  // carries the message list straight out of current state, so there is nothing
+  // older for it to overwrite and nothing to merge against.
+  if (action.origin !== 'sync') return [...incoming]
+  const priorMessages = prior?.messages
+  const pending = action.pendingSeen
+  if (!priorMessages?.length && !pending?.length) return [...incoming]
+  // The same NUL separator `removalKey` joins its parts with, written as an
+  // escape rather than as the raw byte: identical at runtime, and it keeps the
+  // largest source file here from making every `grep` answer "binary file".
+  const key = (folderPath: string, uid: number, uidValidity: number): string =>
+    `${folderPath}\u0000${uid}\u0000${uidValidity}`
+  const readHere = new Set<string>()
+  for (const m of priorMessages ?? []) {
+    if (m.seen) readHere.add(key(m.folderPath, m.uid, m.uidValidity))
+  }
+  const inFlight = new Map<string, boolean>()
+  for (const p of pending ?? []) inFlight.set(key(p.folderPath, p.uid, p.uidValidity), p.seen)
+  return incoming.map((m) => {
+    const k = key(m.folderPath, m.uid, m.uidValidity)
+    const queued = inFlight.get(k)
+    // `??`, not `||`: a queued mark-as-unread is `false` and must still win.
+    const seen = queued ?? (m.seen || readHere.has(k))
+    // Same row back when nothing moved, for the same reason
+    // `patchInboxMessages` does it — a needless new identity here is a needless
+    // re-render of the most expensive list in the app.
+    return seen === m.seen ? m : { ...m, seen }
+  })
+}
 
 /**
  * Exported for `scripts/check-work-calendar.mjs`, which drives `patchSettings`
@@ -929,11 +1082,12 @@ export function reducer(state: AppState, action: Action): AppState {
           : {}
       // Cap message rows here, not in the caller — every writer of this
       // action (a fresh sync, a future push-update) gets the ceiling for free.
+      // `seen` is merged, not replaced: `mergeSeenFlags` holds that rule.
       const inbox: InboxAccountState = {
         ...action.inbox,
         ...preferences,
         removed,
-        messages: withoutRemoved([...action.inbox.messages], removed)
+        messages: withoutRemoved(mergeSeenFlags(action, prior), removed)
           .sort((a, b) => b.date - a.date)
           .slice(0, INBOX_MESSAGE_CAP),
       }
@@ -1140,7 +1294,18 @@ export function reducer(state: AppState, action: Action): AppState {
         // device (see `syncLoop.ts`'s module doc) from regressing either
         // counter — see `recordSyncSeq`'s own doc for why that matters.
         pairedDevices: recordSyncSeq(
-          touchSynced(state.pairedDevices, deviceId, syncedAt, undefined, patch.remoteDeviceId),
+          // `patch.remoteAddress` is set only when the peer announced an
+          // address that differs from the one on file — see `performExchange`.
+          // Passing `undefined` here, which is what this did, is why a pairing
+          // died for good the first time a router handed the other device a
+          // different lease: nothing ever wrote the new address down.
+          touchSynced(
+            state.pairedDevices,
+            deviceId,
+            syncedAt,
+            patch.remoteAddress,
+            patch.remoteDeviceId,
+          ),
           deviceId,
           { outgoingSeq: patch.outgoingSeq, lastAcceptedSeq: patch.lastAcceptedSeq },
         ),
@@ -2861,6 +3026,91 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [bridge, i18n],
   )
 
+  /**
+   * Every `\Seen` change this device has made and not yet had the server
+   * confirm, per account, keyed by message id.
+   *
+   * A ref rather than state, for the same reason `seenInboxIds` above is one:
+   * this changes every time a message is opened, nothing on screen renders from
+   * it, and putting it through the reducer would re-render the whole tree — the
+   * inbox list included — for bookkeeping the user never sees.
+   *
+   * Entries leave on a confirmed push and stay on a failed one, which is what
+   * makes them worth keeping: while an entry is here, `mergeSeenFlags` refuses
+   * to let a sync move that message's `seen` at all. An entry whose push never
+   * succeeds therefore stays for the life of the process — deliberately, since
+   * the local value is the only correct one until the server accepts it. It is
+   * memory only and never persisted, so a restart clears it and rule 2 of
+   * `mergeSeenFlags` carries on protecting the "read" direction by itself.
+   */
+  const pendingSeenPushes = useRef(new Map<string, Map<string, PendingSeenPush>>())
+
+  /** The queue as the reducer needs to see it: one plain array, snapshotted now. */
+  const pendingSeenFor = useCallback(
+    (accountId: string): PendingSeenPush[] => [
+      ...(pendingSeenPushes.current.get(accountId)?.values() ?? []),
+    ],
+    [],
+  )
+
+  /**
+   * Try the queued `\Seen` pushes once more, and wait for the answer.
+   *
+   * Called immediately before a sync, which is the one moment the retry is
+   * worth anything: a push that lands first means the sync reads back the value
+   * this device already believes, and the queue empties instead of pinning the
+   * flag forever. Awaited rather than detached for that same ordering — a
+   * detached retry racing the sync it was meant to precede is the original bug
+   * with extra steps.
+   *
+   * Reads `liveRef` rather than the closed-over `state` because this runs at
+   * sync time, which can be many minutes after the callback was created, and
+   * the account config it hands to the bridge has to be the current one.
+   */
+  const flushPendingSeen = useCallback(
+    async (accountId: string): Promise<void> => {
+      const queue = pendingSeenPushes.current.get(accountId)
+      const push = bridge?.setMessageFlags
+      if (!push || !queue || queue.size === 0) return
+      const inbox = liveRef.current.inboxAccounts.find((i) => i.accountId === accountId)
+      if (!inbox) return
+      await Promise.all(
+        [...queue.values()].map(async (entry) => {
+          const folder = inbox.folders.find((f) => f.path === entry.folderPath)
+          if (folder && folder.uidValidity !== entry.uidValidity) {
+            // The folder was renumbered while this sat in the queue, so
+            // `entry.uid` now names a different message or none at all.
+            // Retrying would set `\Seen` on whatever took its place — a wrong
+            // write to someone's mailbox, which is worse than the lost flag.
+            // Drop it; see `InboxFolder.uidValidity`.
+            queue.delete(entry.id)
+            return
+          }
+          try {
+            const result: unknown = await push(inbox, entry.folderPath, entry.uid, {
+              seen: entry.seen,
+            })
+            if (looksFailed(result)) {
+              console.warn(
+                `[inbox] retry of \\Seen=${entry.seen} was refused for ${entry.id}:`,
+                result,
+              )
+              return
+            }
+            // Identity, not equality: a newer mark on the same message may have
+            // replaced this entry while the request was out, and deleting that
+            // one because an older push finally succeeded would drop the
+            // protection the newer value still needs.
+            if (queue.get(entry.id) === entry) queue.delete(entry.id)
+          } catch (e) {
+            console.warn(`[inbox] retry of \\Seen=${entry.seen} failed for ${entry.id}:`, e)
+          }
+        }),
+      )
+    },
+    [bridge],
+  )
+
   const syncInboxAccount = useCallback(
     async (accountId: string, override?: InboxAccountState) => {
       if (!bridge?.syncInbox) return
@@ -2881,6 +3131,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         override ??
         state.inboxAccounts.find((i) => i.accountId === accountId) ??
         defaultInboxAccountState(accountId)
+      // Drain what we still owe the server before asking it what it holds.
+      // Without this a push that failed once was never retried at all, and the
+      // server's answer stayed permanently one flag behind what the user saw.
+      await flushPendingSeen(accountId)
       try {
         const result = await bridge.syncInbox(config)
         /*
@@ -2903,7 +3157,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (!liveRef.current.accounts.some((a) => a.id === accountId)) {
           return { ok: !result.lastSyncError, error: result.lastSyncError, inbox: result }
         }
-        dispatch({ type: 'upsertInboxAccount', inbox: result, origin: 'sync' })
+        // The queue is snapshotted here, not when the sync started: what
+        // matters is what is still unconfirmed at the moment the reply lands.
+        dispatch({
+          type: 'upsertInboxAccount',
+          inbox: result,
+          origin: 'sync',
+          pendingSeen: pendingSeenFor(accountId),
+        })
         /*
          * After the dispatch, and only on the path where the account still
          * exists. Every inbox refresh in the app funnels through here — the
@@ -2934,12 +3195,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
             type: 'upsertInboxAccount',
             inbox: { ...config, lastSyncError: error },
             origin: 'sync',
+            // `config.messages` is the list this closure captured when the sync
+            // *started*, so this branch is the staler of the two — it needs the
+            // merge more than the success path does, not less.
+            pendingSeen: pendingSeenFor(accountId),
           })
         }
         return { ok: false, error }
       }
     },
-    [bridge, state.inboxAccounts],
+    [bridge, state.inboxAccounts, flushPendingSeen, pendingSeenFor],
   )
 
   const saveInboxAccount = useCallback(
@@ -3021,18 +3286,65 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [bridge, state.inboxAccounts],
   )
 
+  /**
+   * Mark read (or unread) here first, then tell the server.
+   *
+   * The local write stays optimistic — waiting on IMAP before the row stops
+   * being bold would make opening a message feel broken on a slow connection.
+   * What changed is everything after it. The pushes used to be fired into a
+   * bare `.catch(() => {})`, with the platform sides swallowing their own
+   * failures underneath, so a refused `\Seen` was invisible at every layer and
+   * was never retried; the next sync then reported the server's untouched
+   * `false` and the row went bold again. Now each message goes out on its own
+   * request, an unconfirmed one stays queued in `pendingSeenPushes` — which
+   * `mergeSeenFlags` treats as the newer truth and `flushPendingSeen` retries
+   * before the next sync — and a failure is at least written somewhere a
+   * console can be asked about it.
+   */
   const markInboxMessagesRead = useCallback(
     async (accountId: string, ids: string[], seen: boolean) => {
       dispatch({ type: 'patchInboxMessages', accountId, ids, patch: { seen } })
-      if (!bridge?.setMessageFlags) return
+      const push = bridge?.setMessageFlags
+      // Nothing queued where there is no way to push at all: the entry could
+      // never clear, and rule 2 of `mergeSeenFlags` already keeps a local read
+      // from being undone on such a platform.
+      if (!push) return
       const inbox = state.inboxAccounts.find((i) => i.accountId === accountId)
       if (!inbox) return
       const targets = inbox.messages.filter((m) => ids.includes(m.id))
+      if (targets.length === 0) return
+      let queue = pendingSeenPushes.current.get(accountId)
+      if (!queue) {
+        queue = new Map<string, PendingSeenPush>()
+        pendingSeenPushes.current.set(accountId, queue)
+      }
+      const pending = queue
       await Promise.all(
-        targets.map((m) => bridge.setMessageFlags!(inbox, m.folderPath, m.uid, { seen })),
-      ).catch(() => {
-        /* server mirror is best-effort — local state already changed above */
-      })
+        targets.map(async (m) => {
+          // Queued *before* the request goes out, not after it fails: a sync
+          // can land while this is still in flight, and that window is exactly
+          // the one the queue exists to cover.
+          const entry: PendingSeenPush = {
+            id: m.id,
+            folderPath: m.folderPath,
+            uid: m.uid,
+            uidValidity: m.uidValidity,
+            seen,
+          }
+          pending.set(m.id, entry)
+          try {
+            const result: unknown = await push(inbox, m.folderPath, m.uid, { seen })
+            if (looksFailed(result)) {
+              console.warn(`[inbox] server refused \\Seen=${seen} for ${m.id}:`, result)
+              return
+            }
+            // Identity, not equality — see `flushPendingSeen`.
+            if (pending.get(m.id) === entry) pending.delete(m.id)
+          } catch (e) {
+            console.warn(`[inbox] could not push \\Seen=${seen} for ${m.id}:`, e)
+          }
+        }),
+      )
     },
     [bridge, state.inboxAccounts],
   )
@@ -3319,6 +3631,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // with an 'ongoing' pairing gets their listener back the moment their state
   // has loaded.
   const [syncListener, setSyncListener] = useState<SyncListenerStatus | null>(null)
+  /**
+   * The same status, reachable from the two long-lived sync effects — same
+   * mechanism and same reason as `liveRef`.
+   *
+   * Reading `syncListener` directly inside them would pin it at `null` for the
+   * life of the app: both depend on `[ready, bridge]`, so their closures are
+   * built once, before anything has bound to an interface. A device that never
+   * announces where it is listening is a device the other side can never call
+   * back — which is the whole point of the announcement.
+   */
+  const syncListenerRef = useRef<SyncListenerStatus | null>(null)
+  syncListenerRef.current = syncListener
   const wantsSyncListener = state.pairedDevices.some((d) => d.mode === 'ongoing')
 
   useEffect(() => {
@@ -3361,6 +3685,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
           getState: () => liveRef.current,
           getCalendar: () => liveRef.current.settings.workCalendar ?? DEFAULT_WORK_CALENDAR,
           now: () => Date.now(),
+          // Answering is also the moment to say where we are listening. Before
+          // this, a pairing was one-directional by accident: the joiner learned
+          // the host's address from the QR code, the host learned nothing, and
+          // so only the joiner could ever start a sync.
+          selfAddress: () => parseAddress(syncListenerRef.current?.address, SYNC_SERVER_PORT),
           secrets: secretsFor,
           // Written to `liveRef.current` synchronously, the instant the
           // freshness check passes — not batched with the rest of this
@@ -3436,6 +3765,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       getState: () => liveRef.current,
       getCalendar: () => liveRef.current.settings.workCalendar ?? DEFAULT_WORK_CALENDAR,
       getPairedDevices: () => liveRef.current.pairedDevices,
+      selfAddress: () => parseAddress(syncListenerRef.current?.address, SYNC_SERVER_PORT),
       getSecret: (keyRef) => b.getSyncSecret!(keyRef),
       transport: { postJson: (url, body) => b.syncRequest!(url, body) },
       secrets: secretsFor,
@@ -3445,7 +3775,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
       },
     })
     loop.start()
-    return () => loop.stop()
+    // How the "sync now" button reaches this loop. It must not build one of its
+    // own: a second loop would race this one for the same device's replay
+    // counter, and would have no `secrets`, so a hand-triggered sync would
+    // quietly stop carrying mailbox passwords across.
+    registerSyncLoop(loop)
+    return () => {
+      // Deregister first. A press landing in the gap would otherwise drive a
+      // loop already on its way out.
+      registerSyncLoop(null)
+      loop.stop()
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, bridge])
 

@@ -173,9 +173,30 @@
   .actionbar {
     padding: var(--sp-3) var(--sp-4);
   }
+  /*
+   * A toast has to clear everything that is already glued to the bottom of the
+   * screen, and there are three such things — not one.
+   *
+   * This said `calc(var(--sp-4) + 64px)`, and 64 was a number somebody
+   * measured once. It is not the tab bar (`--nav-h` is 56), it does not
+   * include the gesture bar (`env(safe-area-inset-bottom)`), and it does not
+   * include the compose screen's action bar (`--actionbar-h`) at all. The
+   * identical rule keyed to `max-width: 599.98px` in `17-phone.css` named all
+   * three, so a portrait phone was right and the 600-839.98px band — a phone
+   * on its side, a small tablet — got the magic number and put its toasts on
+   * top of the tab bar and, on compose, under the send button.
+   *
+   * One formula, at the boundary where the tab bar actually appears, so there
+   * is nothing left to keep in step. Every term is a token that changes with
+   * the shell it describes: `--actionbar-h` is 68px by default, 96px under
+   * 600px (a wrapped action bar, set on `:root` in `17-phone.css`) and 60px at
+   * compact density, and this rule follows all three without naming any.
+   */
   .toasts {
     inset-inline: var(--sp-4);
-    bottom: calc(var(--sp-4) + 64px);
+    bottom: calc(
+      var(--sp-4) + var(--nav-h) + env(safe-area-inset-bottom, 0px) + var(--actionbar-h)
+    );
     max-width: none;
   }
 
@@ -226,24 +247,19 @@
     display: none;
   }
 
-  /* Confirmations and short prompts stay cards, and on a phone they take their
-     gutter out of their own width — see the `data-shell="mobile"` block below,
-     which takes the padding off the scrim.
+  /* A `.modal` rule used to live here, giving confirmations and short prompts a
+     20px gutter down each side by taking it out of their own width
+     (`calc(100% - 2 * var(--sp-5))`). It is gone, and deliberately: that gutter
+     *was* the "the pop-up does not cover the screen" report. Its replacement is
+     in the `data-shell="mobile"` block below, which is where every other dialog
+     rule in this file already lives.
 
-     Sized rather than margined: the base rule is `width: min(560px, 100%)`, so
-     a margin on top of it asks for 100% + 40px inside a 390px scrim, the box
-     overflows and the browser pins it to the left edge — which is the same
-     "card in the wrong place" that block is fixing, reintroduced one rule
-     further down. The scrim already centres, so taking the gutter out of the
-     width is all that is needed.
-
-     Width-based on purpose, and the only modal rule in this file that still is:
-     a 1280px tablet has room for a 560px "Delete this reminder?" and would look
-     absurd with a 1240px one. */
-  .modal {
-    width: calc(100% - 2 * var(--sp-5));
-    max-height: calc(100% - 2 * var(--sp-5));
-  }
+     Nothing is lost by dropping the width query. `data-shell="mobile"` is set
+     whenever the window is under 840px *or* the platform is Android
+     (`useMobileShell`), so every viewport this media query can match already
+     carries the attribute — a width-keyed modal rule can only ever be a second,
+     weaker spelling of the same condition, and this one was silently the
+     stronger of the two for bare dialogs. */
 }
 
 /* ==========================================================================
@@ -303,6 +319,96 @@
  */
 :root[data-shell="mobile"] .modal-scrim {
   padding: 0;
+}
+
+/*
+ * The dialogs that are not screens: a confirmation, a short prompt, a form of
+ * three fields — everything opened without `wide` or `fullscreen`. `Confirm`
+ * in `ui.tsx` (five of Settings' own buttons go through it), both of
+ * `BackupCard`'s prompts, `DataFolderSetup`, the contact editor.
+ *
+ * These were the half of the rule below that nobody wrote. `.modal--wide` and
+ * `.modal--fullscreen` were pulled edge to edge; a bare `.modal` was not on
+ * that whitelist, so it fell through to the base `width: min(560px, 100%)` and
+ * kept a gutter down each side — 20px on a phone, from a width rule that used
+ * to sit in the media query above, and 232px on a 1024px Android tablet, where
+ * that media query does not match at all and `min(560px, 100%)` is simply
+ * 560px. So a "delete this?" box floated in the middle of a tablet screen
+ * while the section dialog it was opened from covered the whole display: two
+ * shapes for two dialogs in one flow, which is the report this fixes.
+ *
+ * Not stretched to full height, though — being on the whitelist would have
+ * done that. Two lines of question blown up to an 800px screen reads as the
+ * app having lost its place, not as a dialog. The honest mobile form for a
+ * short prompt is the bottom sheet: full bleed left and right, which is what
+ * "it does not cover the screen" was actually about; stuck to the bottom edge,
+ * where the thumb already is and where every sheet on the platform comes from;
+ * as tall as its own content and no taller; rounded only along the edge that
+ * meets the page.
+ *
+ * `align-self` on the dialog rather than a rule on the scrim. `.modal-scrim`
+ * is `display: grid; place-items: center` and a grid item is allowed to
+ * override that for itself, so no ancestor has to know which kind of dialog it
+ * is holding. Selecting the scrim instead would need
+ * `:has(> .modal:not(.modal--wide):not(.modal--fullscreen))`, and `:has()` is
+ * Chromium 105 — the whole reason this block is attribute-based rather than
+ * `:has()`-based is that it has to work on the WebView builds that do not have
+ * it, where a rule like that would match nothing and leave the dialog exactly
+ * as broken as it was.
+ *
+ * `:not(.modal--wide):not(.modal--fullscreen)` chained rather than
+ * `:not(.modal--wide, .modal--fullscreen)`: a selector list inside `:not()` is
+ * Selectors 4 and Chromium 88, and this must hold on the same old engines.
+ */
+:root[data-shell="mobile"] .modal:not(.modal--wide):not(.modal--fullscreen) {
+  align-self: end;
+  width: 100%;
+  max-width: none;
+  /*
+   * A strip of scrim stays visible above the sheet, so it still reads as
+   * something laid over the page rather than as a new screen — and enough of it
+   * to clear the status bar, which on Android is inside this fixed box. Past
+   * the cap the sheet stops growing and `.modal__body` scrolls it, which is the
+   * base rule's behaviour and needs nothing added here: the tall bare dialogs
+   * (the contact editor, the shortcut list) reach it and the short ones never
+   * do.
+   */
+  max-height: calc(100% - var(--sp-8) - env(safe-area-inset-top, 0px) - var(--kb));
+  /*
+   * The keyboard, when there is one. `.modal-scrim` is `position: fixed;
+   * inset: 0` and does not shrink with the WebView, so a sheet glued to the
+   * bottom of it would sit *behind* the keyboard — the one thing centring got
+   * right for free, and the contact editor is a bare dialog with two text
+   * fields in it. `--kb` is `0px` whenever no text entry is focused (see
+   * `core/platform/keyboardInset.ts`), so this costs nothing the rest of the
+   * time, and it is subtracted from the cap above as well so a tall sheet
+   * lifting clear of the keyboard cannot run off the top of the screen.
+   */
+  margin-bottom: var(--kb);
+  /* The side and bottom borders would be 1px lines drawn along three screen
+     edges. The top one stays: it is the join between the sheet and the page
+     behind it, and it is the only edge that has a page on the other side. */
+  border-inline: 0;
+  border-bottom: 0;
+  border-radius: var(--r-xl) var(--r-xl) 0 0;
+  /* `modal-in` scales from 0.985, which on a box pinned to the bottom edge
+     reads as the sheet shrinking away from the screen edges it is supposed to
+     be touching. `sheet-in` is the rise the full-screen dialogs already use. */
+  animation: sheet-in var(--dur-slow) var(--ease-out);
+}
+/*
+ * The gesture bar, kept clear — the same tax the full-screen dialogs pay a few
+ * rules down, now owed for the same reason: this box touches the bottom edge of
+ * the screen, so whatever is last inside it is where the system's own bar is.
+ * A footer, when there is one, is that last thing and takes the inset instead;
+ * the body's own bottom padding underneath a footer is harmless, it becomes
+ * ordinary spacing between the last field and the buttons.
+ */
+:root[data-shell="mobile"] .modal:not(.modal--wide):not(.modal--fullscreen) > .modal__body {
+  padding-bottom: calc(var(--sp-5) + env(safe-area-inset-bottom, 0px));
+}
+:root[data-shell="mobile"] .modal:not(.modal--wide):not(.modal--fullscreen) > .modal__footer {
+  padding-bottom: calc(var(--sp-4) + env(safe-area-inset-bottom, 0px));
 }
 
 :root[data-shell="mobile"] .modal--wide,

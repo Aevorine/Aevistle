@@ -1247,7 +1247,32 @@ export interface InboxMessage {
   uidValidity: number
   messageId?: string
   from: string
+  /**
+   * The first `To` address, kept as a plain string because every list row and
+   * every older cached message already reads it that way.
+   *
+   * `toAll` below is the honest version. This stays as the one-line answer.
+   */
   to: string
+  /**
+   * Every `To` recipient, in the order the envelope listed them.
+   *
+   * Optional because a row written by a build before this existed has no such
+   * field, and a missing list must read as "we never captured it" rather than
+   * as "this message had exactly one recipient" — the two look identical in
+   * the reader otherwise, and the second one is a lie.
+   */
+  toAll?: string[]
+  /**
+   * Every `Cc` recipient.
+   *
+   * There is deliberately no `bcc`. A blind copy is stripped by the sending
+   * server before the message reaches anyone else's mailbox: it is not that
+   * this app declines to show it, it is that the bytes do not arrive. The one
+   * exception — being blind-copied oneself — shows up in neither list either,
+   * which is exactly what every other mail client shows too.
+   */
+  cc?: string[]
   subject: string
   /** Epoch ms. */
   date: number
@@ -1258,6 +1283,75 @@ export interface InboxMessage {
   tag: InboxTag
   /** Whether the sanitized body is present in the on-disk cache right now. */
   bodyCached: boolean
+}
+
+/**
+ * Whether the server took the `\Seen` change.
+ *
+ * Declared here, in the shared types, rather than beside either implementation:
+ * the desktop main process and the Android plugin both answer this question,
+ * over two entirely separate code paths, and the renderer reads both answers
+ * through one call site. A shape typed once per platform is a shape that drifts.
+ *
+ * `reason` is an identifier, never prose: the renderer decides what to say and
+ * in which language, and neither backend has any business writing user-facing
+ * text.
+ * The two platforms classify a failure at different resolutions, and the union
+ * below is deliberately the sum rather than a lowest common denominator:
+ * Android routes this through the same `classify` the send path uses, which
+ * already distinguishes `auth` from `timeout` from `tls`, and flattening that
+ * to one `failed` would throw away detail that is already correct. The
+ * renderer does not branch on most of it — it needs `ok`, and it needs to know
+ * whether retrying is pointless, which is what `isRetryableSeenFailure` below
+ * answers.
+ *
+ *   - `not-requested` — the patch did not ask for a `seen` change at all.
+ *     Reported rather than folded into `ok: true` so that "the server has it"
+ *     is never claimed on behalf of a call that never spoke to a server.
+ *   - `no-credential` — nothing to authenticate with, so the attempt was never
+ *     made. Not transient; retrying changes nothing until the account has a
+ *     password or an OAuth grant again.
+ *   - `failed` — the desktop's single bucket for "tried, did not work".
+ *   - everything else — Android's classifier, shared with sending.
+ */
+export type SeenFlagReason =
+  | 'not-requested'
+  | 'no-credential'
+  | 'failed'
+  | 'auth'
+  | 'handshake'
+  | 'timeout'
+  | 'tls'
+  | 'network'
+  | 'recipient'
+  | 'quota'
+  | 'attachment'
+  | 'config'
+  | 'unknown'
+
+export interface SeenFlagResult {
+  ok: boolean
+  /**
+   * Whether this call had anything to push at all. A tag-only patch never
+   * reaches a server, so its `ok: true` means "nothing was owed", not "the
+   * mailbox agrees" — a distinction the pending-flag queue needs and a bare
+   * boolean cannot carry. Optional: the desktop path answers the same question
+   * with `reason: 'not-requested'`.
+   */
+  pushed?: boolean
+  reason?: SeenFlagReason
+}
+
+/**
+ * Whether a failed `\Seen` push is worth trying again later.
+ *
+ * `no-credential` and `not-requested` are terminal — one needs the user to fix
+ * the account, the other never asked for anything. Everything else is a server
+ * or a network having a bad moment, which is exactly what the queue is for.
+ * Keeping a terminal entry queued would retry it on every single sync, forever.
+ */
+export function isRetryableSeenFailure(reason: SeenFlagReason | undefined): boolean {
+  return reason !== 'no-credential' && reason !== 'not-requested'
 }
 
 /**
@@ -1315,23 +1409,36 @@ export interface InboxFolder {
 export type RemoteImagePolicy = 'never' | 'always' | 'allowlist'
 
 /**
- * The policy actually in force, with one piece of history folded in.
+ * What the app defaults to before the user has expressed a preference.
  *
- * `showRemoteImages` shipped for two releases as scaffolding: it was declared,
- * defaulted to `'never'`, and never read or written by anything. So a stored
- * `'never'` in an install made before this was wired up is the old default,
- * not a decision anyone made — and honouring it would leave existing users
- * with images blocked while a fresh install shows them. `imagePolicyChosen`
- * records the first time the user actually touches the control; until then a
- * stored `'never'` is treated as the new default.
+ * `'never'`. Fetching a remote image is a network request to a host the sender
+ * chose, at the moment the message is opened, from the reader's own address —
+ * which is why marketing mail embeds one. Loading it by default answers three
+ * questions nobody asked to answer: that this address is live, when it was
+ * read, and what IP read it. Blocking by default is what Thunderbird and Apple
+ * Mail do, and it is the only setting under which the "load images" button
+ * below is a decision rather than a formality.
+ *
+ * Images that travel *inside* the message — `cid:` parts, already on disk —
+ * are unaffected by any of this. They cost no request and leak nothing, and
+ * they render whatever this is set to.
+ */
+export const DEFAULT_IMAGE_POLICY: RemoteImagePolicy = 'never'
+
+/**
+ * The policy actually in force.
+ *
+ * Until `imagePolicyChosen` records that the user has touched the control, a
+ * stored value is scaffolding rather than an answer — `showRemoteImages`
+ * shipped for two releases declared, defaulted, and read by nothing — so the
+ * default wins. After that the stored value is a decision and is honoured.
  */
 export function effectiveImagePolicy(
   stored: RemoteImagePolicy | undefined,
   chosen: boolean | undefined,
 ): RemoteImagePolicy {
-  const value = stored ?? 'always'
-  if (value === 'never' && !chosen) return 'always'
-  return value
+  if (!chosen) return DEFAULT_IMAGE_POLICY
+  return stored ?? DEFAULT_IMAGE_POLICY
 }
 
 /**

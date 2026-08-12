@@ -937,6 +937,25 @@ final class MailFetcher {
                 row.put("uidValidity", uidValidity);
                 row.put("from", formatAddresses(m.getFrom()));
                 row.put("to", formatAddresses(m.getRecipients(Message.RecipientType.TO)));
+                /*
+                 * The recipient lists `to` above cannot carry: it is one line
+                 * of prose, and "who else got this" is a question about a list.
+                 *
+                 * Neither costs a round trip, and that is worth stating because
+                 * getting it wrong would cost one per message. Cc travels
+                 * inside the IMAP ENVELOPE beside To (RFC 3501; the
+                 * `ENVELOPE` class in the shipped android-mail 1.6.7 has public
+                 * `to` and `cc` fields side by side), the profile above already
+                 * asks for ENVELOPE — JavaMail spells that item
+                 * `ENVELOPE INTERNALDATE RFC822.SIZE` — and
+                 * `IMAPMessage.getRecipients` returns straight out of the
+                 * parsed envelope, with `loadEnvelope()` returning at its first
+                 * line when one is already in hand. Verified in the bytecode,
+                 * not assumed, because the failure mode is invisible: it would
+                 * still work, one extra FETCH per message.
+                 */
+                putList(row, "toAll", addressList(m.getRecipients(Message.RecipientType.TO)));
+                putList(row, "cc", addressList(m.getRecipients(Message.RecipientType.CC)));
                 row.put("subject", nullToEmpty(m.getSubject()));
                 row.put("date", m.getSentDate() != null ? m.getSentDate().getTime() : System.currentTimeMillis());
                 row.put("sizeBytes", Math.max(0, m.getSize()));
@@ -1190,7 +1209,8 @@ final class MailFetcher {
                 }
                 for (int i = from; i < to; i++) {
                     try {
-                        Parsed parsed = extract(batch.get(i));
+                        Parsed parsed = extract(batch.get(i),
+                                new InlineSink(context, accountId, "INBOX", batchUids.get(i)));
                         InboxBodyStore.writeBody(context, accountId, "INBOX", batchUids.get(i),
                                 parsed.toBodyJson());
                     } catch (Exception ignored) {
@@ -1282,7 +1302,8 @@ final class MailFetcher {
 
         for (int i = 0; i < wanted.size(); i++) {
             try {
-                Parsed parsed = extract(wanted.get(i));
+                Parsed parsed = extract(wanted.get(i),
+                        new InlineSink(context, accountId, "INBOX", uids.get(i)));
                 InboxBodyStore.writeBody(context, accountId, "INBOX", uids.get(i), parsed.toBodyJson());
                 rows.get(i).put("snippet", snippetOf(parsed));
                 rows.get(i).put("bodyCached", true);
@@ -1416,7 +1437,8 @@ final class MailFetcher {
             UIDFolder uidFolder = (UIDFolder) inbox;
             Message m = uidFolder.getMessageByUID(uid);
             if (m == null) throw new IllegalStateException("Message not found");
-            Parsed parsed = extract(m);
+            Parsed parsed = extract(m,
+                    new InlineSink(context, config.optString("accountId", ""), folderPath, uid));
             JSONObject body = parsed.toBodyJson();
             InboxBodyStore.writeBody(context, config.optString("accountId", ""), folderPath, uid, body);
             return body;
@@ -1520,7 +1542,8 @@ final class MailFetcher {
                 int count = 0;
                 for (int i = 0; i < batch.size(); i++) {
                     try {
-                        Parsed parsed = extract(batch.get(i));
+                        Parsed parsed = extract(batch.get(i),
+                                new InlineSink(context, accountId, folderPath, batchUids.get(i)));
                         InboxBodyStore.writeBody(context, accountId, folderPath, batchUids.get(i),
                                 parsed.toBodyJson());
                         count++;
@@ -1550,6 +1573,104 @@ final class MailFetcher {
             if (m != null) inbox.setFlags(new Message[]{m}, new Flags(Flags.Flag.SEEN), seen);
             return null;
         });
+    }
+
+    /**
+     * Push the flag changes made while nothing was connected — currently the
+     * notification's "Mark as read", which is answered on a phone that may
+     * have been offline at the time.
+     *
+     * Must run *before* a sync lists anything, not after. A sync writes the
+     * server's `\Seen` onto every row it returns, so a mark that has not
+     * reached the server yet is a mark the very next listing erases. That was
+     * the whole failure: the button worked, the row went grey, and fifteen
+     * minutes later it was bold again.
+     *
+     * One connection and at most two STORE commands for the whole queue,
+     * regardless of how many messages are in it, and it opens nothing at all
+     * when the queue is empty — which is every sync but the rare one.
+     *
+     * Never throws. A sync that could not push a read flag is still a sync
+     * worth having, and the queue survives for the next attempt (plus {@link
+     * InboxCache#applyPendingSeen}, which keeps the row correct on screen in
+     * the meantime). The failure is logged rather than swallowed: a server
+     * that rejects every STORE looks, from the outside, exactly like the bug
+     * this replaced.
+     *
+     * @return how many messages the server accepted a new flag for.
+     */
+    static int flushPendingSeen(Context context, JSONObject config, String secret) {
+        final String accountId = config.optString("accountId", "");
+        if (accountId.isEmpty()) return 0;
+        final InboxCache cache = new InboxCache(context);
+        final JSONArray pending = cache.pendingSeen(accountId);
+        if (pending.length() == 0) return 0;
+
+        try {
+            Integer pushed = withInbox(context, config, secret, Folder.READ_WRITE, (store, inbox) -> {
+                UIDFolder uidFolder = (UIDFolder) inbox;
+
+                // INBOX, whatever each entry's `folderPath` says — the same
+                // assumption `setSeen` and `purge` above already make, because
+                // this platform has never opened another folder.
+                JSONArray done = new JSONArray();
+                List<JSONObject> live = new ArrayList<>();
+                for (int i = 0; i < pending.length(); i++) {
+                    JSONObject item = pending.optJSONObject(i);
+                    if (item == null) continue;
+                    // No usable UID is nothing this can ever push; queued as
+                    // done so it does not sit in the queue for good.
+                    if (item.optLong("uid", -1L) > 0) live.add(item);
+                    else done.put(item);
+                }
+                if (live.isEmpty()) {
+                    cache.clearPendingSeen(done);
+                    return 0;
+                }
+
+                long[] want = new long[live.size()];
+                for (int i = 0; i < want.length; i++) want[i] = live.get(i).optLong("uid", -1L);
+                // One `UID FETCH <set> (UID)` for the queue rather than a
+                // lookup each, and positional — a null is a UID this mailbox
+                // no longer has.
+                Message[] found = uidFolder.getMessagesByUID(want);
+
+                List<Message> toSeen = new ArrayList<>();
+                List<Message> toUnseen = new ArrayList<>();
+                for (int i = 0; i < live.size(); i++) {
+                    JSONObject item = live.get(i);
+                    Message m = i < found.length ? found[i] : null;
+                    if (m != null) {
+                        (item.optBoolean("seen", true) ? toSeen : toUnseen).add(m);
+                    }
+                    /*
+                     * Queued either way. A message the server cannot find is
+                     * one somebody deleted from another client — there is no
+                     * flag left to set on it, and keeping the entry would mean
+                     * retrying it on every sync for the rest of the install.
+                     */
+                    done.put(item);
+                }
+
+                if (!toSeen.isEmpty()) {
+                    inbox.setFlags(toSeen.toArray(new Message[0]), new Flags(Flags.Flag.SEEN), true);
+                }
+                if (!toUnseen.isEmpty()) {
+                    inbox.setFlags(toUnseen.toArray(new Message[0]), new Flags(Flags.Flag.SEEN), false);
+                }
+                // Cleared only after the STOREs returned. A clear before them
+                // would drop the record of a change the server never accepted,
+                // which is the same lost mark by a different route.
+                cache.clearPendingSeen(done);
+                return toSeen.size() + toUnseen.size();
+            });
+            return pushed == null ? 0 : pushed;
+        } catch (Exception e) {
+            Log.e(TAG, "flushPendingSeen: could not push queued read state for account "
+                    + accountId + " — " + pending.length()
+                    + " change(s) kept for the next attempt", e);
+            return 0;
+        }
     }
 
     /**
@@ -1628,7 +1749,30 @@ final class MailFetcher {
         }
     }
 
-    private static Parsed extract(Message message) throws Exception {
+    /**
+     * Which message a parse belongs to, so its embedded pictures know where to
+     * land.
+     *
+     * Four call sites parse a message and every one of them already knows all
+     * four of these; carrying them together is only so that {@link
+     * #addAttachment}, six frames down, does not have to be handed them one
+     * argument at a time.
+     */
+    private static final class InlineSink {
+        final Context context;
+        final String accountId;
+        final String folderPath;
+        final long uid;
+
+        InlineSink(Context context, String accountId, String folderPath, long uid) {
+            this.context = context;
+            this.accountId = accountId;
+            this.folderPath = folderPath;
+            this.uid = uid;
+        }
+    }
+
+    private static Parsed extract(Message message, InlineSink sink) throws Exception {
         Parsed parsed = new Parsed();
         Object content = message.getContent();
         if (content instanceof String) {
@@ -1638,20 +1782,67 @@ final class MailFetcher {
                 parsed.text = (String) content;
             }
         } else if (content instanceof Multipart) {
-            walk((Multipart) content, parsed);
+            walk((Multipart) content, parsed, sink);
         }
         return parsed;
     }
 
-    private static void walk(Multipart multipart, Parsed parsed) throws Exception {
+    /**
+     * Whether a MIME part belongs in the attachment list rather than in the
+     * body.
+     *
+     * One method with three callers — {@link #walk}, {@link
+     * #collectAttachmentParts} and {@link #countAttachments} — because the
+     * middle one turns a `partIndex` back into a part on the server. Three
+     * copies of this rule that disagree about a single part do not fail
+     * anywhere: they hand the user a different file than the one they tapped.
+     */
+    private static boolean isAttachmentPart(BodyPart part) throws Exception {
+        if (Part.ATTACHMENT.equalsIgnoreCase(part.getDisposition())) return true;
+        if (part.isMimeType("multipart/*")) return false;
+        if (!TextUtils.isEmpty(part.getFileName()) && !part.isMimeType("text/*")) return true;
+        /*
+         * An embedded picture: the logo at the top of a receipt, a pasted
+         * screenshot, a signature image. The body refers to it by `cid:`, and
+         * it very often has no filename at all — which is exactly what the
+         * filename rule above skipped. The part was never listed, so the
+         * reference had nothing to resolve against and the picture could not
+         * appear no matter what else was fixed.
+         *
+         * `text/*` stays excluded on purpose. The root HTML part of a
+         * `multipart/related` legitimately carries a Content-ID of its own;
+         * treating that as an attachment would file the message's own body as
+         * a download and leave the reader with an empty message.
+         */
+        return !part.isMimeType("text/*") && contentIdOf(part) != null;
+    }
+
+    /**
+     * This part's Content-ID, in the one spelling both halves compare on.
+     *
+     * The header is written `<abc@example>` and the `cid:` URL that refers to
+     * it is written without the brackets, so the two only match after the same
+     * trim-and-fold. {@link InboxSanitizer#normalizeCid} is what the body's
+     * placeholders were built with, which is why this calls it instead of
+     * repeating its two rules — a second copy is how a signature image that
+     * *is* in the message renders as nothing.
+     */
+    private static String contentIdOf(BodyPart part) {
+        try {
+            String[] header = part.getHeader("Content-ID");
+            if (header == null || header.length == 0 || header[0] == null) return null;
+            String cid = InboxSanitizer.normalizeCid(header[0]);
+            return cid.isEmpty() ? null : cid;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static void walk(Multipart multipart, Parsed parsed, InlineSink sink) throws Exception {
         for (int i = 0; i < multipart.getCount(); i++) {
             BodyPart part = multipart.getBodyPart(i);
-            String disposition = part.getDisposition();
-            boolean attachment = Part.ATTACHMENT.equalsIgnoreCase(disposition)
-                    || (!TextUtils.isEmpty(part.getFileName()) && !part.isMimeType("text/*"));
-
-            if (attachment) {
-                addAttachment(part, parsed.attachments);
+            if (isAttachmentPart(part)) {
+                addAttachment(part, parsed.attachments, sink);
                 continue;
             }
             if (part.isMimeType("text/plain") && parsed.text == null) {
@@ -1660,39 +1851,63 @@ final class MailFetcher {
                 parsed.html = (String) part.getContent();
             } else if (part.isMimeType("multipart/*")) {
                 Object nested = part.getContent();
-                if (nested instanceof Multipart) walk((Multipart) nested, parsed);
+                if (nested instanceof Multipart) walk((Multipart) nested, parsed, sink);
             }
         }
     }
 
-    private static void addAttachment(BodyPart part, List<JSONObject> attachments) {
+    private static void addAttachment(BodyPart part, List<JSONObject> attachments, InlineSink sink) {
         try {
             long size = part.getSize();
             if (size > ATTACHMENT_MAX_BYTES) return;
 
-            String name = part.getFileName();
-            if (name != null) name = MimeUtility.decodeText(name);
-            JSONObject a = new JSONObject();
-            a.put("id", "att_" + System.nanoTime());
-            a.put("name", name == null ? "attachment" : name);
-            a.put("size", Math.max(0, size));
-            a.put("mime", part.getContentType());
-            a.put("inline", false);
-            // Content is not persisted here — the message body cache stores
-            // metadata only; attachments download on demand the same way a
-            // prefetch-skipped message body does, matching the desktop's
-            // PREFETCH_MAX_BYTES philosophy of bounding what a sync pays for
-            // up front.
-            a.put("source", "imap");
-            // Empty until downloaded. Present rather than absent so the JS
-            // `Attachment` shape is the same on both platforms and the reader
-            // does not need to know which one it is running on.
-            a.put("path", "");
             // The stable handle a later download works from — an ordinal over
             // *attachments only*, in document order. `id` cannot serve: it is
             // minted per parse, so a body read back from the on-disk cache
             // would carry an id that names nothing on the server.
-            a.put("partIndex", attachments.size());
+            int partIndex = attachments.size();
+            String mime = baseMime(part.getContentType());
+            String ext = extensionForMime(mime);
+            String cid = contentIdOf(part);
+            String name = part.getFileName();
+            if (name != null) name = MimeUtility.decodeText(name);
+            if (TextUtils.isEmpty(name)) name = fallbackName(partIndex, mime, ext);
+
+            File stored = mime.startsWith("image/")
+                    ? persistInline(sink, part, partIndex, name, cid, ext)
+                    : null;
+            // The name follows the file it was written as, not the other way
+            // round: `withExtension` may have added a suffix, and a chip
+            // labelled `logo` beside a file called `logo.png` is two names for
+            // one thing, one of which "save a copy" would then act on.
+            if (stored != null) name = withExtension(name, ext);
+
+            JSONObject a = new JSONObject();
+            a.put("id", "att_" + System.nanoTime());
+            a.put("name", name);
+            // The written file where there is one: `getSize()` is the part's
+            // *encoded* length, about a third larger than the bytes, and the
+            // reader spends its inline budget against this number.
+            a.put("size", stored != null ? stored.length() : Math.max(0, size));
+            a.put("mime", part.getContentType());
+            // As the part actually says. This was the constant `false` for
+            // every attachment ever parsed here, which — together with the
+            // missing `cid` below — is why not one embedded image has ever
+            // rendered on Android: the reader skips anything without both.
+            a.put("inline", Part.INLINE.equalsIgnoreCase(part.getDisposition()));
+            if (cid != null) a.put("cid", cid);
+            // Content is not persisted here — the message body cache stores
+            // metadata only; attachments download on demand the same way a
+            // prefetch-skipped message body does, matching the desktop's
+            // PREFETCH_MAX_BYTES philosophy of bounding what a sync pays for
+            // up front. The one exception is an embedded picture, which nobody
+            // can ask for by tapping — see {@link #persistInline}.
+            a.put("source", "imap");
+            // Empty until downloaded. Present rather than absent so the JS
+            // `Attachment` shape is the same on both platforms and the reader
+            // does not need to know which one it is running on.
+            a.put("path", stored == null ? "" : stored.getAbsolutePath());
+            a.put("partIndex", partIndex);
             attachments.add(a);
         } catch (Exception e) {
             // A single malformed part must not fail the whole message parse —
@@ -1702,6 +1917,180 @@ final class MailFetcher {
             // message the user knows had a file attached shows none. Log it
             // so that's at least diagnosable from logcat.
             Log.e(TAG, "addAttachment: could not parse an attachment part", e);
+        }
+    }
+
+    /**
+     * What to call a part that did not name itself.
+     *
+     * Skipping those is what {@link #isAttachmentPart} used to do and is the
+     * reason embedded pictures were invisible, so every one of them now needs
+     * a name. The ordinal rather than the Content-ID: the cid is carried in
+     * its own field where the renderer needs it, and a raw one
+     * (`image001.png@01DA4C…`) is not a filename anybody wants to read in an
+     * attachment chip.
+     */
+    private static String fallbackName(int partIndex, String mime, String ext) {
+        return (mime.startsWith("image/") ? "image-" : "attachment-")
+                + (partIndex + 1) + (ext == null ? "" : "." + ext);
+    }
+
+    /**
+     * How large an embedded picture may be before this stops writing it out
+     * without being asked.
+     *
+     * Not a network budget — by the time this runs the bytes have already
+     * arrived, because every path that parses a message fetched the whole
+     * thing. It bounds the *disk* a sync can spend on pictures nobody has
+     * opened yet, and 2 MB is far above a logo or a signature and below
+     * "somebody embedded a photograph". Anything larger keeps the behaviour
+     * every inline image had before this: it stays a listed attachment that
+     * downloads on a tap, and the reference in the body stays invisible.
+     */
+    private static final long INLINE_PERSIST_MAX_BYTES = 2L * 1024 * 1024;
+
+    /**
+     * Put an embedded picture on disk, so the reader has something to point
+     * at.
+     *
+     * This is the half of `cid:` support Android never had. The renderer
+     * resolves an embedded reference by finding the attachment with that
+     * Content-ID and reading its `path` (see the guard in
+     * `src/views/InboxView.tsx`); an Android attachment's path is empty until
+     * somebody taps it, and nobody taps a picture that is not on screen. So
+     * the reference could never resolve, on any message, ever.
+     *
+     * Only pictures, and only ones the body can actually reference. A part
+     * with no Content-ID cannot be named by the HTML, and a part that is not
+     * an image cannot be rendered as one — writing either would be spending
+     * disk on a file whose only reader is a tap that would have downloaded it
+     * anyway.
+     *
+     * Writes into the same directory, under the same
+     * `<partIndex>_<name>` convention, that {@link #downloadAttachment} uses,
+     * so a later tap on the same part finds this file rather than fetching it
+     * a second time — and so {@link #pruneCache} ages it out with everything
+     * else.
+     *
+     * @return the file that now holds the part, or {@code null} when there is
+     *         nothing to write or writing failed — in which case the caller
+     *         leaves `path` empty and the picture stays invisible, exactly as
+     *         before.
+     */
+    private static File persistInline(InlineSink sink, BodyPart part, int partIndex, String name,
+                                      String cid, String ext) {
+        if (sink == null || cid == null || ext == null) return null;
+        try {
+            File dir = attachmentDir(sink.context, sink.accountId, sink.folderPath, sink.uid);
+            /*
+             * The suffix has to match the bytes, whatever the sender called
+             * the part. `readAttachment` decides what a file *is* from its
+             * extension alone — deliberately, so that a preview never trusts
+             * a stranger's Content-Type — so a part sent as `logo` with no
+             * suffix comes back `application/octet-stream`, is refused by the
+             * previewable list, and the picture is missing again for a reason
+             * that has nothing to do with the picture.
+             */
+            File target = new File(dir, partIndex + "_" + safeSegment(withExtension(name, ext)));
+
+            File existing = findExisting(dir, partIndex);
+            if (existing != null) {
+                // Already here from an earlier parse or an explicit download —
+                // nothing to write, and the same file a later tap will find.
+                if (existing.getName().equals(target.getName())) return existing;
+                /*
+                 * Same slot, different part. `findExisting` matches on the
+                 * `<partIndex>_` prefix alone, and this release changed what
+                 * counts as an attachment — an embedded picture with no
+                 * filename is now listed where it used to be skipped — so on a
+                 * message cached by an older build every part after the first
+                 * such picture has shifted by one. Reusing what is sitting
+                 * there would hand this picture's `path` to somebody else's
+                 * file, which is worse than the missing image this method
+                 * exists to fix. The server still has both.
+                 */
+                //noinspection ResultOfMethodCallIgnored
+                existing.delete();
+            }
+            if (!dir.exists() && !dir.mkdirs()) return null;
+
+            try (InputStream in = part.getInputStream();
+                 OutputStream out = new FileOutputStream(target)) {
+                byte[] buffer = new byte[64 * 1024];
+                int read;
+                long total = 0;
+                while ((read = in.read(buffer)) != -1) {
+                    total += read;
+                    if (total > INLINE_PERSIST_MAX_BYTES) {
+                        throw new IllegalStateException("inline part over the write-ahead ceiling");
+                    }
+                    out.write(buffer, 0, read);
+                }
+            } catch (Exception e) {
+                // Never leave a half-written file behind: `findExisting` above
+                // and in `downloadAttachment` would both treat it as a
+                // completed download, and every later read would get a
+                // truncated image instead of retrying.
+                //noinspection ResultOfMethodCallIgnored
+                target.delete();
+                throw e;
+            }
+            return target;
+        } catch (Exception e) {
+            // The message still parses and still shows; one embedded picture
+            // stays invisible, which is what every one of them did before this
+            // existed. Logged because a device where this fails on every
+            // message looks identical to the bug this method was written to
+            // fix, and logcat is the only thing that can tell them apart.
+            Log.w(TAG, "persistInline: could not cache an embedded image for uid " + sink.uid, e);
+            return null;
+        }
+    }
+
+    /** `inbox-attachments/<account>/<folder>/<uid>` — where a downloaded part lives. */
+    private static File attachmentDir(Context context, String accountId, String folderPath,
+                                      long uid) {
+        return new File(DataRoot.dir(context), ATTACHMENT_CACHE_DIR + File.separator
+                + safeSegment(accountId) + File.separator
+                + safeSegment(folderPath) + File.separator + uid);
+    }
+
+    /** `logo` becomes `logo.png`; `logo.PNG` and `photo.jpeg` are left alone. */
+    private static String withExtension(String name, String ext) {
+        String lower = name.toLowerCase(java.util.Locale.ROOT);
+        if (lower.endsWith("." + ext)) return name;
+        if ("jpg".equals(ext) && lower.endsWith(".jpeg")) return name;
+        return name + "." + ext;
+    }
+
+    /** `image/png; name="logo.png"` — a full Content-Type — reduced to `image/png`. */
+    private static String baseMime(String contentType) {
+        if (contentType == null) return "";
+        int semi = contentType.indexOf(';');
+        return (semi < 0 ? contentType : contentType.substring(0, semi))
+                .trim().toLowerCase(java.util.Locale.ROOT);
+    }
+
+    /**
+     * The inverse of {@link #guessMime}, and of `mimeOfName` in
+     * `AevistleNativePlugin` — which is the one that matters, because that is
+     * what turns a file on disk back into an `image/png` the preview reader
+     * will hand to the WebView. Kept to types both of those already know: an
+     * extension either side does not recognise is not a name worth inventing.
+     */
+    private static String extensionForMime(String mime) {
+        switch (mime) {
+            case "image/png": return "png";
+            case "image/jpeg": case "image/jpg": return "jpg";
+            case "image/gif": return "gif";
+            case "image/webp": return "webp";
+            case "image/bmp": return "bmp";
+            case "image/avif": return "avif";
+            case "application/pdf": return "pdf";
+            case "text/plain": return "txt";
+            case "text/csv": return "csv";
+            case "application/zip": return "zip";
+            default: return null;
         }
     }
 
@@ -1726,9 +2115,7 @@ final class MailFetcher {
     static JSONObject downloadAttachment(android.content.Context context, JSONObject config,
                                          String secret, String folderPath, long uid,
                                          int partIndex, String fallbackName) throws Exception {
-        File dir = new File(DataRoot.dir(context), "inbox-attachments" + File.separator
-                + safeSegment(config.optString("accountId", "")) + File.separator
-                + safeSegment(folderPath) + File.separator + uid);
+        File dir = attachmentDir(context, config.optString("accountId", ""), folderPath, uid);
         if (!dir.exists() && !dir.mkdirs()) {
             throw new IllegalStateException("Could not create the attachment directory");
         }
@@ -1784,10 +2171,7 @@ final class MailFetcher {
             throws Exception {
         for (int i = 0; i < multipart.getCount(); i++) {
             BodyPart part = multipart.getBodyPart(i);
-            String disposition = part.getDisposition();
-            boolean attachment = Part.ATTACHMENT.equalsIgnoreCase(disposition)
-                    || (!TextUtils.isEmpty(part.getFileName()) && !part.isMimeType("text/*"));
-            if (attachment) {
+            if (isAttachmentPart(part)) {
                 out.add(part);
                 continue;
             }
@@ -1842,6 +2226,57 @@ final class MailFetcher {
         }
     }
 
+    /**
+     * The same addresses as a list rather than as one line — one entry per
+     * recipient, in the order the envelope gave them.
+     *
+     * Written `Name <addr>`, which is what `formatAddress` in
+     * `electron/imap.ts` puts in the same field, so a message shows the same
+     * recipients on a phone and on a laptop. Deliberately not the display-name
+     * form {@link #formatAddresses} uses: that one summarises a header into a
+     * sentence, and this is a list of people. Two colleagues both called
+     * "Alex" are one row each here, and with the name alone they are the same
+     * row twice.
+     */
+    private static JSONArray addressList(Address[] addresses) {
+        JSONArray out = new JSONArray();
+        if (addresses == null) return out;
+        for (Address a : addresses) {
+            if (a == null) continue;
+            if (a instanceof InternetAddress) {
+                InternetAddress ia = (InternetAddress) a;
+                String personal = ia.getPersonal();
+                String email = ia.getAddress();
+                if (!TextUtils.isEmpty(personal) && !TextUtils.isEmpty(email)) {
+                    out.put(personal + " <" + email + ">");
+                } else if (!TextUtils.isEmpty(email)) {
+                    out.put(email);
+                } else if (!TextUtils.isEmpty(personal)) {
+                    out.put(personal);
+                }
+            } else if (!TextUtils.isEmpty(a.toString())) {
+                out.put(a.toString());
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Write the list, or take the key away when there is nothing in it.
+     *
+     * The removal is not tidiness. The row handed in is usually the *previous*
+     * sync's row for this message — see `prior` in {@link #sync} — so leaving
+     * the key alone would keep a Cc list belonging to an envelope that no
+     * longer has one. And `toAll?`/`cc?` are optional in `src/core/types.ts`
+     * precisely so that absent reads as "this build never captured it" rather
+     * than as "captured, and the message had no Cc"; an empty array here would
+     * say the second thing about a row that means the first.
+     */
+    private static void putList(JSONObject row, String key, JSONArray values) throws Exception {
+        if (values.length() > 0) row.put(key, values);
+        else row.remove(key);
+    }
+
     private static String formatAddresses(Address[] addresses) {
         if (addresses == null || addresses.length == 0) return "";
         StringBuilder sb = new StringBuilder();
@@ -1887,9 +2322,7 @@ final class MailFetcher {
         int count = 0;
         for (int i = 0; i < multipart.getCount(); i++) {
             BodyPart part = multipart.getBodyPart(i);
-            String disposition = part.getDisposition();
-            if (Part.ATTACHMENT.equalsIgnoreCase(disposition)
-                    || (!TextUtils.isEmpty(part.getFileName()) && !part.isMimeType("text/*"))) {
+            if (isAttachmentPart(part)) {
                 count++;
             } else if (part.isMimeType("multipart/*")) {
                 Object nested = part.getContent();

@@ -21,6 +21,48 @@ import type { LogEntry } from '../core/types'
 type Filter = 'all' | 'send' | 'error' | 'security'
 
 /**
+ * A narrowing this screen can be *opened* with, rather than one the reader has
+ * to reproduce by hand once they get here.
+ *
+ * Two values, and they are Home's second and third figures. Neither is
+ * expressible as one of the four `Filter` options above, which is why this is a
+ * separate axis rather than two more segments:
+ *
+ *   sentToday    `kind === 'send'` *minus the failures* — `filterSend` counts a
+ *                send that bounced off the server as a send, and 今天已发 does
+ *                not, so pressing "发送" would show a longer list than the
+ *                figure that opened it.
+ *   failedToday  `level === 'error'`, which is exactly `filterError` — the only
+ *                thing missing from the existing option is the day.
+ *
+ * A fifth segment would have said "成功发送" beside "发送" in a strip that
+ * already scrolls sideways on a phone, for a distinction nobody arriving from
+ * anywhere else needs.
+ */
+export type LogsFocus = 'sentToday' | 'failedToday'
+
+const DAY_MS = 86_400_000
+
+/**
+ * Whether `at` falls on the calendar day `now` is in — compared as local
+ * midnights, so 23:30 → 00:30 is a different day rather than "half an hour, so
+ * the same one".
+ *
+ * A local copy of the rule `HomeView`'s `daysAhead` applies, for the reason set
+ * out on `ScheduleView`'s identical copy: Home reaches this screen through
+ * `lazy(() => import('./LogsView'))`, and a static import back the other way
+ * would pull the whole home screen into the chunk `App.tsx` loads for the
+ * activity tab.
+ */
+function isToday(at: number, now: number): boolean {
+  const a = new Date(at)
+  const b = new Date(now)
+  a.setHours(0, 0, 0, 0)
+  b.setHours(0, 0, 0, 0)
+  return Math.round((a.getTime() - b.getTime()) / DAY_MS) === 0
+}
+
+/**
  * One row of CSV.
  *
  * Quoting is not optional here: a log title is arbitrary user text and will
@@ -62,12 +104,33 @@ function redact(text: string): string {
   )
 }
 
-export function LogsView() {
+export function LogsView({
+  focus,
+}: {
+  /**
+   * Optional, and every existing caller omits it — `App.tsx`'s own tab opens
+   * this screen at its full list, as it always has. Only Home's 今天已发 and
+   * 今天失败 figures pass anything.
+   */
+  focus?: LogsFocus
+}) {
   const { state, dispatch, pushUndo } = useApp()
   const { t, formatDateTime } = useI18n()
   const { confirm, confirmElement } = useConfirm()
   const toast = useToast()
-  const [filter, setFilter] = useState<Filter>('all')
+  /**
+   * The narrowing this screen was opened with, held as state so it can be let
+   * go of — see the same pair in `ScheduleView`. Seeded once; this screen is
+   * mounted fresh each time Home's dialog opens.
+   */
+  const [focused, setFocused] = useState<LogsFocus | null>(focus ?? null)
+  /* The segmented strip still has to show *something* pressed while a focus is
+     on, or the reader is looking at a filtered list with every option unlit.
+     Seeded to the closest of the four, which is the one the focus is a
+     narrowing of. */
+  const [filter, setFilter] = useState<Filter>(
+    focus === 'failedToday' ? 'error' : focus === 'sentToday' ? 'send' : 'all',
+  )
   const [query, setQuery] = useState('')
 
   /**
@@ -87,33 +150,53 @@ export function LogsView() {
   const receiptStats = useMemo(() => summariseReceipts(receipts), [receipts])
 
   const deferredQuery = useDeferredValue(query)
+
+  /**
+   * Everything the focus — or, with no focus, the segmented filter — admits,
+   * before the search box narrows it any further.
+   *
+   * Split out from `entries` below so the chip can print a count that means
+   * what Home's figure meant. Counting `entries` instead would have made the
+   * chip say "今天已发 2 封" the moment somebody typed two characters into the
+   * search box, under a home screen that had just said eight.
+   *
+   * The two focus predicates are the same expressions `HomeView`'s `todaySent`
+   * and `todayFailed` are computed from; see the note on `LogsFocus` for why
+   * neither is one of the four options.
+   *
+   * `pruneLogs`, not a second cutoff computed here.
+   *
+   * The inline version this replaces was `Date.now() - logRetentionDays *
+   * 86400000` with none of the fallbacks `pruneLogs` documents at length.
+   * Clear the "Keep activity log for" box in Settings and the browser reports
+   * `''` mid-edit, `Number('')` is 0, the cutoff becomes `Date.now()` and every
+   * comparison fails: this screen renders "Nothing has happened yet" while the
+   * entire log is still sitting in state.json. Nothing throws and nothing warns
+   * — the log simply appears to have been erased.
+   */
+  const scoped = useMemo(() => {
+    const now = Date.now()
+    return pruneLogs(state.logs, state.settings).filter((l) => {
+      if (focused === 'sentToday') {
+        return l.kind === 'send' && l.level !== 'error' && isToday(l.at, now)
+      }
+      if (focused === 'failedToday') return l.level === 'error' && isToday(l.at, now)
+      if (filter === 'all') return true
+      if (filter === 'error') return l.level === 'error'
+      if (filter === 'security') return l.kind === 'security'
+      return l.kind === 'send'
+    })
+  }, [state.logs, state.settings.logRetentionDays, filter, focused])
+
   const entries = useMemo(() => {
     const needle = deferredQuery.trim().toLowerCase()
-    /*
-     * `pruneLogs`, not a second cutoff computed here.
-     *
-     * The inline version this replaces was `Date.now() - logRetentionDays *
-     * 86400000` with none of the fallbacks `pruneLogs` documents at length.
-     * Clear the "Keep activity log for" box in Settings and the browser
-     * reports `''` mid-edit, `Number('')` is 0, the cutoff becomes `Date.now()`
-     * and every comparison fails: this screen renders "Nothing has happened
-     * yet" while the entire log is still sitting in state.json. Nothing throws
-     * and nothing warns — the log simply appears to have been erased.
-     */
-    return pruneLogs(state.logs, state.settings)
-      .filter((l) => {
-        if (filter === 'all') return true
-        if (filter === 'error') return l.level === 'error'
-        if (filter === 'security') return l.kind === 'security'
-        return l.kind === 'send'
-      })
-      .filter(
-        (l) =>
-          needle.length === 0 ||
-          l.title.toLowerCase().includes(needle) ||
-          (l.detail ?? '').toLowerCase().includes(needle),
-      )
-  }, [state.logs, state.settings.logRetentionDays, filter, deferredQuery])
+    if (needle.length === 0) return scoped
+    return scoped.filter(
+      (l) =>
+        l.title.toLowerCase().includes(needle) ||
+        (l.detail ?? '').toLowerCase().includes(needle),
+    )
+  }, [scoped, deferredQuery])
 
   /**
    * Export what is on screen, not everything.
@@ -253,10 +336,47 @@ export function LogsView() {
           </div>
         ) : null}
 
+        {/*
+          What the list is currently narrowed to, said out loud, as the control
+          that undoes it.
+
+          The wording is `home.todaySent` / `home.todayFailed` — the very
+          sentence on the figure that was tapped to get here — with the count
+          taken from this screen's own filtered list rather than passed in. That
+          is the correspondence made checkable instead of asserted: if the
+          predicates here and in `HomeView` ever drift apart, Home says one
+          number and this chip says another on the next screen, which somebody
+          notices. See the same chip in `ScheduleView`.
+        */}
+        {focused ? (
+          /* Wrapped in `.btn-row` for the reason the receipt chips above are:
+             `.view__inner` is a flex column and stretches its children, so a
+             bare chip would be a full-width bar. */
+          <div className="btn-row">
+            <button
+              type="button"
+              className="chip chip--toggle"
+              aria-pressed="true"
+              onClick={() => setFocused(null)}
+            >
+              {t(focused === 'sentToday' ? 'home.todaySent' : 'home.todayFailed', {
+                n: scoped.length,
+              })}
+            </button>
+          </div>
+        ) : null}
+
         <div className="listcontrols">
+          {/* Touching any of the four is also how the day narrowing is let go
+              of — it is a request to see a different set, and the segment that
+              was pressed is the one the focus was a narrowing of, so "press the
+              option that is already lit" widens rather than doing nothing. */}
           <Segmented
             value={filter}
-            onChange={setFilter}
+            onChange={(value) => {
+              setFocused(null)
+              setFilter(value)
+            }}
             ariaLabel={t('logs.title')}
             options={[
               { value: 'all', label: t('logs.filterAll') },
@@ -273,9 +393,13 @@ export function LogsView() {
             see VirtualList for the measurements that made that necessary. */}
         {entries.length === 0 ? (
           <div className="list-pane">
+            {/* "还没有发生任何事" is false when a hundred things happened and
+                none of them was today, so a narrowed list says the neutral
+                thing instead. The chip above is still on screen saying which
+                narrowing, and is still the way out of it. */}
             <EmptyState
               icon={<IconActivity size={24} />}
-              title={t('logs.empty')}
+              title={focused ? t('common.empty') : t('logs.empty')}
             />
           </div>
         ) : (

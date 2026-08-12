@@ -74,7 +74,8 @@ import {
   sealWithRandomIv,
   type PairingEnvelope,
 } from './pairingCrypto'
-import type { PairedDevice } from './pairedDevices'
+import type { PairedDevice, PairedDeviceAddress } from './pairedDevices'
+import { sameAddress, toStorableAddress } from './lanAddress'
 import {
   conflictSummary as _conflictSummary,
   detectConflicts,
@@ -176,6 +177,43 @@ export interface SyncExchangePayload {
    * against a value persisted on `PairedDevice`, is the adaptation.
    */
   seq: number
+  /**
+   * Where the *sender* is listening for sync requests right now, as it sees
+   * itself — the mechanism that keeps a pairing alive across an IP change.
+   *
+   * Until this existed, `PairedDevice.lastAddress` was written once, at
+   * pairing time, and never again: `touchSynced` accepted an address but every
+   * caller passed `undefined`, and nothing else set it. A router handing out a
+   * different DHCP lease — a phone rejoining Wi-Fi, a laptop resuming from
+   * sleep, an overnight reboot — therefore ended the pairing permanently and
+   * silently. Nothing failed loudly; cycles simply stopped connecting, and the
+   * only cure was to pair again.
+   *
+   * Announcing it here rather than discovering it on the network is the whole
+   * point. This app broadcasts nothing and runs no mDNS/SSDP responder (see
+   * `core/pairing.ts`'s module doc), so the only party that ever learns this
+   * device's address is one that already holds the pairing key: the field
+   * rides *inside* the AES-GCM envelope, next to `seq`, not alongside it. A
+   * stranger on the LAN cannot read it, cannot inject one, and cannot tell
+   * from the outside that it is there.
+   *
+   * It also makes the pairing symmetric for the first time. The joiner learns
+   * the host's address from the QR code, but the handshake tells the host
+   * nothing about the joiner — see `views/DevicesCard.tsx`'s module doc — so
+   * the host could only ever answer, never initiate, and a device with no
+   * `lastAddress` is skipped outright by `SyncLoop.runCycle`. One exchange in
+   * the joiner-to-host direction now teaches the host where the joiner is, and
+   * from then on either side can start a cycle. That redundancy is what
+   * recovers an address change: whichever device can still reach the other
+   * carries the new address to it on its next poll.
+   *
+   * Optional, and absent from a peer on an older build or one that is not
+   * currently listening (a desktop with no 'ongoing' pairings has no listener
+   * bound, and a device with no network has no address to claim). An absent
+   * value never clears what is already stored — see `toStorableAddress` and
+   * the `remoteAddress` handling in `performExchange`.
+   */
+  selfAddress?: PairedDeviceAddress
 }
 
 /**
@@ -395,6 +433,21 @@ export interface SyncApplyPatch {
   /** The peer's own `Settings.localDeviceId`, learned from `SyncExchangePayload.selfDeviceId` — set in `performExchange`, not `applyExchange`, since it is protocol-level rather than scoped user data. Written onto `PairedDevice.remoteDeviceId`. */
   remoteDeviceId?: string
   /**
+   * Where the peer says it is listening now, learned from
+   * `SyncExchangePayload.selfAddress` and already validated as a private LAN
+   * address by `toStorableAddress` — written onto `PairedDevice.lastAddress`
+   * via `touchSynced`.
+   *
+   * Set only when the peer announced something that differs from what is
+   * already stored, so the common steady-state exchange (nothing moved, the
+   * peer re-announces the address this device is already using) leaves the
+   * field absent and the reducer has nothing to write. Also protocol-level
+   * rather than scoped user data, for the same reason `remoteDeviceId` is: a
+   * device that agreed to sync only its contacts still has to remain
+   * reachable, so this is deliberately not gated on `PairedDevice.scopes`.
+   */
+  remoteAddress?: PairedDeviceAddress
+  /**
    * The `SyncExchangePayload.seq` this exchange's `incoming` carried, already
    * validated by `assertFreshSeq` before `performExchange` ever ran — written
    * onto `PairedDevice.lastAcceptedSeq` via `recordSyncSeq`'s forward-only
@@ -607,6 +660,13 @@ export interface PerformExchangeResult extends ExchangeOutcome {
  * unread — the request that call already sent used its own, separately
  * allocated, number — so that caller passes the peer's *current* value
  * unchanged, and overwrites `patch.outgoingSeq` itself afterwards.
+ *
+ * `selfAddress` is where *this* device is currently listening, as the host
+ * platform reports it — a parameter rather than something read out of
+ * `AppState`, because nothing in `core/` can see a network interface (see
+ * `SyncLoopHooks.selfAddress`). Optional in both directions: a device with no
+ * listener bound has nothing to announce, and a peer on a build that predates
+ * the field sends nothing to learn from.
  */
 export async function performExchange(
   state: AppState,
@@ -616,6 +676,7 @@ export async function performExchange(
   now: number,
   outgoingSeq: number,
   secrets?: SyncSecretTransport,
+  selfAddress?: PairedDeviceAddress,
 ): Promise<PerformExchangeResult> {
   const sessionId = `${device.id}:${now}`
   const sinceLocal = device.lastSyncedAt ?? 0
@@ -628,6 +689,19 @@ export async function performExchange(
     secrets,
   )
   if (incoming.selfDeviceId) patch.remoteDeviceId = incoming.selfDeviceId
+  // Narrowed here rather than at the point it is written to state, because
+  // this is the last moment the value is still recognisably *the peer's
+  // claim* rather than something the app already believes. `toStorableAddress`
+  // refuses anything that is not a private IPv4 literal with a usable port,
+  // and returning `undefined` for a refused claim is what leaves the stored
+  // address untouched — a compromised peer cannot cost this device the good
+  // address it already has, only fail to change it. See `lanAddress.ts`.
+  const announced = toStorableAddress(incoming.selfAddress)
+  // Only when it actually differs: the steady state is a peer re-announcing
+  // the address this device is already using, every 90 seconds, forever, and
+  // a patch field set on every one of those cycles would make `touchSynced`
+  // write a new object for no reason on each of them.
+  if (announced && !sameAddress(announced, device.lastAddress)) patch.remoteAddress = announced
   patch.lastAcceptedSeq = incoming.seq
   patch.outgoingSeq = outgoingSeq
   const changed = buildChangedPayload(state, calendar, device.scopes, sinceLocal)
@@ -636,11 +710,21 @@ export async function performExchange(
   // is never among the ids handed to the trusted layer to seal. Unchecking a
   // scope keeps it off the wire, rather than off the screen at the far end.
   await attachAccountSecrets(changed, secrets, state)
+  // Put through the same gate the *incoming* claim above goes through, on
+  // purpose. The host hands this in from whatever interface it happened to
+  // bind (`SyncListenerStatus.address`), and a machine with a VPN up can
+  // report a public one — see the address picker in `views/DevicesCard.tsx`
+  // for how routinely the wrong interface wins. Announcing that would tell a
+  // paired device this machine's public address and then have it send there
+  // every cycle. Omitted entirely when it does not survive the gate, which is
+  // what an absent field already means: "nothing to learn from me this time".
+  const announceable = toStorableAddress(selfAddress)
   const outgoing: SyncExchangePayload = {
     since: now,
     changed,
     selfDeviceId: state.settings.localDeviceId,
     seq: outgoingSeq,
+    ...(announceable ? { selfAddress: announceable } : {}),
   }
   return { patch, conflicts, accountSecrets, outgoing }
 }
@@ -672,6 +756,22 @@ export interface RespondHooks {
    * what closes that window.
    */
   commitAcceptedSeq(pairId: string, seq: number): void
+  /**
+   * Where this device is listening right now, for
+   * `SyncExchangePayload.selfAddress` on the *reply*. Same hook, same shape
+   * and same source as `SyncLoopHooks.selfAddress` — see that one for where
+   * the value comes from and why it cannot be read from here.
+   *
+   * Worth sending on the answering side too, not just the asking side: the
+   * address the requester holds for this device came from a QR code, and the
+   * host picks which interface that code publishes by ranking guesses (see
+   * `electron/pairingServer.ts`'s `pickLanIPv4` and the address picker in
+   * `views/DevicesCard.tsx`). A machine with a VPN or a container bridge up
+   * can publish an address that happens to work once and then stops. The
+   * reply is what replaces that guess with the address this device is
+   * actually bound to.
+   */
+  selfAddress?(): PairedDeviceAddress | undefined
 }
 
 /** Everything a caller needs to actually commit the exchange to state and the keystore — kept separate from the sealed reply so `respondToSyncRequest` can answer before the renderer has finished dispatching. */
@@ -731,6 +831,7 @@ export async function respondToSyncRequest(
     now,
     outgoingSeq,
     hooks.secrets?.(device),
+    hooks.selfAddress?.(),
   )
   const replyEnvelope = await sealWithRandomIv(key, result.outgoing)
   return { envelope: replyEnvelope, outcome: { ...result, device } }
@@ -755,6 +856,76 @@ export interface SyncLoopHooks {
   onUnreachable?(device: PairedDevice): void
   onError?(device: PairedDevice, message: string): void
   log?(level: 'info' | 'warn' | 'error', message: string, detail?: string): void
+  /**
+   * Where this device is listening right now, for
+   * `SyncExchangePayload.selfAddress` — the only way that field can be
+   * filled in, because nothing in this file can find out on its own.
+   *
+   * `core/` runs in the Electron renderer and the Android WebView, neither of
+   * which can enumerate a network interface: the address is discovered by the
+   * host when it binds the listener (`electron/syncServer.ts`'s `pickLanIPv4`,
+   * `LanAddresses.best()` on Android) and travels back as
+   * `SyncListenerStatus.address`, a `"host:port"` string. `state/AppState.tsx`
+   * already holds that status for the settings screen and is the natural
+   * place to turn it into this — `parseAddress(status.address,
+   * SYNC_SERVER_PORT)` from `lanAddress.ts` is the conversion.
+   *
+   * Optional, and returning `undefined` is a normal answer rather than a
+   * failure: a device with no 'ongoing' pairing has no listener bound, and a
+   * device with no network has no address to claim. Either way the exchange
+   * proceeds and simply teaches the peer nothing this time.
+   */
+  selfAddress?(): PairedDeviceAddress | undefined
+}
+
+/**
+ * Why one device got nothing out of a cycle — the difference between the
+ * three things a user reads as "sync is broken" and cannot otherwise tell
+ * apart.
+ *
+ * Kept as a closed set rather than a message, because the caller that needs
+ * this is a screen (`views/DevicesCard.tsx`'s "sync now" button) and a screen
+ * has to translate it. `detail` on the report below carries the machine's own
+ * words alongside, for the cases where there are any.
+ *
+ * - `'noAddress'` — this side has never learned where the peer listens. Not a
+ *   failure and not new: the host half of a pairing starts out this way by
+ *   design (see `SyncExchangePayload.selfAddress`) and stays that way until
+ *   the peer has initiated once. Worth reporting rather than skipping
+ *   silently, because "nothing happened and nothing was said" is exactly what
+ *   a manual button must not do.
+ * - `'unreachable'` — the address is known and nothing answered at it. Three
+ *   causes are indistinguishable from here (the app is closed on the other
+ *   device, the two are on different networks, the address has moved) and the
+ *   copy must say all three rather than pick one.
+ * - `'refused'` — something answered and said no: a key this device no longer
+ *   holds after a revoke, or a payload rejected by `assertFreshSeq`.
+ * - `'failed'` — anything else, including a missing keystore entry on *this*
+ *   side and a decrypt that threw.
+ */
+export type SyncDeviceOutcome = 'synced' | 'noAddress' | 'unreachable' | 'refused' | 'failed'
+
+export interface SyncDeviceReport {
+  device: PairedDevice
+  outcome: SyncDeviceOutcome
+  /** What was actually dialled, so a screen can name it — absent only for `'noAddress'`, where there was nothing to dial. */
+  address?: PairedDeviceAddress
+  /** The peer's own error string, or the exception's message. Never invented: absent means nothing said anything. */
+  detail?: string
+}
+
+/**
+ * What one pass over the paired devices did — the return value the 90-second
+ * timer discards and the manual button exists to read.
+ *
+ * `ran: false` is its own answer rather than an empty device list: a cycle
+ * that collided with one already in flight did nothing at all, and reporting
+ * that as "0 devices synced" would be a lie in the one direction that
+ * matters. The button says "already running" instead.
+ */
+export interface SyncCycleReport {
+  ran: boolean
+  devices: SyncDeviceReport[]
 }
 
 /**
@@ -780,26 +951,57 @@ export class SyncLoop {
     this.timer = null
   }
 
-  /** Every 'ongoing' device with a known address, one at a time — a LAN poll is cheap, but running them concurrently just means more sockets in flight for no benefit anyone would notice. */
-  async runCycle(): Promise<void> {
-    if (this.running) return
+  /**
+   * Every 'ongoing' device, one at a time — a LAN poll is cheap, but running
+   * them concurrently just means more sockets in flight for no benefit anyone
+   * would notice.
+   *
+   * A device with no `lastAddress` used to be dropped by the same `continue`
+   * that skips a `'once'` pairing, which conflated two different facts: a
+   * `'once'` row is not a sync target at all, while an 'ongoing' row with no
+   * address is one this side simply cannot reach *yet* — the host half of
+   * every pairing, until the peer initiates once and
+   * `SyncExchangePayload.selfAddress` teaches this device where it lives. The
+   * timer does not care about that difference. `views/DevicesCard.tsx`'s
+   * manual button does: it is the difference between "we tried and nobody
+   * answered" and "we have never had anywhere to try", and a button that
+   * silently did nothing for the second case would be the exact
+   * unactionable silence this whole change exists to end.
+   */
+  async runCycle(): Promise<SyncCycleReport> {
+    if (this.running) return { ran: false, devices: [] }
     this.running = true
+    const devices: SyncDeviceReport[] = []
     try {
       for (const device of this.hooks.getPairedDevices()) {
-        if (device.mode !== 'ongoing' || !device.lastAddress) continue
-        await this.runDeviceCycle(device)
+        if (device.mode !== 'ongoing') continue
+        const address = device.lastAddress
+        if (!address) {
+          devices.push({ device, outcome: 'noAddress' })
+          continue
+        }
+        devices.push(await this.runDeviceCycle(device, address))
       }
     } finally {
       this.running = false
     }
+    return { ran: true, devices }
   }
 
-  private async runDeviceCycle(device: PairedDevice): Promise<void> {
+  /**
+   * `address` is passed in rather than re-read off `device` so that the one
+   * place deciding "is there anywhere to send this" is `runCycle` above —
+   * the previous arrangement checked it there and then dereferenced it here
+   * behind a non-null assertion, which is a promise the type system was not
+   * being allowed to keep.
+   */
+  private async runDeviceCycle(device: PairedDevice, address: PairedDeviceAddress): Promise<SyncDeviceReport> {
     try {
       const keyB64 = await this.hooks.getSecret(device.keyRef)
       if (!keyB64) {
-        this.hooks.onError?.(device, 'no key stored for this device')
-        return
+        const detail = 'no key stored for this device'
+        this.hooks.onError?.(device, detail)
+        return { device, outcome: 'failed', address, detail }
       }
       const key = await importLongLivedKey(keyB64)
       const secrets = this.hooks.secrets?.(device)
@@ -816,30 +1018,46 @@ export class SyncLoop {
       // paired devices polling each other within the same window.
       const beforeSend = this.hooks.getPairedDevices().find((d) => d.id === device.id) ?? device
       const requestSeq = (beforeSend.outgoingSeq ?? 0) + 1
+      // Read once and reused for the reply's own `performExchange` below, so
+      // a listener that comes up or goes down mid-round-trip cannot have this
+      // one exchange announcing two different things about the same moment.
+      // Narrowed by `toStorableAddress` for the reason spelled out on
+      // `performExchange`'s own call to it.
+      const selfAddress = toStorableAddress(this.hooks.selfAddress?.())
       const outgoing: SyncExchangePayload = {
         since: now,
         changed,
         selfDeviceId: state.settings.localDeviceId,
         seq: requestSeq,
+        ...(selfAddress ? { selfAddress } : {}),
       }
       const requestEnvelope = await sealWithRandomIv(key, outgoing)
 
       let raw: unknown
       try {
-        raw = await this.hooks.transport.postJson(syncUrl(device.lastAddress!.host), {
+        // Still the well-known `SYNC_SERVER_PORT` rather than
+        // `address.port`. Every listener this app binds is on that constant
+        // (`electron/syncServer.ts`, `AevistleNativePlugin.applySyncListener`)
+        // and every stored address carries it, so reading the field back
+        // would change nothing except to hand a peer that has been taken over
+        // a free choice of which port on the LAN this device posts to. The
+        // port is stored because `PairedDeviceAddress` has always carried it
+        // and `sameAddress` compares it; it is not an instruction.
+        raw = await this.hooks.transport.postJson(syncUrl(address.host), {
           pairId: device.id,
           envelope: requestEnvelope,
         })
       } catch {
         // Unreachable this cycle — not a failure, and not queued. See the module doc.
         this.hooks.onUnreachable?.(device)
-        return
+        return { device, outcome: 'unreachable', address }
       }
 
       const response = raw as { ok?: boolean; envelope?: PairingEnvelope; error?: string }
       if (!response.ok || !response.envelope) {
-        this.hooks.onError?.(device, response.error ?? 'the other device refused the request')
-        return
+        const detail = response.error ?? 'the other device refused the request'
+        this.hooks.onError?.(device, detail)
+        return { device, outcome: 'refused', address, detail }
       }
 
       const theirs = await openWithRandomIv<SyncExchangePayload>(key, response.envelope)
@@ -862,14 +1080,18 @@ export class SyncLoop {
         now,
         beforeApply.outgoingSeq ?? 0,
         secrets,
+        selfAddress,
       )
       // The number actually used for the request already sent above — not
       // whatever `performExchange` stamped on the `outgoing` object it built
       // (and this method discards) while processing the reply.
       result.patch.outgoingSeq = requestSeq
       this.hooks.onSynced(device, result, now)
+      return { device, outcome: 'synced', address }
     } catch (e) {
-      this.hooks.onError?.(device, e instanceof Error ? e.message : String(e))
+      const detail = e instanceof Error ? e.message : String(e)
+      this.hooks.onError?.(device, detail)
+      return { device, outcome: 'failed', address, detail }
     }
   }
 }

@@ -13,11 +13,17 @@ import androidx.core.app.NotificationManagerCompat;
  *
  * Same reasoning as {@link CopyCodeReceiver}: a {@link BroadcastReceiver}
  * rather than an activity, because pressing the button must not bring the app
- * to the front. Marking read is local-state-only — see {@link
- * InboxCache#markSeen} and `docs/ARCHITECTURE.md`'s note that delete, and by
- * the same reasoning read state, only ever touches the local cache — so there
- * is no IMAP round trip to wait on and this finishes well inside a receiver's
- * ten-second budget.
+ * to the front.
+ *
+ * Split in two, deliberately. What happens here is instant and cannot fail on
+ * a network — the cache write the Inbox screen reads, and dismissing the
+ * notification — so the tap is answered the moment it is made. The server side
+ * of the same change is queued by {@link InboxCache#markSeen} and pushed by
+ * {@link InboxFlagWorker}, because an IMAP connect, log in and STORE can
+ * outlast a receiver's ten-second budget on mobile data, and because it has to
+ * survive being made with no signal at all. Doing it inline was never an
+ * option; doing it *nowhere*, which is what this used to do, meant the next
+ * sync read `\Seen` off the server and put the message straight back to unread.
  *
  * Not exported, and must stay that way — an exported receiver would let any
  * app on the device mark arbitrary messages read (or worse, feed it an
@@ -59,5 +65,10 @@ public class MarkReadReceiver extends BroadcastReceiver {
         if (notificationId >= 0) {
             NotificationManagerCompat.from(context).cancel(notificationId);
         }
+
+        // Last, and only after the queue entry above is on disk: the worker
+        // reads that queue, and enqueuing it first would let it run against a
+        // queue this receiver had not written to yet.
+        InboxFlagWorker.kick(context);
     }
 }

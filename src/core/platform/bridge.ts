@@ -31,6 +31,7 @@ import type {
   Platform,
   ScheduledJob,
   SecretKind,
+  SeenFlagResult,
   SendResult,
   SharePayload,
 } from '../types'
@@ -620,16 +621,21 @@ export interface PlatformBridge {
    */
   sanitizeHtml?(html: string): Promise<string>
   /**
-   * `seen` best-effort mirrors to the server's `\Seen` flag; `tag` never
-   * leaves the device (see `InboxTag`). Local state always updates regardless
-   * of whether the server round-trip succeeds.
+   * `seen` mirrors to the server's `\Seen` flag; `tag` never leaves the device
+   * (see `InboxTag`). Local state always updates regardless of whether the
+   * server round-trip succeeds.
+   *
+   * The result says whether the mirror actually landed. It used to be `void`,
+   * which read as "best effort, and you will never know" — and not knowing is
+   * how a message the user had read came back unread after the next sync read
+   * the server's flags over the top. See `SeenFlagResult`.
    */
   setMessageFlags?(
     config: InboxAccountState,
     folderPath: string,
     uid: number,
     patch: { seen?: boolean; tag?: InboxTag },
-  ): Promise<void>
+  ): Promise<SeenFlagResult>
   /**
    * Local cache only — never issues an IMAP `\Deleted`/EXPUNGE.
    *

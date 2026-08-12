@@ -126,6 +126,31 @@
 }
 
 /*
+ * `.health__expand` — the "展开" under a clamped health message — belongs on the
+ * list above and was not on it, because the probe that built that list could
+ * not see it: `HealthBoard` renders this control only on a row whose text
+ * really did overflow two lines, so at the standard text size on a 360px screen
+ * there is often no such row and the button does not exist. `check:tap`
+ * measured it the first time a run happened to land on the `larger` text
+ * setting, where the same messages do overflow — 40x33, on Settings, under the
+ * floor in both directions.
+ *
+ * Nothing moves as a result. The button exists only where the message is
+ * clamped at two lines, and two lines of `--text-base` at `--leading-normal` is
+ * 53px before the row's own padding — so `.health__item` is already taller than
+ * `--tap-min` every time this rule applies, and the floor is spent on the
+ * button's own box rather than on the row's height. That is why it needs none
+ * of the negative-margin correction `.markup__toggle` below does.
+ *
+ * On the shell rather than on a width, for this file's own reason: the row
+ * behaves the same on an 820px tablet, which no phone width query reaches.
+ */
+:root[data-shell='mobile'] .health__expand {
+  min-width: var(--tap-min);
+  min-height: var(--tap-min);
+}
+
+/*
  * `.markup__toggle` gets the 48px *hit area* without the 48px *height*, which
  * is the distinction `--tap-pad` exists for and the first place it earns its
  * keep.

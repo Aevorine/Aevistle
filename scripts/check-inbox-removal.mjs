@@ -147,9 +147,16 @@ check(
   'removing must write a tombstone, not just filter the list',
   /case 'removeInboxMessages'[\s\S]{0,700}?rememberRemoved\(/.test(appState),
 )
+// The character budget is a landmine, so it is generous. It was 2400 against a
+// case body of 2261 — 139 characters of headroom — and the next person to add
+// two lines of comment inside that case would have blown it and been told
+// "every sync result must be filtered through the tombstone list", which would
+// have been false and would have sent them looking in entirely the wrong place.
+// Widened to a size no plausible edit reaches. If this ever does fire, read the
+// case body before believing it.
 check(
   'every sync result must be filtered through the tombstone list',
-  /case 'upsertInboxAccount'[\s\S]{0,2400}?withoutRemoved\(/.test(appState),
+  /case 'upsertInboxAccount'[\s\S]{0,4000}?withoutRemoved\(/.test(appState),
 )
 check(
   'a sync must merge tombstones, not overwrite them with its own stale copy',

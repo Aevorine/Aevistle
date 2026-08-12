@@ -305,8 +305,26 @@
  * itself. Unconditional `margin-inline-start: auto` fixes that at every width
  * and costs nothing where the button was already flush (the common case on a
  * modal narrower than the reading cap).
+ *
+ * ## Why "the first thing after the body" and not `:last-child`
+ *
+ * This was `.banner--stack > :last-child:not(.banner__body)`, which is the same
+ * element for as long as a banner has exactly one thing after its text. It does
+ * not any more: a dismissible banner appends a close button after the action,
+ * and `:last-child` would have moved the auto margin onto the X — leaving the
+ * action stranded against the end of the sentence with the gap on the wrong
+ * side of it, which is the exact defect the paragraph above describes, one
+ * element along. The margin belongs to the *leading edge of the trailing
+ * group*, and `.banner__body + *` is that edge whether the group is one button,
+ * a button and a close, or a close on its own.
+ *
+ * `--stack` is off the selector for the same reason. That modifier is added
+ * only when a banner has an action (see `Banner` in `ui.tsx`), so a banner
+ * whose only trailing element is a close button never carried it and its X
+ * would have sat wherever the text ended. Nothing is lost by widening it: with
+ * no trailing element there is nothing to match.
  */
-.banner--stack > :last-child:not(.banner__body) {
+.banner > .banner__body + * {
   margin-inline-start: auto;
 }
 @media (max-width: 839.98px) {
@@ -315,6 +333,33 @@
   }
   .banner--stack > .banner__body {
     flex: 1 1 12em;
+  }
+  /*
+   * The cross goes up, the action goes down.
+   *
+   * A flex row wraps in *order-modified* order, and with the close button last
+   * in the markup the wrap victim was the close. Measured at 360px on a banner
+   * carrying both: line one came out [icon][text][修复] and line two was the X
+   * on its own at the *left* edge of the banner — a control that reads as
+   * having fallen off the row rather than as having moved.
+   *
+   * Ordering the close ahead of the action makes the two of them land where
+   * each already belongs on a small screen: the cross in the top-right corner,
+   * which is where every phone puts a dismiss, and the action on a line of its
+   * own across the bottom, which is where a 110px button stops competing with
+   * the sentence for width. The wrap still happens; what changes is which
+   * control it moves, and this one looks deliberate on a line by itself.
+   *
+   * Inside this query and on `--stack` only. `--stack` is the banners that have
+   * an action at all, and above 840px nothing wraps — there the markup order is
+   * already the right order, with the action leading the trailing group and the
+   * cross closing it, both flush against the trailing edge.
+   */
+  .banner--stack > .banner__close {
+    order: 1;
+  }
+  .banner--stack > .banner__body ~ *:not(.banner__close) {
+    order: 2;
   }
 }
 

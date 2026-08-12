@@ -344,6 +344,33 @@ export function Segmented<T extends string>({
 
 export type BannerTone = 'info' | 'warning' | 'danger' | 'success'
 
+/**
+ * How long an `info` or `success` banner stays before it starts leaving.
+ *
+ * Seven seconds, which is between the two figures `ToastProvider` below already
+ * uses — 4.2s for a success, 9s for an error — and picked for the same reason
+ * those two differ. A banner carries more than a toast does (a bold title and
+ * a sentence, often a path or a server's own words), so 4.2s is not long
+ * enough to finish reading one; but it also sits inline with the screen's own
+ * content instead of floating over a corner of it, so it is not in anybody's
+ * way while it waits and does not need the 9s an error message gets. Seven is
+ * roughly thirty Chinese characters at an unhurried pace, which is longer than
+ * any banner text in this application.
+ */
+const BANNER_TTL_MS = 7000
+
+/**
+ * The gap between "start leaving" and "gone", which has to match
+ * `.banner--leaving`'s fade in the stylesheet.
+ *
+ * Same arrangement — and the same caveat — as `INK_BLOOM_MS` in
+ * `ScheduleView`: a CSS animation's duration cannot be read back out into a
+ * `setTimeout`, so this is a second copy of the same number rather than a
+ * shared source. Drift and the element unmounts slightly before or after its
+ * own fade finishes; nothing else depends on the two staying equal.
+ */
+const BANNER_LEAVE_MS = 220
+
 export function Banner({
   tone = 'info',
   title,
@@ -356,7 +383,7 @@ export function Banner({
   children?: ReactNode
   action?: ReactNode
   /**
-   * Survive the phone's cull of `banner--info`.
+   * Survive the phone's cull of `banner--info` — and the timer below.
    *
    * A phone hides every info banner (see the `@media (max-width: 760px)` block
    * in app.css) on the reasoning that they explain how a screen works and a
@@ -366,10 +393,80 @@ export function Banner({
    * refused to overwrite, and hiding it is precisely how auto-fill comes to look
    * broken. The `:not(.banner--keep)` escape hatch already existed in the
    * stylesheet for exactly this; this is the prop that reaches it.
+   *
+   * It now means one more thing, which is the same thing: a caller who has said
+   * this message must not be hidden has also said it must not time out. See
+   * `transient`.
    */
   keep?: boolean
 }) {
+  const { t } = useI18n()
   const Icon = tone === 'success' ? IconCheckCircle : tone === 'info' ? IconInfo : IconAlert
+
+  /**
+   * Three states rather than a boolean, because "leaving" is a real one: the
+   * element has to stay mounted for as long as its fade takes to play, and
+   * `gone` has to be distinguishable from `shown` or the fade would restart on
+   * the next render.
+   */
+  const [phase, setPhase] = useState<'shown' | 'leaving' | 'gone'>('shown')
+
+  /**
+   * Which banners go away on their own, and which are only ever dismissed by
+   * the person reading them.
+   *
+   * `info` and `success` report something that *happened* — a backup was
+   * written, three fields were filled in for you — and the fact stays true
+   * whether the sentence is still on screen or not. `warning` and `danger`
+   * report something that is *still the case*: "no receiving account is
+   * configured" is not news, it is a condition, and a condition that quietly
+   * vanished after seven seconds would be read as "so it fixed itself". Those
+   * two keep their place and get the close button instead, which is the user
+   * saying "seen it" — a claim only the user is in a position to make.
+   */
+  const transient = !keep && (tone === 'info' || tone === 'success')
+
+  /**
+   * Take it off screen, through the fade where there is one.
+   *
+   * `prefers-reduced-motion` is asked at the moment of dismissal rather than
+   * assumed either way. theme.css's global block already cuts animation
+   * durations to 0.01ms under that setting, so the leaving phase would be
+   * `BANNER_LEAVE_MS` of nothing visibly happening followed by an unmount;
+   * going straight to `gone` is the same result without the wait.
+   */
+  const dismiss = useCallback(() => {
+    const reduced =
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    setPhase(reduced ? 'gone' : 'leaving')
+  }, [])
+
+  /*
+   * A new message is a new banner, even inside the same mounted element.
+   * Several callers swap a banner's text in place rather than re-keying it —
+   * the account dialog's test-connection strip is the same `<Banner>` saying
+   * three different things over one dialog's life — and a replacement that
+   * arrived after the timer had run would never be seen at all. Setting the
+   * phase it already has is a no-op React bails out of, so the renders where
+   * nothing changed pay nothing for this.
+   */
+  useEffect(() => setPhase('shown'), [title, tone])
+
+  useEffect(() => {
+    if (!transient || phase !== 'shown') return
+    const timer = window.setTimeout(dismiss, BANNER_TTL_MS)
+    return () => window.clearTimeout(timer)
+  }, [transient, phase, dismiss])
+
+  useEffect(() => {
+    if (phase !== 'leaving') return
+    const timer = window.setTimeout(() => setPhase('gone'), BANNER_LEAVE_MS)
+    return () => window.clearTimeout(timer)
+  }, [phase])
+
+  if (phase === 'gone') return null
+
   return (
     <div
       className={`banner banner--${tone}${keep ? ' banner--keep' : ''}${
@@ -378,7 +475,7 @@ export function Banner({
         // characters wide. `--stack` is what app.css hangs the phone rule off;
         // it is emitted only where there is an action, so nothing else moves.
         action ? ' banner--stack' : ''
-      }`}
+      }${phase === 'leaving' ? ' banner--leaving' : ''}`}
       role={tone === 'danger' ? 'alert' : undefined}
     >
       <Icon className="banner__icon" size={16} />
@@ -387,6 +484,21 @@ export function Banner({
         {children}
       </div>
       {action}
+      {/*
+        Every banner can be closed, including the ones that never close
+        themselves — that is the whole of what `warning` and `danger` get in
+        place of a timer, and a banner reporting a condition the user has
+        already decided to live with should not be a permanent tax on the
+        screen it sits in.
+
+        An `IconButton` rather than a bespoke cross so it inherits the 48px
+        touch floor `icon-btn` already carries (`check:tap`), and
+        `t('common.close')` rather than a word of its own because this is the
+        same act the dialog header's cross performs.
+      */}
+      <IconButton className="banner__close" label={t('common.close')} onClick={dismiss}>
+        <IconX size={15} />
+      </IconButton>
     </div>
   )
 }
@@ -556,10 +668,18 @@ export function Modal({
       // first real field. Prefer the body, and only fall back to the whole
       // panel (which is how a content-less confirm dialog still gets a
       // focused Cancel/OK) when the body has nothing focusable in it.
+      //
+      // `.banner__close` is excluded for the same reason the header's cross is
+      // not searched for: several dialogs open with a `Banner` above their
+      // first field (the account dialog's auto-fill report, the send-test
+      // result), and now that a banner carries a dismiss button that button is
+      // the first focusable in the body. Landing on it would put the keyboard
+      // on "throw this message away" instead of on the thing the dialog was
+      // opened to edit.
+      const focusable = 'input, textarea, select, button:not(.banner__close), [tabindex]'
       const target =
-        bodyRef.current?.querySelector<HTMLElement>(
-          'input, textarea, select, button, [tabindex]',
-        ) ?? panel.querySelector<HTMLElement>('input, textarea, select, button, [tabindex]')
+        bodyRef.current?.querySelector<HTMLElement>(focusable) ??
+        panel.querySelector<HTMLElement>(focusable)
       target?.focus()
     }, 30)
     return () => {
@@ -622,6 +742,7 @@ export function useToast(): ToastApi {
 }
 
 export function ToastProvider({ children }: { children: ReactNode }) {
+  const { t } = useI18n()
   const [toasts, setToasts] = useState<Toast[]>([])
 
   const push = useCallback((toast: Omit<Toast, 'id'>) => {
@@ -640,19 +761,29 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     <ToastContext.Provider value={api}>
       {children}
       <div className="toasts" role="status" aria-live="polite">
-        {toasts.map((t) => {
+        {/* `toast`, not `t` — the row used to be named for the one letter this
+            component now needs for the translator. */}
+        {toasts.map((toast) => {
           const Icon =
-            t.tone === 'success' ? IconCheckCircle : t.tone === 'error' ? IconAlert : IconInfo
+            toast.tone === 'success'
+              ? IconCheckCircle
+              : toast.tone === 'error'
+                ? IconAlert
+                : IconInfo
           return (
-            <div className={`toast toast--${t.tone}`} key={t.id}>
+            <div className={`toast toast--${toast.tone}`} key={toast.id}>
               <Icon className="toast__icon" size={17} />
               <div className="toast__body">
-                <div className="toast__title">{t.title}</div>
-                {t.detail ? <div className="toast__detail">{t.detail}</div> : null}
+                <div className="toast__title">{toast.title}</div>
+                {toast.detail ? <div className="toast__detail">{toast.detail}</div> : null}
               </div>
+              {/* `t('common.close')`, like every other close button in the
+                  app. The literal 'Dismiss' that used to be here was the one
+                  control whose accessible name a Chinese screen reader read
+                  out in English. */}
               <IconButton
-                label="Dismiss"
-                onClick={() => setToasts((prev) => prev.filter((x) => x.id !== t.id))}
+                label={t('common.close')}
+                onClick={() => setToasts((prev) => prev.filter((x) => x.id !== toast.id))}
               >
                 <IconX size={15} />
               </IconButton>

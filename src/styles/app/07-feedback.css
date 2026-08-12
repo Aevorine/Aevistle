@@ -29,6 +29,119 @@
 .banner__title {
   font-weight: 700;
 }
+
+/*
+ * The close button, on the banners that carry one.
+ *
+ * No positioning: `.banner` is a flex row and this is the last item in it, so
+ * it is already at the trailing edge — `19-runecircuit.css` owns the one rule
+ * that keeps it there when `.banner__body` stops growing at the reading cap
+ * before the row does. Top-right rather than centred, because `.banner` is
+ * `align-items: flex-start` and a message that wraps to three lines must not
+ * move the X to the middle of them.
+ *
+ * ## Why two sizes and not one 48px square
+ *
+ * `ui.tsx` renders this as `icon-btn banner__close`, and `check:tap` reads a
+ * control's first non-modifier class as its *kind*, then fails any kind that
+ * renders at two heights at one viewport. A flat 48px here made every
+ * `.icon-btn` in the app "a control that is sometimes 36 and sometimes 48",
+ * and the gate said so on the laptop viewport — 36px in the sidebar footer and
+ * on every list row, 48px in a banner, one kind, two heights.
+ *
+ * So this follows the same ladder `.icon-btn` is already on rather than
+ * inventing a rung beside it: `--ctl-sm` (36px) where there is a pointer, and
+ * `--tap-min` (48px) on the mobile shell, which is exactly what
+ * `16-mail.css` and `20-short.css` do to `.icon-btn` itself and for the same
+ * reason — a finger is not a cursor, and an 820px tablet has no width query
+ * that can tell you which one is on the glass. Stated here in full rather than
+ * left to those two rules, so the button keeps its size if the `icon-btn`
+ * class is ever dropped from the markup.
+ *
+ * ## Why the negative margins
+ *
+ * The banner's own padding is 12px top and bottom, so an untrimmed button
+ * would set the row's height and make every banner that can be dismissed
+ * taller than the same banner that cannot — 24px taller at the mobile size.
+ * Pulling 12px off each block edge leaves a 24px outer box at 48px, and 12px
+ * at 36px, both under the 28px that one line of body text already occupies. So
+ * the target keeps its full size, its top sits on the banner's own top edge,
+ * and no banner changes height. `.homehero__search` makes the same trade for
+ * the same reason.
+ *
+ * The trim is scoped to a close that sits directly after the body, i.e. the one
+ * on the first line. A banner with an action *and* a close carries
+ * `.banner--stack`, whose narrow-screen rule wraps that pair onto a line of
+ * their own; a negative top margin there would pull the X up through the
+ * sentence above it. On that line it stays a plain full-size item in a
+ * full-size row, which is what the action button beside it already is.
+ */
+.banner__close {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: var(--ctl-sm);
+  height: var(--ctl-sm);
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  /* The tone's own ink. `--info` / `--warning` / `--danger` / `--success` are
+     set as `color` on `.banner` itself, and a grey X on a red banner reads as
+     a disabled control rather than as part of the message. */
+  color: inherit;
+  cursor: pointer;
+}
+:root[data-shell="mobile"] .banner__close {
+  width: var(--tap-min);
+  height: var(--tap-min);
+}
+.banner__body + .banner__close {
+  margin-block: calc(var(--sp-3) * -1);
+  margin-inline-end: calc(var(--sp-4) * -1);
+}
+.banner__close:hover {
+  background: color-mix(in srgb, currentColor 14%, transparent);
+}
+
+/*
+ * Leaving.
+ *
+ * A banner that dismisses itself on a timer fades; it does not blink out.
+ * Something that disappears between two frames reads as a glitch — the eye
+ * catches the change and not the reason for it — and one `--dur` of fade is
+ * the whole difference between "that went away" and "did I just break
+ * something?". `forwards` holds the last frame, so the banner stays gone if
+ * whatever set this class needs another tick to unmount it, and
+ * `pointer-events: none` stops the action button inside a half-faded banner
+ * from being pressed on the way out.
+ *
+ * Opacity only, no slide: this class can land on a banner sitting above a
+ * form, and a translate would drag the rest of the column with it.
+ */
+.banner--leaving {
+  animation: banner-out var(--dur) var(--ease) forwards;
+  pointer-events: none;
+}
+@keyframes banner-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+/* theme.css already crushes every animation to 0.01ms under this query, so the
+   banner ends up hidden and an `animationend` listener still fires. What that
+   blanket rule does not do is state what the reduced-motion version *is* —
+   this does, and it keeps the end state correct if the blanket rule is ever
+   narrowed. */
+@media (prefers-reduced-motion: reduce) {
+  .banner--leaving {
+    opacity: 0;
+  }
+}
+
 .banner--info {
   background: var(--info-bg);
   border-color: color-mix(in srgb, var(--info) 26%, transparent);
