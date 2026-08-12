@@ -1705,8 +1705,9 @@
  * The phone counterpart to the grid above — see `components/SettingsSection.tsx`
  * for why the structure changes rather than the styling.
  *
- * A plain column, not a grid: every child is either the heading, a banner, or
- * one full-width row, and there is never a second column to place anything in.
+ * A plain column, not a grid: every child is either the heading, a banner, the
+ * index (`.settingsindex`, in 25-settings.css) or one of the sixteen zero-height
+ * section anchors, and there is never a second column to place anything in.
  */
 .view__inner--list {
   display: flex;
@@ -1735,6 +1736,12 @@
  * scrolling past. The chevron is not decoration — it is the only thing
  * distinguishing "this opens something" from "this is a heading", and the
  * rows below it look exactly like headings without it.
+ *
+ * This block owns the row's *height* and nothing else may change it:
+ * `check-tap-targets.mjs` pools one height per kind of control across every
+ * screen in the app, so a variant that grew a row by four pixels would fail as
+ * ".settingsrow renders at 2 heights". The grouping, the inline value and the
+ * action variant are all in 25-settings.css and all stay inside this box.
  */
 .settingsrow {
   display: flex;

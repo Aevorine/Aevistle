@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
   Banner,
   Button,
@@ -17,6 +17,7 @@ import {
 import {
   IconAlert,
   IconCalendar,
+  IconChevronRight,
   IconDatabase,
   IconDownload,
   IconExternal,
@@ -47,7 +48,7 @@ import { ControlCard } from './ControlCard'
 import { CalendarSubscribeCard } from './CalendarSubscribeCard'
 import { SectionNav } from '../components/SectionNav'
 import { SettingsSection } from '../components/SettingsSection'
-import { useMobileShell } from '../components/useNarrow'
+import { useMobileShell, useTwoPane } from '../components/useNarrow'
 import {
   accountGroupKey,
   accountLabel,
@@ -133,6 +134,97 @@ const ACCENT_CYBERS: Array<{ id: AccentCyber; labelKey: TranslationKey }> = [
 
 const REPO_URL = 'https://github.com/Aevorine/Aevistle'
 
+/**
+ * What a row promises when you tap it.
+ *
+ * `panel` opens a set of preferences you change and leave changed. `action` is
+ * a one-shot verb — back this up, move it to another device — which is a
+ * different kind of thing to find in a list of settings and is drawn as one
+ * (see `.settingsrow--action` in `styles/app/25-settings.css`). The distinction
+ * is not decoration: a preference row is safe to open out of curiosity, and an
+ * action row is where the irreversible things live.
+ */
+type SettingsRowKind = 'panel' | 'action'
+
+/**
+ * The phone index: four groups, sixteen rows, in the order they are read.
+ *
+ * ## Why this table and not sixteen self-drawing rows
+ *
+ * Each section used to draw its own row from inside `SettingsSection`, and four
+ * of them (`set-digest`, `set-greetings`, `set-calendarsub`, `set-devices`)
+ * drew none at all because `HomeView` already had tiles for them. Twelve rows,
+ * sixteen sections: opening Settings to look for the daily digest found nothing
+ * and pointed nowhere, and three of the four missing ones sat behind Home's 更多
+ * at three taps. The Home tiles stay — two doors into one room is right when
+ * both doors are where somebody would look — but Settings has to be one of
+ * them.
+ *
+ * A row cannot decide its own position in a group, so the order lives here
+ * rather than in the sixteen sections below. This table is also the single
+ * source of every section's *name*: the row title, the dialog title and the
+ * wide window's jump-bar entry are all `t(labelKey)` from this one place, so a
+ * row that opens a dialog with a different name on it is not a thing that can
+ * happen.
+ *
+ * The ids are the anchor ids the sections emit, which is what
+ * `scripts/layout-probe.mjs` finds them by — an id that drifted here would show
+ * up immediately as a row that opens nothing.
+ */
+const SETTINGS_GROUPS: Array<{
+  captionKey: TranslationKey
+  rows: Array<{ id: string; labelKey: TranslationKey; icon: ReactNode; kind: SettingsRowKind }>
+}> = [
+  {
+    captionKey: 'settings.group.common',
+    rows: [
+      { id: 'set-appearance', labelKey: 'settings.appearance', icon: <IconSun size={17} />, kind: 'panel' },
+      { id: 'set-notifications', labelKey: 'settings.notifications', icon: <IconAlert size={17} />, kind: 'panel' },
+      { id: 'set-sending', labelKey: 'settings.sending', icon: <IconSend size={17} />, kind: 'panel' },
+    ],
+  },
+  {
+    captionKey: 'settings.group.mail',
+    rows: [
+      { id: 'set-accounts', labelKey: 'account.title', icon: <IconMail size={17} />, kind: 'panel' },
+      { id: 'set-privacy', labelKey: 'settings.privacy', icon: <IconShield size={17} />, kind: 'panel' },
+      { id: 'set-digest', labelKey: 'settings.digest', icon: <IconFileText size={17} />, kind: 'panel' },
+      { id: 'set-greetings', labelKey: 'settings.greetings', icon: <IconStar size={17} />, kind: 'panel' },
+    ],
+  },
+  {
+    captionKey: 'settings.group.data',
+    rows: [
+      { id: 'set-backup', labelKey: 'backup.title', icon: <IconDatabase size={17} />, kind: 'action' },
+      { id: 'set-transfer', labelKey: 'transfer.title', icon: <IconSend size={17} />, kind: 'action' },
+      { id: 'set-devices', labelKey: 'devices.title', icon: <IconLink size={17} />, kind: 'panel' },
+      /* Renamed from `cal.subscribe.toggle` — "Publish the working calendar for
+         subscription" is what the switch inside does, and a switch's sentence is
+         not a place's name. The switch keeps its own wording. */
+      { id: 'set-calendarsub', labelKey: 'settings.row.calendarSub', icon: <IconCalendar size={17} />, kind: 'panel' },
+      { id: 'set-data', labelKey: 'data.title', icon: <IconFolder size={17} />, kind: 'panel' },
+      /* Same again, from `pairing.file.export` — "Save an encrypted pairing
+         file" is the button, and the button is still called that inside. The
+         two were not merged with the control interface below: one row is one
+         promise, and "pairing and control" behind a single row would be two. */
+      { id: 'set-pairingfile', labelKey: 'settings.row.pairingFile', icon: <IconKey size={17} />, kind: 'panel' },
+      { id: 'set-control', labelKey: 'control.title', icon: <IconGlobe size={17} />, kind: 'panel' },
+    ],
+  },
+  {
+    captionKey: 'settings.group.about',
+    rows: [
+      { id: 'set-update', labelKey: 'update.title', icon: <IconDownload size={17} />, kind: 'panel' },
+      { id: 'set-about', labelKey: 'settings.about', icon: <IconInfo size={17} />, kind: 'panel' },
+    ],
+  },
+]
+
+/** Section id → the one key that names it, everywhere it is named. */
+const SECTION_LABEL_KEYS: Record<string, TranslationKey> = Object.fromEntries(
+  SETTINGS_GROUPS.flatMap((group) => group.rows.map((row) => [row.id, row.labelKey])),
+)
+
 export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: boolean }) {
   const {
     state,
@@ -165,8 +257,100 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
    */
   const narrow = useMobileShell(bridge?.platform === 'android')
 
+  /**
+   * 600-839px: the index and the section it opens, side by side.
+   *
+   * The same hook the Inbox reads for the same band — see `useNarrow.ts`. One
+   * hook rather than one test per screen, because the two screens that split
+   * have to split at the same width or the app changes shape twice on the way
+   * across one drag, which is the defect this whole round exists to remove.
+   *
+   * It changes nothing about what a section *is*: `SettingsSection` still
+   * renders each one either as markup on the page or as a full-height dialog,
+   * and here it is told "as markup" for exactly the one that is selected and
+   * "as a dialog, shut" for the other fifteen. So the pane holds the same
+   * component tree the phone dialog holds and the desktop page holds — there
+   * is no third rendering of a section to keep in step.
+   */
+  const twoPane = useTwoPane()
+
   /** Passed to every section so the dialog's close button is translated once, here, rather than sixteen times. */
   const closeLabel = t('common.close')
+
+  /**
+   * Which section's dialog is open, on a phone.
+   *
+   * One piece of state for all sixteen rather than one `useState` inside each
+   * section, because the rows are now an index (`SETTINGS_GROUPS`) and the
+   * index has to be able to open a section it does not contain the markup of.
+   * It also makes "two dialogs at once" unrepresentable, which sixteen
+   * independent booleans did not.
+   */
+  const [openSection, setOpenSection] = useState<string | null>(null)
+  const closeSection = useCallback(() => setOpenSection(null), [])
+
+  /**
+   * Which section the two-pane band is showing.
+   *
+   * `null` — nothing tapped yet — is a legitimate state on a phone, where it
+   * means "the index, no dialog". Beside a pane it would mean an empty half
+   * of the screen on arrival, which says nothing and looks broken, so the band
+   * falls back to the first row of the first group. Derived rather than
+   * written into `openSection` on mount: a default that is state has to be
+   * cleared again when the window narrows, and the version of this that forgot
+   * to do that opened a dialog on a phone nobody had asked for.
+   */
+  const selectedSection = twoPane ? (openSection ?? SETTINGS_GROUPS[0].rows[0].id) : openSection
+
+  /**
+   * "Is this section a dialog, rather than markup on the page?" — the question
+   * `SettingsSection`'s `narrow` prop actually asks.
+   *
+   * On a phone: all sixteen, one of which is open. On a desktop: none, all
+   * sixteen are cards. In the band: the selected one is markup — so it renders
+   * into the pane — and the other fifteen stay shut dialogs, which is how only
+   * one section's markup exists at a time without `SettingsSection` needing a
+   * third mode.
+   */
+  const dialogFor = useCallback(
+    (id: string) => (twoPane ? selectedSection !== id : narrow),
+    [twoPane, selectedSection, narrow],
+  )
+
+  /**
+   * Leaving the band puts the index back.
+   *
+   * Selecting a row in the two-pane layout writes to the same `openSection`
+   * the phone opens dialogs from — deliberately, so that widening a window
+   * carries the section you were reading straight into the pane. Narrowing has
+   * to be handled, though, and was not: dragging a 768px window down to a
+   * phone width left `openSection` set and a full-height dialog opened over
+   * the index, on a screen nobody had tapped. Measured, not reasoned about —
+   * the browser run for this change hit it and could not get back to the tab
+   * bar.
+   *
+   * The clear is in the cleanup rather than in an effect that watches for
+   * `!twoPane`, so it fires exactly on the true→false transition and never on
+   * a phone that was never in the band.
+   */
+  useEffect(() => {
+    if (!twoPane) return
+    return () => setOpenSection(null)
+  }, [twoPane])
+
+  /** The one name a section has — row title, dialog title and jump-bar entry. */
+  const sectionLabel = useCallback((id: string) => t(SECTION_LABEL_KEYS[id]), [t])
+
+  /**
+   * The update check's answer, for the Updates row's inline value.
+   *
+   * Read from the shared store rather than by asking again: `App` runs the
+   * check at launch and `UpdateCard` below reads the same two functions, so
+   * this is the answer that already exists. A row that triggered a network
+   * request to draw itself would turn opening Settings into an update check.
+   */
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(() => lastUpdateCheck())
+  useEffect(() => onUpdateCheck(setUpdateInfo), [])
 
   /**
    * The jump bar's entries.
@@ -188,25 +372,26 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
    * in one position while the section it names sat in a different one.
    */
   const navSections = useMemo(
-    () => [
-      { id: 'set-accounts', label: t('account.title') },
-      { id: 'set-data', label: t('data.title') },
-      { id: 'set-backup', label: t('backup.title') },
-      { id: 'set-transfer', label: t('transfer.title') },
-      { id: 'set-pairingfile', label: t('pairing.file.export') },
-      { id: 'set-devices', label: t('settings.devices') },
-      { id: 'set-control', label: t('control.title') },
-      { id: 'set-calendarsub', label: t('cal.subscribe.toggle') },
-      { id: 'set-update', label: t('update.title') },
-      { id: 'set-appearance', label: t('settings.appearance') },
-      { id: 'set-sending', label: t('settings.sending') },
-      { id: 'set-digest', label: t('settings.digest') },
-      { id: 'set-greetings', label: t('settings.greetings') },
-      { id: 'set-notifications', label: t('settings.notifications') },
-      { id: 'set-privacy', label: t('settings.privacy') },
-      { id: 'set-about', label: t('settings.about') },
-    ],
-    [t],
+    () =>
+      [
+        'set-accounts',
+        'set-data',
+        'set-backup',
+        'set-transfer',
+        'set-pairingfile',
+        'set-devices',
+        'set-control',
+        'set-calendarsub',
+        'set-update',
+        'set-appearance',
+        'set-sending',
+        'set-digest',
+        'set-greetings',
+        'set-notifications',
+        'set-privacy',
+        'set-about',
+      ].map((id) => ({ id, label: sectionLabel(id) })),
+    [sectionLabel],
   )
   const toast = useToast()
   const { confirm, confirmElement } = useConfirm()
@@ -282,6 +467,112 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
     disabled: state.accounts.length < 2,
   })
 
+  /**
+   * The account the app sends as — the one fact the top of this screen is for.
+   *
+   * `hasSecret` (through `needsStoredPassword`, so an OAuth2 grant is not
+   * reported as a missing password) is the whole health check, deliberately:
+   * it is already on screen in the account list below, it is the difference
+   * between an account that can send and one that cannot, and it costs nothing.
+   * No probe, no connection test, no new field — a chip at the top of Settings
+   * that opened a socket every time the screen mounted would be a worse bug
+   * than the one it reports.
+   */
+  const defaultAccount = useMemo(() => {
+    if (state.accounts.length === 0) return undefined
+    return state.accounts.find((a) => a.id === s.defaultAccountId) ?? state.accounts[0]
+  }, [state.accounts, s.defaultAccountId])
+  const identityNeedsAttention = !defaultAccount || needsStoredPassword(defaultAccount)
+
+  /**
+   * What each row says about itself, on the right-hand side.
+   *
+   * This is not garnish. Below 760px every `hint` and `description` in this
+   * application is hidden by the stylesheet, so on the screen this index exists
+   * for, a row is a name and a chevron and nothing else — "Sending" with no way
+   * to learn whether quiet hours are on without opening it. The value is the
+   * only channel left, which is why each string carries its own noun ("Quiet
+   * 22:00–07:00", "Log kept 30 days") rather than a bare state word: a row may
+   * report a different fact when the first one does not exist yet, and a value
+   * that names itself stays readable when it does.
+   *
+   * Every one of these is read from state this screen already holds. Nothing
+   * here starts a request.
+   */
+  const rowValues = useMemo<Record<string, string | undefined>>(() => {
+    const themeLabel = t(
+      s.themeMode === 'light'
+        ? 'settings.themeLight'
+        : s.themeMode === 'dark'
+          ? 'settings.themeDark'
+          : 'settings.themeSystem',
+    )
+    const scale = s.textScale ?? 'standard'
+    const scaleLabel = t(
+      scale === 'large'
+        ? 'settings.textScaleLarge'
+        : scale === 'larger'
+          ? 'settings.textScaleLarger'
+          : 'settings.textScaleStandard',
+    )
+    const notifyOn = [s.notifyOnSuccess, s.notifyOnFailure, s.notifyOnCode !== false].filter(
+      Boolean,
+    ).length
+    const blocking = state.inboxAccounts.some(
+      (inbox) => effectiveImagePolicy(inbox.showRemoteImages, s.imagePolicyChosen) !== 'always',
+    )
+    const countryKey = HOLIDAY_PRESETS.find((p) => p.id === s.greetingCountry)?.labelKey
+    /* The folder's name, not its path: a phone's data location is forty
+       characters of `/storage/emulated/0/…` and the row is one line. The full
+       path is inside, on the About card, where there is room for it. */
+    const folder = (info?.dataLocation ?? '')
+      .split(/[\\/]/)
+      .filter(Boolean)
+      .pop()
+    return {
+      'set-appearance': `${themeLabel} · ${scaleLabel}`,
+      'set-notifications':
+        notifyOn === 0 ? t('settings.value.allOff') : t('settings.value.onCount', { n: notifyOn }),
+      'set-sending': s.quietHoursEnabled
+        ? t('settings.value.quiet', { from: s.quietStart, to: s.quietEnd })
+        : t('settings.value.quietOff'),
+      'set-accounts': t('settings.value.accounts', { n: state.accounts.length }),
+      /* Remote images when there is a mailbox to receive any, and the log
+         retention when there is not — the setting on this card somebody is most
+         likely to have an opinion about, in either case. */
+      'set-privacy':
+        state.inboxAccounts.length === 0
+          ? t('settings.value.logDays', { n: s.logRetentionDays })
+          : blocking
+            ? t('settings.value.imagesBlocked')
+            : t('settings.value.imagesShown'),
+      'set-digest': s.digestEnabled
+        ? t('settings.value.dailyAt', { time: s.digestTime })
+        : t('settings.value.off'),
+      'set-greetings': countryKey ? t(countryKey as TranslationKey) : undefined,
+      'set-devices':
+        state.pairedDevices.length === 0
+          ? t('settings.value.noDevices')
+          : t('settings.value.devices', { n: state.pairedDevices.length }),
+      'set-calendarsub': s.calendarSubscribeEnabled
+        ? t('settings.value.on')
+        : t('settings.value.off'),
+      'set-data': folder,
+      'set-control': s.controlEnabled ? t('settings.value.on') : t('settings.value.off'),
+      /* Silent when the check itself failed. "Up to date" would be a claim
+         nothing behind it supports, and this row is one line with no room to
+         explain the difference — the card inside says so properly. */
+      'set-update': !updateInfo
+        ? undefined
+        : updateInfo.available
+          ? t('settings.value.updateReady', { version: updateInfo.latest })
+          : updateInfo.error
+            ? undefined
+            : t('settings.value.latest', { version: updateInfo.current }),
+      'set-about': info?.version ?? __APP_VERSION__,
+    }
+  }, [t, s, state.accounts.length, state.inboxAccounts, state.pairedDevices.length, info, updateInfo])
+
   const removeAccount = async (account: MailAccount) => {
     const ok = await confirm({
       title: t('account.deleteConfirm'),
@@ -307,8 +598,102 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
     toast.push({ tone: 'info', title: t('common.done') })
   }
 
+  /* --- the index --------------------------------------------------------
+     Sixteen rows in four groups, and one card above them naming the account
+     this app sends as. The card is not a sixteenth setting: it is the answer
+     to "is this thing working", which is the question somebody actually
+     arrives on this screen with, and it is a door into the accounts section
+     rather than a second place to edit one.
+
+     Held as a value rather than written inline because it is rendered in two
+     different places — inside the scrolling column on a phone, and as the left
+     pane of its own in the 600-839px band. Two copies of it would be two lists
+     of sixteen rows to keep in the same order. */
+  const settingsIndex = (
+    <div className="settingsindex">
+      <button
+        type="button"
+        className="settingsid"
+        onClick={() => setOpenSection('set-accounts')}
+      >
+        <span className="settingsid__avatar" aria-hidden="true">
+          <IconMail size={20} />
+        </span>
+        <span className="settingsid__body">
+          <span className="settingsid__name">
+            {defaultAccount ? accountLabel(defaultAccount) : t('settings.identityNoAccount')}
+          </span>
+          {defaultAccount ? (
+            <span className="settingsid__address">{defaultAccount.fromAddress}</span>
+          ) : null}
+        </span>
+        <StatusChip
+          tone={identityNeedsAttention ? 'warning' : 'success'}
+          label={
+            identityNeedsAttention
+              ? t('settings.identityAttention')
+              : t('settings.identityHealthy')
+          }
+          dot
+        />
+        <IconChevronRight size={16} className="settingsrow__chevron" />
+      </button>
+
+      {SETTINGS_GROUPS.map((group) => (
+        <div className="settingsgroup" key={group.captionKey}>
+          <div className="settingsgroup__caption">{t(group.captionKey)}</div>
+          <div className="settingsgroup__list">
+            {group.rows.map((row) => {
+              const value = rowValues[row.id]
+              return (
+                <button
+                  key={row.id}
+                  type="button"
+                  className={`settingsrow settingsrow--${row.kind}`}
+                  /* Beside a pane the row is no longer a door you go through
+                     and come back from — it is a tab, and the one whose
+                     section is showing has to say so, or tapping a row
+                     changes the right half of the screen and nothing on the
+                     left half moves. Only in the band: on a phone the row
+                     opens a dialog and there is nothing to mark as current
+                     once it closes. */
+                  aria-current={twoPane && selectedSection === row.id ? 'true' : undefined}
+                  onClick={() => setOpenSection(row.id)}
+                >
+                  <span className="settingsrow__icon">{row.icon}</span>
+                  <span className="settingsrow__label">{t(row.labelKey)}</span>
+                  {/* An action row carries no value: "Backup and restore"
+                      has no current state, it has a thing it does, and a
+                      grey word beside it would only look like one. */}
+                  {row.kind === 'panel' && value ? (
+                    <span className="settingsrow__value">{value}</span>
+                  ) : null}
+                  <IconChevronRight size={16} className="settingsrow__chevron" />
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+
   return (
-    <div className="view view--settings">
+    /* Two columns in the 600-839px band, one everywhere else. The left pane is
+       the index; the right one is `.view__inner`, which already holds every
+       section and needed no rearranging to become a pane — only a scroller of
+       its own. */
+    <div className={`view view--settings${twoPane ? ' view--twopane' : ''}`}>
+      {twoPane ? (
+        <div className="twopane__list">
+          {/* The palette button belongs over the index, not over the section.
+              It opens the command palette for the whole app, and a lone
+              magnifying glass at the top of a panel showing "Appearance" reads
+              as a search of that panel. */}
+          <PageHead title={t('nav.settings')} hideTitle />
+          {settingsIndex}
+        </div>
+      ) : null}
       {/* A grid, not a column — on a desktop. Sixteen cards stacked one per row
           is a ribbon of settings down the middle of a 2560px monitor with
           nothing either side of it; the anchor markers span the full width so
@@ -318,7 +703,11 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
           holds there is not cards but rows (see `SettingsSection`), which want
           to sit flush against each other as a single list rather than floating
           apart with card gaps between them. `--list` is that difference. */}
-      <div className={`view__inner ${narrow ? 'view__inner--list' : 'view__inner--grid'}`}>
+      <div
+        className={`view__inner ${narrow ? 'view__inner--list' : 'view__inner--grid'}${
+          twoPane ? ' twopane__detail' : ''
+        }`}
+      >
         {/* No page *heading*: the tab already highlighted at the bottom (or
             side) of the window says "设置" the moment this screen is open, and
             repeating it here was the only thing this head ever held.
@@ -330,7 +719,7 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
             without a keyboard. The band costs one control's height and only on
             a phone; on a desktop the button is hidden and this collapses to
             nothing, which is what it was before. */}
-        <PageHead title={t('nav.settings')} hideTitle />
+        {twoPane ? null : <PageHead title={t('nav.settings')} hideTitle />}
 
 
         {/* Top of the screen, not tucked into the data card: an app that came
@@ -360,13 +749,19 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
             IntersectionObserver over eight elements on exactly that value. */}
         {narrow ? null : <SectionNav sections={navSections} />}
 
+        {/* On a phone the index is the screen, so it belongs in the column
+            with everything else. In the band it is the left pane and is
+            rendered above, outside this box. */}
+        {narrow && !twoPane ? settingsIndex : null}
+
         {/* --- accounts ---------------------------------------------------- */}
         <SettingsSection
           id="set-accounts"
-          label={t('account.title')}
-          icon={<IconMail size={17} />}
-          narrow={narrow}
+          label={sectionLabel('set-accounts')}
+          narrow={dialogFor('set-accounts')}
           closeLabel={closeLabel}
+          open={openSection === 'set-accounts'}
+          onClose={closeSection}
         >
         <Card flush>
           <CardHeader
@@ -544,6 +939,47 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
             ])
           )}
         </Card>
+
+        {/* --- receiving ------------------------------------------------------
+            How often new mail is fetched, and whether the server may push.
+
+            These two lived on the inbox screen itself, in a row above the list,
+            and that row was on screen every time anyone opened their mail —
+            for a decision made once a year. They are settings, and they are
+            about the accounts listed directly above them, so this is where
+            they belong; the inbox screen got the ~300px of chrome back.
+
+            Rendered whether or not a bridge exists. `inboxSyncMinutes` and
+            `inboxPush` are read by the scheduler regardless (`AppState`), so a
+            person who has not added a mailbox yet can still say how they want
+            it checked when they do — and a block that vanishes is a block
+            nobody can find their way back to. */}
+        <Card>
+          <Field label={t('inbox.syncEvery')} hint={t('inbox.syncEveryHint')}>
+            <select
+              className="select"
+              value={String(s.inboxSyncMinutes ?? 5)}
+              onChange={(e) => patch({ inboxSyncMinutes: Number(e.target.value) })}
+            >
+              {/* `inbox.syncOff` / `inbox.syncMinutes` rather than a generic
+                  "off" and the scheduler's "in N minutes": these are the
+                  strings this control has always used, they read as a period
+                  rather than as a countdown, and they came across from the
+                  inbox screen with the control they belong to. */}
+              {[0, 1, 3, 5, 10, 15, 30, 60].map((m) => (
+                <option key={m} value={m}>
+                  {m === 0 ? t('inbox.syncOff') : t('inbox.syncMinutes', { n: m })}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Switch
+            checked={s.inboxPush !== false}
+            onChange={(v) => patch({ inboxPush: v })}
+            title={t('inbox.push')}
+            description={t('inbox.pushHint')}
+          />
+        </Card>
         </SettingsSection>
 
         {/* --- data folder --------------------------------------------------
@@ -552,10 +988,11 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
             it under six panels of preferences is why it gets missed. */}
         <SettingsSection
           id="set-data"
-          label={t('data.title')}
-          icon={<IconFolder size={17} />}
-          narrow={narrow}
+          label={sectionLabel('set-data')}
+          narrow={dialogFor('set-data')}
           closeLabel={closeLabel}
+          open={openSection === 'set-data'}
+          onClose={closeSection}
         >
           <DataFolderCard />
         </SettingsSection>
@@ -572,30 +1009,33 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
             pairing (see `core/pairingFile.ts`). */}
         <SettingsSection
           id="set-backup"
-          label={t('backup.title')}
-          icon={<IconDatabase size={17} />}
-          narrow={narrow}
+          label={sectionLabel('set-backup')}
+          narrow={dialogFor('set-backup')}
           closeLabel={closeLabel}
+          open={openSection === 'set-backup'}
+          onClose={closeSection}
         >
           <BackupCard />
         </SettingsSection>
 
         <SettingsSection
           id="set-transfer"
-          label={t('transfer.title')}
-          icon={<IconSend size={17} />}
-          narrow={narrow}
+          label={sectionLabel('set-transfer')}
+          narrow={dialogFor('set-transfer')}
           closeLabel={closeLabel}
+          open={openSection === 'set-transfer'}
+          onClose={closeSection}
         >
           <ScheduleTransferCard />
         </SettingsSection>
 
         <SettingsSection
           id="set-pairingfile"
-          label={t('pairing.file.export')}
-          icon={<IconKey size={17} />}
-          narrow={narrow}
+          label={sectionLabel('set-pairingfile')}
+          narrow={dialogFor('set-pairingfile')}
           closeLabel={closeLabel}
+          open={openSection === 'set-pairingfile'}
+          onClose={closeSection}
         >
           <PairingFileCard />
         </SettingsSection>
@@ -605,32 +1045,33 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
             managed. See `core/pairedDevices.ts` and `core/syncLoop.ts`. */}
         <SettingsSection
           id="set-devices"
-          label={t('devices.title')}
-          icon={<IconLink size={17} />}
-          narrow={narrow}
+          label={sectionLabel('set-devices')}
+          narrow={dialogFor('set-devices')}
           closeLabel={closeLabel}
-          hideOnNarrow
+          open={openSection === 'set-devices'}
+          onClose={closeSection}
         >
           <DevicesCard />
         </SettingsSection>
 
         <SettingsSection
           id="set-control"
-          label={t('control.title')}
-          icon={<IconGlobe size={17} />}
-          narrow={narrow}
+          label={sectionLabel('set-control')}
+          narrow={dialogFor('set-control')}
           closeLabel={closeLabel}
+          open={openSection === 'set-control'}
+          onClose={closeSection}
         >
           <ControlCard />
         </SettingsSection>
 
         <SettingsSection
           id="set-calendarsub"
-          label={t('cal.subscribe.toggle')}
-          icon={<IconCalendar size={17} />}
-          narrow={narrow}
+          label={sectionLabel('set-calendarsub')}
+          narrow={dialogFor('set-calendarsub')}
           closeLabel={closeLabel}
-          hideOnNarrow
+          open={openSection === 'set-calendarsub'}
+          onClose={closeSection}
         >
           <CalendarSubscribeCard />
         </SettingsSection>
@@ -647,10 +1088,11 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
 
         <SettingsSection
           id="set-update"
-          label={t('update.title')}
-          icon={<IconDownload size={17} />}
-          narrow={narrow}
+          label={sectionLabel('set-update')}
+          narrow={dialogFor('set-update')}
           closeLabel={closeLabel}
+          open={openSection === 'set-update'}
+          onClose={closeSection}
         >
           <UpdateCard />
         </SettingsSection>
@@ -658,10 +1100,11 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
         {/* --- appearance -------------------------------------------------- */}
         <SettingsSection
           id="set-appearance"
-          label={t('settings.appearance')}
-          icon={<IconSun size={17} />}
-          narrow={narrow}
+          label={sectionLabel('set-appearance')}
+          narrow={dialogFor('set-appearance')}
           closeLabel={closeLabel}
+          open={openSection === 'set-appearance'}
+          onClose={closeSection}
         >
         <Card>
           <div className="card__body">
@@ -856,10 +1299,11 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
         {/* --- sending ----------------------------------------------------- */}
         <SettingsSection
           id="set-sending"
-          label={t('settings.sending')}
-          icon={<IconSend size={17} />}
-          narrow={narrow}
+          label={sectionLabel('set-sending')}
+          narrow={dialogFor('set-sending')}
           closeLabel={closeLabel}
+          open={openSection === 'set-sending'}
+          onClose={closeSection}
         >
         <Card>
           <div className="card__body">
@@ -960,11 +1404,11 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
 
         <SettingsSection
           id="set-digest"
-          label={t('settings.digest')}
-          icon={<IconFileText size={17} />}
-          narrow={narrow}
+          label={sectionLabel('set-digest')}
+          narrow={dialogFor('set-digest')}
           closeLabel={closeLabel}
-          hideOnNarrow
+          open={openSection === 'set-digest'}
+          onClose={closeSection}
         >
         <DigestCard />
 
@@ -979,11 +1423,11 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
 
         <SettingsSection
           id="set-greetings"
-          label={t('settings.greetings')}
-          icon={<IconStar size={17} />}
-          narrow={narrow}
+          label={sectionLabel('set-greetings')}
+          narrow={dialogFor('set-greetings')}
           closeLabel={closeLabel}
-          hideOnNarrow
+          open={openSection === 'set-greetings'}
+          onClose={closeSection}
         >
         <GreetingsCard />
 
@@ -992,10 +1436,11 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
 
         <SettingsSection
           id="set-notifications"
-          label={t('settings.notifications')}
-          icon={<IconAlert size={17} />}
-          narrow={narrow}
+          label={sectionLabel('set-notifications')}
+          narrow={dialogFor('set-notifications')}
           closeLabel={closeLabel}
+          open={openSection === 'set-notifications'}
+          onClose={closeSection}
         >
         <Card>
           <div className="card__body">
@@ -1161,10 +1606,11 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
 
         <SettingsSection
           id="set-privacy"
-          label={t('settings.privacy')}
-          icon={<IconShield size={17} />}
-          narrow={narrow}
+          label={sectionLabel('set-privacy')}
+          narrow={dialogFor('set-privacy')}
           closeLabel={closeLabel}
+          open={openSection === 'set-privacy'}
+          onClose={closeSection}
         >
         <Card>
           <div className="card__body">
@@ -1379,10 +1825,11 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
 
         <SettingsSection
           id="set-about"
-          label={t('settings.about')}
-          icon={<IconInfo size={17} />}
-          narrow={narrow}
+          label={sectionLabel('set-about')}
+          narrow={dialogFor('set-about')}
           closeLabel={closeLabel}
+          open={openSection === 'set-about'}
+          onClose={closeSection}
         >
         <Card>
           <div className="card__body">

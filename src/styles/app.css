@@ -61,7 +61,19 @@
      19-runecircuit.css         486 lines   The runecircuit visual style, and the last responsive odds
      20-short.css               ~120 lines  Short windows: phone landscape, and one-primary-action-per-screen
      21-home-grid.css           ~290 lines  The phone Home screen: hero, stat strip, eight-cell function grid
-                            11164 lines   total
+     22-compose.css             ~230 lines  The phone compose header: recipients and subject, readable unfolded
+     23-codes.css               ~300 lines  The phone codes screen: the hero code card and its compact list
+     24-inbox.css               ~435 lines  The phone inbox: one title band, the two-line mail row, and 编辑 mode
+     25-settings.css            ~190 lines  The phone settings list: identity card, four groups, inline values
+     26-tablet.css              ~345 lines  600-839px: the inbox and settings as two panes instead of one
+                            12464 lines   total
+
+   Files 22-25 are round 7, and they are numbered in the order the five phone
+   tabs sit on the bar rather than in the order they were written — compose,
+   codes, home (21), inbox, settings. Order is still behaviour: each of these
+   only styles its own screen's block classes, so none of them can tie with
+   another, but they come last so that where one does meet an older rule of
+   equal specificity it wins, which is the direction a newer layer should win in.
 */
 
 @import './app/01-base.css';
@@ -85,3 +97,8 @@
 @import './app/19-runecircuit.css';
 @import './app/20-short.css';
 @import './app/21-home-grid.css';
+@import './app/22-compose.css';
+@import './app/23-codes.css';
+@import './app/24-inbox.css';
+@import './app/25-settings.css';
+@import './app/26-tablet.css';

@@ -1,0 +1,345 @@
+/* ==========================================================================
+   The tablet band — 600 to 839px, where a list and the thing it opens fit
+   side by side
+
+   Between 600px and 840px this app was the phone laid out edge to edge.
+   `--content-max` is `100%`, so the only cap on `.view__inner` was the window
+   itself: at 820px an inbox row was an 820px-wide two-line row with the
+   subject ending 500px short of the edge, and opening it threw a full-screen
+   dialog over a list that was perfectly readable underneath. Settings was the
+   same shape — sixteen rows across 820px, each one opening a dialog that
+   covered them.
+
+   That is a real device, not a corner: a 768x1024 tablet in portrait, an
+   800px phone on its side, a half-screen window on a laptop. Android calls it
+   the `medium` window size class and it is one of the three widths this app is
+   allowed (`components/useNarrow.ts`); until this file nothing keyed off it.
+
+   ## What changes, and what deliberately does not
+
+   Two columns, on the two screens where there is a list and a thing the list
+   opens:
+
+     收件箱   the message list, and the reader that was a dialog
+     设置     the sixteen grouped rows, and the section that was a dialog
+
+   Everything else is untouched. The shell is still the phone's — bottom tabs,
+   dialogs as screens, 44px targets — because the shell changes at 840, not
+   here (see `useNarrow.ts` on why those are two different questions). Below
+   600 the phone keeps its full-screen reader; at 840 and up the desktop keeps
+   what it has. Neither boundary moves.
+
+   ## Why this is a media query *and* a class
+
+   `useTwoPane()` in `useNarrow.ts` decides which box the reader and the
+   section are mounted in, because that is a difference in structure that no
+   stylesheet can express — a dialog does not become a column by being
+   restyled. The class it puts on `.view` says which arrangement React built.
+   The media query around everything below says which arrangement the window
+   is actually in, so a class left over from a resize that React has not
+   re-rendered past yet cannot lay out a row of two columns on a 360px phone.
+   Both spell the same two numbers, and `scripts/check-breakpoints.mjs` fails
+   the build if either grows a third.
+
+   Loaded last of all, after the four round-7 phone files. Order is behaviour
+   in this stylesheet (see `app.css`), and every rule here is either a new
+   block class of its own or an override of a phone rule that must win — which
+   is the direction a newer layer should win in.
+   ========================================================================== */
+
+@media (min-width: 600px) and (max-width: 839.98px) {
+  /* --- the frame ---------------------------------------------------------
+   *
+   * `.view` is a scrolling column everywhere else in the app. Here it stops
+   * scrolling and becomes the row that holds two columns that scroll, which is
+   * the whole difference between "one screen you scroll through" and "two
+   * panes you look at".
+   * ---------------------------------------------------------------------- */
+
+  .view--twopane {
+    display: flex;
+    flex-direction: row;
+    align-items: stretch;
+    gap: var(--sp-4);
+    overflow: hidden;
+  }
+
+  /*
+   * Neither column may be sized by its longest word.
+   *
+   * A flex item's automatic minimum size is its min-content width, and a
+   * column holding an email subject, a sender address or a data-folder path
+   * has a min-content width of whatever the longest unbreakable token in it
+   * happens to be. Without this the pane silently pushes the list narrower
+   * than its share and the whole view overflows sideways — which is the one
+   * thing `scripts/layout-probe.mjs` measures at 820x1180 and refuses to let
+   * past.
+   */
+  .view--twopane > .twopane__list,
+  .view--twopane > .twopane__detail {
+    min-width: 0;
+    min-height: 0;
+  }
+
+  /* --- 收件箱 --------------------------------------------------------------
+   *
+   * 4:5. The list is dense two-line rows and reaches a usable width quickly;
+   * the message is prose and never stops wanting more. At 768px that is a
+   * 320px list beside a 400px reader, and at the bottom of the band (600px) a
+   * 240px list beside a 300px reader — narrow, but both still their own
+   * shape rather than one of them crushed.
+   * ---------------------------------------------------------------------- */
+
+  .view--list.view--twopane > .twopane__list {
+    display: flex;
+    flex-direction: column;
+    flex: 4 1 0;
+  }
+  .view--list.view--twopane > .twopane__detail {
+    flex: 5 1 0;
+  }
+
+  /*
+   * The title band's hairline stops at the column edge.
+   *
+   * `.inboxbar::after` bleeds one page gutter past its box on each side so
+   * that on a phone the rule reads as a band across the whole screen. Beside
+   * a second pane there is no whole screen to cross: the bleed would draw the
+   * line out into the gutter and 16px into the reader, and an absolutely
+   * positioned child reaching past its scroller's padding box is counted in
+   * that scroller's `scrollWidth` — phantom horizontal overflow on a view
+   * that is measured for exactly that.
+   */
+  .view--twopane .inboxbar::after {
+    inset-inline: 0;
+  }
+
+  /*
+   * Which row the pane is showing.
+   *
+   * The same argument as the settings row below, on the screen where it bites
+   * harder: opening a message changes the entire right half of the window, and
+   * without a mark the list underneath a thumb looks exactly as it did before
+   * the tap. Painted on `.job` rather than on `.swipe__front` so it sits above
+   * that element's own surface, and left as a tint rather than a border so the
+   * row does not change size — `scripts/layout-probe.mjs` measures this row's
+   * height and `check-tap-targets.mjs` pools it with every other row in the
+   * app.
+   */
+  .job[data-open='true'] {
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  }
+
+  /* --- 设置 ---------------------------------------------------------------
+   *
+   * Not 4:5. The index is sixteen rows of two-to-six characters plus a value
+   * that is already capped at 45% and truncated (`25-settings.css`), so past
+   * about 18rem it is a list of short labels with a lot of nothing after
+   * them; the sections hold forms, and a form is what gets squeezed.
+   *
+   * 38% or 14rem, whichever is larger — measured, not picked. At 34% the rail
+   * was 250px at 768, and the identity card at the top of it (a 48px avatar, a
+   * status chip, a chevron and 24px of padding = ~180px of fixed furniture)
+   * had 70px left for the account name: "工作邮箱" rendered as "工作…". At 38%
+   * it is 280px and the name fits. At the very bottom of the band it is the
+   * 14rem floor — 224px — and the card truncates again; that is the narrowest
+   * two-column window this app allows and it is an ellipsis, not a break.
+   * Below 600px none of this applies — the
+   * phone index is the full width of the screen and was never squeezed.
+   * ---------------------------------------------------------------------- */
+
+  .view--settings.view--twopane > .twopane__list {
+    display: flex;
+    flex: 0 0 max(14rem, 38%);
+    flex-direction: column;
+    overflow-y: auto;
+    /* The last group must clear the bottom of the pane rather than sit
+       against it — this column ends where the window does, with no page
+       padding under it the way the scrolling phone screen had. */
+    padding-bottom: var(--sp-5);
+  }
+  .view--settings.view--twopane > .twopane__detail {
+    flex: 1 1 0;
+    overflow-y: auto;
+    padding-bottom: var(--sp-5);
+  }
+  /* The palette band sits over the index here (see `SettingsView.tsx`), where
+     on a phone it sits over the whole screen — so it needs the gap that
+     `.view__inner--list > .page-head` gives it there. */
+  .view--settings.view--twopane > .twopane__list > .page-head {
+    margin-bottom: var(--sp-3);
+  }
+
+  /*
+   * The row whose section is showing.
+   *
+   * On a phone a row is a door: you go through it and come back, and there is
+   * nothing to mark while you are back. Beside a pane it is a tab — tapping
+   * one changes the right half of the screen, and if nothing on the left half
+   * moves then the list has sixteen rows that all look equally not-pressed
+   * while one of them is. Tinted from the live accent rather than from a
+   * colour of its own, so it follows all seven visual styles and both themes.
+   *
+   * The height is untouched, deliberately: `scripts/check-tap-targets.mjs`
+   * pools `.settingsrow` heights across every screen in the app, and a
+   * selected row that is one pixel taller than its fifteen neighbours is the
+   * exact defect that rule exists to catch.
+   */
+  .settingsrow[aria-current='true'] {
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+  }
+  .settingsrow[aria-current='true'] .settingsrow__label {
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .settingsrow[aria-current='true'] .settingsrow__chevron {
+    color: var(--accent);
+  }
+
+  /* --- two controls that had never been measured on a finger ---------------
+   *
+   * `scripts/check-tap-targets.mjs` walks the five phone tabs and measures
+   * what is on them; it does not open dialogs, and until this file every
+   * control inside a settings section was behind one. So the moment the
+   * Appearance section renders in a pane instead, two of them showed up under
+   * the 44px floor for the first time:
+   *
+   *   .segmented__item          42px   theme, density, language, week start
+   *   .accent-swatches .swatch  32px   the seven accent colours
+   *
+   * Both are padding-driven and were sized for a mouse. 48px is the rung the
+   * rest of this app's controls sit on (`--ctl-md`), and it is the floor for
+   * a touch shell — which every window in this band is, since the shell does
+   * not change until 840.
+   *
+   * Said plainly: the same two controls are still 42px and 32px inside the
+   * *phone's* Appearance dialog, below 600px. That is older than this round,
+   * no gate opens that dialog, and widening the fix to every shell is a change
+   * to three screens this work was not asked to touch. It is a real finding
+   * and it is written down here rather than quietly fixed halfway.
+   */
+  .segmented__item {
+    min-height: var(--ctl-md);
+  }
+  .accent-swatches .swatch {
+    width: var(--ctl-md);
+    height: var(--ctl-md);
+  }
+
+  /* --- the detail pane ----------------------------------------------------
+   *
+   * Only the Inbox's. The Settings pane is `.view__inner` itself — it already
+   * held every section and needed nothing but a scroller — and its sections
+   * are `.card`s, which carry their own surface. A second surface behind them
+   * would be a box inside a box.
+   * ---------------------------------------------------------------------- */
+
+  .view--list.view--twopane > .twopane__detail {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    background: var(--surface-1);
+  }
+
+  /*
+   * The pane's own header: the subject, and the action row the reader built.
+   *
+   * No close button. There is nothing to close back to — the list it would
+   * return to is already on screen beside it — and the pane empties itself
+   * when the open message is deleted. `--ctl-lg` is the floor rather than the
+   * height: the three buttons in the row are `.icon-btn`s at `--ctl-md`, and
+   * a band that is exactly as tall as its tallest control has no air in it at
+   * all.
+   */
+  .detailhead {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    min-height: var(--ctl-lg);
+    padding: var(--sp-2) var(--sp-3);
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  /*
+   * 20px, the same rank the phone reader's own title takes below 840px
+   * (`--text-value`, set on `.modal__title` in 14-growth.css). One reader,
+   * one heading size — the pane and the dialog are two boxes for the same
+   * screen and a subject that changed size when the window crossed 600px
+   * would say they were two screens.
+   *
+   * Two lines, then an ellipsis. One line loses too much of a real subject at
+   * this width; three would start eating the message.
+   */
+  .detailhead__title {
+    display: -webkit-box;
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    font-size: var(--text-value);
+    font-weight: 700;
+    line-height: var(--leading-tight);
+    letter-spacing: var(--tracking-tight);
+  }
+
+  /*
+   * Three icons in the pane header, not five.
+   *
+   * 14-growth.css intends exactly this below 840px — it folds day/night, find
+   * and full screen behind one `.reader__more` trigger so the header stays
+   * flag + delete + more — but the intent does not reach the page: its
+   * `@media (max-width: 839.98px)` block sets `.reader__actionsFull` to `none`
+   * at line 981, and then the unconditional `.reader__actionsFull { display:
+   * flex }` at line 1011 restates the same property at the same specificity,
+   * later in the same file, and wins at every width. `.reader__more` is
+   * hidden by the same inversion. So the *phone* reader has been showing five
+   * inline icons and no overflow menu ever since, which is a live defect in a
+   * file this round was not given (and it is reported rather than reached
+   * into: 14-growth.css styles every screen in the app).
+   *
+   * Inside the pane it is fixed here, at a specificity that settles it, and
+   * only here. Five 48px buttons is 264px of a ~420px pane header, and one of
+   * the five is "full screen", which in a column that is already a column has
+   * nothing to toggle — `InboxView.tsx` drops that item from the menu in this
+   * band for the same reason.
+   */
+  .detailhead .reader__actionsFull {
+    display: none;
+  }
+  .detailhead .reader__more {
+    display: flex;
+  }
+
+  /*
+   * The scrolling body.
+   *
+   * It carries `modal__body--reader` as well, which is where its padding, its
+   * margins and "the frame does the growing" come from — see `ReaderShell` in
+   * `views/InboxView.tsx` for why that class is deliberately worn by an
+   * element that is not in a modal. What is left for this rule is only what a
+   * column needs that a dialog body already had: to be the scroller, and to be
+   * a flex column so `.reader__frame`'s `flex: 1` still has something to grow
+   * inside.
+   */
+  .detailpane__body {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    flex-direction: column;
+    overflow-y: auto;
+  }
+
+  /* Nothing open yet. The empty state is centred in the pane rather than
+     stacked at the top of it, because a pane with one short sentence pinned
+     to its top edge reads as a pane that failed to load. */
+  .detailpane__body--empty {
+    align-items: center;
+    justify-content: center;
+  }
+}

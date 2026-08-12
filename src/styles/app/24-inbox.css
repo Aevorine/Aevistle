@@ -1,0 +1,435 @@
+/* ==========================================================================
+   The Inbox screen — one band of chrome, and a row that spends its width on
+   the message
+
+   Measured with a real browser at 360x800, with forty messages seeded, before
+   any of this:
+
+     .page-head    68px   check-status + "Check now"
+     .segmented    56px   the account strip — for ONE account
+     .search-wrap 104px   the search box and its four scope chips
+     .btn-row      52px   auto-check frequency, select all, delete all,
+                          "全部从邮箱删除" in red
+     gaps          37px
+     ------------------
+     chrome       317px   of a 687px screen
+     list pane    369px   → five messages
+
+   Forty-one per cent of a mailbox spent on controls, and the one irreversible
+   action in the whole application — delete every message off the server —
+   sitting on the resting screen where a thumb scrolling a list could reach it.
+
+   What replaces it is one title band: the screen's name, how many are unread,
+   when it last checked, a search icon and an overflow. Everything else moved:
+
+     "Check now"        → a pull on the list, with a named twin in the menu
+     the bulk actions   → 编辑, a mode entered from the menu or a long press
+     auto-check every N → deleted from this screen; it is a setting
+     the account strip  → only when there is more than one account
+     search + scopes    → behind the search icon
+
+   The row keeps two lines, and that is a measurement rather than a taste: the
+   9-row floor `scripts/layout-probe.mjs` holds this screen to allows 76.1px of
+   pitch at 360x800, a third text line costs ~19px, and 67 + 19 does not fit
+   under 76. The snippet rides on the end of the subject line instead. See the
+   note above `.job__snippet`.
+
+   Loaded last, so it settles ties against `14-growth.css` and `17-phone.css`
+   — both of which style `.job` and `.page-head` for every list screen, and
+   neither of which should have to know this one exists.
+   ========================================================================== */
+
+/* --- the title band -------------------------------------------------------
+ *
+ * Not `PageHead`. That component puts a command-palette magnifying glass on
+ * every phone screen, and this screen needs a magnifying glass of its own that
+ * searches *mail* — two of them side by side is a coin toss on every tap. The
+ * palette keeps its door as a named item in the overflow menu instead.
+ *
+ * Sticky and opaque for the reason `.page-head` gives at length in
+ * `02-shell.css`: `backdrop-filter` on a sticky element makes an Android
+ * WebView re-blur the pixels underneath on every scroll frame, which is
+ * precisely when this app must not stutter.
+ * ------------------------------------------------------------------------- */
+
+/* No block padding. The two icon buttons already stand 48px tall — the tap
+   floor — and the title-plus-count block is 44px, so every pixel of padding
+   here is padding around something that is already tall enough. Measured: with
+   `--sp-1` top and bottom the band was 56px and eight rows fit the pane; at 0
+   it is 48px, the pane is 631px, and nine do. The `::after` rule is what
+   separates the band from the list, not air. */
+.inboxbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  background: var(--bg);
+}
+/* The rule runs the full width of the scroll area, not just the content
+   column, so the band reads as a band. `--page-pad-x` exactly, because an
+   absolutely positioned child reaching past the padding box counts toward its
+   scroller's `scrollWidth` — a wider bleed here is 4px of phantom horizontal
+   overflow on the whole view. */
+.inboxbar::after {
+  content: "";
+  position: absolute;
+  inset-inline: calc(-1 * var(--page-pad-x));
+  bottom: 0;
+  height: 1px;
+  background: var(--border-subtle);
+}
+.inboxbar__text {
+  flex: 1;
+  min-width: 0;
+}
+.inboxbar__title {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: 700;
+  line-height: var(--leading-tight);
+  letter-spacing: var(--tracking-tight);
+}
+/* "20 unread · Checked 5 minutes ago" — the two facts a mailbox is opened to
+   learn, in the space a toolbar used to take to say one of them. One line and
+   truncated: a status that wraps is a status that moves the list. */
+.inboxbar__status {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--text-sm);
+  line-height: var(--leading-tight);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* `--sp-2` between two 48px targets, not `--sp-1`: they are the only two
+   controls on this screen that are always on it, and 4px between adjacent
+   thumb-sized buttons is how "search" gets pressed when "more" was meant. */
+.inboxbar__actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+/* --- the overflow menu ----------------------------------------------------
+ *
+ * Modelled on the reader's `.reader__moreMenu`, deliberately: it is the same
+ * kind of anchored panel on the same screen, closed by the same two events
+ * (Escape, or a pointer outside the anchor), and two popovers that look
+ * different is two things to learn.
+ * ------------------------------------------------------------------------- */
+
+.inboxmenu {
+  position: relative;
+  display: flex;
+}
+.inboxmenu__panel {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + var(--sp-2));
+  inset-inline-end: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 12rem;
+  max-width: min(18rem, 80vw);
+  padding: var(--sp-2);
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-lg);
+}
+.inboxmenu__item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  /* `--ctl-md` is 48px, which is the tap floor. `.reader__moreItem` — the
+     panel this is modelled on — is padding-driven and lands at 36px, and it
+     gets away with it only because a probe never sees a menu that has to be
+     opened first. This is the same control for the same finger. */
+  min-height: var(--ctl-md);
+  padding: var(--sp-2) var(--sp-3);
+  border: 0;
+  background: none;
+  border-radius: var(--r-sm);
+  color: var(--text-1);
+  font-family: inherit;
+  font-size: var(--text-base);
+  text-align: start;
+  cursor: pointer;
+}
+.inboxmenu__item:hover {
+  background: var(--surface-hover);
+}
+.inboxmenu__item:focus-visible {
+  outline: var(--ring);
+  outline-offset: -2px;
+}
+/* Greyed rather than absent: "Check now" is disabled on a platform that cannot
+   fetch (the browser preview) and while a check is already running, and a menu
+   whose items come and go is a menu you have to read every time. */
+.inboxmenu__item:disabled {
+  color: var(--text-3);
+  cursor: not-allowed;
+}
+.inboxmenu__item > svg {
+  flex: none;
+}
+
+/* --- search, while searching ---------------------------------------------
+ *
+ * One row: the box, then the four scopes it can look in. The scopes stayed
+ * beside the box rather than folding into a dropdown for the reason they were
+ * put there originally — a scope hidden behind a control is a scope people
+ * leave on the wrong setting without noticing. At 360px they do not fit
+ * beside a usable input, so they scroll sideways rather than taking a second
+ * row: this band only exists while somebody is searching, and it must not
+ * cost the list two rows to do it.
+ * ------------------------------------------------------------------------- */
+
+.inboxsearch {
+  display: flex;
+  align-items: center;
+  /* `.search-wrap` — carried alongside for its pending signal — wraps by
+     default, which is the behaviour this band exists to avoid. */
+  flex-wrap: nowrap;
+  gap: var(--sp-2);
+  flex: none;
+}
+.inboxsearch > .search {
+  flex: 1 1 10rem;
+  min-width: 0;
+}
+/* Capped at 9rem so the *input* keeps the room. At `flex: 0 1 auto` the four
+   Chinese labels took 172px of a 328px row and left the box 133px — eight
+   Latin characters, on the control being typed into. The chips already scroll,
+   so the width they lose here costs a swipe rather than a label. */
+.inboxsearch__scope {
+  display: flex;
+  flex: 0 1 9rem;
+  gap: var(--sp-1);
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.inboxsearch__scope > .chip {
+  flex: 0 0 auto;
+}
+
+/* --- 编辑 -----------------------------------------------------------------
+ *
+ * Every bulk action, in a mode that has to be asked for. Two rows: what is
+ * selected and how to stop, then what can be done. The second row scrolls
+ * sideways rather than wrapping, because a row of buttons that changes height
+ * when a selection changes moves the list under a thumb that is still on it.
+ * ------------------------------------------------------------------------- */
+
+.inboxedit {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  flex: none;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.inboxedit__head,
+.inboxedit__row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.inboxedit__head > *,
+.inboxedit__row > * {
+  flex: 0 0 auto;
+}
+.inboxedit__count {
+  margin-inline-end: auto;
+  color: var(--text-1);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  font-variant-numeric: var(--numeric);
+  /* It is the one item on the row that may be a whole sentence, so it is the
+     one that gives way. */
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* --- pull to refresh ------------------------------------------------------
+ *
+ * The wrapper exists only so the gesture has somewhere to live that is not the
+ * scroller `VirtualList` owns. It has to pass the flex growth straight
+ * through, or the list pane inside it collapses to its content height and the
+ * screen stops scrolling at all.
+ *
+ * `overscroll-behavior-y: contain` is the part that makes the gesture
+ * possible: without it the browser claims the drag at the top of the list for
+ * its own overscroll and the pointer stream is cancelled mid-gesture.
+ * ------------------------------------------------------------------------- */
+
+.pullwrap {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.view--list .pullwrap > .list-pane {
+  overscroll-behavior-y: contain;
+}
+/* `.pull` itself is styled in `16-mail.css`; it only needs to be told not to
+   take a share of the height it is animating. */
+.pullwrap > .pull {
+  flex: none;
+}
+
+/* ==========================================================================
+   The row
+   ========================================================================== */
+
+/* Line one is the sender line, and it is first in the DOM as well as on the
+   screen. `06-lists.css` puts the 4px between the two lines on `.job__meta`,
+   which is the second child there and the first child here — so the gap moves
+   to `.job__name` and the row measures exactly the same height either way.
+   That matters: `layout-probe.mjs` builds its synthetic row in the other
+   order, and a rule that only worked for one of them would make the gate
+   measure a row nobody has. */
+.job__meta {
+  margin-top: 0;
+}
+.job__body > .job__name {
+  margin-top: 4px;
+}
+/*
+ * The sender line gets the tight leading the subject line above it already
+ * has, and it is worth 4.9px on every row.
+ *
+ * `.job__meta` inherits the body's 1.65 leading, which is right for a
+ * paragraph and is pure air on a one-line row of metadata: 14px of text in a
+ * 23.1px line box. At `--leading-tight` it is 18.2px, the row goes from 65.9px
+ * to 61.0px, and the pane at 360x800 holds nine messages instead of eight —
+ * which is the floor `scripts/layout-probe.mjs` holds this screen to and the
+ * reason the third line of a three-line row could not be afforded.
+ *
+ * Scoped through `.swipe`, which is what tells an inbox row from a Scheduled
+ * or Activity row: those two wrap their metadata over several lines and want
+ * the reading leading. Nothing about the *size* of the text changes — 14px is
+ * the auxiliary rank and it stays there.
+ */
+.swipe .job .job__meta {
+  line-height: var(--leading-tight);
+}
+/*
+ * And nothing on that line may be taller than the line itself.
+ *
+ * `.chip` is 14px of text in a 1.3 line box — 18.2px — plus 3px of padding top
+ * and bottom, and those 6px were the whole difference between a 61px row and a
+ * 67px one for anybody with two mailboxes: the account chip is the one element
+ * that only appears when there is a second account, so adding one silently made
+ * every row taller and cost the pane a message. The pill still paints, it just
+ * stops setting the height. (04-forms.css already tightened the chip's leading
+ * for this exact reason; the padding is the half that was left.)
+ */
+.swipe .job .job__meta > .chip {
+  padding-block: 0;
+}
+
+/* The sender is the item on the line whose length is arbitrary, so it is the
+   one that gives way; everything else on the line is short and fixed. */
+.job__from {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+/* Never shrinks below its own content. Measured before this rule existed: in a
+   nowrap row the bare timestamp was the one item with no `white-space` of its
+   own, so it shrank under its text and broke "2 min" into two lines — 41.3px
+   for a two-word timestamp, taller than the subject above it. */
+.job__time {
+  flex: 0 0 auto;
+  margin-inline-start: auto;
+  white-space: nowrap;
+  font-variant-numeric: var(--numeric);
+}
+/* A paperclip, where the literal character "@" used to be. That "@" read as an
+   address rather than as an attachment, and it carried no label at all — so a
+   screen reader announced a mail with a photograph in it exactly the same as
+   one without. */
+.job__clip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-3);
+}
+
+/* --- read is not unimportant ---------------------------------------------
+ *
+ * `data-disabled="true"` used to be set on every message that had been read,
+ * which dropped the whole row — subject, sender, timestamp — to 62% opacity.
+ * In a mailbox most mail has been read, so most of the screen was half-erased,
+ * and the one thing opacity is genuinely good at (saying "this control does
+ * nothing") was being spent to say "you have seen this".
+ *
+ * The distinction it was making is real and is kept, twice: the dot, and the
+ * weight of the subject. Both are marks *on* the row rather than a veil over
+ * it, so a read message is still a message you can read.
+ * ------------------------------------------------------------------------- */
+
+.job__subject {
+  font-weight: 400;
+}
+.job[data-unread='true'] .job__subject {
+  font-weight: 700;
+}
+/*
+ * The first words of the message, on the end of the subject line.
+ *
+ * A third line was the shape everyone wanted and it does not fit: the 9-row
+ * floor at 360x800 allows 76.1px of pitch, the row is 67px, and a third line
+ * of 14px text costs about 19px. So the snippet shares line two, in the
+ * auxiliary colour so the subject still reads as the headline, and the
+ * one-line clamp on `.job__name` cuts whichever of the two runs out of room
+ * first — which is the honest order, because the subject is what identifies
+ * the message.
+ */
+.job__snippet {
+  color: var(--text-3);
+  font-weight: 400;
+}
+.job__snippet::before {
+  /* An em space rather than a punctuation mark: a dash between a subject that
+     ends in one and a snippet that starts with one is unreadable, and this
+     survives being copied. */
+  content: "\2003";
+}
+
+@media (max-width: 839.98px) {
+  /* The band is the first thing on a phone screen and the last thing that
+     should take height from the list. `--ctl-md` is the tap floor its two
+     icon buttons already occupy, so the text block costs nothing extra. */
+  .inboxbar {
+    min-height: var(--ctl-md);
+  }
+  /* `17-phone.css` hides `.view--list .page-subtitle` because a subtitle that
+     restates the title is dead weight on the screen with the least room. This
+     one does not restate anything — it is the unread count — so it stays, one
+     rank down. */
+  .inboxbar__status {
+    font-size: var(--text-sm);
+  }
+  /* The account chip stays capped rather than pinned — `16-mail.css` already
+     holds it at 38% for the reason given there; it only renders at all now
+     when there is more than one account.
+     The avatar stays a wide-screen thing for the reason given on
+     `.swipe .job > .job__avatar` in the same file: a 28px circle plus its gap
+     would put the subject back under the 256px floor the 360px check holds it
+     to, and the unread dot already does that job here. */
+}

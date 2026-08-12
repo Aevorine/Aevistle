@@ -38,7 +38,7 @@
  *    date silently scheduled is worse than no offer at all.
  */
 
-import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useContext, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Banner,
   Button,
@@ -47,7 +47,7 @@ import {
   EmptyState,
   IconButton,
   Modal,
-  PageHead,
+  PaletteContext,
   useConfirm,
   useToast,
 } from '../components/ui'
@@ -66,6 +66,7 @@ import {
   IconMinimize,
   IconMoon,
   IconMore,
+  IconPaperclip,
   IconRefresh,
   IconSearch,
   IconSun,
@@ -74,8 +75,10 @@ import {
 } from '../components/icons'
 import { VirtualList } from '../components/VirtualList'
 import { useSwipe } from '../components/useSwipe'
+import { useTwoPane } from '../components/useNarrow'
 import { MessageBodyFrame, textAsHtml } from '../components/MessageBodyFrame'
 import { useApp } from '../state/AppState'
+import { PULL_THRESHOLD_PX, resolvePull, type PullState } from '../core/platform/gestures'
 import { SearchInput } from '../components/inputs'
 import {
   ImageLightbox,
@@ -217,6 +220,25 @@ function senderInitial(name: string, address: string): string {
   return source.slice(0, 1).toUpperCase()
 }
 
+/**
+ * What a row should call the sender.
+ *
+ * The list used to print the raw `From` header, so a row began
+ * `招商银行 <no-reply@bank…` and the ellipsis fell inside the address — the
+ * half of the string nobody reads — while the four characters that identify
+ * the sender competed with it for a 150px column. `splitSender` already knows
+ * how to take the header apart; this is the "and never invent one" half of its
+ * contract written down: a header with no display name falls back to the local
+ * part of the address, and only then to the address itself, because
+ * `no-reply@bank.example.com` truncated at 12 characters is `no-reply@ban…`
+ * and says less than `no-reply`.
+ */
+function senderLabel(from: string): string {
+  const { name, address } = splitSender(from)
+  if (name) return name
+  return address.split('@')[0] || address || from
+}
+
 export function InboxView({
   onGoToAccounts,
   focusMessageId,
@@ -250,11 +272,53 @@ export function InboxView({
   const { t, formatAgo, formatDateTime, dir } = useI18n()
   const toast = useToast()
   const { confirm, confirmElement } = useConfirm()
+  /**
+   * 600-839px: the list and the message it opens, side by side.
+   *
+   * The same hook Settings reads, for the same band — see `useNarrow.ts`. It
+   * changes exactly one thing here: which box the reader is mounted in
+   * (`ReaderShell` at the bottom of this file). Nothing about the reader
+   * itself is conditional on it, because a second reader is a second set of
+   * image-policy rules waiting to disagree with the first.
+   */
+  const twoPane = useTwoPane()
+  /**
+   * The command palette, reached from the overflow menu rather than from a
+   * second magnifying glass beside the first.
+   *
+   * `PageHead` puts a palette button on every phone screen, and this screen now
+   * has a search icon of its own that searches *mail* — which is what a
+   * magnifying glass on a mailbox means. Two of them side by side, one for the
+   * list and one for the app, is a coin toss on every tap. So this view does not
+   * render `PageHead` at all, and the palette keeps its door as a named menu
+   * item instead of an ambiguous icon.
+   */
+  const openPalette = useContext(PaletteContext)
 
   const [filter, setFilter] = useState<AccountFilter>('all')
   const [query, setQuery] = useState('')
   /** Which field the search box looks in. */
   const [scope, setScope] = useState<SearchScope>('all')
+  /**
+   * The search field is a mode, not furniture.
+   *
+   * A permanently mounted box plus four scope chips was 104px of a 687px
+   * screen — a seventh of the mailbox — spent on a control that is used for
+   * seconds at a time. It opens from the icon in the title bar and takes the
+   * chips with it.
+   */
+  const [searchOpen, setSearchOpen] = useState(false)
+  /**
+   * 编辑 — the mode the bulk actions live in.
+   *
+   * They used to sit on the resting screen, which is how "全部从邮箱删除" (the
+   * one irreversible action in this app) ended up one stray tap away from a
+   * list somebody was only scrolling. Entered deliberately from the overflow
+   * menu, or by a long press on a row, and left by "Done".
+   */
+  const [editMode, setEditMode] = useState(false)
+  /** The title bar's overflow menu — same anchored-popover rules as the reader's. */
+  const [menuOpen, setMenuOpen] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [openMessage, setOpenMessage] = useState<InboxMessage | null>(null)
   const [openBody, setOpenBody] = useState<InboxMessageBody | null>(null)
@@ -506,6 +570,56 @@ export function InboxView({
 
   const syncAll = async () => {
     await Promise.all(enabledInboxes.map((i) => syncOne(i.accountId)))
+  }
+
+  const canCheckNow = canSyncInbox && enabledInboxes.length > 0
+
+  // --- pull to refresh -------------------------------------------------------
+  //
+  // `resolvePull` has been sitting in `core/platform/gestures.ts`, tested by
+  // `check-gestures.mjs`, with no caller — the arithmetic for the gesture was
+  // written and never wired to anything. This is the wiring.
+  //
+  // Two rules, both of them the reason this is not just "drag = refresh":
+  //
+  //  · **Only from a genuine top.** The scroller's live `scrollTop` is passed
+  //    to `resolvePull` on every move rather than sampled once at the start,
+  //    because a pull that fires halfway down a mailbox is the single most
+  //    annoying version of this gesture.
+  //  · **It is never the only way.** "Check now" is a named item in the
+  //    overflow menu, which is where it went when the button left the toolbar.
+  //    A gesture nobody can find is a regression.
+  //
+  // Mouse pointers are excluded for the same reason `useSwipe` excludes them: a
+  // desktop window has the menu item and a wheel that must keep scrolling.
+  const listWrapRef = useRef<HTMLDivElement>(null)
+  const pullFrom = useRef<{ y: number; id: number } | null>(null)
+  /** Mirrors `pull.armed` for the pointer-up handler, which closes over stale state. */
+  const pullArmed = useRef(false)
+  const [pull, setPull] = useState<PullState>({ progress: 0, armed: false })
+
+  const pullScroller = () => listWrapRef.current?.querySelector<HTMLElement>('.list-pane') ?? null
+
+  const onPullStart = (e: React.PointerEvent) => {
+    if (e.pointerType === 'mouse' || !canCheckNow) return
+    const scroller = pullScroller()
+    if (!scroller || scroller.scrollTop > 0) return
+    pullFrom.current = { y: e.clientY, id: e.pointerId }
+  }
+  const onPullMove = (e: React.PointerEvent) => {
+    const start = pullFrom.current
+    if (!start || start.id !== e.pointerId) return
+    const next = resolvePull(e.clientY - start.y, pullScroller()?.scrollTop ?? 0)
+    pullArmed.current = next.armed
+    setPull((prev) => (prev.progress === next.progress && prev.armed === next.armed ? prev : next))
+  }
+  const onPullEnd = () => {
+    if (!pullFrom.current) return
+    pullFrom.current = null
+    const fire = pullArmed.current
+    pullArmed.current = false
+    setPull({ progress: 0, armed: false })
+    if (fire) void syncAll()
   }
 
   const groupByAccount = useCallback(
@@ -1117,6 +1231,26 @@ export function InboxView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openMessage, step])
 
+  /** The list's own overflow menu, closed by the same two events as the
+      reader's below — Escape, or a pointer that lands outside the anchor. */
+  useEffect(() => {
+    if (!menuOpen) return
+    const close = (e: Event) => {
+      if (e instanceof KeyboardEvent && e.key !== 'Escape') return
+      if (e.type === 'pointerdown') {
+        const target = e.target as HTMLElement | null
+        if (target?.closest('.inboxmenu')) return
+      }
+      setMenuOpen(false)
+    }
+    document.addEventListener('keydown', close)
+    document.addEventListener('pointerdown', close)
+    return () => {
+      document.removeEventListener('keydown', close)
+      document.removeEventListener('pointerdown', close)
+    }
+  }, [menuOpen])
+
   /** The phone header's overflow menu closes on Escape and on a click that
       lands anywhere outside it — the same rule the compose screen's quick-
       times popover (`whenbar__quick`) uses for the same kind of anchored
@@ -1391,171 +1525,267 @@ export function InboxView({
     )
   }
 
-  const bulkAction =
-    selected.size > 0 ? (
-      <div className="btn-row">
-        <span className="btn-row__note">{t('inbox.selectedCount', { n: selected.size })}</span>
-        <Button variant="ghost" onClick={() => markSet(selected, true)}>
-          {t('inbox.markRead')}
-        </Button>
-        <Button variant="ghost" onClick={() => markSet(selected, false)}>
-          {t('inbox.markUnread')}
-        </Button>
-        {/* Batch tagging: the third thing anyone does to a handful of selected
-            messages, after reading and deleting them. Cycling each row's tag
-            one click at a time is how you end up not bothering. */}
-        <Button variant="ghost" onClick={() => tagSet(selected, 'flagged')}>
-          {t('inbox.tagFlagged')}
-        </Button>
-        <Button variant="ghost" onClick={() => tagSet(selected, 'none')}>
-          {t('inbox.tagNone')}
-        </Button>
-        {/*
-          Two deletes, because they are two different requests.
+  const multiAccount = inboxOrder.length > 1
+  /** Checkboxes are on while a selection is live *or* while 编辑 is open. */
+  const selecting = editMode || selected.size > 0
+  const readTotal = allMessages.length - unreadTotal
 
-          "Remove" takes it out of Aevistle and leaves the mailbox alone; it is
-          reversible from the bin. "Delete from mailbox" is the real thing and
-          cannot be undone, so it is the one that stays red and asks a second
-          question. Before this there was one button that said "delete" and did
-          neither — it dropped the row, and the next sync five minutes later
-          fetched the message straight back.
-        */}
-        <Button variant="ghost" icon={<IconTrash size={15} />} onClick={deleteSelected}>
-          {t('inbox.removeHere')}
-        </Button>
-        <Button variant="danger" onClick={purgeSelected}>
-          {t('inbox.deleteOnServer')}
-        </Button>
-        <Button variant="ghost" onClick={clearSelection}>
-          {t('inbox.clearSelection')}
-        </Button>
-      </div>
-    ) : (
-      <div className="btn-row">
-        {lastSyncAt ? (
-          <span className="btn-row__note" title={formatDateTime(lastSyncAt)}>
-            {t('inbox.lastChecked', { when: formatAgo(lastSyncAt) })}
-          </span>
-        ) : null}
-        <Button
-          size="lg"
-          variant="primary"
-          icon={<IconRefresh size={16} />}
-          loading={syncingIds.size > 0}
-          onClick={syncAll}
-          // Grey where the platform has no way to fetch, rather than offering a
-          // button that resolves having done nothing — the browser preview is
-          // the case, and it can still show mail that is already stored.
-          disabled={enabledInboxes.length === 0 || !canSyncInbox}
-        >
-          {syncingIds.size > 0 ? t('inbox.checking') : t('inbox.checkNow')}
-        </Button>
-      </div>
-    )
+  /**
+   * The one line of status this screen still says out loud.
+   *
+   * It replaces a whole band: "Checked 5 minutes ago" used to be a note beside
+   * a button, and the unread count — the single number anyone opens a mailbox
+   * to see — was not on the screen anywhere at all.
+   */
+  const headStatus =
+    syncingIds.size > 0
+      ? t('inbox.checking')
+      : [
+          unreadTotal > 0 ? t('inboxbar.unread', { n: unreadTotal }) : t('inboxbar.allRead'),
+          // The string the toolbar's own note used, kept rather than replaced:
+          // it says the same thing, it is already translated six times, and a
+          // second spelling of one sentence is how two screens end up
+          // disagreeing about what "checked" means.
+          lastSyncAt ? t('inbox.lastChecked', { when: formatAgo(lastSyncAt) }) : t('inboxbar.neverSynced'),
+        ].join(' · ')
+
+  const leaveEdit = () => {
+    setEditMode(false)
+    clearSelection()
+  }
 
   const attachments = openBody?.attachments ?? []
 
   return (
-    <div className="view view--list" data-screen="inbox">
-      <div className="view__inner">
-        {/* No subtitle, and now no heading either: the highlighted Inbox tab
-            already names the screen. `bulkAction` is why this still renders
-            `PageHead` rather than nothing — `hideTitle` keeps that row (and
-            the screen's accessible name, moved onto `.page-head` itself)
-            while dropping the visible "收件箱" text. */}
-        <PageHead title={t('inbox.title')} action={bulkAction} hideTitle />
+    /* `data-screen` is how `scripts/layout-probe.mjs` knows which screen it
+       landed on, and it stays exactly where it was. `view--twopane` is the
+       only thing the band adds to the frame: it turns this box into a row of
+       two columns and hands each of them its own scroller. */
+    <div className={`view view--list${twoPane ? ' view--twopane' : ''}`} data-screen="inbox">
+      <div className={`view__inner${twoPane ? ' twopane__list' : ''}`}>
+        {/*
+          One band, where there were five.
+
+          Measured at 360x800 before this: check-status + "Check now" (68px),
+          the account strip (56px), the search box and its four scope chips
+          (104px) and the auto-check row (52px) came to 281px of a 687px screen
+          — 41% of the mailbox spent on controls, leaving a 369px list that
+          held five messages. Every one of those four bands was permanent, and
+          three of them were for things nobody does while reading mail.
+
+          So: a title, a count, a search icon and an overflow. Everything else
+          is behind one of those two icons or behind a gesture that has a named
+          twin in the menu. `PageHead` is deliberately not used — see
+          `openPalette` above for why this screen cannot carry its search
+          button.
+        */}
+        <div className="inboxbar">
+          <div className="inboxbar__text">
+            <h1 className="inboxbar__title">{t('inbox.title')}</h1>
+            <p className="inboxbar__status" aria-live="polite">
+              {headStatus}
+            </p>
+          </div>
+          <div className="inboxbar__actions">
+            <IconButton
+              label={searchOpen ? t('inboxbar.searchClose') : t('inboxbar.search')}
+              aria-expanded={searchOpen}
+              onClick={() => {
+                setSearchOpen((v) => {
+                  // Closing it clears the query too. A hidden filter still
+                  // filtering is how a mailbox appears to have lost mail.
+                  if (v) setQuery('')
+                  return !v
+                })
+              }}
+            >
+              {searchOpen ? <IconX size={16} /> : <IconSearch size={16} />}
+            </IconButton>
+            <div className="inboxmenu">
+              <IconButton
+                label={t('inboxbar.menu')}
+                aria-expanded={menuOpen}
+                aria-haspopup="menu"
+                onClick={() => setMenuOpen((v) => !v)}
+              >
+                <IconMore size={16} />
+              </IconButton>
+              {menuOpen ? (
+                <div className="popover inboxmenu__panel" role="menu" aria-label={t('inboxbar.menu')}>
+                  {/* The visible twin of the pull. The gesture is the fast
+                      path; this is the one anybody finds without being told. */}
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="inboxmenu__item"
+                    disabled={!canCheckNow || syncingIds.size > 0}
+                    onClick={() => {
+                      setMenuOpen(false)
+                      void syncAll()
+                    }}
+                  >
+                    <IconRefresh size={16} />
+                    <span>{syncingIds.size > 0 ? t('inbox.checking') : t('inbox.checkNow')}</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="inboxmenu__item"
+                    onClick={() => {
+                      setMenuOpen(false)
+                      setEditMode(true)
+                    }}
+                  >
+                    <IconCheck size={16} />
+                    <span>{t('inboxbar.edit')}</span>
+                  </button>
+                  {/* Only once there is something in it. A bin that is always
+                      there and always empty is a control people stop seeing.
+                      It lives here rather than on the list so that emptying the
+                      list cannot take the way back into it with it — that bug
+                      is what the note on the old controls row was about. */}
+                  {removedAll.length > 0 ? (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="inboxmenu__item"
+                      onClick={() => {
+                        setMenuOpen(false)
+                        setShowBin((v) => !v)
+                      }}
+                    >
+                      <IconTrash size={16} />
+                      <span>{t('inbox.binToggle', { n: removedAll.length })}</span>
+                    </button>
+                  ) : null}
+                  {openPalette ? (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="inboxmenu__item"
+                      onClick={() => {
+                        setMenuOpen(false)
+                        openPalette()
+                      }}
+                    >
+                      <IconSearch size={16} />
+                      <span>{t('palette.title')}</span>
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </div>
 
         {enabledInboxes.length === 0 ? (
           <Banner tone="info">{t('inbox.noAccountsHint')}</Banner>
         ) : (
           <>
-            {/* Everything above the list stays put; only rows scroll.
+            {/*
+              The account strip, only when there is more than one account to
+              choose between. With one mailbox it was a permanent 56px row
+              offering "All accounts" and the same account twice — and at 360px
+              the account's own tab was ellipsed to 工…, which is a truncation
+              of a word that was already redundant.
 
-                Written out here rather than passed to `Segmented`. The shared
-                control is a plain button group used on nine other screens, and
-                the two extra elements a reorderable tab needs — a drop target
-                wrapping the button, and a grip inside it — are not something
-                the timezone picker or the search-scope switch should have to
-                carry. It borrows `Segmented`'s own class names, so the strip is
-                the same control visually and stays that way if the control is
-                restyled; only the markup underneath is one layer deeper. */}
-            <div className="segmented" role="group" aria-label={t('inbox.title')}>
-              {/*
-                "All accounts" is not an account, so it is neither draggable nor
-                a place another tab may land. It also stays pinned at the start
-                — it is the reset, not a member of the arrangement.
-              */}
-              <button
-                type="button"
-                className="segmented__item"
-                aria-pressed={filter === 'all'}
-                onClick={() => setFilter('all')}
-              >
-                {t('inbox.allAccounts')}
-              </button>
-              {inboxOrder.map((id) => (
-                <span key={id} className="segmented__slot" {...inboxReorder.itemProps(id)}>
-                  {inboxOrder.length > 1 ? (
-                    <button
-                      type="button"
-                      className="reorder-handle reorder-handle--tab"
-                      aria-label={t('account.reorderHandle', { name: accountLabel(id) })}
-                      title={t('account.reorderHint')}
-                      aria-keyshortcuts="Alt+ArrowLeft Alt+ArrowRight"
-                      {...inboxReorder.handleProps(id)}
-                    >
-                      <IconGrip size={13} />
-                    </button>
-                  ) : null}
+              Written out here rather than passed to `Segmented`: the shared
+              control is a plain button group used on nine other screens, and
+              the two extra elements a reorderable tab needs — a drop target
+              wrapping the button, and a grip inside it — are not something the
+              timezone picker should have to carry. It borrows `Segmented`'s
+              class names, so it is the same control visually.
+            */}
+            {multiAccount ? (
+              <>
+                <div className="segmented" role="group" aria-label={t('inbox.title')}>
+                  {/*
+                    "All accounts" is not an account, so it is neither draggable
+                    nor a place another tab may land. It also stays pinned at the
+                    start — it is the reset, not a member of the arrangement.
+                  */}
                   <button
                     type="button"
                     className="segmented__item"
-                    aria-pressed={filter === id}
-                    onClick={() => setFilter(id)}
+                    aria-pressed={filter === 'all'}
+                    onClick={() => setFilter('all')}
                   >
-                    {accountLabel(id)}
+                    {t('inbox.allAccounts')}
                   </button>
+                  {inboxOrder.map((id) => (
+                    <span key={id} className="segmented__slot" {...inboxReorder.itemProps(id)}>
+                      <button
+                        type="button"
+                        className="reorder-handle reorder-handle--tab"
+                        aria-label={t('account.reorderHandle', { name: accountLabel(id) })}
+                        title={t('account.reorderHint')}
+                        aria-keyshortcuts="Alt+ArrowLeft Alt+ArrowRight"
+                        {...inboxReorder.handleProps(id)}
+                      >
+                        <IconGrip size={13} />
+                      </button>
+                      <button
+                        type="button"
+                        className="segmented__item"
+                        aria-pressed={filter === id}
+                        onClick={() => setFilter(id)}
+                      >
+                        {accountLabel(id)}
+                      </button>
+                    </span>
+                  ))}
+                </div>
+                {/* Outside the strip, for the reason given on the twin of this in
+                    SettingsView: a live region that gets unmounted by the very
+                    reorder it is describing never gets to say anything. */}
+                <span className="sr-only" role="status" aria-live="polite">
+                  {inboxReorder.announcement}
                 </span>
-              ))}
-            </div>
-            {/* Outside the strip, for the reason given on the twin of this in
-                SettingsView: a live region that gets unmounted by the very
-                reorder it is describing never gets to say anything. */}
-            <span className="sr-only" role="status" aria-live="polite">
-              {inboxReorder.announcement}
-            </span>
+              </>
+            ) : null}
 
-            <div className="search-wrap" data-pending={searchPending || undefined}>
-              <SearchInput
-                value={query}
-                onChange={setQuery}
-                placeholder={t(`inbox.searchIn.${scope}` as 'inbox.searchIn.all')}
-              />
-              {/* Beside the box rather than inside it: a scope hidden in a
-                  dropdown on the left of a search field is a scope people
-                  leave on the wrong setting without noticing. */}
-              <div className="search-scope" role="group" aria-label={t('inbox.searchScope')}>
-                {(['all', 'from', 'subject', 'body'] as const).map((s) => (
-                  <button
-                    key={s}
-                    type="button"
-                    className="chip chip--toggle"
-                    aria-pressed={scope === s}
-                    onClick={() => setScope(s)}
-                  >
-                    {t(`inbox.scope.${s}` as 'inbox.scope.all')}
-                  </button>
-                ))}
+            {/* The search field and the four scopes it can look in, on one
+                row and only while searching. The scopes stayed *beside* the
+                box rather than moving into a dropdown for the reason they
+                were put there originally: a scope hidden behind a control is
+                a scope people leave on the wrong setting without noticing.
+                They scroll sideways when they do not fit, which they do at
+                360px, rather than taking a second row. */}
+            {searchOpen ? (
+              /* `search-wrap` too, so `13-panels.css`'s "still catching up"
+                 signal on the magnifier keeps working — the input is never
+                 late, only the filtered list is, and that has to be visible. */
+              <div className="search-wrap inboxsearch" data-pending={searchPending || undefined}>
+                <SearchInput
+                  value={query}
+                  onChange={setQuery}
+                  placeholder={t(`inbox.searchIn.${scope}` as 'inbox.searchIn.all')}
+                />
+                <div className="inboxsearch__scope" role="group" aria-label={t('inbox.searchScope')}>
+                  {(['all', 'from', 'subject', 'body'] as const).map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      className="chip chip--toggle"
+                      aria-pressed={scope === s}
+                      onClick={() => setScope(s)}
+                    >
+                      {/* Every chip's text stays wrapped: `text-overflow` does
+                          not apply to the anonymous text of a flex container,
+                          so a bare-text chip is cut with no ellipsis at all. */}
+                      <span className="chip__text">{t(`inbox.scope.${s}` as 'inbox.scope.all')}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
+            ) : null}
 
             {/*
               What "the most recent 50" leaves out, said before someone goes
               looking for older mail that is not here and concludes the app
               lost it. `keep` because a phone is exactly where a missing
               message is most likely to be noticed and least likely to be
-              explained by anything else on screen — see the `--keep`
-              discussion on the other banners in this file.
+              explained by anything else on screen.
             */}
             {inboxServerTotal > INBOX_LIST_FETCH_LIMIT ? (
               <Banner tone="info" keep>
@@ -1567,85 +1797,110 @@ export function InboxView({
             ) : null}
 
             {/*
-              Gated on the selection only. It used to also require
-              `filteredMessages.length > 0`, which made emptying the list
-              destroy the way back into it: select all, "Remove from here", and
-              the whole row — including the recycle-bin button — stopped
-              rendering, so `showBin` could never become true and the removed
-              messages were unreachable until a sync brought a different one
-              back. The same gate also hid auto-check and push on an empty
-              inbox, which is exactly when someone goes looking for them.
+              编辑 — every bulk action, in a mode you have to ask for.
 
-              The bulk actions inside still need something to act on; they keep
-              their own gate. */}
-            {selected.size === 0 ? (
-              <div className="btn-row">
-                {/* Auto-check lives here rather than in Settings: it is the
-                    control people reach for the moment mail seems late, and
-                    that moment happens on this screen. */}
-                <div className="inline-select">
-                  {/* Push first: when it is on it is what actually delivers
-                      the mail, and the interval below it is the fallback. */}
-                  {bridge?.watchInbox ? (
-                    <label className="inline-check" title={t('inbox.pushHint')}>
-                      <input
-                        type="checkbox"
-                        checked={state.settings.inboxPush !== false}
-                        onChange={(e) =>
-                          dispatch({ type: 'patchSettings', patch: { inboxPush: e.target.checked } })
-                        }
-                      />
-                      <span>{t('inbox.push')}</span>
-                    </label>
-                  ) : null}
-                  <span className="inline-select__label">{t('inbox.syncEvery')}</span>
-                  <select
-                    className="select select--compact"
-                    value={state.settings.inboxSyncMinutes ?? 5}
-                    title={t('inbox.syncEveryHint')}
-                    onChange={(e) =>
-                      dispatch({
-                        type: 'patchSettings',
-                        patch: { inboxSyncMinutes: Number(e.target.value) },
-                      })
-                    }
+              Gated on `editMode` and on nothing else. It must *not* also
+              require `filteredMessages.length > 0`: doing that once made
+              emptying the list destroy the way back into it — select all,
+              "Remove from Aevistle", and the whole row stopped rendering, so
+              the recycle bin became unreachable until a sync happened to bring
+              a different message back. The buttons inside need something to
+              act on, so they are disabled rather than removed, which also
+              means the row never changes shape under a thumb.
+            */}
+            {editMode ? (
+              <div className="inboxedit">
+                <div className="inboxedit__head">
+                  <span className="inboxedit__count">
+                    {selected.size > 0
+                      ? t('inbox.selectedCount', { n: selected.size })
+                      : t('inboxbar.editHint')}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    disabled={filteredMessages.length === 0}
+                    onClick={selectAllVisible}
                   >
-                    <option value={0}>{t('inbox.syncOff')}</option>
-                    {[1, 3, 5, 10, 15, 30, 60].map((n) => (
-                      <option key={n} value={n}>
-                        {t('inbox.syncMinutes', { n })}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                {filteredMessages.length > 0 ? (
-                  <>
-                    <Button variant="ghost" onClick={selectAllVisible}>
-                      {t('inbox.selectAll')}
+                    {t('inbox.selectAll')}
+                  </Button>
+                  {selected.size > 0 ? (
+                    <Button variant="ghost" onClick={clearSelection}>
+                      {t('inbox.clearSelection')}
                     </Button>
-                    {unreadTotal > 0 ? (
-                      <Button variant="ghost" icon={<IconCheck size={15} />} onClick={markAllRead}>
+                  ) : null}
+                  <Button variant="primary" onClick={leaveEdit}>
+                    {t('common.done')}
+                  </Button>
+                </div>
+                <div className="inboxedit__row">
+                  {selected.size > 0 ? (
+                    <>
+                      <Button variant="ghost" onClick={() => markSet(selected, true)}>
+                        {t('inbox.markRead')}
+                      </Button>
+                      <Button variant="ghost" onClick={() => markSet(selected, false)}>
+                        {t('inbox.markUnread')}
+                      </Button>
+                      {/* Batch tagging: the third thing anyone does to a handful
+                          of selected messages, after reading and deleting them. */}
+                      <Button variant="ghost" onClick={() => tagSet(selected, 'flagged')}>
+                        {t('inbox.tagFlagged')}
+                      </Button>
+                      <Button variant="ghost" onClick={() => tagSet(selected, 'none')}>
+                        {t('inbox.tagNone')}
+                      </Button>
+                      {/*
+                        Two deletes, because they are two different requests.
+
+                        "Remove" takes it out of Aevistle and leaves the mailbox
+                        alone; it is reversible from the bin. "Delete from
+                        mailbox" is the real thing and cannot be taken back, so
+                        it is the one that stays red and asks a second question.
+                        Before this there was one button that said "delete" and
+                        did neither — it dropped the row, and the next sync five
+                        minutes later fetched the message straight back.
+                      */}
+                      <Button variant="ghost" icon={<IconTrash size={15} />} onClick={deleteSelected}>
+                        {t('inbox.removeHere')}
+                      </Button>
+                      <Button variant="danger" onClick={purgeSelected}>
+                        {t('inbox.deleteOnServer')}
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <Button
+                        variant="ghost"
+                        icon={<IconCheck size={15} />}
+                        disabled={unreadTotal === 0}
+                        onClick={markAllRead}
+                      >
                         {t('inbox.markAllRead')}
                       </Button>
-                    ) : null}
-                    <Button variant="ghost" onClick={deleteAllRead}>
-                      {t('inbox.deleteAllRead')}
-                    </Button>
-                    <Button variant="ghost" onClick={deleteAllMessages}>
-                      {t('inbox.deleteAll')}
-                    </Button>
-                    <Button variant="danger" onClick={purgeAllMessages}>
-                      {t('inbox.deleteAllOnServer')}
-                    </Button>
-                  </>
-                ) : null}
-                {/* Only once there is something in it. A bin that is always
-                    there and always empty is a control people stop seeing. */}
-                {removedAll.length > 0 ? (
-                  <Button variant="ghost" onClick={() => setShowBin((v) => !v)}>
-                    {t('inbox.binToggle', { n: removedAll.length })}
-                  </Button>
-                ) : null}
+                      <Button variant="ghost" disabled={readTotal === 0} onClick={deleteAllRead}>
+                        {t('inbox.deleteAllRead')}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        disabled={allMessages.length === 0}
+                        onClick={deleteAllMessages}
+                      >
+                        {t('inbox.deleteAll')}
+                      </Button>
+                      {/* The one action here that reaches outside this app and
+                          cannot be undone. It is reachable only from inside a
+                          mode that was deliberately entered — it must never sit
+                          on the resting list screen again. */}
+                      <Button
+                        variant="danger"
+                        disabled={allMessages.length === 0}
+                        onClick={purgeAllMessages}
+                      >
+                        {t('inbox.deleteAllOnServer')}
+                      </Button>
+                    </>
+                  )}
+                </div>
               </div>
             ) : null}
 
@@ -1662,6 +1917,9 @@ export function InboxView({
                       <Button variant="ghost" onClick={emptyBin}>
                         {t('inbox.binEmpty')}
                       </Button>
+                      <Button variant="ghost" onClick={() => setShowBin(false)}>
+                        {t('common.close')}
+                      </Button>
                     </div>
                   }
                 />
@@ -1674,7 +1932,8 @@ export function InboxView({
                             {entry.message.subject || t('inbox.noSubject')}
                           </div>
                           <div className="bin-row__meta">
-                            {entry.message.from} · {t('inbox.binRemovedAgo', { when: formatAgo(entry.at) })}
+                            {senderLabel(entry.message.from)} ·{' '}
+                            {t('inbox.binRemovedAgo', { when: formatAgo(entry.at) })}
                           </div>
                         </div>
                         <Button
@@ -1720,99 +1979,177 @@ export function InboxView({
             />
           </div>
         ) : (
-          <VirtualList
-            items={filteredMessages}
-            keyOf={(m) => m.id}
-            /* Re-measured after the type came down: a row with an account chip
-               in its meta line is 76.5px at the default density (it was 93.2),
-               and `VirtualList` measures the 8px `.joblist` gap along with the
-               row. The old 96 was already 9px short of the row it described. */
-            estimate={84}
-            scrollerClassName="list-pane"
-            rowsClassName="joblist"
+          /* The pull lives on the wrapper rather than on the scroller itself
+             because `VirtualList` owns that element; pointer events bubble, and
+             the scroller's live `scrollTop` is read out of it by query on every
+             move. See `onPullStart` for the two rules this gesture obeys. */
+          <div
+            className="pullwrap"
+            ref={listWrapRef}
+            onPointerDown={onPullStart}
+            onPointerMove={onPullMove}
+            onPointerUp={onPullEnd}
+            onPointerCancel={onPullEnd}
           >
-            {(m) => (
-              <SwipeableRow
-                message={m}
-                rtl={dir === 'rtl'}
-                onRemove={() => void deleteInboxMessages(m.accountId, [m.id])}
-                onToggleRead={() => markSet(new Set([m.id]), !m.seen)}
-                onLongPress={() => toggleSelect(m.id)}
-              >
-              <div
-                className="job"
-                data-disabled={m.seen ? 'true' : undefined}
-                /* Read by the phone block in `app.css`: while a selection is
-                   live every row shows its checkbox, and while there is none no
-                   row spends 18px plus a gap advertising a mode nobody is in.
-                   A long press is what starts one — see `SwipeableRow`. */
-                data-selecting={selected.size > 0 ? 'true' : undefined}
-                onClick={() => openDetail(m)}
-              >
-                <input
-                  type="checkbox"
-                  className="job__select"
-                  checked={selected.has(m.id)}
-                  onClick={(e) => e.stopPropagation()}
-                  onChange={() => toggleSelect(m.id)}
-                  aria-label={t('inbox.selectMessage')}
-                />
-                <span className="job__pulse" data-unread={m.seen ? 'false' : 'true'} />
-                <div className="job__body">
-                  <div className="job__name">{m.subject || t('inbox.noSubject')}</div>
-                  <div className="job__meta">
-                    {/* Every one of these wraps its text in `.chip__text`.
-                        `text-overflow` does not apply to the anonymous text of a
-                        flex container, so a `.chip` with bare text inside was cut
-                        with no ellipsis at all — a long account label simply
-                        ended mid-character. The nowrap child is what the ellipsis
-                        needs; the recipe is at `.chip__text` in `app.css`. */}
-                    {filter === 'all' ? (
-                      <span className="chip">
-                        <span className="chip__text">{accountLabel(m.accountId)}</span>
-                      </span>
-                    ) : null}
-                    <span className="job__from">{m.from}</span>
-                    <span>{formatAgo(m.date)}</span>
-                    {m.hasAttachments ? (
-                      <span className="chip chip--quiet">
-                        <span className="chip__text">@</span>
-                      </span>
-                    ) : null}
-                    {m.tag !== 'none' ? (
-                      <span className={`chip chip--${m.tag === 'important' ? 'danger' : 'warning'}`}>
-                        <span className="chip__text">
-                          {t(m.tag === 'important' ? 'inbox.tagImportant' : 'inbox.tagFlagged')}
-                        </span>
-                      </span>
-                    ) : null}
+            <div
+              className="pull"
+              style={{ height: Math.round(pull.progress * PULL_THRESHOLD_PX) }}
+              data-armed={pull.armed || undefined}
+              aria-hidden={pull.progress === 0 || undefined}
+            >
+              {pull.armed ? t('inboxbar.pullRelease') : t('inboxbar.pull')}
+            </div>
+            <VirtualList
+              items={filteredMessages}
+              keyOf={(m) => m.id}
+              /* Measured, not guessed. At 360x800 with forty messages seeded,
+                 every row is 65.9px — the same whatever the subject length,
+                 which is what the one-line clamp buys — and `.joblist` adds a
+                 4px gap that `VirtualList` counts as part of the row: 69.9px
+                 of pitch. With an account chip on the sender line (two or more
+                 mailboxes) it is 71.0px. 70 sits between the two.
+
+                 The 84 this replaces was the *desktop* row's number, cited as
+                 such in its own comment, on the screen the list is actually
+                 scrolled on. */
+              estimate={70}
+              scrollerClassName="list-pane"
+              rowsClassName="joblist"
+            >
+              {(m) => (
+                <SwipeableRow
+                  message={m}
+                  rtl={dir === 'rtl'}
+                  onRemove={() => void deleteInboxMessages(m.accountId, [m.id])}
+                  onToggleRead={() => markSet(new Set([m.id]), !m.seen)}
+                  onLongPress={() => {
+                    setEditMode(true)
+                    toggleSelect(m.id)
+                  }}
+                >
+                  {/*
+                    Two lines, and no dimming.
+
+                    `data-disabled="true"` used to be set on every read message,
+                    which dropped the whole row — subject, sender, timestamp — to
+                    62% opacity. Read is not the same as unimportant, and a
+                    mailbox where most rows are half-erased is a mailbox that is
+                    hard to read. The distinction is carried by the dot and by
+                    the subject's weight instead, which is what those two things
+                    are for.
+                  */}
+                  <div
+                    className="job"
+                    data-unread={m.seen ? undefined : 'true'}
+                    /* Read by the phone block in `16-mail.css`: while a
+                       selection is live — or 编辑 is open — every row shows its
+                       checkbox, and while neither is true no row spends 18px
+                       plus a gap advertising a mode nobody is in. */
+                    data-selecting={selecting ? 'true' : undefined}
+                    /* Which row the pane beside it is showing. Only in the
+                       two-pane band: below it the reader is a full-screen
+                       dialog and the list is not on screen to mark, and above
+                       it the desktop has its own arrangement. Without this,
+                       tapping a row changes the whole right half of the screen
+                       and nothing on the left half moves. */
+                    data-open={twoPane && openMessage?.id === m.id ? 'true' : undefined}
+                    onClick={() => (selecting ? toggleSelect(m.id) : openDetail(m))}
+                  >
+                    <input
+                      type="checkbox"
+                      className="job__select"
+                      checked={selected.has(m.id)}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={() => toggleSelect(m.id)}
+                      aria-label={t('inbox.selectMessage')}
+                    />
+                    <span className="job__pulse" data-unread={m.seen ? 'false' : 'true'} />
+                    {/* Hidden on a phone by `16-mail.css` — that band has no
+                        width to spare and the dot already says "unread" — and
+                        shown from the tablet up, where the initial is the
+                        fastest way to find a sender in a scrolling list. */}
+                    <span className="avatar job__avatar" aria-hidden="true">
+                      {senderInitial(splitSender(m.from).name, splitSender(m.from).address)}
+                    </span>
+                    <div className="job__body">
+                      {/*
+                        Line one: who it is from, and when.
+
+                        The sender was the raw `From` header — a row started
+                        `招商银行 <no-reply@bank…`, so the ellipsis fell inside
+                        the address and the four characters that identify the
+                        sender had to share the line with a string nobody reads.
+                        `senderLabel` takes the display name out.
+                      */}
+                      <div className="job__meta">
+                        {filter === 'all' && multiAccount ? (
+                          <span className="chip">
+                            <span className="chip__text">{accountLabel(m.accountId)}</span>
+                          </span>
+                        ) : null}
+                        <span className="job__from">{senderLabel(m.from)}</span>
+                        {m.hasAttachments ? (
+                          /* A paperclip, not the literal character "@" this
+                             used to print — which read as an address, not as an
+                             attachment, and had no label of any kind. */
+                          <span className="job__clip" role="img" aria-label={t('inboxbar.attachment')}>
+                            <IconPaperclip size={13} />
+                          </span>
+                        ) : null}
+                        {m.tag !== 'none' ? (
+                          <span className={`chip chip--${m.tag === 'important' ? 'danger' : 'warning'}`}>
+                            <span className="chip__text">
+                              {t(m.tag === 'important' ? 'inbox.tagImportant' : 'inbox.tagFlagged')}
+                            </span>
+                          </span>
+                        ) : null}
+                        {/* Last on the line and never allowed to shrink below
+                            its own content: in a nowrap row the bare timestamp
+                            is the one item with no `white-space` of its own, and
+                            it broke "2 min" onto two lines. */}
+                        <span className="job__time">{formatAgo(m.date)}</span>
+                      </div>
+                      {/*
+                        Line two: the subject, then the first words of the
+                        message in a quieter colour on the same line.
+
+                        One line, hard. A two-line subject was tried and made the
+                        row 124.7px, which cut the pane to four messages — taller
+                        than the row was before any of this work. The snippet
+                        rides along on whatever is left rather than taking a
+                        third line, because a third line costs ~19px on every row
+                        and this screen is measured in rows.
+                      */}
+                      <div className="job__name">
+                        <span className="job__subject">{m.subject || t('inbox.noSubject')}</span>
+                        {m.snippet ? <span className="job__snippet">{m.snippet}</span> : null}
+                      </div>
+                    </div>
+                    <div className="job__actions" onClick={(e) => e.stopPropagation()}>
+                      <IconButton label={t('inbox.tagAs')} onClick={() => cycleTag(m)}>
+                        <IconFlag size={16} />
+                      </IconButton>
+                      <IconButton label={t('common.delete')} onClick={() => deleteIdSet(new Set([m.id]))}>
+                        <IconTrash size={16} />
+                      </IconButton>
+                    </div>
                   </div>
-                </div>
-                <div className="job__actions" onClick={(e) => e.stopPropagation()}>
-                  <IconButton label={t('inbox.tagAs')} onClick={() => cycleTag(m)}>
-                    <IconFlag size={16} />
-                  </IconButton>
-                  <IconButton label={t('common.delete')} onClick={() => deleteIdSet(new Set([m.id]))}>
-                    <IconTrash size={16} />
-                  </IconButton>
-                </div>
-              </div>
-              </SwipeableRow>
-            )}
-          </VirtualList>
+                </SwipeableRow>
+              )}
+            </VirtualList>
+          </div>
         )}
       </div>
 
-      <Modal
+      <ReaderShell
+        twoPane={twoPane}
         open={openMessage !== null}
-        fullscreen={immersive}
-        wide
-        bodyClassName="modal__body--reader"
+        immersive={immersive}
         title={openMessage?.subject || t('inbox.noSubject')}
         onClose={() => setOpenMessage(null)}
         onEscape={handleEscape}
         closeLabel={t('common.close')}
-        headerExtra={
+        actions={
           <div className="btn-row">
             {/*
               Tag and delete, on the open message.
@@ -1914,18 +2251,25 @@ export function InboxView({
                     <IconSearch size={16} />
                     <span>{t('inbox.find')}</span>
                   </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className="reader__moreItem"
-                    onClick={() => {
-                      setImmersive((v) => !v)
-                      setMoreOpen(false)
-                    }}
-                  >
-                    {immersive ? <IconMinimize size={16} /> : <IconMaximize size={16} />}
-                    <span>{immersive ? t('inbox.exitFullscreen') : t('inbox.fullscreen')}</span>
-                  </button>
+                  {/* Full screen is a dialog's word. In the two-pane band the
+                      reader is a column of the screen and there is no
+                      "restore" to go back to, so the control that would do
+                      nothing visible is not offered rather than offered and
+                      inert. */}
+                  {twoPane ? null : (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="reader__moreItem"
+                      onClick={() => {
+                        setImmersive((v) => !v)
+                        setMoreOpen(false)
+                      }}
+                    >
+                      {immersive ? <IconMinimize size={16} /> : <IconMaximize size={16} />}
+                      <span>{immersive ? t('inbox.exitFullscreen') : t('inbox.fullscreen')}</span>
+                    </button>
+                  )}
                 </div>
               ) : null}
             </div>
@@ -2176,7 +2520,7 @@ export function InboxView({
             ) : null}
           </>
         ) : null}
-      </Modal>
+      </ReaderShell>
 
       {/* Attachment preview: its own layer above the reader, so closing it
           returns to the message rather than to the list. */}
@@ -2227,6 +2571,107 @@ export function InboxView({
 
       {confirmElement}
     </div>
+  )
+}
+
+/**
+ * The reader, in whichever of the two boxes this window has room for.
+ *
+ * Below 600px and from 840px up it is what it has always been: a `Modal` over
+ * the list, opening full screen. In the band between — `useTwoPane`, the same
+ * 600/840 boundaries every other shape change in this app uses — the window is
+ * wide enough to hold the list and the message at once, and a dialog laid over
+ * a list that is perfectly readable beside it hides half a screen for nothing.
+ *
+ * ## Why children rather than a second reader
+ *
+ * Everything that makes this reader safe is the caller's and is passed
+ * straight through: the `imageRun` / `bodyRun` counters that stop a slow load
+ * splicing one message's pictures into another, `MessageBodyFrame`'s sandbox
+ * with no `allow-scripts`, the three remote-image policy banners, and
+ * `openLinkSafely`'s confirm before anything opens outside the app. This
+ * component picks the box. It does not know, and must not know, what is in it
+ * — a copy of the reader with a different wrapper is how two readers end up
+ * disagreeing about what a blocked image means, and only one of them gets
+ * fixed.
+ *
+ * The header is the same two things in both: the subject, and the action row
+ * the caller built. In the pane there is no close button, because there is
+ * nothing to close back to — the list is already on screen, and the pane
+ * empties itself when the open message is deleted.
+ */
+function ReaderShell({
+  twoPane,
+  open,
+  immersive,
+  title,
+  actions,
+  onClose,
+  onEscape,
+  closeLabel,
+  children,
+}: {
+  twoPane: boolean
+  open: boolean
+  /** Dialog only: the reader opens full screen and Escape steps out of it first. */
+  immersive: boolean
+  title: string
+  actions: React.ReactNode
+  onClose: () => void
+  onEscape: () => void
+  closeLabel: string
+  children: React.ReactNode
+}) {
+  const { t } = useI18n()
+
+  if (!twoPane) {
+    return (
+      <Modal
+        open={open}
+        fullscreen={immersive}
+        wide
+        bodyClassName="modal__body--reader"
+        title={title}
+        onClose={onClose}
+        onEscape={onEscape}
+        closeLabel={closeLabel}
+        headerExtra={actions}
+      >
+        {children}
+      </Modal>
+    )
+  }
+
+  return (
+    <aside className="twopane__detail" aria-label={t('twopane.reader')}>
+      {open ? (
+        <>
+          <div className="detailhead">
+            <h2 className="detailhead__title">{title}</h2>
+            {actions}
+          </div>
+          {/*
+            `modal__body--reader` on an element that is not in a modal, on
+            purpose. That class is the reader body's layout — no gap, the frame
+            does the growing, and one margin shared by the banners, the meta
+            row, the find bar and the attachment list — and restating those six
+            rules under a second name is how the pane and the dialog would come
+            to lay the same message out two different ways. `detailpane__body`
+            adds only what a column needs that a dialog body already had: a
+            scroller of its own.
+          */}
+          <div className="modal__body--reader detailpane__body">{children}</div>
+        </>
+      ) : (
+        <div className="detailpane__body detailpane__body--empty">
+          <EmptyState
+            icon={<IconInbox size={24} />}
+            title={t('twopane.noMessage')}
+            hint={t('twopane.noMessageHint')}
+          />
+        </div>
+      )}
+    </aside>
   )
 }
 

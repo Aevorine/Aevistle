@@ -781,7 +781,7 @@
     flex: 1 1 auto;
   }
   /**
-   * The metadata is one line, truncated — never three.
+   * The sender line is one line, truncated — never three.
    *
    * `.job__meta` is `flex-wrap: wrap`, which was harmless while the subject
    * above it was a single 146px line and the row was ~76px. It is not harmless
@@ -798,6 +798,11 @@
    *
    * The chip is capped rather than pinned: at `flex: none` a long account label
    * would push the timestamp off the end, and at no cap it would take the line.
+   *
+   * This line now leads the row rather than trailing it, and it carries the
+   * sender's *display name* rather than the raw `From` header — see
+   * `senderLabel` in `InboxView.tsx`, and `24-inbox.css` for where the 4px
+   * between the two lines went when they swapped places.
    */
   .swipe .job .job__meta {
     flex-wrap: nowrap;

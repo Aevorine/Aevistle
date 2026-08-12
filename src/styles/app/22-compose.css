@@ -1,0 +1,613 @@
+/* ==========================================================================
+   22 — The phone compose header: who it goes to, and what it is about
+
+   Round 7. Replaces `.composesummary`, the single 48px bar that folded To and
+   Subject together and ellipsised each to about a third of its content —
+   measured on a filled draft it read "david.chen@example.co… 季度汇报（第…",
+   so the two fields a person can most expensively get wrong were the two they
+   could not check before pressing send. It also had no way to show Bcc, so a
+   draft with Bcc set looked identical to one without.
+
+   ## The height budget, because this screen has a hard floor
+
+   `scripts/layout-probe.mjs` fails the build if the message box is under 85%
+   of `.view--compose`. At 360x800 that view is ~654px, so the box must clear
+   ~556px and everything else on the card gets ~98px.
+
+   That is the whole design constraint, and it is why this is not simply the
+   old `.compose-head` left unfolded: that block is `Field`-based, a label row
+   above each control, and opening it was measured at a 66% share (52% with a
+   second account). Two rows with the label inline, plus deleting the body's
+   own label row (its tools moved to the action bar), is what fits:
+
+     To row        48px   the 48px tap floor on `.chip__remove` sets this; see below
+     Subject row   44px
+     ------------------
+                   92px   against a ~98px budget
+
+   Lowering the floor instead was tried once, on this exact screen, and
+   reverted the same day. It is not available.
+
+   ## Why the To row is 48px and not 40px
+
+   A recipient chip is normally ~54px on a touch shell: `.chip__remove` is held
+   to the 48px tap minimum and the chip pads around it. Three of those is a
+   162px row, and there was no cap at all — measured, ten recipients came to
+   ~660px, taller than the message box underneath, with no `max-height` and no
+   scroller anywhere in the stylesheet.
+
+   Two things fix it together. `TagField`'s `maxVisible` (3 here) caps how many
+   chips exist. And the chip's own vertical padding is taken out here so the
+   48px button *is* the row height rather than sitting inside a taller box.
+   The row then holds one line and scrolls sideways rather than wrapping —
+   wrapping is what made the old block unbounded in the first place.
+   ========================================================================== */
+
+.composetop2 {
+  display: flex;
+  flex-direction: column;
+}
+
+.composetop2__row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-4);
+  border-bottom: 1px solid var(--border-subtle);
+  min-width: 0;
+}
+
+/*
+ * The field name, inline rather than on a row of its own.
+ *
+ * `--text-base`, not the data rank: it is a label on a control, and the type
+ * ladder assigns 小四 to "body copy, labels, buttons, inputs". `check-tap`
+ * pools font sizes per kind of text across every screen, so a label here that
+ * disagreed with a label anywhere else would fail the build.
+ */
+.composetop2__lb {
+  flex: 0 0 auto;
+  font-size: var(--text-base);
+  color: var(--text-3);
+}
+
+.composetop2__subject {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 44px;
+  border: 0;
+  background: transparent;
+  color: var(--text-1);
+  font: inherit;
+  font-size: var(--text-base);
+  padding: 0;
+}
+.composetop2__subject::placeholder {
+  color: var(--text-3);
+}
+.composetop2__subject:focus-visible {
+  outline: none;
+  /* The row already reads as a field; a ring inside it would be a second
+     border 1px from the first. The caret is the focus indicator here, and the
+     underline below goes accent so it is not carried by the caret alone. */
+  box-shadow: none;
+}
+.composetop2__row:focus-within {
+  border-bottom-color: var(--accent);
+}
+
+/* The chevron to account / Cc / Bcc. 48px, like every other icon button. */
+.composetop2__more {
+  flex: 0 0 var(--ctl-md);
+  width: var(--ctl-md);
+  height: var(--ctl-md);
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  border-radius: var(--r-full);
+  /* -12px so the 48px target keeps its size while the glyph lines up with the
+     screen's gutter instead of sitting 12px inside it. */
+  margin-right: calc(var(--sp-3) * -1);
+}
+.composetop2__more[aria-expanded='true'] {
+  color: var(--accent);
+  transform: rotate(180deg);
+}
+
+/* --- the recipient row ---------------------------------------------------- */
+.composetop2 .tagfield-wrap {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.composetop2 .tagfield {
+  min-height: 44px;
+  /* One line. Wrapping is what let this band reach 660px. */
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  gap: var(--sp-2);
+  border-radius: 0;
+}
+.composetop2 .tagfield::-webkit-scrollbar {
+  display: none;
+}
+
+/*
+ * Zero vertical padding, and this is the line that makes the budget work: the
+ * 48px `.chip__remove` inside now *is* the row height instead of sitting in a
+ * 54px box. Horizontal padding stays — the name still needs room from the edge.
+ */
+/*
+ * 38%, not 62vw.
+ *
+ * At 62vw one address filled the row and the other four sat off the right edge
+ * behind a horizontal scroll — measured on a five-recipient draft, the screen
+ * showed exactly one name and no sign that there were more, which is worse
+ * than the truncated summary bar this replaced. Capping each chip at about a
+ * third means two names and the "+N" are on screen together, and "+N" is the
+ * part that says the list is longer than it looks.
+ */
+.composetop2 .chip--recipient {
+  /* `0 0 auto`, not `0 1 auto`. Allowed to shrink, three chips at 38% each
+     asked for 114% of the row and flex took the difference out of all of them
+     equally — measured, every chip collapsed to a coloured pill with no text
+     in it at all, which says less than the truncated bar this replaced. They
+     keep their content width and the row scrolls; "+N" is what tells you the
+     list is longer than the part you can see. */
+  flex: 0 0 auto;
+  min-width: 0;
+  max-width: 46%;
+  padding-block: 0;
+}
+.composetop2 .chip--recipient .chip__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composetop2 .tagfield__input {
+  flex: 1 0 8ch;
+  min-width: 8ch;
+}
+
+/* The "+N" pill. Not chip-shaped: it is the only thing in the row that is not
+   a recipient, and the chip shape would make "+7" look removable. */
+.tagfield__more {
+  flex: 0 0 auto;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 var(--sp-3);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--r-full);
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--text-base);
+  cursor: pointer;
+}
+.tagfield__more:hover {
+  background: var(--surface-hover);
+  color: var(--text-1);
+}
+
+/* --- account / Cc / Bcc, behind the chevron ------------------------------- */
+.composetop2 + .compose-head--extra {
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+/* --- what the header cost, taken back ------------------------------------ */
+
+/*
+ * The two rows sit flush against the message box.
+ *
+ * `.compose-layout`'s gap between bands is right when the bands are cards; here
+ * the rows carry their own hairline separators, so the gap is a second divider
+ * made of empty space. On a screen with a 98px furniture budget that is not a
+ * refinement, it is most of the margin.
+ */
+:root[data-shell='mobile'] .view--compose .composetop2 {
+  margin-bottom: calc(var(--sp-1) * -1);
+}
+
+/*
+ * The count, overlaid on the bottom-right corner of the message box.
+ *
+ * `--text-sm` is the data rank and this is data — a count, looked at rather
+ * than read — which is exactly the split the type ladder draws at 14px. It is
+ * not a control, so the 44px tap floor does not apply and `check-tap` does not
+ * measure it; that is also why it may sit over the text at all.
+ *
+ * The tinted plate is load-bearing rather than decorative: without it the
+ * digits sit directly on whatever line of the message happens to have scrolled
+ * under them, and two runs of text at the same size overlapping is unreadable
+ * in a way that a plate fixes for the cost of 2px of padding.
+ */
+.composecount {
+  position: absolute;
+  right: var(--sp-3);
+  bottom: var(--sp-2);
+  padding: 1px var(--sp-2);
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--surface-1) 88%, transparent);
+  font-size: var(--text-sm);
+  color: var(--text-3);
+  white-space: nowrap;
+  pointer-events: none;
+}
+:root[data-shell='mobile'] .view--compose .compose-layout > .field:has(.textarea--body) {
+  position: relative;
+}
+
+/*
+ * The recipient field's own text input.
+ *
+ * Measured at 140x32 and caught by the 44px floor: the row's `min-height` sizes
+ * the *field*, and the bare `<input>` inside it was free to be shorter than the
+ * box it lives in. A control the user taps to type an address has to clear the
+ * floor whatever its container does.
+ */
+.composetop2 .tagfield__input {
+  min-height: 44px;
+}
+
+/*
+ * The formatting toolbar, now anchored in the action bar.
+ *
+ * Folded it is one icon-sized control in the row. Open, the seven buttons
+ * cannot fit beside the send button at 360px, so the strip lifts to its own
+ * line directly above the bar — the position a keyboard accessory row would
+ * take, and the one place on this screen that costs the message box nothing,
+ * because the action bar is already outside `.view--compose`'s measured height.
+ *
+ * Absolute rather than a flex line: in flow it would push the bar up and take
+ * the 44px back off the message, which is the exact trade the label row was
+ * deleted to avoid.
+ */
+.composeacts {
+  position: relative;
+}
+
+/*
+ * The send-time button, which is the only flexible item in this row and so the
+ * one that pays for everything else.
+ *
+ * Measured at 38x48 on the largest text setting and caught by the 44px floor:
+ * at 125% the send button's own label grows and there is simply less row left.
+ * A minimum, and the time inside ellipsises rather than the button shrinking —
+ * a control you cannot hit is worse than a time you have to open to read in
+ * full, and opening it is what tapping it does anyway.
+ */
+.composeacts__when {
+  min-width: 44px;
+}
+
+/* The toggle. A 48px icon control like its three neighbours in this row —
+   `15-compose-narrow.css` sizes it as a 23.8px box with a 44px `::after` hit
+   area, but that rule is scoped to the message field it used to live in and
+   does not reach here, which is correct: in the action bar it is one of four
+   buttons and should be the same size as the other three. */
+.composeacts .markup__toggle {
+  flex: 0 0 var(--ctl-md);
+  width: var(--ctl-md);
+  height: var(--ctl-md);
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  padding: 0;
+}
+.composeacts .markup__toggle[aria-expanded='true'] {
+  background: var(--surface-active);
+  color: var(--accent);
+}
+/*
+ * Icon only in this row.
+ *
+ * The toggle carries a visible "排版" beside its chevron, which is right beside
+ * the message field it used to live in and wrong in a row of four icon
+ * buttons: measured at 390px it pushed the send-time button down to showing
+ * "2026 …" — a date truncated past the point of saying anything. The label
+ * stays in the accessible name, which is what a screen reader reads and what
+ * the tooltip shows.
+ */
+.composeacts .markup__toggle {
+  /* The label is a bare text node, so it cannot be selected and hidden — the
+     first attempt used `> :not(svg)` and matched nothing. Zeroing the font size
+     on the button and restoring it on the icon is the one way to drop a text
+     node without touching the markup; the accessible name is on the button's
+     `aria-label`/`title`, so nothing is lost to a screen reader. */
+  font-size: 0;
+}
+.composeacts .markup__toggle svg {
+  font-size: var(--text-base);
+}
+
+/*
+ * Closed, and actually closed.
+ *
+ * `15-compose-narrow.css` has the rule that folds the strip away, and it is
+ * written `.view--compose[data-narrow] .compose-layout > .field:has(.textarea
+ * --body) .markup__toggle[aria-expanded="false"] + .markup` — scoped to the
+ * message field the toolbar used to live in. Moving the toolbar into the
+ * action bar took that ancestor out from under the selector, so it stopped
+ * matching and the seven buttons were never hidden again: measured at 390px,
+ * the strip sat permanently over the band directly above the bar, covering the
+ * pre-send warning strip and swallowing every tap aimed at it. The toggle
+ * still worked; the thing it toggles was simply always on.
+ *
+ * That is the same failure the note at the end of this file already records
+ * about the message field's own label — a rule that quietly stops applying
+ * because the markup under it changed shape. Re-stated here against the
+ * toolbar's new parent, with nothing in between for the next edit to remove.
+ */
+.composeacts .markup__toggle[aria-expanded='false'] + .markup {
+  display: none;
+}
+
+/*
+ * The open strip, lifted clear of the row.
+ *
+ * `.markup` is the toolbar itself (`MarkupToolbar.tsx:121`) — the first version
+ * of this rule guessed `.markup__bar`, which matches nothing, so the seven
+ * buttons wrapped inside the action bar instead: measured, the bar went from
+ * ~53px to **363px** and squeezed `.view--compose` from 654px to 348px, taking
+ * the message box to 69%. Absolute, not a flex line, for exactly that reason —
+ * in flow it pushes the bar up and takes the height back off the message,
+ * which is the trade deleting the label row was meant to avoid.
+ */
+.composeacts .markup {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  z-index: 2;
+  display: flex;
+  /* One line that scrolls. Inherited `flex-wrap: wrap` put the seven buttons on
+     two rows, and the panel then covered the send-guardian banner underneath
+     it — a strip that hides a warning is worse than a strip you have to swipe. */
+  flex-wrap: nowrap;
+  gap: var(--sp-1);
+  margin-bottom: var(--sp-2);
+  padding: var(--sp-1) var(--sp-2);
+  background: var(--surface-1);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-md);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.composeacts .markup::-webkit-scrollbar {
+  display: none;
+}
+.composeacts .markup__btn {
+  flex: 0 0 auto;
+}
+
+/*
+ * The message field's own label, hidden again.
+ *
+ * It was already `sr-only` on a phone — but by a selector that reads
+ * `.field > .field__labelrow > .field__label`, and deleting the label row took
+ * the middle term out from under it. The label reappeared, visibly, saying
+ * "正文" directly above the box that is obviously the body: measured at
+ * 20.8px, which was most of the 21px the header was over budget by. A rule
+ * that stops applying because the markup under it changed shape is the same
+ * failure mode as the `>` combinator bug this screen already has on record.
+ *
+ * Written against the field rather than the row so there is nothing left in
+ * between for a future edit to remove.
+ */
+:root[data-shell='mobile'] .view--compose .compose-layout > .field:has(.textarea--body) > .field__label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+/* And the gap that separated the box from a row that no longer exists. */
+:root[data-shell='mobile'] .view--compose .compose-layout > .field:has(.textarea--body) {
+  gap: 0;
+}
+
+/*
+ * 44px, not 48, and only inside this header.
+ *
+ * `--tap-min` is 48 and that is the right default, but this row's height *is*
+ * this button's height (the chip has no vertical padding here), so every pixel
+ * on it is a pixel off the message box. 44 is the floor `check-tap-targets`
+ * enforces and the floor Android's own guidance sets; spending the extra four
+ * here costs the one measurement on this screen that has a hard gate.
+ */
+.composetop2 .chip__remove {
+  min-width: 44px;
+  width: 44px;
+  min-height: 44px;
+  height: 44px;
+}
+
+/* ==========================================================================
+   The pre-send warning strip, folded
+
+   Two full-width cards used to stack here: the validation list and Send
+   Guardian's. Measured together on a phone-shaped draft they came to ~150px —
+   about a fifth of a 360x800 screen, held permanently, for text that is read
+   once and then scrolled past.
+
+   Folded, the same information is a 44px row carrying the count and a chevron.
+   The count is the part that has to be on screen unasked: a warning that has
+   to be opened before you know there is one is not a warning. The sentences
+   are one tap under it, still in their two labelled groups.
+
+   `.banner` is `display: flex` with its own padding, both of which this
+   replaces — the tone (background, border, text colour) is all this reuses
+   from it, and reusing it is the point: the strip is the same object as the
+   banners it stands for, only closed.
+   ========================================================================== */
+
+.warnfold {
+  display: block;
+  padding: 0;
+  /* The head button provides the row's own padding, so the strip has none of
+     its own; without this the folded row is 44px of button inside 24px of
+     banner padding, which is 68px for one sentence. */
+  overflow: hidden;
+}
+
+.warnfold__head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  /* 44, not `--tap-min`'s 48. This row is furniture on the one screen with a
+     hard message-box floor, and 44 is the number `check-tap-targets` and
+     Android's own guidance both set — the same trade `.composetop2
+     .chip__remove` above makes, for the same reason. */
+  min-height: 44px;
+  padding: var(--sp-2) var(--sp-4);
+  border: 0;
+  background: transparent;
+  /* Inherited from `.banner--warning` / `.banner--danger`, so the count is the
+     tone of the thing it is counting without this rule knowing which. */
+  color: inherit;
+  font: inherit;
+  font-size: var(--text-base);
+  text-align: start;
+  cursor: pointer;
+}
+
+.warnfold__icon {
+  flex: none;
+}
+
+.warnfold__count {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-weight: 700;
+}
+
+.warnfold__chev {
+  flex: none;
+}
+.warnfold__head[aria-expanded='true'] .warnfold__chev {
+  transform: rotate(180deg);
+}
+
+.warnfold__body {
+  padding: 0 var(--sp-4) var(--sp-3);
+}
+
+/* Send Guardian's own heading, kept. Expanded, these are still two sets — a
+   list of facts about the draft and a list of guesses about intent, only one
+   of which can block Send — and running them together under one bullet list
+   would be the one thing this fold is not allowed to do. */
+.warnfold__title {
+  margin-top: var(--sp-2);
+  font-weight: 700;
+}
+
+/* ==========================================================================
+   The send-time quick-pick, hanging off the action bar
+
+   The times people actually pick, two taps from the compose screen: the clock
+   button in the action bar opens this, and picking arms the time and closes
+   it. What it replaces is a full-screen sheet, a second full-screen modal
+   opened on top of it, and `RecurrenceEditor` — eight taps and two scrolls for
+   "this Friday at six".
+
+   Anchored above the bar rather than placed in it, for the same reason the
+   markup strip is: `.composeacts` is already `position: relative`, the action
+   bar sits outside `.view--compose`'s measured height, and an absolute panel
+   costs the message box nothing open or closed. In flow it would push the bar
+   up and take the height straight off the message.
+   ========================================================================== */
+
+.composeacts__picks {
+  position: absolute;
+  /* Above `.markup`, which is 2. The two can only be open together by
+     deliberate effort, but when they are, the one the user just opened is the
+     one that should be on top. */
+  z-index: 3;
+  inset-inline: 0;
+  bottom: 100%;
+  margin-bottom: var(--sp-2);
+  display: flex;
+  flex-direction: column;
+  padding: var(--sp-1);
+  background: var(--surface-1);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-lg);
+  /* Five entries at 48px is 240px and fits a phone with the keyboard up; the
+     cap is for the largest text setting, where it scrolls rather than running
+     off the top of the window. */
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+/* A row of the list. Its own block name rather than `.btn`: `check-tap-targets`
+   pools one kind of control at one height across every screen in the app, and
+   these are 48px list rows, not buttons in a row. */
+.pickitem {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  min-height: var(--ctl-md);
+  padding: 0 var(--sp-3);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-1);
+  font: inherit;
+  font-size: var(--text-base);
+  text-align: start;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.pickitem:hover {
+  background: var(--surface-hover);
+}
+.pickitem:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+/* The time already armed. Colour only — a check mark would need a column the
+   row does not have, and `aria-pressed` is what a screen reader reads anyway. */
+.pickitem[aria-pressed='true'] {
+  color: var(--accent);
+}
+
+.pickitem__icon {
+  flex: none;
+  color: var(--text-3);
+}
+
+/* "Send now" and "Custom…" are not times; the hairlines say so. */
+.pickitem--now {
+  color: var(--accent);
+  border-bottom: 1px solid var(--border-subtle);
+  border-radius: 0;
+}
+.pickitem--now .pickitem__icon {
+  color: inherit;
+}
+.pickitem--more {
+  border-top: 1px solid var(--border-subtle);
+  border-radius: 0;
+  color: var(--text-2);
+}

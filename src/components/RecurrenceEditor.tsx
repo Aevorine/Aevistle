@@ -92,7 +92,7 @@ export function hhmm(ms: number): string {
 }
 
 /**
- * The four start times people actually pick, as one tap each.
+ * The start times people actually pick, as one tap each.
  *
  * Built from the current clock rather than from constants, and *not*
  * memoised on mount: a window left open overnight would otherwise offer
@@ -103,6 +103,11 @@ export function hhmm(ms: number): string {
  * whose stored time carries the 37 seconds that happened to be on the clock
  * when the chip was tapped fires at 09:00:37, which is not what "tomorrow at
  * nine" means to anyone.
+ *
+ * This is the one list. The phone's send-time quick-pick (see
+ * `.composeacts__picks` in ComposeView) reads it too, so a time that is
+ * offered in the dialog is offered on the action bar and there is no second
+ * table of "the usual times" to drift out of step with this one.
  */
 export function quickTimes(now: number): Array<{ key: string; at: number }> {
   const at = (dayOffset: number, hour: number, minute = 0) => {
@@ -112,6 +117,21 @@ export function quickTimes(now: number): Array<{ key: string; at: number }> {
     return d.getTime()
   }
   const tonight = at(0, 20)
+  /**
+   * "This Friday, 18:00" — the end of the working week, which is the deadline
+   * a surprising share of reminders are actually about.
+   *
+   * `% 7` with no `|| 7`, unlike `nextMonday` below: on a Friday morning "this
+   * Friday" means today, and the entry is dropped by the `> now` filter once
+   * six o'clock has gone rather than silently sliding a week forward under a
+   * label that says "this".
+   */
+  const thisFriday = () => {
+    const d = new Date(now)
+    d.setDate(d.getDate() + ((5 - d.getDay() + 7) % 7))
+    d.setHours(18, 0, 0, 0)
+    return d.getTime()
+  }
   const nextMonday = () => {
     const d = new Date(now)
     // 1 = Monday. `|| 7` turns Sunday's 0 into "one day away" rather than
@@ -122,12 +142,14 @@ export function quickTimes(now: number): Array<{ key: string; at: number }> {
     d.setHours(9, 0, 0, 0)
     return d.getTime()
   }
+  const friday = thisFriday()
   return [
     { key: 'quick.hour', at: Math.ceil((now + 3_600_000) / 60_000) * 60_000 },
     // Offered only while it is still ahead — a chip that silently schedules
     // something in the past is worse than one that is not there.
     ...(tonight > now ? [{ key: 'quick.tonight', at: tonight }] : []),
     { key: 'quick.tomorrow', at: at(1, 9) },
+    ...(friday > now ? [{ key: 'quick.friday', at: friday }] : []),
     { key: 'quick.nextWeek', at: nextMonday() },
   ]
 }

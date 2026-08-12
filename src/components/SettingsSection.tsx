@@ -1,6 +1,6 @@
 /**
- * One block of Settings, rendered as a card on a desktop and as a row that
- * opens a dialog on a phone.
+ * One block of Settings, rendered as a card on a desktop and as a full-height
+ * dialog on a phone.
  *
  * Settings is sixteen cards. On a wide window that is a two-column grid you
  * scan in a couple of seconds. On a 360px phone it is a single column roughly
@@ -13,11 +13,29 @@
  * the screen is a second navigation system competing with the one at the bottom
  * of the screen, and it ate the first 44px of every settings screen to do it.
  *
- * So the phone gets a different structure, not a restyle: a list of sixteen
+ * So the phone gets a different structure, not a restyle: an index of grouped
  * rows, each opening its section in a full-height dialog with one close button.
- * The rows fit on two screens; the section you open is the only thing on
- * screen; and closing it puts you back exactly where you were, which scrolling
- * never quite does.
+ * The index fits on about a screen and a half; the section you open is the only
+ * thing on screen; and closing it puts you back exactly where you were, which
+ * scrolling never quite does.
+ *
+ * ## Why the row is not in here any more
+ *
+ * It used to be: this component drew its own row, held its own `open` state,
+ * and a `hideOnNarrow` flag dropped four sections' rows entirely because Home
+ * already had tiles for them. That produced the defect this round exists to
+ * fix — twelve rows for sixteen sections, with the daily digest, holiday
+ * greetings, calendar publishing and device pairing reachable *only* from Home,
+ * three of them behind 更多. Somebody who opened Settings looking for the daily
+ * digest found nothing, and nothing pointing anywhere.
+ *
+ * Rows in the section and rows in a group cannot both be true: a group is an
+ * ordering across sections, and a component that only knows about itself cannot
+ * be ordered. So the index (`views/SettingsView.tsx`) owns the rows, their
+ * order, their captions and their inline values, and owns which section is
+ * open; this component owns the anchor and the dialog. The section's label
+ * still arrives as a prop, from the same table the row title comes from, so the
+ * row you tapped and the dialog that opened cannot disagree about their name.
  *
  * ## Why a wrapper and not sixteen files
  *
@@ -38,17 +56,16 @@
  * until the dialog actually mounts them.
  */
 
-import { useState, type ReactNode } from 'react'
-import { IconChevronRight } from './icons'
+import { type ReactNode } from 'react'
 import { Modal } from './ui'
 
 export function SettingsSection({
   id,
   label,
-  icon,
   narrow,
   closeLabel,
-  hideOnNarrow,
+  open,
+  onClose,
   children,
 }: {
   /**
@@ -57,29 +74,19 @@ export function SettingsSection({
    * Still emitted on a phone even though nothing there scrolls to it: these
    * ids are also how `scripts/layout-probe.mjs` and the screenshot tooling
    * find a section, and a measuring script that silently found nothing would
-   * report a passing measurement of the wrong thing.
+   * report a passing measurement of the wrong thing. They are also the keys
+   * the phone index opens sections by, so an id that drifted would show up as
+   * a row that opens nothing rather than as a silent measurement.
    */
   id: string
   label: string
-  icon: ReactNode
   narrow: boolean
   closeLabel: string
-  /**
-   * Drops the row (and the dialog behind it) on a phone, leaving only the
-   * anchor div, for the handful of sections `HomeView`'s `HOME_FEATURES`
-   * already puts one tap away from the tab bar. A wide window has no such
-   * shortcut — Settings is already the only door — so this never touches the
-   * `!narrow` branch below, and the row keeps its place there unconditionally.
-   * Without it, opening the app to Home and then to Settings offered the same
-   * digest/greetings/calendar-subscribe/pairing card behind two different
-   * buttons, which read as the phone not knowing where it put its own
-   * features rather than as two doors to one room.
-   */
-  hideOnNarrow?: boolean
+  /** Phone only. Ignored on a wide window, where every section is on the page. */
+  open: boolean
+  onClose: () => void
   children: ReactNode
 }) {
-  const [open, setOpen] = useState(false)
-
   if (!narrow) {
     return (
       <>
@@ -89,21 +96,12 @@ export function SettingsSection({
     )
   }
 
-  if (hideOnNarrow) {
-    return <div id={id} className="settings-section" />
-  }
-
   return (
     <>
       <div id={id} className="settings-section" />
-      <button type="button" className="settingsrow" onClick={() => setOpen(true)}>
-        <span className="settingsrow__icon">{icon}</span>
-        <span className="settingsrow__label">{label}</span>
-        <IconChevronRight size={16} className="settingsrow__chevron" />
-      </button>
       {/*
         Mounted only while open, so a shut section costs nothing beyond the
-        element tree above. `Modal` returns null when `open` is false, but the
+        anchor above. `Modal` returns null when `open` is false, but the
         children would still have been constructed *and* their component
         elements handed to React to reconcile — this way the section genuinely
         does not exist until it is asked for.
@@ -112,7 +110,7 @@ export function SettingsSection({
         <Modal
           open
           title={label}
-          onClose={() => setOpen(false)}
+          onClose={onClose}
           closeLabel={closeLabel}
           fullscreen
           bodyClassName="modal__body--settings"

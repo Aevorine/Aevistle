@@ -63,6 +63,7 @@ import { MarkupToolbar } from '../components/MarkupToolbar'
 import { PreflightDialog, useFilePresence, usePreflight } from '../components/PreflightDialog'
 import { SendResultDetails } from '../components/SendDetails'
 import {
+  IconAlert,
   IconChevronDown,
   IconClock,
   IconFileText,
@@ -306,6 +307,21 @@ export function ComposeView({
   const [recurrence, setRecurrence] = useState<Recurrence>(() => editingJob?.recurrence ?? seedRecurrence())
   /** The quick-pick popover. Anchored, so opening it costs the message box no height. */
   const [quickOpen, setQuickOpen] = useState(false)
+  /**
+   * The same idea one layer out: the send-time quick-pick hanging off the
+   * action bar's clock button, so "this Friday at six" is two taps rather than
+   * eight. Anchored above the bar, which is outside `.view--compose`'s measured
+   * height, so it costs the message box nothing whether open or closed.
+   */
+  const [pickOpen, setPickOpen] = useState(false)
+  /**
+   * Whether the pre-send warning strip is expanded.
+   *
+   * Collapsed is the initial state and the state it returns to: what is on
+   * screen unasked is the *count*, which is the part a warning has to make you
+   * notice, and the sentences are one tap under it.
+   */
+  const [warnOpen, setWarnOpen] = useState(false)
   const [retry, setRetry] = useState<RetryPolicy>(() => editingJob?.retry ?? DEFAULT_RETRY)
   const [burst, setBurst] = useState<BurstPolicy>(() => editingJob?.burst ?? DEFAULT_BURST)
   /** Undefined means "whoever has it enabled" — see `ScheduledJob.executorDeviceId`. */
@@ -332,6 +348,7 @@ export function ComposeView({
   const headId = useFieldId('head')
   const moreId = useFieldId('more')
   const whenId = useFieldId('when')
+  const warnId = useFieldId('warn')
 
   /**
    * The body box remembers how tall it was dragged.
@@ -515,6 +532,24 @@ export function ComposeView({
       }),
     [draft, scheduleSet, recurrence, state.recentRecipients],
   )
+  /**
+   * How many things there are to look at before sending, both sets together.
+   *
+   * The two sets stay separate everywhere else — `bannerIssues` are facts about
+   * the draft and `guardianFindings` are guesses about intent, and only the
+   * first kind can block Send — but on a phone they were two stacked full-width
+   * cards measuring ~150px between them, taken straight off the message box.
+   * One number is what goes on screen unasked; both lists are one tap under it,
+   * still labelled and still in their two groups.
+   */
+  const warnCount = bannerIssues.length + guardianFindings.length
+  const warnBlocking = bannerIssues.some((i) => i.severity === 'error')
+  /* Nothing left to show means nothing left expanded. Without this the strip
+     would come back open the next time it appeared, having been left open on a
+     draft that has since been sent. */
+  useEffect(() => {
+    if (warnCount === 0) setWarnOpen(false)
+  }, [warnCount])
   const recipientCount = draft.to.length + draft.cc.length + draft.bcc.length
   /** Has the user put anything in the draft yet? Nothing is "wrong" until so. */
   const started =
@@ -859,6 +894,20 @@ export function ComposeView({
   }
 
   const openSchedule = () => {
+    /*
+     * Close whatever sheet asked for this first.
+     *
+     * `ComposeSheet` is a full-screen layer on a narrow window and the Schedule
+     * dialog is another one, and the only route to the dialog from a phone ran
+     * through the send-time sheet's "Repeat, retry, conditions…" button — which
+     * left `sheet` set, so the modal opened *on top of* the sheet it was
+     * launched from. Two stacked full-screen layers, and closing the top one
+     * put you back in a sheet you had already finished with. One line, and it
+     * belongs here rather than at each call site: every route into this dialog
+     * wants the layer it came from gone.
+     */
+    setSheet(null)
+    setPickOpen(false)
     // Editing an existing job: every field below is already seeded from it
     // (see the `useState` initialisers above), and resetting them here — on
     // every open, not just mount — would discard the job's own settings the
@@ -995,25 +1044,23 @@ export function ComposeView({
     return [t('deliver.composeTitle'), ...lines].join('\n')
   }, [delivery, t, formatDateTime])
 
-  /**
-   * Who this is for and what it is about, on one line.
+  /*
+   * `headerSummary` lived here — "who this is for and what it is about, on one
+   * line" — and it is gone with the summary bar it fed.
    *
-   * The narrow layout folds the account, To, Cc, Bcc and subject fields away —
-   * from the first paint now, not only once the message box has focus — and
-   * something has to stay behind saying what was folded. A bar that reads only
-   * "tap to expand" is a bar nobody can check their own draft against.
+   * Its own doc argued that a folded bar "has to stay behind saying what was
+   * folded", and that is right; what it could not do was say it legibly. Both
+   * fields shared one 48px row and each was ellipsised to roughly a third of
+   * its content, so the two things a person can most expensively get wrong —
+   * who it goes to, what it is about — were the two things they could not read
+   * before pressing send. Nor could it show Bcc at all.
    *
-   * Empty is returned as empty rather than as `validate.noRecipients`. On a fresh
-   * draft, which is now the state this bar is *first seen* in, "No recipients"
-   * reads as a verdict on a form that has not been filled in yet, and a verdict
-   * is not an invitation to type. The bar renders the recipient field's own
-   * placeholder instead and is styled as that field (see `.composesummary`), so
-   * the folded state reads as the empty input it stands in for.
+   * Neither field is folded any more (see `.composetop2` in the render), so
+   * there is nothing left to summarise. What stays folded is the account
+   * picker, Cc and Bcc — each answered once per draft or never, which is the
+   * test for what may fold, and none of which needs a summary because the
+   * chevron's expanded state already says whether there is more.
    */
-  const headerSummary = useMemo(
-    () => ({ to: draft.to.join(', '), subject: draft.subject.trim() }),
-    [draft.to, draft.subject],
-  )
 
   /**
    * The send time, as one line for the action bar.
@@ -1069,6 +1116,45 @@ export function ComposeView({
       document.removeEventListener('pointerdown', close)
     }
   }, [quickOpen])
+
+  /* The action bar's own send-time popover, same rule. Written separately
+     rather than folded into the effect above because the two are anchored to
+     different elements and a shared "did the click land inside" test would have
+     to know about both — which is how one popover ends up refusing to close
+     because the other one's anchor was on screen. */
+  useEffect(() => {
+    if (!pickOpen) return
+    const close = (e: Event) => {
+      if (e instanceof KeyboardEvent && e.key !== 'Escape') return
+      if (e.type === 'pointerdown') {
+        const target = e.target as HTMLElement | null
+        if (target?.closest('.composeacts__picks, .composeacts__when')) return
+      }
+      setPickOpen(false)
+    }
+    document.addEventListener('keydown', close)
+    document.addEventListener('pointerdown', close)
+    return () => {
+      document.removeEventListener('keydown', close)
+      document.removeEventListener('pointerdown', close)
+    }
+  }, [pickOpen])
+
+  /**
+   * One time, armed and the popover shut.
+   *
+   * `kind` is deliberately left alone. A draft carrying "every weekday" whose
+   * owner taps "this Friday 18:00" wants the *clock* moved, not the repeat
+   * silently deleted — and for the four `timeOfDay` rules `startAt` is only a
+   * floor (see `firesAtTimeOfDay`), so both fields are written together or the
+   * pick edits a number nothing reads. Same two lines the send-time bar's own
+   * chips already run.
+   */
+  const pickSendTime = (at: number) => {
+    setRecurrence((r) => ({ ...r, startAt: at, timeOfDay: hhmm(at) }))
+    setScheduleSet(true)
+    setPickOpen(false)
+  }
 
   const scheduleHasErrors = hasErrors([...validateRecurrence(recurrence), ...validateBurst(burst)])
 
@@ -1134,7 +1220,15 @@ export function ComposeView({
     }
 
     const base: Omit<ScheduledJob, 'id' | 'chainId'> = {
-      name: jobName.trim() || t('schedule.namePlaceholder'),
+      /*
+       * `draft.subject` in the middle of the fallback for the phone's direct
+       * arm: the action bar arms without opening the dialog, so `jobName` — set
+       * by `openSchedule`, which that route never calls — is still empty, and
+       * every reminder scheduled from a phone would have been filed under the
+       * same "Untitled" placeholder. The dialog route is unaffected: it seeds
+       * the name from the subject already, so this term is never reached there.
+       */
+      name: jobName.trim() || draft.subject.trim() || t('schedule.namePlaceholder'),
       enabled: true,
       draft: { ...draft },
       recurrence,
@@ -1377,43 +1471,124 @@ export function ComposeView({
                 take focus is the kind of thing that is only ever found by the
                 person it happens to.
               */}
-              {narrow && !headerOpen ? (
-                <button
-                  type="button"
-                  className="composesummary"
-                  onClick={() => setHeaderOpen(true)}
-                  aria-expanded={false}
-                  aria-controls={headId}
-                  aria-label={t('compose.editHeader')}
-                  title={t('compose.editHeader')}
-                >
-                  {/* Only the collapsed summary bar carries this — the one place
-                      `narrow` was asked to gain a permanent element rather than
-                      lose one. Kept to a flex-shrink:0 pill so it never claims
-                      the ellipsis room the to/subject text already fights for. */}
-                  {editingJob ? (
-                    <span className="composesummary__edit">{t('compose.editingBadge')}</span>
+              {/*
+                Round 7. Who it goes to and what it is about are now two rows
+                that are readable and editable without a tap, on the screen the
+                app opens on.
+
+                What this replaces: one 48px summary bar holding both, each
+                ellipsised to about a third of its content — measured, the
+                filled state read "david.chen@example.co… 季度汇报（第…", so
+                neither of the two fields you can most expensively get wrong was
+                legible before pressing send. It also could not show Bcc at all,
+                so a draft with Bcc set looked identical to one without.
+
+                Why it is not simply the old `.compose-head` unfolded: that is
+                `Field`-based, a label row above each control, and opening it was
+                measured at a 66% message-box share (52% with a second account)
+                against an 85% floor. This is two 40px rows with the label
+                inline, and it pays for itself by taking the body's own label
+                row away — see the `Field` below, whose tools moved to the
+                action bar. Net measured cost is in the release notes; if it had
+                come out over the floor the fallback was a two-line summary, not
+                a lower floor. (Lowering the floor was tried once, on this exact
+                screen, and reverted the same day.)
+
+                Account, Cc and Bcc are behind the chevron: each is answered
+                once per draft or never, which is the test for what may fold.
+              */}
+              {narrow ? (
+                <>
+                  <div className="composetop2">
+                    <div className="composetop2__row">
+                      {editingJob ? (
+                        <span className="composesummary__edit">{t('compose.editingBadge')}</span>
+                      ) : null}
+                      <span className="composetop2__lb">{t('compose.to')}</span>
+                      <TagField
+                        id={toId}
+                        values={draft.to}
+                        onChange={(v) => patch({ to: v })}
+                        placeholder={t('compose.recipientPlaceholder')}
+                        suggestions={state.contacts}
+                        recents={state.recentRecipients}
+                        pickerLabel={t('compose.to')}
+                        /* Two, measured rather than chosen. At three, a 390px
+                           row showed two chips and pushed the "+N" off the
+                           right edge — so a five-recipient draft looked like a
+                           two-recipient draft, which is the failure this cap
+                           exists to prevent rather than a smaller version of
+                           it. Two chips and the pill fit together, and the
+                           pill is the part that says there are more. */
+                        maxVisible={2}
+                      />
+                      <button
+                        type="button"
+                        className="composetop2__more"
+                        onClick={() => setHeaderOpen((v) => !v)}
+                        aria-expanded={headerOpen}
+                        aria-controls={headId}
+                        aria-label={t('compose.editHeader')}
+                        title={t('compose.editHeader')}
+                      >
+                        <IconChevronDown size={16} />
+                      </button>
+                    </div>
+                    <div className="composetop2__row">
+                      <label className="composetop2__lb" htmlFor={subjectId}>
+                        {t('compose.subject')}
+                      </label>
+                      <input
+                        id={subjectId}
+                        className="composetop2__subject"
+                        value={draft.subject}
+                        maxLength={998}
+                        placeholder={t('compose.subjectPlaceholder')}
+                        onChange={(e) => patch({ subject: e.target.value })}
+                      />
+                    </div>
+                  </div>
+
+                  {headerOpen ? (
+                    <div className="compose-head compose-head--extra" id={headId}>
+                      {state.accounts.length > 1 ? (
+                        <Field label={t('compose.account')}>
+                          <select
+                            className="select"
+                            value={draft.accountId}
+                            onChange={(e) => patch({ accountId: e.target.value })}
+                          >
+                            {state.accounts.map((a) => (
+                              <option key={a.id} value={a.id}>
+                                {accountLabel(a)} — {a.fromAddress}
+                              </option>
+                            ))}
+                          </select>
+                        </Field>
+                      ) : null}
+                      <Field label={t('compose.cc')}>
+                        <TagField
+                          values={draft.cc}
+                          onChange={(v) => patch({ cc: v })}
+                          suggestions={state.contacts}
+                          recents={state.recentRecipients}
+                          pickerLabel={t('compose.cc')}
+                          maxVisible={3}
+                        />
+                      </Field>
+                      <Field label={t('compose.bcc')}>
+                        <TagField
+                          values={draft.bcc}
+                          onChange={(v) => patch({ bcc: v })}
+                          suggestions={state.contacts}
+                          recents={state.recentRecipients}
+                          pickerLabel={t('compose.bcc')}
+                          maxVisible={3}
+                        />
+                      </Field>
+                    </div>
                   ) : null}
-                  {/* `data-empty` is what makes this read as an input rather
-                      than as a missing field: the placeholder tone, and the
-                      dashed border in `app.css`, both hang off it. A user who
-                      cannot find where to type the recipient is a worse outcome
-                      than a small message box, so the empty state of this bar
-                      gets more design attention than the filled one. */}
-                  <span
-                    className="composesummary__to"
-                    data-empty={headerSummary.to ? undefined : 'true'}
-                  >
-                    {headerSummary.to || t('compose.recipientPlaceholder')}
-                  </span>
-                  <span
-                    className="composesummary__subject"
-                    data-empty={headerSummary.subject ? undefined : 'true'}
-                  >
-                    {headerSummary.subject || t('compose.subjectPlaceholder')}
-                  </span>
-                  <IconChevronDown size={16} className="composesummary__chev" />
-                </button>
+                </>
               ) : (
                 <>
                   <div className="compose-head" id={headId}>
@@ -1529,7 +1704,26 @@ export function ComposeView({
               <Field
                 label={t('compose.body')}
                 htmlFor={bodyId}
+                /*
+                 * No tools row on a phone, and this is what pays for the two
+                 * header rows above.
+                 *
+                 * Passing an `action` is what makes `Field` emit
+                 * `.field__labelrow`; the label itself is already `sr-only`
+                 * here, so the row was 28px of chrome sitting on the message
+                 * box's top edge holding a folded toggle and a byte count.
+                 * Measured: with the new header and this row still present the
+                 * box came to 524px of a 654px view — 80.1%, under the 85%
+                 * floor. Both controls move to the action bar, where the byte
+                 * count is next to the button whose limit it is about, and the
+                 * row goes.
+                 *
+                 * Kept on a wide window: there the label row costs the message
+                 * nothing it cannot spare, and the toolbar is more discoverable
+                 * beside the field it formats.
+                 */
                 action={
+                  narrow ? undefined : (
                   <div className="field__tools">
                     {/*
                       On the label line, not on a row of its own.
@@ -1583,6 +1777,7 @@ export function ComposeView({
                       </button>
                     ) : null}
                   </div>
+                  )
                 }
               >
                 {/*
@@ -1611,6 +1806,26 @@ export function ComposeView({
                     if (narrow) setHeaderOpen(false)
                   }}
                 />
+                {/*
+                  The count, in the corner of the box it counts.
+
+                  It was in the label row, which is gone on a phone; the action
+                  bar was tried next and measured badly — at 360px six items in
+                  that row left the send-time button **18px wide**, under the
+                  44px floor, and the gate caught it. Overlaid on the textarea
+                  it costs no height at all, which is the whole currency of this
+                  screen, and it sits where the typing is rather than at the far
+                  edge of the screen from it.
+
+                  Characters and bytes both, because they disagree by 3× in
+                  Chinese and the disagreement is the information: a draft that
+                  looks half the length of a provider's limit can be over it.
+                */}
+                {narrow ? (
+                  <span className="composecount" aria-live="polite">
+                    {t('compose.bodyCount', bodyCount)}
+                  </span>
+                ) : null}
               </Field>
 
               {/* The pictures the message carries, as pictures.
@@ -1917,37 +2132,76 @@ export function ComposeView({
             </div>
           </Card>
 
-          {/* One box, and only once there is something to be wrong about.
-              An untouched form used to open with four stacked red banners —
-              242px of alarm telling the user off for not having typed yet.
-              Blank is not an error: the action bar already says what is
-              missing, and Send is disabled until it is not. */}
-          {started && bannerIssues.length > 0 ? (
-            <div
-              className={`banner banner--${bannerIssues.some((i) => i.severity === 'error') ? 'danger' : 'warning'}`}
-            >
-              <ul className="banner__list">
-                {bannerIssues.map((issue, i) => (
-                  <li key={`${issue.key}-${i}`}>
-                    {t(issue.key as 'validate.noRecipients', issue.values)}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
+          {/*
+            One strip, folded, and only once there is something to be wrong
+            about.
 
-          {/* Send Guardian's own banner, separate from the one above: these are
-              heuristic guesses about intent, not settled facts about the draft,
-              and always non-blocking — Send stays enabled no matter what is
-              shown here. See `core/sendGuardian.ts`. */}
-          {started && guardianFindings.length > 0 ? (
-            <Banner tone="warning" title={t('sendGuardian.title')}>
-              <ul className="banner__list">
-                {guardianFindings.map((finding) => (
-                  <li key={finding.rule}>{t(finding.key as TranslationKey, finding.values)}</li>
-                ))}
-              </ul>
-            </Banner>
+            Two things happened here in order. First: an untouched form used to
+            open with four stacked red banners — 242px of alarm telling the user
+            off for not having typed yet — so nothing is said at all until the
+            draft has been started, because blank is not an error and Send is
+            disabled until it is not.
+
+            Then, on a draft that *is* under way, the two boxes that remained —
+            the validation list and Send Guardian's — measured ~150px together
+            at 360px, one fifth of the phone, permanently, for text that is read
+            once and then scrolled past. They are now one 44px row: the count,
+            which is the part a warning exists to make you notice, and a chevron
+            to the sentences.
+
+            Nothing is dropped and nothing is merged into a single undifferent-
+            iated list. Expanded, the two sets are still two labelled groups in
+            the order they were in — facts about the draft first, then the
+            guesses about intent, which never block Send (see
+            `core/sendGuardian.ts` for why those two are separate at all).
+
+            The strip carries the tone of the worse set: `danger` the moment
+            something in it actually blocks Send, `warning` otherwise, so "you
+            cannot send this yet" and "have a look at this" do not look alike
+            from across the room.
+          */}
+          {started && warnCount > 0 ? (
+            <div
+              className={`banner banner--${warnBlocking ? 'danger' : 'warning'} warnfold`}
+              role={warnBlocking ? 'alert' : undefined}
+            >
+              <button
+                type="button"
+                className="warnfold__head"
+                aria-expanded={warnOpen}
+                aria-controls={warnId}
+                onClick={() => setWarnOpen((v) => !v)}
+              >
+                <IconAlert size={16} className="warnfold__icon" />
+                <span className="warnfold__count">{t('compose.warnFold', { n: warnCount })}</span>
+                <IconChevronDown size={16} className="warnfold__chev" />
+              </button>
+              {warnOpen ? (
+                <div className="warnfold__body" id={warnId}>
+                  {bannerIssues.length > 0 ? (
+                    <ul className="banner__list">
+                      {bannerIssues.map((issue, i) => (
+                        <li key={`${issue.key}-${i}`}>
+                          {t(issue.key as 'validate.noRecipients', issue.values)}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  {guardianFindings.length > 0 ? (
+                    <>
+                      <div className="warnfold__title">{t('sendGuardian.title')}</div>
+                      <ul className="banner__list">
+                        {guardianFindings.map((finding) => (
+                          <li key={finding.rule}>
+                            {t(finding.key as TranslationKey, finding.values)}
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
           ) : null}
         </div>
       </div>
@@ -2021,16 +2275,35 @@ export function ComposeView({
           on air around a sentence.
 
           Narrow: one 52px row that is the form's missing third of the screen.
-          The attachment picker and the send-time bar are behind the first two
-          buttons, the options panel behind the third, and the send-time
-          sentence rides on the button that opens it — that question may not be
-          one tap away from being unanswerable. "Schedule" is not duplicated
-          here: it is the same `openSchedule` the "Repeat, retry, conditions…"
-          button inside the send-time sheet already calls, and a second copy
-          would cost the row the width the sentence needs.
+          The attachment picker is behind the first button, a list of the times
+          people actually pick behind the second, the options panel behind the
+          third, and the send-time sentence rides on the button that opens it —
+          that question may not be one tap away from being unanswerable.
+
+          Four items and the primary button is what 360px holds. Everything
+          added to this row since has had to come out of the send-time button,
+          which is the only flexible one, and it is already at its floor; see
+          the note on `.composeacts__when` and the one on "send now" in the
+          popover below.
         */}
         {narrow ? (
           <div className="composeacts">
+            {/*
+              The formatting toolbar and the byte count moved here from the
+              message field's own label row, which is now gone on a phone — see
+              the note on that `Field`'s `action`. The toolbar keeps its folded
+              behaviour exactly; only its anchor changed, and `.composeacts` is
+              where every other thing you do *to* the message already lives.
+
+              Hidden once the body is HTML, for the reason it always was:
+              inserting `**bold**` into HTML puts literal asterisks in the mail.
+            */}
+            {draft.bodyFormat !== 'html' ? (
+              <MarkupToolbar
+                textarea={bodyRef}
+                onChange={(body) => patch({ body, bodyFormat: 'markdown' })}
+              />
+            ) : null}
             <button
               type="button"
               className="btn btn--ghost btn--icon composeacts__btn"
@@ -2043,15 +2316,110 @@ export function ComposeView({
                 <span className="composeacts__badge">{draft.attachments.length}</span>
               ) : null}
             </button>
+            {/*
+              The send-time button now answers the question instead of asking
+              it again one layer down.
+
+              What it used to open was the send-time sheet: a full-screen layer
+              whose own "Repeat, retry, conditions…" button opened the Schedule
+              dialog *on top of it*, and inside that, `RecurrenceEditor` — about
+              fourteen tappable things of which exactly one, the Starts picker,
+              is on the way to "Friday at six". Counted end to end, eight taps
+              and two scrolls for the commonest schedule anyone sets.
+
+              Now it opens a list of the times people actually pick (the same
+              `quickTimes` the dialog offers — one table, so the two cannot
+              disagree), and picking one arms it and closes. Two taps, no
+              layers. Everything the sheet and the dialog do is still there,
+              unchanged, behind this list's last entry.
+
+              `cron` is the exception and goes straight to the sheet: a cron
+              expression is not a time you can pick off a list, and a menu of
+              wall-clock times would be editing a field that rule does not read.
+            */}
             <button
               type="button"
               className="btn btn--ghost composeacts__when"
               title={deliveryDetail ?? whenLine}
-              onClick={() => setSheet('when')}
+              aria-expanded={recurrence.kind === 'cron' ? undefined : pickOpen}
+              onClick={() =>
+                recurrence.kind === 'cron' ? setSheet('when') : setPickOpen((v) => !v)
+              }
             >
               <IconClock size={17} />
               <span className="composeacts__whentext">{whenLine}</span>
             </button>
+            {pickOpen ? (
+              <div
+                className="popover composeacts__picks"
+                role="group"
+                aria-label={t('schedule.quickTimes')}
+              >
+                {/*
+                  "Send it now" lives at the top of the time menu, because now
+                  is a time.
+
+                  It is here rather than beside the primary button for a reason
+                  that is arithmetic, not taste: at 360px the bar is 16px of
+                  padding, three 48px icon buttons, the send-time button and the
+                  primary. A second full-size button in that row takes the
+                  send-time button to roughly 20px — half the 44px floor
+                  `check-tap-targets` enforces — and the note already in
+                  `.composeacts__when` records it measuring 38px on the largest
+                  text setting *before* anything else was added. So the row has
+                  no room, and the one place that costs nothing is the panel
+                  hanging above it.
+
+                  Shown only when a time is set. With no schedule the primary
+                  button *is* "Send now" and a second copy here would be a menu
+                  entry for the thing already under the user's thumb.
+                */}
+                {scheduleSet ? (
+                  <button
+                    type="button"
+                    className="pickitem pickitem--now"
+                    disabled={blocked || sending}
+                    onClick={() => {
+                      setPickOpen(false)
+                      void doSend()
+                    }}
+                  >
+                    <IconSend size={16} className="pickitem__icon" />
+                    {t('compose.sendNow')}
+                  </button>
+                ) : null}
+                {quickTimes(Date.now()).map((o) => (
+                  <button
+                    key={o.key}
+                    type="button"
+                    className="pickitem"
+                    aria-pressed={scheduleSet && Math.abs(recurrence.startAt - o.at) < 60_000}
+                    onClick={() => pickSendTime(o.at)}
+                  >
+                    <IconClock size={16} className="pickitem__icon" />
+                    {t(o.key as TranslationKey)}
+                  </button>
+                ))}
+                {/*
+                  The whole old path, exactly where it was, one entry down.
+                  This opens the send-time sheet — the date-and-time box, the
+                  chips, and its own button through to repeats, retries and
+                  conditions — so nothing that used to be reachable stopped
+                  being reachable; it stopped being compulsory.
+                */}
+                <button
+                  type="button"
+                  className="pickitem pickitem--more"
+                  onClick={() => {
+                    setPickOpen(false)
+                    setSheet('when')
+                  }}
+                >
+                  <IconSliders size={16} className="pickitem__icon" />
+                  {t('compose.quickCustom')}
+                </button>
+              </div>
+            ) : null}
             <button
               type="button"
               className="btn btn--ghost btn--icon composeacts__btn"
@@ -2116,20 +2484,33 @@ export function ComposeView({
 
           `scheduleSet` is the same flag the "when" bar already sets the
           moment a time or a repeat rule is touched, so this button starts
-          agreeing with it rather than a moment later. Tapping it opens the
-          schedule dialog rather than arming the job directly — the same one
-          click the wide layout's own Schedule button opens — because that
-          dialog is where retries, chains and conditions still live, and
-          skipping it would silently drop whatever a returning user had set
-          there.
+          agreeing with it rather than a moment later.
+
+          It now *arms* rather than opening the dialog. Opening it was the
+          first fix for the bug above and it overshot: a single button was
+          neither "send" nor "schedule" but "ask me again", so a phone with a
+          time set could not arm the job without a modal round-trip and could
+          not send immediately at all without first clearing the time. The
+          reason for the round-trip was that retries, chains and conditions
+          live in that dialog and skipping it would drop whatever a returning
+          user had set — but nothing is dropped: `confirmSchedule` reads the
+          very same state the dialog edits, so a job armed from here carries
+          whatever was last set there, and the defaults when it was never
+          opened. The one thing `openSchedule` did that mattered on this path
+          was seed the job's name from the subject, which `confirmSchedule`
+          now does for itself.
+
+          "Send now" has not gone; it is the first entry in the send-time
+          popover, on the button showing the time it would be overriding. See
+          the note there for why it is not a second button in this row.
         */}
         {narrow && scheduleSet ? (
           <Button
             size="lg"
             variant="primary"
             icon={<IconClock size={17} />}
-            disabled={blocked || sending}
-            onClick={openSchedule}
+            disabled={blocked || sending || scheduleHasErrors}
+            onClick={() => void confirmSchedule()}
           >
             {t('compose.schedule')}
           </Button>

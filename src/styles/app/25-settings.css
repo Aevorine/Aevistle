@@ -1,0 +1,224 @@
+/*
+ * One row, one height — including at 125% text.
+ *
+ * `check-tap-targets` measured `.settingsrow` at three heights (63 / 64 / 97px)
+ * on the largest text setting. 63 and 64 are the same row rounding two ways and
+ * are inside the gate's 2px tolerance; 97 is a real second line, and it is the
+ * *name* that wraps, not the value — the value was already capped and
+ * ellipsised below, the label never was.
+ *
+ * The rule the gate enforces is that one kind of control renders at one height,
+ * and it is the right rule: a list where three rows are taller for a reason
+ * nobody can see is exactly the "looks unfinished" this round exists to remove.
+ * A settings row's name is two to six characters by design, so clipping it is
+ * a fallback that should never fire — but it is the difference between a list
+ * that stays a list at 125% and one that does not.
+ */
+.settingsrow__label {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ==========================================================================
+   The phone Settings index — identity card, four groups, sixteen rows
+
+   The rows themselves are still `.settingsrow` from 14-growth.css: one height,
+   one hairline, one chevron, pooled with every other row in the application by
+   `scripts/check-tap-targets.mjs`. Nothing here changes that height. What this
+   file adds is everything the flat list could not say —
+
+     · which rows belong together, and what to call the bunch;
+     · what each row's current value is, on the right, because every `hint` and
+       `description` in this app is hidden below 760px and the value is then the
+       only thing on the row that can tell you the state of anything;
+     · which rows are preferences and which are one-shot actions.
+
+   It loads last so it can reach over 14-growth.css's own `.settingsrow` block
+   without either file having to know about the other's specificity.
+   ========================================================================== */
+
+/**
+ * The index as a whole.
+ *
+ * `.view__inner--list` is a `gap: 0` column because its children used to be
+ * rows meant to touch. They are now one child — this — so the spacing between
+ * the identity card and the four groups is set here, where it is about the
+ * groups rather than about the page.
+ */
+.settingsindex {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+}
+
+/* --- the identity card ----------------------------------------------------
+ *
+ * Not a seventeenth setting. Somebody opening Settings on a phone is usually
+ * answering "is this thing actually working", and the flat list answered it
+ * nowhere: the sending account's address was four taps away inside 邮箱账号,
+ * and whether it could send at all was not stated on any screen. So the top of
+ * the index says who the app sends as and whether that account is usable, and
+ * tapping it opens the accounts section — one door, clearly labelled, not a
+ * second place to edit an account.
+ */
+.settingsid {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface-1);
+  color: var(--text-1);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
+}
+.settingsid:hover,
+.settingsid:focus-visible {
+  background: var(--surface-2);
+  border-color: var(--border-strong);
+}
+.settingsid:focus-visible {
+  outline: var(--ring);
+  outline-offset: 2px;
+}
+
+.settingsid__avatar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--ctl-md);
+  height: var(--ctl-md);
+  border-radius: var(--r-full);
+  /* Tinted from the live accent rather than from a colour of its own, so it
+     follows the seven visual styles and both themes without a second palette
+     that can disagree with the first. */
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+}
+
+.settingsid__body {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+/* Both lines truncate rather than wrap: an address is one long unbreakable
+   token and a card that grows a third line for it pushes the first group off
+   the screen this index exists to fit. */
+.settingsid__name {
+  overflow: hidden;
+  font-size: var(--text-lg);
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.settingsid__address {
+  overflow: hidden;
+  color: var(--text-2);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.settingsid > .statuschip {
+  flex: none;
+}
+
+/* --- a group -------------------------------------------------------------- */
+
+.settingsgroup__caption {
+  padding: 0 var(--sp-3) var(--sp-2);
+  color: var(--text-3);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+/**
+ * The rounded list.
+ *
+ * `overflow: hidden` is what rounds the first and last rows with it — the rows
+ * are square by themselves, and giving the corner rows their own radius would
+ * mean four more rules that have to be kept in step with which row is first.
+ * The focus ring is drawn inset (`outline-offset: -2px` in 14-growth.css), so
+ * clipping here does not clip it.
+ */
+.settingsgroup__list {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface-1);
+}
+/* Inside a card the row needs the card's inset; flush against the screen edge
+   it did not. Horizontal only — the vertical padding, and therefore the row's
+   height, is the pooled one from 14-growth.css and is not touched. */
+.settingsgroup__list > .settingsrow {
+  padding-inline: var(--sp-3);
+}
+/* `:last-of-type` in 14-growth.css already lands here, since every child of a
+   list is a button. Said again by position because that is the thing meant:
+   no rule under the last row, or the group looks unfinished. */
+.settingsgroup__list > .settingsrow:last-child {
+  border-bottom: 0;
+}
+
+/* --- what a row says about itself ----------------------------------------- */
+
+/**
+ * One icon slot, one width, whatever is in it.
+ *
+ * The action rows below paint a tinted square where the preference rows paint a
+ * bare glyph, and without a fixed slot that difference would ripple into the
+ * labels — sixteen rows whose text starts at two different places, which reads
+ * as a rendering fault rather than as a distinction.
+ */
+.settingsgroup__list > .settingsrow > .settingsrow__icon {
+  align-items: center;
+  justify-content: center;
+  width: var(--ctl-xs);
+  height: var(--ctl-xs);
+  border-radius: var(--r-sm);
+}
+
+/**
+ * A one-shot verb, not a preference.
+ *
+ * 备份与恢复 and 搬到别的设备 do not have a current state to report; they have a
+ * thing they do, and one of them writes over the data on this device. Drawn
+ * like the other fourteen they are indistinguishable from a panel of switches
+ * you can open to have a look. The accent square is that difference, and it is
+ * the same tint as the identity avatar above so it reads as "this acts" rather
+ * than as a second unexplained colour.
+ */
+.settingsgroup__list > .settingsrow--action > .settingsrow__icon {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+}
+
+/**
+ * The current value, on the right.
+ *
+ * At `--text-sm` — 14px, the floor — and in `--text-3`, so it is legible and
+ * still clearly subordinate to the row's name. Capped at 45% and truncated
+ * rather than wrapped: a value that wraps makes one row taller than the
+ * fifteen beside it, and `check-tap-targets.mjs` pools row heights across every
+ * screen in the app for exactly that reason.
+ */
+.settingsrow__value {
+  flex: none;
+  max-width: 45%;
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+  text-align: end;
+  text-overflow: ellipsis;
+}

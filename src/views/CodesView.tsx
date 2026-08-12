@@ -25,8 +25,29 @@
  * press — and the correction is remembered for that sender.
  */
 
-import { useDeferredValue, useEffect, useMemo, useState } from 'react'
-import { Banner, Button, EmptyState, Modal, PageHead, Segmented, useConfirm, useToast } from '../components/ui'
+import {
+  useContext,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+} from 'react'
+import {
+  Banner,
+  Button,
+  EmptyState,
+  IconButton,
+  Modal,
+  PageHead,
+  PaletteContext,
+  Segmented,
+  useConfirm,
+  useToast,
+} from '../components/ui'
 import { SearchInput } from '../components/inputs'
 import {
   IconAlert,
@@ -37,18 +58,22 @@ import {
   IconHelp,
   IconKey,
   IconLink,
+  IconMore,
   IconQr,
   IconRefresh,
+  IconSearch,
   IconShield,
   IconTrash,
   IconX,
 } from '../components/icons'
 import { VirtualList } from '../components/VirtualList'
+import { useMobileShell } from '../components/useNarrow'
 import { useApp } from '../state/AppState'
 import { useCodeCheck, WAIT_PRESETS, type CheckOutcome } from '../state/CodeCheck'
 import { useI18n } from '../i18n'
 import { CODE_FRESH_MS } from '../core/ops/codeHistory'
 import { copyText } from '../core/platform/clipboard'
+import { AXIS_LOCK_PX, resolvePull, type PullState } from '../core/platform/gestures'
 import { encodeQr, qrPath } from '../core/sync/qr'
 import { accountLabel as labelOfAccount } from '../core/mail/accounts'
 import type { LinkPurpose } from '../core/mail/linkPurpose'
@@ -113,8 +138,24 @@ export function CodesView({ onGoToInbox }: { onGoToInbox?: () => void }) {
   const { confirm, confirmElement } = useConfirm()
   const check = useCodeCheck()
 
+  /**
+   * Touch shell, not "narrow window".
+   *
+   * The same question `App` asks, and for the same reason: a 1024px tablet
+   * running the Android build has no pointer and no Ctrl+K, so the width alone
+   * would put it on the desktop arrangement. Everything this flag gates — the
+   * one-row head, the pull, the hero card — is about a thumb, not about pixels.
+   */
+  const phone = useMobileShell(bridge?.platform === 'android')
+  const openPalette = useContext(PaletteContext)
+
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<Filter>('all')
+  /** The overflow menu, and the search field it sits beside. Phone only. */
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [searchOpen, setSearchOpen] = useState(false)
+  /** The screen root — only so the search field can be focused when it opens. */
+  const viewRef = useRef<HTMLDivElement>(null)
   /** id → when it was copied in *this* session, for the transient "Copied ✓". */
   const [justCopied, setJustCopied] = useState<string | null>(null)
   /** Which card has its "why this one" panel open. At most one at a time. */
@@ -176,6 +217,136 @@ export function CodesView({ onGoToInbox }: { onGoToInbox?: () => void }) {
     check.waitingUntil !== undefined ||
     visible.some((h) => h.expiresAt !== undefined && h.expiresAt > now)
   useTick(counting)
+
+  /**
+   * The one card drawn large: the newest code that has not been read yet.
+   *
+   * Computed over `state.codeHits` rather than over `visible`, so a filter or a
+   * search cannot promote a *different* card to hero — and rendered where the
+   * hit already sits in the list rather than moved to the top, because nothing
+   * on this screen is allowed to reorder (see the note on `visible` above).
+   * In the ordinary case, newest-first ordering already puts it first.
+   *
+   * "Newest code, if unread" rather than "newest unread code": once it has been
+   * dealt with the hero goes away instead of promoting an older one, which
+   * would be a large card appearing halfway down a list nobody asked to change.
+   */
+  const heroId = useMemo(() => {
+    if (!phone) return undefined
+    let newest: CodeHit | undefined
+    for (const hit of state.codeHits) {
+      if (hit.kind !== 'code') continue
+      if (!newest || hit.date > newest.date) newest = hit
+    }
+    return newest && !newest.readAt ? newest.id : undefined
+  }, [state.codeHits, phone])
+
+  /**
+   * The filter only exists when there is something to filter.
+   *
+   * All/codes/links is three controls answering a question nobody has when
+   * every hit is a code — which is the usual case. It appears the moment a
+   * link turns up beside a code, and the value is put back to `all` when it
+   * goes away, or a stale `link` filter would leave the screen looking empty
+   * with no visible control explaining why.
+   */
+  const hasCode = state.codeHits.some((h) => h.kind === 'code')
+  const hasLink = state.codeHits.some((h) => h.kind === 'link')
+  const canFilter = hasCode && hasLink
+  useEffect(() => {
+    if (!canFilter) setFilter('all')
+  }, [canFilter])
+
+  /* The overflow menu closes on Escape and on a press that lands outside it —
+     the same rule the reader's own header menu uses (`InboxView`). */
+  useEffect(() => {
+    if (!menuOpen) return
+    const close = (e: Event) => {
+      if (e instanceof KeyboardEvent && e.key !== 'Escape') return
+      if (e.type === 'pointerdown' && (e.target as HTMLElement | null)?.closest('.codesmenu')) return
+      setMenuOpen(false)
+    }
+    document.addEventListener('keydown', close)
+    document.addEventListener('pointerdown', close)
+    return () => {
+      document.removeEventListener('keydown', close)
+      document.removeEventListener('pointerdown', close)
+    }
+  }, [menuOpen])
+
+  /* Opening the field and then having to aim at it is two taps for one
+     intention. */
+  useEffect(() => {
+    if (searchOpen) viewRef.current?.querySelector<HTMLInputElement>('.search__input')?.focus()
+  }, [searchOpen])
+
+  const toggleSearch = () => {
+    /* Closing clears the query. A field that is not on screen must not still
+       be filtering the list — that is a screen that looks like it has lost
+       your codes, with nothing on it to explain why. */
+    if (searchOpen) setQuery('')
+    setSearchOpen((v) => !v)
+  }
+
+  // --- pull to refresh ------------------------------------------------------
+
+  /**
+   * "Check now" as the gesture the platform already taught everyone.
+   *
+   * The arithmetic is `core/gestures.resolvePull`, which is tested without a
+   * DOM and refuses to fire unless the list is genuinely at the top. This only
+   * tracks the pointer. Mouse pointers are excluded for the same reason
+   * `useSwipe` excludes them: a drag on a desktop list is a selection, not a
+   * refresh, and the desktop head still carries the button.
+   *
+   * The gesture is never the only way in — "立即检查" stays in the overflow
+   * menu, because a gesture nobody can find is a regression (see the swipe
+   * section of `16-mail.css`).
+   */
+  const pullFrom = useRef<{ y: number; scroller: HTMLElement } | null>(null)
+  /** A drag that ends on a card must not also count as a tap on that card. */
+  const swallowClick = useRef(false)
+  /* The same fact as `pull.armed`, kept where the release handler cannot read
+     a stale render of it: the last move and the release can land in one batch. */
+  const armed = useRef(false)
+  const [pull, setPull] = useState<PullState>({ progress: 0, armed: false })
+
+  const endPull = () => {
+    pullFrom.current = null
+    armed.current = false
+    setPull((prev) => (prev.progress === 0 ? prev : { progress: 0, armed: false }))
+  }
+
+  const onPullDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    /* Reset first, and before every early return: a pull that the browser
+       turned into a scroll never produces a click, so a flag left standing
+       would eat the *next* genuine tap instead. */
+    swallowClick.current = false
+    if (!phone || e.pointerType === 'mouse' || check.checking) return
+    const scroller = (e.target as HTMLElement | null)?.closest?.('.list-pane')
+    if (!(scroller instanceof HTMLElement) || scroller.scrollTop > 0) return
+    pullFrom.current = { y: e.clientY, scroller }
+  }
+
+  const onPullMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const from = pullFrom.current
+    if (!from) return
+    const dy = e.clientY - from.y
+    /* The same 10px that decides a swipe from a tap, reused rather than
+       re-picked: below it this is still a press with a shaky thumb. */
+    if (dy >= AXIS_LOCK_PX) swallowClick.current = true
+    const next = resolvePull(dy, from.scroller.scrollTop)
+    armed.current = next.armed
+    setPull((prev) =>
+      prev.progress === next.progress && prev.armed === next.armed ? prev : next,
+    )
+  }
+
+  const onPullUp = () => {
+    const fire = armed.current
+    endPull()
+    if (fire) void check.checkNow()
+  }
 
   /**
    * One click does both jobs: the value lands on the clipboard, and the card
@@ -249,65 +420,299 @@ export function CodesView({ onGoToInbox }: { onGoToInbox?: () => void }) {
   const hasAnyInbox = state.inboxAccounts.some((i) => i.enabled)
   const waitLeft = check.waitingUntil ? check.waitingUntil - now : 0
 
+  /**
+   * The one line under the title, and the only thing the head still says about
+   * the check. It replaces a button that was reporting its own state ("Check
+   * now" / "Checking…") in a row that cost the screen a whole line.
+   */
+  const headNote = check.checking
+    ? t('codes.checking')
+    : check.waitingUntil
+      ? t('codes.waitingFor', { time: formatRemaining(waitLeft) })
+      : check.lastCheckedAt
+        ? t('codes.lastChecked', { ago: formatAgo(check.lastCheckedAt) })
+        : undefined
+
+  /**
+   * "Why this one", shared by both card shapes.
+   *
+   * `facts` is what the hero card puts here instead of on its face: the source
+   * and the account are the same on every card from the same sender, so they
+   * are reference material rather than something to read at a glance.
+   */
+  const renderWhy = (hit: CodeHit, isLink: boolean, facts?: ReactNode) => (
+    <div className="codewhy">
+      {facts ? <div className="codewhy__facts">{facts}</div> : null}
+      <div className="codewhy__section">
+        <div className="codewhy__label">{t('codes.whyPicked')}</div>
+        <ul className="codewhy__list">
+          {(hit.reasons ?? []).map((r, i) => (
+            <li key={`${r.code}-${i}`}>{t(`codes.reason.${r.code}`, { detail: r.detail ?? '' })}</li>
+          ))}
+          {(hit.reasons?.length ?? 0) === 0 ? <li>{t('codes.reason.none')}</li> : null}
+        </ul>
+      </div>
+
+      {(hit.alternatives?.length ?? 0) > 0 ? (
+        <div className="codewhy__section">
+          <div className="codewhy__label">{t('codes.alternatives')}</div>
+          <ul className="codewhy__alts">
+            {hit.alternatives!.map((alt, i) => (
+              <li key={`${alt.value}-${i}`} data-eligible={alt.eligible || undefined}>
+                <code>{alt.value}</code>
+                <span className="codewhy__altReason">
+                  {alt.reasons
+                    .map((r) => t(`codes.reason.${r.code}`, { detail: r.detail ?? '' }))
+                    .join(' · ')}
+                </span>
+                {/* Only a genuine contender can be promoted; a struck-out
+                    postcode is shown to explain the decision, not offered as
+                    an answer. */}
+                {alt.eligible && !isLink ? (
+                  <Button variant="ghost" onClick={() => correctTo(hit, alt.value)}>
+                    {t('codes.useThis')}
+                  </Button>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {!isLink ? (
+        <div className="codewhy__foot">
+          <Button variant="ghost" onClick={() => correctTo(hit)}>
+            {t('codes.notThis')}
+          </Button>
+          <span className="codewhy__note">{t('codes.correctNote')}</span>
+        </div>
+      ) : null}
+    </div>
+  )
+
+  /** Where a hit was read out of the mail — the same wording on both shapes. */
+  const sourceLabel = (hit: CodeHit) =>
+    t(
+      hit.source === 'subject'
+        ? 'codes.sourceSubject'
+        : hit.source === 'link'
+          ? 'codes.sourceLink'
+          : 'codes.sourceBody',
+    )
+
   return (
     /* `data-screen` names this screen for `scripts/layout-probe.mjs`: Inbox and
        Codes both render `.view.view--list` and are indistinguishable from
        outside, so a probe navigating between them could not tell it had arrived.
        Same reason `.nav__item` carries `data-view`. */
-    <div className="view view--list" data-screen="codes">
+    <div
+      className="view view--list"
+      data-screen="codes"
+      ref={viewRef}
+      onPointerDown={onPullDown}
+      onPointerMove={onPullMove}
+      onPointerUp={onPullUp}
+      onPointerCancel={endPull}
+      /* A drag that travelled far enough to be a pull must not also land as a
+         tap on whatever card happened to be under the thumb — and on this
+         screen a tap copies. Swallowed in the capture phase, before the card's
+         own handler ever sees it. */
+      onClickCapture={(e) => {
+        if (!swallowClick.current) return
+        swallowClick.current = false
+        e.preventDefault()
+        e.stopPropagation()
+      }}
+    >
       <div className="view__inner">
-        {/* No subtitle, and now no heading either — the highlighted tab
-            already names the screen. `hideTitle` keeps this `action` row
-            (the reason `PageHead` is still called here at all) while
-            dropping the visible "验证码 / 登录链接" text. */}
-        <PageHead
-          title={t('codes.title')}
-          hideTitle
-          action={
-            <>
-              {/* The reason anyone opens this screen while waiting. First
-                  control, primary weight, never hidden behind a menu. */}
-              <Button
-                variant="primary"
-                icon={<IconRefresh size={15} />}
-                onClick={() => void check.checkNow()}
-                disabled={!hasAnyInbox}
-                loading={check.checking}
-              >
-                {check.checking ? t('codes.checking') : t('codes.checkNow')}
-              </Button>
-              {check.waitingUntil ? (
-                <Button variant="secondary" icon={<IconX size={15} />} onClick={check.stopWaiting}>
-                  {t('codes.stopWaiting', { time: formatRemaining(waitLeft) })}
-                </Button>
-              ) : (
+        {phone ? (
+          /*
+            One row of chrome instead of four.
+
+            The head used to carry Check now, I'm waiting, Mark all read and
+            Clear history — four `nowrap` buttons in a row that `17-phone.css`
+            gives `flex: 1 1 100%`, so on a phone the screen opened with a full
+            line of controls above the first code. What is left here is what
+            only the head can say (which screen this is, and how long ago it
+            looked) and two 48px targets: search, and everything else.
+          */
+          <PageHead
+            title={t('codes.title')}
+            subtitle={headNote}
+            action={
+              <>
+                <IconButton
+                  label={t('codes.search')}
+                  aria-expanded={searchOpen}
+                  onClick={toggleSearch}
+                >
+                  {searchOpen ? <IconX size={17} /> : <IconSearch size={17} />}
+                </IconButton>
+                <div className="codesmenu">
+                  <IconButton
+                    label={t('codes.more')}
+                    aria-expanded={menuOpen}
+                    onClick={() => setMenuOpen((v) => !v)}
+                  >
+                    <IconMore size={17} />
+                  </IconButton>
+                  {menuOpen ? (
+                    <div className="codesmenu__list" role="menu" aria-label={t('codes.more')}>
+                      {/* The visible twin of the pull. Everything reachable by
+                          gesture is reachable by pressing something. */}
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="codesmenu__item"
+                        disabled={!hasAnyInbox || check.checking}
+                        onClick={() => {
+                          setMenuOpen(false)
+                          void check.checkNow()
+                        }}
+                      >
+                        <IconRefresh size={16} />
+                        <span>{check.checking ? t('codes.checking') : t('codes.checkNow')}</span>
+                      </button>
+                      {/* The wait's home is the empty state, where it is the
+                          only thing to do. It is here as well because a wait
+                          cannot be started — or, worse, stopped — from an
+                          empty state that is no longer on screen. */}
+                      {check.waitingUntil ? (
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className="codesmenu__item"
+                          onClick={() => {
+                            setMenuOpen(false)
+                            check.stopWaiting()
+                          }}
+                        >
+                          <IconX size={16} />
+                          <span>{t('codes.stopWaiting', { time: formatRemaining(waitLeft) })}</span>
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className="codesmenu__item"
+                          disabled={!hasAnyInbox}
+                          title={t('codes.waitHint', { s: WAIT_PRESETS[0] })}
+                          onClick={() => {
+                            setMenuOpen(false)
+                            check.startWaiting(WAIT_PRESETS[0])
+                          }}
+                        >
+                          <IconClock size={16} />
+                          <span>{t('codes.wait')}</span>
+                        </button>
+                      )}
+                      {unread > 0 ? (
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className="codesmenu__item"
+                          onClick={() => {
+                            setMenuOpen(false)
+                            dispatch({ type: 'markAllCodesRead' })
+                          }}
+                        >
+                          <IconCheck size={16} />
+                          <span>{t('codes.markAllRead')}</span>
+                        </button>
+                      ) : null}
+                      {state.codeHits.length > 0 ? (
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className="codesmenu__item"
+                          onClick={() => {
+                            setMenuOpen(false)
+                            void clearAll()
+                          }}
+                        >
+                          <IconTrash size={16} />
+                          <span>{t('codes.clear')}</span>
+                        </button>
+                      ) : null}
+                      {/* `.page-head__search` — the command palette's only
+                          tappable door on a phone — is switched off on this
+                          screen by `23-codes.css`, because two magnifiers a
+                          thumb apart meaning two different searches is worse
+                          than one of them being a menu item. The door is not
+                          removed, it moved here. */}
+                      {openPalette ? (
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className="codesmenu__item"
+                          onClick={() => {
+                            setMenuOpen(false)
+                            openPalette()
+                          }}
+                        >
+                          <IconSearch size={16} />
+                          <span>{t('palette.title')}</span>
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+              </>
+            }
+          />
+        ) : (
+          /* The desktop head, unchanged: a pointer has no pull gesture, the
+             row has the width for four labelled buttons, and the tab strip
+             above already names the screen (hence `hideTitle`). */
+          <PageHead
+            title={t('codes.title')}
+            hideTitle
+            action={
+              <>
+                {/* The reason anyone opens this screen while waiting. First
+                    control, primary weight, never hidden behind a menu. */}
                 <Button
-                  variant="secondary"
-                  icon={<IconClock size={15} />}
-                  onClick={() => check.startWaiting(WAIT_PRESETS[0])}
+                  variant="primary"
+                  icon={<IconRefresh size={15} />}
+                  onClick={() => void check.checkNow()}
                   disabled={!hasAnyInbox}
-                  title={t('codes.waitHint', { s: WAIT_PRESETS[0] })}
+                  loading={check.checking}
                 >
-                  {t('codes.wait')}
+                  {check.checking ? t('codes.checking') : t('codes.checkNow')}
                 </Button>
-              )}
-              {unread > 0 ? (
-                <Button
-                  variant="ghost"
-                  icon={<IconCheck size={15} />}
-                  onClick={() => dispatch({ type: 'markAllCodesRead' })}
-                >
-                  {t('codes.markAllRead')}
-                </Button>
-              ) : null}
-              {state.codeHits.length > 0 ? (
-                <Button variant="ghost" icon={<IconTrash size={15} />} onClick={clearAll}>
-                  {t('codes.clear')}
-                </Button>
-              ) : null}
-            </>
-          }
-        />
+                {check.waitingUntil ? (
+                  <Button variant="secondary" icon={<IconX size={15} />} onClick={check.stopWaiting}>
+                    {t('codes.stopWaiting', { time: formatRemaining(waitLeft) })}
+                  </Button>
+                ) : (
+                  <Button
+                    variant="secondary"
+                    icon={<IconClock size={15} />}
+                    onClick={() => check.startWaiting(WAIT_PRESETS[0])}
+                    disabled={!hasAnyInbox}
+                    title={t('codes.waitHint', { s: WAIT_PRESETS[0] })}
+                  >
+                    {t('codes.wait')}
+                  </Button>
+                )}
+                {unread > 0 ? (
+                  <Button
+                    variant="ghost"
+                    icon={<IconCheck size={15} />}
+                    onClick={() => dispatch({ type: 'markAllCodesRead' })}
+                  >
+                    {t('codes.markAllRead')}
+                  </Button>
+                ) : null}
+                {state.codeHits.length > 0 ? (
+                  <Button variant="ghost" icon={<IconTrash size={15} />} onClick={clearAll}>
+                    {t('codes.clear')}
+                  </Button>
+                ) : null}
+              </>
+            }
+          />
+        )}
 
         {/* Android's background sync runs on a system-owned 15-minute floor
             (see InboxSyncWorker.java) that this screen's "Check now" button
@@ -351,36 +756,81 @@ export function CodesView({ onGoToInbox }: { onGoToInbox?: () => void }) {
           </div>
         ) : null}
 
-        {state.codeHits.length > 0 ? (
-          <>
-            <Segmented
-              value={filter}
-              onChange={setFilter}
-              ariaLabel={t('codes.title')}
-              options={[
-                { value: 'all', label: t('codes.filterAll') },
-                { value: 'code', label: t('codes.filterCodes') },
-                { value: 'link', label: t('codes.filterLinks') },
-              ]}
-            />
-            <SearchInput value={query} onChange={setQuery} placeholder={t('codes.searchPlaceholder')} />
-          </>
+        {/* Three buttons that answer a question nobody has while every hit on
+            the screen is a code. `canFilter` is the whole rule: a link has to
+            be here beside a code before the choice means anything. */}
+        {canFilter ? (
+          <Segmented
+            value={filter}
+            onChange={setFilter}
+            ariaLabel={t('codes.title')}
+            options={[
+              { value: 'all', label: t('codes.filterAll') },
+              { value: 'code', label: t('codes.filterCodes') },
+              { value: 'link', label: t('codes.filterLinks') },
+            ]}
+          />
+        ) : null}
+
+        {/* On a phone the field is what the magnifier opens; on a desktop it
+            stays where it has always been, because that row has the width and
+            a pointer has nothing better to do with it. */}
+        {state.codeHits.length > 0 && (!phone || searchOpen) ? (
+          <SearchInput value={query} onChange={setQuery} placeholder={t('codes.searchPlaceholder')} />
+        ) : null}
+
+        {/* Only while a thumb is actually pulling — a zero-height element in a
+            gapped column still costs the gap. */}
+        {pull.progress > 0 ? (
+          <div
+            className="codespull"
+            data-armed={pull.armed || undefined}
+            style={{ '--pull': pull.progress } as CSSProperties}
+          >
+            <IconRefresh size={15} />
+            <span>{pull.armed ? t('codes.pullRelease') : t('codes.pull')}</span>
+          </div>
         ) : null}
 
         {visible.length === 0 ? (
           <div className="list-pane">
-            {/* No hint line. All three variants described what the screen does
-                rather than telling anyone anything they could act on — and in
-                the one case where there *is* something to do, the button below
-                is it. */}
+            {/*
+              One line, and it has to be something to *do*.
+
+              The three hints this replaces were deleted on purpose: each of
+              them described what the screen was for, which is not information
+              to anyone already looking at it. This one names the next action
+              — ask the sender for the code, then pull — and it is only shown
+              on the shell that has a pull to offer.
+            */}
             <EmptyState
               icon={<IconKey size={24} />}
               title={state.codeHits.length === 0 ? t('codes.empty') : t('common.empty')}
+              hint={phone ? (hasAnyInbox ? t('codes.emptyPull') : t('codes.emptyNoInbox')) : undefined}
               action={
                 !hasAnyInbox && onGoToInbox ? (
                   <Button variant="primary" onClick={onGoToInbox}>
                     {t('nav.inbox')}
                   </Button>
+                ) : /* The wait's home. It was the second of four buttons in the
+                       head; here it is the only thing on the screen, which is
+                       what it is: the one useful answer to "it has not come
+                       yet". */
+                phone && hasAnyInbox ? (
+                  check.waitingUntil ? (
+                    <Button variant="secondary" icon={<IconX size={15} />} onClick={check.stopWaiting}>
+                      {t('codes.stopWaiting', { time: formatRemaining(waitLeft) })}
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="primary"
+                      icon={<IconClock size={15} />}
+                      onClick={() => check.startWaiting(WAIT_PRESETS[0])}
+                      title={t('codes.waitHint', { s: WAIT_PRESETS[0] })}
+                    >
+                      {t('codes.wait')}
+                    </Button>
+                  )
                 ) : undefined
               }
             />
@@ -395,7 +845,20 @@ export function CodesView({ onGoToInbox }: { onGoToInbox?: () => void }) {
                measures the 12px `--row-gap` along with the row. 118 is the code
                card plus its gap — the same convention the old 148 followed,
                since a screen called Codes is mostly codes and the link cards
-               that are taller get measured as they scroll in. */
+               that are taller get measured as they scroll in.
+
+               Unchanged by the phone round, and deliberately: the compact rows
+               are the same markup and the same rules they were, so the number
+               they were measured for still describes them. Two numbers taken
+               at 360x800 while that round was being built, for whoever revisits
+               this: the same code card is 221.8px there (the action row wraps
+               to its own line under 840px, and the meta chips wrap with it) and
+               the hero is 241.4px. So this estimate is a desktop figure — which
+               it always was — and it only decides the first paint and the
+               scrollbar, since every row is corrected from the DOM as it comes
+               into view. Widening it to a phone number would make the desktop
+               wrong instead; splitting it per shell is a `VirtualList` change,
+               not a `CodesView` one. */
             estimate={118}
             scrollerClassName="list-pane"
             rowsClassName="codelist"
@@ -408,6 +871,110 @@ export function CodesView({ onGoToInbox }: { onGoToInbox?: () => void }) {
               const remaining = hit.expiresAt !== undefined ? hit.expiresAt - now : undefined
               const expired = remaining !== undefined && remaining <= 0
               const primary = () => (isLink ? void openLink(hit) : void copy(hit))
+
+              /**
+               * The one card you came here for, at 二号.
+               *
+               * Rendered in place, not lifted to the top: the row order on this
+               * screen is fixed and this is a change of *shape*, not of
+               * position. Everything that is not the digits is either one line
+               * or one of at most two chips — the countdown, which changes, and
+               * the one fact that is unusual about this code. Where it came
+               * from and which account it landed in are the same on every card
+               * from that sender, so they moved into "why this one".
+               */
+              if (hit.id === heroId) {
+                const unusual = hit.oneTime
+                  ? t('codes.oneTime')
+                  : hit.confidence !== 'high'
+                    ? t('codes.lowConfidence')
+                    : undefined
+                return (
+                  <div
+                    className="codehero"
+                    data-copied={copied || undefined}
+                    data-expired={expired || undefined}
+                    data-new={foundKeys.has(keyOfHit(hit)) || undefined}
+                  >
+                    <div
+                      className="codehero__body"
+                      role="button"
+                      tabIndex={0}
+                      title={t('codes.readHint')}
+                      onClick={primary}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault()
+                          primary()
+                        }
+                      }}
+                    >
+                      <div className="codehero__digits">{grouped(hit.value)}</div>
+                      {/* The card has always been the copy button and never
+                          said so — the only thing that did was a `title`,
+                          which a phone has no way to show. The small copy
+                          button that used to sit beside it is gone from this
+                          card: it was a 32px target competing with a 300px
+                          one that does the same thing. */}
+                      <div className="codehero__cta">
+                        {copied ? <IconCheck size={16} /> : <IconCopy size={16} />}
+                        <span>{copied ? t('common.copied') : t('codes.tapToCopy')}</span>
+                      </div>
+                    </div>
+
+                    <div className="codehero__from">
+                      {name ? <strong>{name}</strong> : null}
+                      <span className="codecard__address">{address}</span>
+                      <span title={formatDateTime(hit.date)}>{formatAgo(hit.date)}</span>
+                    </div>
+                    <div className="codehero__subject">{hit.subject || t('inbox.noSubject')}</div>
+
+                    <div className="codehero__foot">
+                      <div className="codehero__chips">
+                        {remaining !== undefined ? (
+                          <span className={expired ? 'chip chip--warning' : 'chip chip--timer'}>
+                            {expired
+                              ? t('codes.expired')
+                              : t('codes.expiresIn', { time: formatRemaining(remaining) })}
+                          </span>
+                        ) : null}
+                        {unusual ? <span className="chip chip--warning">{unusual}</span> : null}
+                      </div>
+                      {/* Always offered here, even with no reasons recorded:
+                          this is the only door to the source and the account
+                          now that they are no longer printed on the face. No
+                          `stopPropagation` — unlike the compact card, this row
+                          is a sibling of the press target rather than inside
+                          it, so a press here was never a press on the card. */}
+                      <div className="codehero__actions">
+                        <Button
+                          variant="ghost"
+                          icon={<IconHelp size={15} />}
+                          title={open ? t('codes.whyHide') : t('codes.why')}
+                          onClick={() => setExplaining(open ? null : hit.id)}
+                          aria-expanded={open}
+                        >
+                          {open ? t('codes.whyHide') : t('codes.why')}
+                        </Button>
+                      </div>
+                    </div>
+
+                    {open
+                      ? renderWhy(
+                          hit,
+                          false,
+                          <>
+                            <span className="chip">{accountName(hit.accountId)}</span>
+                            <span className="chip chip--quiet">{sourceLabel(hit)}</span>
+                            {hit.copiedAt && !copied ? (
+                              <span className="chip chip--quiet">{t('codes.alreadyCopied')}</span>
+                            ) : null}
+                          </>,
+                        )
+                      : null}
+                  </div>
+                )
+              }
 
               return (
                 <div
@@ -512,15 +1079,7 @@ export function CodesView({ onGoToInbox }: { onGoToInbox?: () => void }) {
                         <span className="chip">{accountName(hit.accountId)}</span>
                         {/* Where it came from, so a wrong answer is explainable
                             rather than mysterious — see `core/codeExtract`. */}
-                        <span className="chip chip--quiet">
-                          {t(
-                            hit.source === 'subject'
-                              ? 'codes.sourceSubject'
-                              : hit.source === 'link'
-                                ? 'codes.sourceLink'
-                                : 'codes.sourceBody',
-                          )}
-                        </span>
+                        <span className="chip chip--quiet">{sourceLabel(hit)}</span>
                         {hit.confidence !== 'high' ? (
                           <span className="chip chip--warning">{t('codes.lowConfidence')}</span>
                         ) : null}
@@ -608,56 +1167,7 @@ export function CodesView({ onGoToInbox }: { onGoToInbox?: () => void }) {
                     </div>
                   </div>
 
-                  {open ? (
-                    <div className="codewhy">
-                      <div className="codewhy__section">
-                        <div className="codewhy__label">{t('codes.whyPicked')}</div>
-                        <ul className="codewhy__list">
-                          {(hit.reasons ?? []).map((r, i) => (
-                            <li key={`${r.code}-${i}`}>
-                              {t(`codes.reason.${r.code}`, { detail: r.detail ?? '' })}
-                            </li>
-                          ))}
-                          {(hit.reasons?.length ?? 0) === 0 ? <li>{t('codes.reason.none')}</li> : null}
-                        </ul>
-                      </div>
-
-                      {(hit.alternatives?.length ?? 0) > 0 ? (
-                        <div className="codewhy__section">
-                          <div className="codewhy__label">{t('codes.alternatives')}</div>
-                          <ul className="codewhy__alts">
-                            {hit.alternatives!.map((alt, i) => (
-                              <li key={`${alt.value}-${i}`} data-eligible={alt.eligible || undefined}>
-                                <code>{alt.value}</code>
-                                <span className="codewhy__altReason">
-                                  {alt.reasons
-                                    .map((r) => t(`codes.reason.${r.code}`, { detail: r.detail ?? '' }))
-                                    .join(' · ')}
-                                </span>
-                                {/* Only a genuine contender can be promoted; a
-                                    struck-out postcode is shown to explain the
-                                    decision, not offered as an answer. */}
-                                {alt.eligible && !isLink ? (
-                                  <Button variant="ghost" onClick={() => correctTo(hit, alt.value)}>
-                                    {t('codes.useThis')}
-                                  </Button>
-                                ) : null}
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      ) : null}
-
-                      {!isLink ? (
-                        <div className="codewhy__foot">
-                          <Button variant="ghost" onClick={() => correctTo(hit)}>
-                            {t('codes.notThis')}
-                          </Button>
-                          <span className="codewhy__note">{t('codes.correctNote')}</span>
-                        </div>
-                      ) : null}
-                    </div>
-                  ) : null}
+                  {open ? renderWhy(hit, isLink) : null}
                 </div>
               )
             }}

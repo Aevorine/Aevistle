@@ -65,6 +65,22 @@ const below = (px: number) => `(max-width: ${px - 0.02}px)`
 /** Phone portrait only. */
 export const COMPACT_QUERY = below(BP_MEDIUM)
 /**
+ * The band where a second pane fits beside a list but the shell is still a
+ * stack — 600px up to, but not including, 840px.
+ *
+ * This is the `medium` tier and nothing else, written as a query rather than
+ * as a `sizeClass === 'medium'` test at each call site so that the stylesheet
+ * and the two screens are demonstrably keyed off the same two numbers. Both
+ * boundaries are already declared above; this composes them, it does not add
+ * a fourth.
+ *
+ * Why the band and not simply "600 and up": above 840 the app already changes
+ * shape on its own — the tab bar becomes a side rail, dialogs stop being
+ * screens — and the wide layout is not this one. Below 600 there is no width
+ * for two columns worth having; a 300px reader is not a reader.
+ */
+export const TWO_PANE_QUERY = `(min-width: ${BP_MEDIUM}px) and ${below(BP_EXPANDED)}`
+/**
  * The shell query: everything below the two-pane layout.
  *
  * Named `NARROW_QUERY` still, because `main.tsx` sets the shell attribute from
@@ -191,6 +207,28 @@ export function useNarrow(): boolean {
 /** True from 840px up — the width at which a second pane fits. */
 export function useExpanded(): boolean {
   return useMedia(EXPANDED_QUERY)
+}
+
+/**
+ * "Is this window wide enough for a list and the thing it opens, side by side,
+ * while still being a touch shell?"
+ *
+ * One hook, read by both screens that split — Inbox and Settings — because the
+ * alternative is two copies of one decision, and two copies of a layout
+ * decision is precisely how 界面不统一 was reported five times. If the band ever
+ * moves, it moves here and both screens move with it; a screen cannot drift
+ * out of step with the other by being edited on its own.
+ *
+ * This is the same kind of question `useNarrow` answers and for the same
+ * reason it is JavaScript rather than CSS: a two-pane inbox is not the phone
+ * inbox restyled. On a phone, selecting a row opens a full-screen `Modal`; in
+ * the band it fills the pane instead, and there is no stylesheet that turns a
+ * dialog into a column. `26-tablet.css` restates the same two numbers as a
+ * media query for the parts that *are* only styling, and
+ * `scripts/check-breakpoints.mjs` is what stops the two spellings drifting.
+ */
+export function useTwoPane(): boolean {
+  return useMedia(TWO_PANE_QUERY)
 }
 
 /**

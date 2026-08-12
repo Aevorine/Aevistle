@@ -1,0 +1,344 @@
+/* ==========================================================================
+   The Codes screen, as a phone screen
+
+   Everything here is one round of work with one aim: on a 360px screen, the
+   code you came for should be the first thing under your thumb, not the fifth
+   thing under four rows of chrome.
+
+   What the screen used to open with, measured top to bottom:
+
+     page head        a row of four `nowrap` buttons — Check now, I'm waiting,
+                      Mark all read, Clear history — which `17-phone.css` gives
+                      `flex: 1 1 100%`, so it is a *whole line* of its own
+     banner           the Android 15-minute sync floor
+     check bar        what the last press turned up
+     filter           all / codes / links, three buttons, always
+     search           a field, always
+
+   Five bands, four of which are about *operating* the screen rather than about
+   any code. This file leaves one: a title, a line saying how long ago the app
+   looked, and two 48px targets. The rest went where it is cheaper —
+
+     Check now        the pull gesture (`core/gestures.resolvePull`), with the
+                      menu item as its visible twin, because a gesture nobody
+                      can find is a regression (see `16-mail.css`)
+     I'm waiting      the empty state, where it is the only thing to do
+     Mark all / Clear the overflow menu
+     filter           only rendered when a link is on screen beside a code
+     search           behind the magnifier
+
+   Nothing here changes `.codecard`. The compact rows are the ones that were
+   already measured (105.6px for a code card, 123.3 for a link, plus the 12px
+   `--row-gap`, which is where `VirtualList`'s `estimate={118}` comes from) and
+   they keep every affordance they had, including their own copy button. The
+   one card that changes shape is the newest unread code, which becomes
+   `.codehero` — a different class on purpose, so `.codecard`'s rules, and the
+   layout probe's assertion that a code renders at 20px, both go on meaning
+   what they meant.
+
+   Ordering note: this part loads after `17-phone.css`, which is what the head
+   overrides below rely on. They are also written one specificity step above
+   the rules they answer, so the cascade is not the only thing holding them.
+   ========================================================================== */
+
+/* --- the head: one row, two targets --------------------------------------- */
+
+/**
+ * The action row stops taking a line of its own.
+ *
+ * `17-phone.css` gives every `.page-head__actions` `flex: 1 1 100%` below
+ * 600px, for a good reason: four labelled buttons squeeze a heading down to
+ * its 200px minimum and wrap it anyway. There are two icon buttons here — 96px
+ * plus a gap — so the heading has the rest of the row and nothing wraps.
+ */
+.view--list[data-screen="codes"] .page-head__actions {
+  flex: none;
+}
+.view--list[data-screen="codes"] .page-head__text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/**
+ * And the subtitle comes back.
+ *
+ * `.view--list .page-subtitle` is `display: none` under 600px, on the grounds
+ * that a list screen's subtitle restates its title. This one does not restate
+ * anything: it is the only place the screen now says when it last looked, and
+ * it is the whole reason the "Check now" button could stop reporting its own
+ * state in the row above.
+ */
+.view--list[data-screen="codes"] .page-subtitle {
+  display: block;
+  font-size: var(--text-sm);
+  font-variant-numeric: var(--numeric);
+}
+/**
+ * One magnifier on this screen, not two.
+ *
+ * `PageHead` renders the command palette's button on every phone screen, and
+ * this screen needs a magnifier of its own for the list. Two of them a thumb
+ * apart, meaning two different searches, is worse than either. The palette is
+ * not taken away — it is the last item in the overflow menu, so the door that
+ * `20-short.css` opened for phones is still open.
+ */
+[data-screen="codes"] .page-head__search {
+  display: none;
+}
+
+/* --- the overflow menu ---------------------------------------------------- */
+
+/* Anchored to its own button, the same shape as the reader's header menu in
+   `14-growth.css`. Closed it costs nothing; open it closes itself on Escape
+   or on a press outside (see `CodesView`). */
+.codesmenu {
+  position: relative;
+}
+.codesmenu__list {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + var(--sp-2));
+  inset-inline-end: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 13rem;
+  max-width: min(20rem, 80vw);
+  padding: var(--sp-2);
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-lg);
+}
+/* `--ctl-md`, not the 36px the desktop menu uses: this one is aimed at with a
+   thumb, and it is the only place four of this screen's actions live. */
+.codesmenu__item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  min-height: var(--ctl-md);
+  padding: var(--sp-2) var(--sp-3);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--text-1);
+  font-size: var(--text-base);
+  text-align: start;
+  cursor: pointer;
+}
+.codesmenu__item:hover {
+  background: var(--surface-hover);
+}
+.codesmenu__item:disabled {
+  color: var(--text-3);
+  cursor: default;
+}
+.codesmenu__item:focus-visible {
+  outline: var(--ring);
+  outline-offset: calc(-1 * var(--ring-offset));
+}
+
+/* --- pull to refresh ------------------------------------------------------ */
+
+/**
+ * The indicator, sized by the gesture.
+ *
+ * `--pull` is 0..1 and is written inline by `CodesView` from `resolvePull`,
+ * which is the only number that crosses from the gesture into the stylesheet —
+ * the height, the colours and the type all stay here. Declared with a default
+ * so the property resolves even if the element is ever rendered without one.
+ *
+ * The element only exists while a thumb is on the screen: a zero-height child
+ * of `.view__inner` would still cost the column's `--sp-2` gap.
+ */
+/* The platform's own overscroll is switched off on this list, because there is
+   now something of ours at the top of it: a rubber-band or a browser-owned
+   refresh spinner fighting the indicator below is two answers to one pull. */
+[data-screen="codes"] .list-pane {
+  overscroll-behavior-y: contain;
+}
+.codespull {
+  --pull: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  overflow: hidden;
+  height: calc(var(--pull) * var(--ctl-lg));
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: var(--text-sm);
+  /* No transition on the height: it is being driven by a finger, and easing it
+     puts the indicator behind the thumb that is dragging it. */
+  transition: color var(--dur-fast) var(--ease);
+}
+/* Past the threshold: letting go now will check. The colour is the whole
+   signal, because at this point the words are moving. */
+.codespull[data-armed] {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface-2));
+}
+
+/* --- the hero card -------------------------------------------------------- */
+
+/**
+ * The newest unread code, at 二号.
+ *
+ * 29.33px is the ladder's hero rank and it is used here for exactly one line
+ * on the screen. It is deliberately not 24px: 小二 is the size of a *screen
+ * title*, and a code that reads as a heading is a code competing with the name
+ * of the page it is on. The compact rows below stay at `--text-value` (20px),
+ * which is the size the whole list was brought down to and the size the layout
+ * probe asserts.
+ *
+ * Rendered where the hit already sits in the list rather than lifted to the
+ * top — the row order on this screen is fixed, and this is a change of shape,
+ * not of position.
+ */
+.codehero {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  width: 100%;
+  padding: var(--sp-4);
+  background: var(--surface-1);
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--border));
+  border-radius: var(--r-lg);
+  /* The same inset bar `.codecard[data-fresh]` uses, so "this is the new one"
+     is one visual idea on this screen rather than two. */
+  box-shadow: inset 3px 0 0 0 var(--accent);
+}
+.codehero[data-copied] {
+  border-color: var(--success);
+  background: var(--success-bg);
+  box-shadow: inset 3px 0 0 0 var(--success);
+}
+/* Found by the press you just made, as opposed to already sitting there — the
+   same mark `.codecard[data-new]` carries, so the two shapes say it the same
+   way. */
+.codehero[data-new] {
+  border-color: var(--success);
+}
+/* Expired, and still shown: a code that ran out is the answer to "why did that
+   not work", and a card that vanished would read as mail that never arrived. */
+.codehero[data-expired] .codehero__digits {
+  color: var(--text-3);
+  text-decoration: line-through;
+  text-decoration-thickness: 2px;
+}
+
+/**
+ * The press target: the digits and the sentence that says what pressing does.
+ *
+ * The card has been the copy button since it was written, and the only thing
+ * that ever said so was a `title` — which a phone cannot show, because a thumb
+ * cannot hover. So the card says it in words, and the 32px copy button that
+ * used to sit beside it is gone from this one card: it was a small target
+ * competing with a large one that does the same thing. Every other row keeps
+ * its button.
+ */
+.codehero__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  align-items: flex-start;
+  width: 100%;
+  min-height: var(--ctl-lg);
+  padding: var(--sp-3);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  cursor: pointer;
+  transition: transform var(--dur-fast) var(--ease);
+}
+.codehero__body:active {
+  transform: scale(0.995);
+}
+.codehero__body:focus-visible {
+  outline: var(--ring);
+  outline-offset: calc(-1 * var(--ring-offset));
+}
+/* Tabular figures, and grouped 3+3 in the markup — never on the clipboard,
+   where a space is a rejected code. */
+.codehero__digits {
+  font-size: var(--text-2xl);
+  font-weight: var(--fw-bold);
+  line-height: var(--leading-tight);
+  letter-spacing: var(--tracking-wide);
+  font-variant-numeric: var(--numeric);
+  color: var(--text-1);
+  overflow-wrap: anywhere;
+}
+.codehero__cta {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  color: var(--accent);
+  font-size: var(--text-sm);
+  font-weight: var(--fw-medium);
+}
+.codehero[data-copied] .codehero__cta {
+  color: var(--success);
+}
+
+/* Who it is from, and when — one line, and one line even when the address is
+   forty characters: `.codecard__address` brings its own ellipsis, and `wrap`
+   would let the browser take a second row before it ever reached for it.
+   Measured at 360px: wrapping cost this card 32px it did not need. */
+.codehero__from {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: baseline;
+  gap: var(--sp-2);
+  min-width: 0;
+  font-size: var(--text-sm);
+  color: var(--text-2);
+}
+/* The name and the timestamp keep their width; the address is what gives. */
+.codehero__from > strong,
+.codehero__from > span:last-child {
+  flex: none;
+}
+.codehero__subject {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-sm);
+  color: var(--text-3);
+}
+
+/* At most two chips, and the reason why: the countdown changes, and the second
+   one is whatever is *unusual* about this code (single use, or a value we are
+   not confident about). The source and the account are the same on every card
+   from that sender, so they are in "why this one" instead — reference, not a
+   glance. */
+.codehero__foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+.codehero__chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.codehero__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+/* The two facts that moved off the face of the hero card, at the top of the
+   panel that explains it. */
+.codewhy__facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  padding-bottom: var(--sp-2);
+}

@@ -28,6 +28,22 @@ export function TagField({
    */
   pickerLabel,
   id,
+  /**
+   * Show at most this many chips, then a "+N" pill that reveals the rest.
+   *
+   * There was no cap at all, and on a phone that is not a cosmetic gap. A chip
+   * is 54px tall here because `.chip__remove` has to clear the 48px tap floor,
+   * so measured heights ran 1 recipient ≈ 120px, 3 ≈ 240px, **10 ≈ 660px** —
+   * taller than the message box it sits above, with no `max-height` and no
+   * scroller anywhere in the stylesheet. The only reason it never showed was
+   * that the whole band used to be folded behind a summary bar; opening it
+   * with ten recipients pushed the message off-screen entirely, and nothing
+   * asserted against that because the layout probe measures the folded state.
+   *
+   * Undefined means no cap, which is what every wide caller wants: a desktop
+   * chip is 30px and ten of them are ~190px in a 700px column.
+   */
+  maxVisible,
 }: {
   values: string[]
   onChange: (v: string[]) => void
@@ -36,9 +52,14 @@ export function TagField({
   recents?: RecentRecipient[]
   pickerLabel?: string
   id?: string
+  maxVisible?: number
 }) {
   const [text, setText] = useState('')
   const [pickerOpen, setPickerOpen] = useState(false)
+  /* Reveal is per-visit and deliberately not persisted: the cap exists to
+     protect the message box, and a field that stayed expanded from last time
+     would hand that protection away before the user has typed anything. */
+  const [showAll, setShowAll] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const wrapRef = useRef<HTMLDivElement>(null)
 
@@ -62,7 +83,7 @@ export function TagField({
           if (pickerLabel !== undefined) setPickerOpen(true)
         }}
       >
-        {values.map((address) => {
+        {(maxVisible === undefined || showAll ? values : values.slice(0, maxVisible)).map((address) => {
           const valid = isValidAddress(address)
           const known = pool.find((p) => p.key === address.toLowerCase())
           return (
@@ -86,6 +107,22 @@ export function TagField({
             </span>
           )
         })}
+        {/* The "+N" pill, and it is a button rather than a chip on purpose:
+            it is the only thing in this row that is not a recipient, and
+            giving it the chip shape would make "+7 人" look like an address
+            somebody could remove. Counts what is hidden, not the total. */}
+        {maxVisible !== undefined && !showAll && values.length > maxVisible ? (
+          <button
+            type="button"
+            className="tagfield__more"
+            onClick={(e) => {
+              e.stopPropagation()
+              setShowAll(true)
+            }}
+          >
+            +{values.length - maxVisible}
+          </button>
+        ) : null}
         <input
           ref={inputRef}
           id={id}
