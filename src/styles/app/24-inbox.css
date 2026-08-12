@@ -512,6 +512,93 @@
   white-space: nowrap;
   font-variant-numeric: var(--numeric);
 }
+/* --- the sender line, on a screen too narrow to hold it ---------------------
+ *
+ * Two lines at rest on a touch shell, and still exactly one while scrolling.
+ *
+ * ## What was wrong
+ *
+ * The header above is `flex-wrap: nowrap` on purpose — a bar that changes
+ * height as the sender's name changes length is a bar that moves the message
+ * under the reader's eye. The arithmetic behind that rule does not survive a
+ * 360px phone. Measured, with five items on the row:
+ *
+ *     avatar         32px   flex: 0 0 auto   cannot shrink
+ *     sender         36px   flex: 1 1 auto   ← everything is taken from here
+ *     timestamp     141px   flex: 0 0 auto   cannot shrink
+ *     account chip   24px                    already crushed from 60
+ *     chevron        48px   min-width        cannot shrink
+ *
+ * 328px of content width, minus 221px of unshrinkable items and 48px of gaps,
+ * leaves 59px to share between the sender and the chip. The sender got 36 —
+ * and `.reader__senderAddress` carries `overflow-wrap: anywhere`, which is
+ * right when it prevents an address running off the side of a dialog and
+ * catastrophic at 36px: `zhangsan@example.com` came out as five lines of three
+ * characters, and the bar it sits in was 126px tall.
+ *
+ * ## Why this shape
+ *
+ * Nothing here can be fixed by taking a few pixels from a neighbour. The
+ * timestamp is 141px of fact somebody is checking, the chevron is a 48px tap
+ * target, and the address needs about 140px to exist at all. The row needs a
+ * second line, and it is affordable because the resting bar is *already*
+ * shorter afterwards: 126px of shattered address becomes 91px of two clean
+ * lines.
+ *
+ *     [avatar]  Name                                    [v]
+ *               address@example.com
+ *               2026-08-11 22:30   [account]
+ *
+ * `:not([data-compact])` is what keeps the original promise intact. Compact is
+ * the scrolled state, and it already hides the address and the chip; with those
+ * gone the timestamp fits beside the name and the bar is one line again, so the
+ * height it transitions between is unchanged and the message does not move
+ * while it is being read.
+ *
+ * The basis is written as the space the other three items occupy rather than as
+ * `224px`, so the line stays exactly full — and so a change to the avatar size,
+ * the tap floor or the gap moves it without anybody having to notice. Exactly
+ * full is what forces the timestamp onto the second line while leaving room for
+ * the chip beside it; a `flex-basis: 100%` on the timestamp would do the first
+ * half and push the chip onto a third line.
+ *
+ * Scoped to the touch shell. A desktop reader is 1240px wide, the sender is
+ * never crushed there, and this basis would push the timestamp onto a second
+ * line it has no need of.
+ *
+ * ## The two-pane band, and what this does not fully solve
+ *
+ * Between 600 and 840px the reader is a ~394px column and `.reader__quick` —
+ * three more icon buttons, hidden on a phone — is on the row as well. The basis
+ * above does not know about it, so line one fills with the avatar and the
+ * sender, and `.reader__quick` and the chevron take a second line before the
+ * timestamp and chip take a third: 130px, three lines.
+ *
+ * That is left as it is rather than papered over with a second, wider basis for
+ * this band. The measurement is why: before this rule the same pane gave the
+ * sender **0px** and broke the address across **20 lines**, for a 399px header
+ * on a message nobody could read the sender of. 399 -> 130 is the fix; 130 ->
+ * 108 would cost a width calculation that has to know how many buttons
+ * `.reader__quick` is holding, which is the kind of arithmetic that is wrong
+ * the first time a button is added to it.
+ */
+:root[data-shell='mobile'] .modal__body--reader > .reader__meta:not([data-compact]) {
+  flex-wrap: wrap;
+  /* The 12px column gap is right between items and is too much between two
+     lines of the same block. */
+  row-gap: 2px;
+}
+:root[data-shell='mobile'] .modal__body--reader > .reader__meta:not([data-compact]) > .reader__sender {
+  flex: 0 1 calc(100% - var(--icon-lg) - var(--ctl-md) - var(--sp-3) * 2);
+}
+/* Second line, in reading order: when it happened, then which mailbox it
+   landed in. `order` rather than markup — the DOM order is already the right
+   one for a screen reader and for the wide layout. */
+:root[data-shell='mobile'] .modal__body--reader > .reader__meta:not([data-compact]) > .reader__when,
+:root[data-shell='mobile'] .modal__body--reader > .reader__meta:not([data-compact]) > .reader__account {
+  order: 1;
+}
+
 .reader__quick {
   flex: 0 0 auto;
   display: flex;
