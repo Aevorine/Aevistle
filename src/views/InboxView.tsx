@@ -56,6 +56,7 @@ import {
   IconCheck,
   IconChevronDown,
   IconClock,
+  IconCopy,
   IconDownload,
   IconExternal,
   IconFlag,
@@ -95,6 +96,8 @@ import { resolveWithCache } from '../core/mail/imageCache'
 import { getCachedBody, putCachedBody } from '../core/mail/bodyMemo'
 import { CHAIN_STAGES, buildChain, leadLabelKey } from '../core/schedule/chain'
 import { extractDates, type DateHit } from '../core/schedule/dateExtract'
+import { copyText } from '../core/platform/clipboard'
+import { haptic } from '../core/haptics'
 import type { InboxMessageBody } from '../core/platform/bridge'
 import {
   DEFAULT_RETRY,
@@ -106,6 +109,7 @@ import {
   senderDomain,
   shouldAutoLoadImages,
   type Attachment,
+  type CodeHit,
   type InboxMessage,
   type InboxTag,
   type ScheduledJob,
@@ -385,6 +389,84 @@ export function InboxView({
     (state.settings.themeMode !== 'light' &&
       typeof window !== 'undefined' &&
       window.matchMedia?.('(prefers-color-scheme: dark)').matches === true)
+
+  /**
+   * Whether a message *opens* repainted, and whether this one is showing that
+   * way right now.
+   *
+   * Three inputs, and they are three separate questions that were previously
+   * two. The theme decides whether there is anything to repaint at all — in a
+   * light app a sender's white page is simply the page. `readerDarkInvert` is
+   * the standing preference (default on, `DEFAULT_SETTINGS`); somebody who has
+   * decided they would rather see mail as sent turns it off once and never
+   * thinks about it again. `rawStyle` is this message only, reset in
+   * `openDetail`, and it means "the other thing" rather than "off" — which is
+   * what makes one control correct in both directions: with the setting on it
+   * is the escape hatch for a layout inversion ruins, and with the setting off
+   * it is the way to read one glaring white newsletter at night without
+   * changing the preference to do it.
+   */
+  const invertByDefault = readerIsDark && state.settings.readerDarkInvert !== false
+  const nightOn = rawStyle ? !invertByDefault : invertByDefault
+
+  /**
+   * The verification code a row can show, by message id.
+   *
+   * Nothing here extracts anything. `CodeCheckProvider` already reads the body
+   * of every message from the last day, runs `core/ops/codeExtract` over it and
+   * files the result in `state.codeHits` — a second detector in this file would
+   * be a second set of answers to the same question, and the one in that file
+   * is where the `98052` postcode bug and its eight fixes live. This is a
+   * lookup, and it costs one pass over an array that is already in memory.
+   *
+   * `confidence === 'high'` only, and that is the whole of the risk control.
+   * The Codes screen can afford to show a `medium` guess because it shows the
+   * *reasons* beside it and offers the runners-up in one press; a list row has
+   * room for six digits and nothing else, so a wrong number here would be a
+   * wrong number with no way to see that it was wrong. `CodeCheck.announce`
+   * draws the same line for the same reason — a notification has no room to
+   * explain itself either.
+   *
+   * Links are excluded outright: a URL does not fit, and a one-tap control
+   * that opens a sign-in link from a list is exactly the reflex this app's
+   * link-confirmation dialog exists to interrupt.
+   */
+  const codeByMessage = useMemo(() => {
+    const out = new Map<string, CodeHit>()
+    for (const hit of state.codeHits) {
+      if (hit.kind !== 'code' || hit.confidence !== 'high') continue
+      const already = out.get(hit.messageId)
+      if (!already || hit.foundAt > already.foundAt) out.set(hit.messageId, hit)
+    }
+    return out
+  }, [state.codeHits])
+
+  /**
+   * Copy from the row — the same three steps the Codes screen takes, in the
+   * same order, and deliberately not a fourth path to the clipboard.
+   *
+   * `copyText` rather than `navigator.clipboard.writeText`: the bare web call
+   * is refused inside an Android WebView, which is where this button is most
+   * likely to be pressed. The read mark is set first and outside the result
+   * check, because a code read off the screen and typed by hand has still been
+   * dealt with. A toast on success rather than the Codes screen's inline tick:
+   * a 61px row has nowhere to put a tick, and a copy that says nothing is
+   * indistinguishable from a tap that missed.
+   */
+  const copyRowCode = useCallback(
+    async (hit: CodeHit) => {
+      dispatch({ type: 'markCodeRead', id: hit.id })
+      if (await copyText(hit.value)) {
+        dispatch({ type: 'markCodeCopied', id: hit.id })
+        toast.push({ tone: 'success', title: t('inbox.rowCodeCopied', { code: hit.value }) })
+        haptic('copy', state.settings.haptics)
+      } else {
+        toast.push({ tone: 'error', title: t('inbox.copyFailed') })
+        haptic('fail', state.settings.haptics)
+      }
+    },
+    [dispatch, t, toast, state.settings.haptics],
+  )
 
   const accountsById = useMemo(() => new Map(state.accounts.map((a) => [a.id, a])), [state.accounts])
   const enabledInboxes = useMemo(() => state.inboxAccounts.filter((i) => i.enabled), [state.inboxAccounts])
@@ -1718,7 +1800,6 @@ export function InboxView({
                         type="button"
                         className="reorder-handle reorder-handle--tab"
                         aria-label={t('account.reorderHandle', { name: accountLabel(id) })}
-                        title={t('account.reorderHint')}
                         aria-keyshortcuts="Alt+ArrowLeft Alt+ArrowRight"
                         {...inboxReorder.handleProps(id)}
                       >
@@ -2016,7 +2097,12 @@ export function InboxView({
               scrollerClassName="list-pane"
               rowsClassName="joblist"
             >
-              {(m) => (
+              {(m) => {
+                /* Looked up once per row, not per element inside it — see
+                   `codeByMessage`. `undefined` on the overwhelming majority of
+                   rows, which is the case this must cost nothing on. */
+                const rowCode = codeByMessage.get(m.id)
+                return (
                 <SwipeableRow
                   message={m}
                   rtl={dir === 'rtl'}
@@ -2120,9 +2206,42 @@ export function InboxView({
                         third line, because a third line costs ~19px on every row
                         and this screen is measured in rows.
                       */}
+                      {/*
+                        The code capsule leads line two, and it takes the
+                        snippet's place rather than joining it.
+
+                        Leading, because `.job__name` is a one-line clamp with
+                        `overflow: hidden` — anything after a long subject is
+                        cut off, and a copy button you cannot see is worse than
+                        none. Instead of the snippet, because the row has 4.9px
+                        of height left before the 9-row floor breaks (see
+                        `.job__code` in 24-inbox.css for the arithmetic) and a
+                        second element competing for the same line would push
+                        the subject out of it. On a mail that carries a code the
+                        code *is* the preview; on every other row nothing here
+                        changes at all.
+                      */}
                       <div className="job__name">
+                        {rowCode ? (
+                          <button
+                            type="button"
+                            className="job__code"
+                            aria-label={t('inbox.rowCodeCopy', { code: rowCode.value })}
+                            onClick={(e) => {
+                              // The row underneath opens the message. Without
+                              // this, copying also navigates.
+                              e.stopPropagation()
+                              void copyRowCode(rowCode)
+                            }}
+                          >
+                            <IconCopy size={13} />
+                            <span className="job__codeValue">{rowCode.value}</span>
+                          </button>
+                        ) : null}
                         <span className="job__subject">{m.subject || t('inbox.noSubject')}</span>
-                        {m.snippet ? <span className="job__snippet">{m.snippet}</span> : null}
+                        {m.snippet && !rowCode ? (
+                          <span className="job__snippet">{m.snippet}</span>
+                        ) : null}
                       </div>
                     </div>
                     <div className="job__actions" onClick={(e) => e.stopPropagation()}>
@@ -2135,7 +2254,8 @@ export function InboxView({
                     </div>
                   </div>
                 </SwipeableRow>
-              )}
+                )
+              }}
             </VirtualList>
           </div>
         )}
@@ -2188,12 +2308,15 @@ export function InboxView({
               this off and `.reader__more` below on, never any JS state.
             */}
             <div className="reader__actionsFull">
+              {/* Offered whenever the app is dark, whichever way the setting
+                  points — see `invertByDefault`. The label names what the
+                  press *will do*, not what is on screen. */}
               {openMessage && readerIsDark ? (
                 <IconButton
-                  label={rawStyle ? t('inbox.viewNightColors') : t('inbox.viewOriginalColors')}
+                  label={nightOn ? t('inbox.viewOriginalColors') : t('inbox.viewNightColors')}
                   onClick={() => setRawStyle((v) => !v)}
                 >
-                  {rawStyle ? <IconMoon size={16} /> : <IconSun size={16} />}
+                  {nightOn ? <IconSun size={16} /> : <IconMoon size={16} />}
                 </IconButton>
               ) : null}
               <IconButton label={t('inbox.find')} onClick={() => setFindOpen((v) => !v)}>
@@ -2235,8 +2358,8 @@ export function InboxView({
                         setMoreOpen(false)
                       }}
                     >
-                      {rawStyle ? <IconMoon size={16} /> : <IconSun size={16} />}
-                      <span>{rawStyle ? t('inbox.viewNightColors') : t('inbox.viewOriginalColors')}</span>
+                      {nightOn ? <IconSun size={16} /> : <IconMoon size={16} />}
+                      <span>{nightOn ? t('inbox.viewOriginalColors') : t('inbox.viewNightColors')}</span>
                     </button>
                   ) : null}
                   <button
@@ -2440,7 +2563,13 @@ export function InboxView({
                   html={resolvedHtml ?? openBody.sanitizedHtml ?? textAsHtml(openBody.text ?? t('inbox.noBody'))}
                   find={findOpen ? deferredFind : ''}
                   onLinkClick={openLinkSafely}
-                  nightFilter={readerIsDark && !rawStyle}
+                  nightFilter={nightOn}
+                  /* Both branches of that `??` above go through the same fold:
+                     a reply quoted with `>` in a text/plain part and one quoted
+                     as `<blockquote>` in an HTML part are the same message to
+                     the person reading it, and only one of them being foldable
+                     would look like the feature working intermittently. */
+                  foldQuotes={state.settings.readerFoldQuotes !== false}
                 />
 
                 {attachments.length > 0 ? (

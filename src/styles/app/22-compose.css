@@ -14,21 +14,71 @@
    of `.view--compose`. At 360x800 that view is ~654px, so the box must clear
    ~556px and everything else on the card gets ~98px.
 
-   That is the whole design constraint, and it is why this is not simply the
-   old `.compose-head` left unfolded: that block is `Field`-based, a label row
-   above each control, and opening it was measured at a 66% share (52% with a
-   second account). Two rows with the label inline, plus deleting the body's
-   own label row (its tools moved to the action bar), is what fits:
+   That budget is the *whole* screen, not a share of it. Itemised at 360x800
+   with an account configured and the first-run bands suppressed, every pixel
+   between the top of the scroller and the bottom of the message box:
 
-     To row        48px   the 48px tap floor on `.chip__remove` sets this; see below
-     Subject row   44px
-     ------------------
-                   92px   against a ~98px budget
+     .view padding-block                    0px   (`--sp-8` bottom, overridden to
+                                                   `--sp-2` on compose and then to
+                                                   0 under `[data-narrow]`)
+     .compose-card border / .card__body     0px   (both zeroed for narrow)
+     .compose-layout gap                    0px   (`--sp-1`, cancelled by the
+                                                   negative margin further down)
+     .composetop2                          88px
+     ------------------------------------------
+                                           88px   against a ~98px budget
+
+   There is nothing else. The header *is* the chrome, which is why every
+   argument on this screen is an argument about these rows.
+
+   ## Why 账号 is on the recipient row and not on a row of its own
+
+   Round 8 asked for three 44px rows — 账号, 收件人, 主题 — with the body
+   starting at row 4. Measured, that does not fit, and the arithmetic is short
+   enough to state in full:
+
+     three 44px content boxes                    132px
+     + the hairline under each of the first two    2px
+     ---------------------------------------------------
+                                                 134px
+
+     message box left                654 - 134 =  520px
+     share                             520 / 654 = 79.5%   floor is 85%
+
+   It overruns by 36px, which is 5.5 points of message box. And there is no
+   second place to take 36px from: the itemisation above is already all zeroes
+   apart from the header, the action bar is a sibling of `.view` (folding it to
+   nothing would add 53px to a denominator that needs 240), and the two rows
+   that remain cannot be shortened because `check-tap-targets` measures
+   `input`, `select` and `textarea` as controls and fails anything under 44px
+   in either direction — so `.tagfield__input` and `.composetop2__subject` are
+   both pinned at 44 by a second gate.
+
+   What was traded, and what was kept. The two rows you *type* into keep their
+   full 44px. 账号 becomes the leading control of the recipient row rather than
+   a row of its own: it is the same button, in the same place, at the same 44px,
+   that used to be an unlabelled chevron opening the same block — so printing
+   the account on it costs the message box nothing at all, and it is the fact a
+   phone could not previously see, because the `<select>` naming the sending
+   account lives *inside* the folded block. All three of 账号 / 收件人 / 主题
+   are now readable without a tap; two of them are editable in place and the
+   third is one tap from being editable, which is what it was before.
+
+   The rows also came down from 48+44 to 44+44 and their separators moved from
+   `border-bottom` (1px of layout each) to an inset `box-shadow` (0px), so the
+   header is 88px where it was 94:
+
+     before   48 + 1 + 44 + 1 = 94px    message box 560px    85.6%
+     after    44     + 44     = 88px    message box 566px    86.5%
+
+   The 6px is not spent. It is the headroom the rule lines, the folded action
+   bar and the attachment strip are built against, and it is why this round
+   ends *above* the floor rather than 0.1 points over it.
 
    Lowering the floor instead was tried once, on this exact screen, and
    reverted the same day. It is not available.
 
-   ## Why the To row is 48px and not 40px
+   ## Why the To row is 44px and not 40px
 
    A recipient chip is normally ~54px on a touch shell: `.chip__remove` is held
    to the 48px tap minimum and the chip pads around it. Three of those is a
@@ -48,12 +98,26 @@
   flex-direction: column;
 }
 
+/*
+ * One row, 44px, and its separator costs nothing.
+ *
+ * `box-shadow: inset` rather than `border-bottom`: a border is 1px of layout on
+ * a screen whose entire furniture budget is 98px, and two rows of it is 2px —
+ * 0.3% of the message box, for a line that an inset shadow draws identically.
+ * The row's own height is then exactly its tallest control, which is what makes
+ * "each row is 44px" a statement about the rendered box and not about a
+ * `min-height` that something inside quietly beat.
+ *
+ * `min-height` as well as the controls' own, so an empty row (no chips, no
+ * text) is still 44 rather than collapsing to its label's line box.
+ */
 .composetop2__row {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
   padding: 0 var(--sp-4);
-  border-bottom: 1px solid var(--border-subtle);
+  min-height: 44px;
+  box-shadow: inset 0 -1px 0 0 var(--border-subtle);
   min-width: 0;
 }
 
@@ -93,27 +157,120 @@
   box-shadow: none;
 }
 .composetop2__row:focus-within {
-  border-bottom-color: var(--accent);
+  box-shadow: inset 0 -1px 0 0 var(--accent);
 }
 
-/* The chevron to account / Cc / Bcc. 48px, like every other icon button. */
-.composetop2__more {
-  flex: 0 0 var(--ctl-md);
-  width: var(--ctl-md);
-  height: var(--ctl-md);
-  display: grid;
-  place-items: center;
-  border: 0;
-  background: transparent;
-  color: var(--text-3);
-  cursor: pointer;
+/*
+ * 账号 — the account this leaves from, and the way into 账号 / 抄送 / 密送.
+ *
+ * This is the chevron that used to sit at the end of the recipient row, moved
+ * to the head of it and given the one thing it was missing: a name. Same
+ * element, same disclosure, same 44px target — see the file header for why the
+ * account gets a control on an existing row rather than a row of its own.
+ *
+ * Stroked, not filled. Exactly one control on this screen is solid (see the
+ * note on the primary button in `ComposeView`), and it is the one that sends.
+ * A tinted pill here would be a second thing competing for "press me" on a row
+ * whose actual job is to be typed into.
+ *
+ * -12px on the leading side, so the 44px target keeps its size while the text
+ * lines up with the screen's gutter rather than sitting 12px inside it — the
+ * same trick, and the same number, the chevron carried on the trailing side.
+ */
+/*
+ * `flex: none`, not `0 1 auto`, and this is load-bearing.
+ *
+ * With `0 1 auto` + `min-width: 0` this button is free to shrink to nothing,
+ * and it did: the recipient field beside it is the flex item that wants all
+ * the room, so the account label was measured **24px wide** — rendering the
+ * three-character placeholder as "选.." — while its own `max-width` sat
+ * unreached at 56px. The cap was never what was clipping it.
+ *
+ * Refusing to shrink is safe here precisely *because* the cap exists: this
+ * button can never exceed 4em + chevron + padding whatever the account is
+ * called, so it cannot be the thing that overflows the row. The budget in the
+ * note below is therefore a real ceiling rather than a starting point the
+ * layout negotiates away.
+ */
+.composetop2__from {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  height: 44px;
+  padding-inline: var(--sp-2);
+  margin-inline-start: calc(var(--sp-3) * -1);
+  border: 1px solid var(--border-subtle);
   border-radius: var(--r-full);
-  /* -12px so the 48px target keeps its size while the glyph lines up with the
-     screen's gutter instead of sitting 12px inside it. */
-  margin-right: calc(var(--sp-3) * -1);
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  /* The data rank, not the body rank. It is a name being *identified* rather
+     than read — the same call `.actionbar__meta` already makes about this exact
+     string on the wide layout, and making the two disagree is what
+     `check-tap-targets`' "one kind of text, one size" rule exists to catch. */
+  font-size: var(--text-sm);
+  white-space: nowrap;
+  cursor: pointer;
 }
-.composetop2__more[aria-expanded='true'] {
+/*
+ * The account name shrinks before the recipients do, and 6ch is why.
+ *
+ * The row is 328px inside its gutters. Priced out at 360px, at `--text-sm`:
+ *
+ *   account button   6ch + chevron + padding + border   ~83px
+ *                    less its -12px leading margin      ~71px
+ *   gap                                                   8px
+ *   "收件人"                                              48px
+ *   gap                                                   8px
+ *   ------------------------------------------------------------
+ *   left for the chips and the input                    ~193px
+ *
+ * against 228px before this button existed. That 35px is what 账号 costs, and
+ * it is bought from the one band on this screen that already scrolls sideways
+ * by design rather than from anything that had to fit. Uncapped, the same
+ * button measured ~118px and took the chips to 146 — two coloured pills with no
+ * text in them, which is the exact failure `.chip--recipient`'s own note records
+ * and forbids.
+ *
+ * Six characters of a mailbox name is enough to tell one of your own accounts
+ * from another, which is the question being answered; the full address is on
+ * `title`, on the accessible name, and in the block this opens.
+ */
+/*
+ * `em`, not `ch` — and this is the difference between the budget above being
+ * right and the control being useless.
+ *
+ * `ch` is the advance width of "0". In Times New Roman at `--text-sm` that is
+ * about 7px, so 6ch is ~42px. A Chinese character at 14px is 14px wide, so
+ * "6 characters" bought **three** of them — and three is exactly the length of
+ * the placeholder, so the first thing anyone sees on this screen with no
+ * account chosen was measured rendering as "选.." with the third character
+ * eaten by its own ellipsis. The label that says which account you are about
+ * to send from was illegible.
+ *
+ * 4em is 4 CJK characters (56px) or ~8 Latin ones, at every text scale,
+ * because `em` is the type size itself. That is +14px on the ~83px priced
+ * above, taking the chips and input from ~193px to ~179px — still far above
+ * the ~146px that the note above records as the point where recipient chips
+ * become coloured pills with no text in them.
+ */
+.composetop2__fromtext {
+  min-width: 0;
+  max-width: 4em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.composetop2__from .composetop2__chev {
+  flex: none;
+  color: var(--text-3);
+}
+.composetop2__from[aria-expanded='true'] {
+  border-color: var(--accent);
   color: var(--accent);
+}
+.composetop2__from[aria-expanded='true'] .composetop2__chev {
+  color: inherit;
   transform: rotate(180deg);
 }
 
@@ -218,21 +375,34 @@
 }
 
 /*
- * The count, overlaid on the bottom-right corner of the message box.
+ * "已保存 · 12:03", in the corner the character count used to hold.
  *
- * `--text-sm` is the data rank and this is data — a count, looked at rather
- * than read — which is exactly the split the type ladder draws at 14px. It is
- * not a control, so the 44px tap floor does not apply and `check-tap` does not
- * measure it; that is also why it may sit over the text at all.
+ * `.composecount` — "0 字 · 0 B" — lived here and is gone. It was two numbers
+ * about a message the person writing it is looking at, printed permanently in
+ * the corner of the box they are looking at it in; the one thing the screen
+ * could not tell them was whether the work was safe if the phone died. So the
+ * corner keeps its technique and changes its content.
+ *
+ * Everything about the position is inherited from what it replaces, and for the
+ * same reasons. Absolute, so it costs the message box no height at all — the
+ * whole currency of this screen. `--text-sm` is the data rank, which is what a
+ * timestamp is. It is not a control, so the 44px tap floor does not apply and
+ * `check-tap-targets` does not measure it; that is also why it may sit over the
+ * text at all.
  *
  * The tinted plate is load-bearing rather than decorative: without it the
- * digits sit directly on whatever line of the message happens to have scrolled
- * under them, and two runs of text at the same size overlapping is unreadable
- * in a way that a plate fixes for the cost of 2px of padding.
+ * characters sit directly on whatever line of the message has scrolled under
+ * them, and two runs of text at the same size overlapping is unreadable in a
+ * way that a plate fixes for the cost of 2px of padding. It also covers the
+ * rule lines below, which would otherwise strike through the stamp.
+ *
+ * What makes it not a label is that it is not always there: `ComposeView`
+ * stamps it when the typing settles and clears it a few seconds later, so the
+ * corner is empty again long before anyone starts reading it as chrome.
  */
-.composecount {
+.composesaved {
   position: absolute;
-  right: var(--sp-3);
+  inset-inline-end: var(--sp-3);
   bottom: var(--sp-2);
   padding: 1px var(--sp-2);
   border-radius: var(--r-sm);
@@ -242,8 +412,116 @@
   white-space: nowrap;
   pointer-events: none;
 }
-:root[data-shell='mobile'] .view--compose .compose-layout > .field:has(.textarea--body) {
+/*
+ * Both flags, not just the shell's.
+ *
+ * `data-shell='mobile'` is written for a phone-shaped *window*; `data-narrow`
+ * is written by `ComposeView` from `useBodyFirst`, which is also true on a
+ * short-and-wide window and on the Android build at any width. The overlaid
+ * stamp is rendered from the second flag, so it has to be positioned against
+ * the first *or* the second — matched to only one of them, a short desktop
+ * window would put it against whatever positioned ancestor happened to exist,
+ * which is the page.
+ */
+:root[data-shell='mobile'] .view--compose .compose-layout > .field:has(.textarea--body),
+.view--compose[data-narrow] .compose-layout > .field:has(.textarea--body) {
   position: relative;
+}
+
+/* ==========================================================================
+   格线托住宋体 — ruled lines under the message
+
+   Chinese set in a serif leans on the gap between lines to keep the thin
+   horizontals of one row from reading as part of the row above (the note on
+   `--leading-tight` in `theme.css` says the same thing about why the leading
+   was not tightened). A rule at the foot of each line box does the same work
+   visibly: the characters sit *on* something instead of floating, and a long
+   message stops looking like one grey block.
+
+   ## How it stays in step with the text at every size
+
+   The tile is `calc(1em * var(--leading-relaxed))` — the same two values the
+   box's own `line-height` is made of, read off the same element. `1em` on
+   `.textarea--body` is its computed font size, which is `--text-md` (1rem),
+   which is the root size, which is the *only* thing the text-size setting
+   moves (`--text-scale`, 100 / 112.5 / 125%). So one line box is one tile at
+   every setting without a second rule anywhere:
+
+     standard  16px x 1.75 = 28.0px
+     large     18px x 1.75 = 31.5px
+     largest   20px x 1.75 = 35.0px
+
+   The vertical offset is `--sp-4`, which is the box's own `padding` token, not
+   a copy of its value — the first line box starts one padding down from the
+   top of the positioning area, so the first tile has to as well.
+
+   `background-attachment: local` is what makes the rules scroll *with* the
+   text rather than staying pinned to the box while the characters slide over
+   them. Without it the alignment is correct only until the message is longer
+   than the box, which is the case this exists for.
+
+   (The 112.5% setting lands on a half pixel. A tile is 31.5px and a line box
+   is laid out at 31.5px too, so they do not drift relative to one another;
+   what varies is which side of a device pixel each rule is rasterised on.
+   Measured over a screenful, the worst case is a rule that looks a shade
+   softer than its neighbour, which is what a hairline at 60% opacity looks
+   like anyway.)
+
+   ## Why it is safe in all seven visual styles
+
+   The ink is `--border-subtle`, the token every hairline in the app already
+   uses, softened to 60%. Each of the seven `data-style` blocks in `theme.css`
+   redefines it in both light and dark, so the rules follow the style's own
+   palette rather than carrying a colour of their own — including `contrast`,
+   where the hairline is meant to be assertive, and `paper`, where ruled lines
+   are the point.
+
+   It is decoration and not text: it is a `background-image`, so nothing reads
+   it, nothing selects it, and `check-contrast` — which pools text colours
+   against their backgrounds — has no text here to measure. The `1px` is a
+   hairline like the twenty other `1px solid var(--border-subtle)` rules in
+   this file, not a spacing value.
+   ========================================================================== */
+
+/*
+ * `:focus` is in the selector, and it is not decoration.
+ *
+ * `04-forms.css` styles a focused field with `background: var(--surface-1)` —
+ * the *shorthand*, which resets `background-image` to `none`. So a rule written
+ * against `.textarea--body` alone (0,1,0) is beaten by `.textarea:focus`
+ * (0,2,0) the instant anyone taps into the box, and the lines this whole block
+ * exists to draw would vanish at exactly the moment there is text to sit on
+ * them. Matching the specificity and coming later in the cascade is what keeps
+ * them; the focused background *colour* still comes from that rule, because
+ * only `background-image` is restated here.
+ */
+.textarea--body,
+.textarea--body:focus {
+  /* Named once so the offset below and the tile agree by construction. */
+  --rule-step: calc(1em * var(--leading-relaxed));
+  /*
+   * Full `--border-subtle`, not 60% of it.
+   *
+   * At 60% the lines measured `rgba(238,240,246,0.6)` against the box's own
+   * `--surface-2` and were, on a real 360px window, invisible — I looked at a
+   * screenshot of an empty message box and could not tell the feature had
+   * shipped. A rule line nobody can see is not a restrained rule line, it is
+   * an absent one, and "格线托住宋体" was the requirement.
+   *
+   * `--border-subtle` undiluted is the same ink every hairline in the app is
+   * drawn in, so this is the app's existing quietest visible line rather than
+   * a new value chosen by eye, and it moves with all seven styles in both
+   * themes for free.
+   */
+  background-image: linear-gradient(
+    to top,
+    var(--border-subtle) 0 1px,
+    transparent 1px
+  );
+  background-size: 100% var(--rule-step);
+  background-position: 0 var(--sp-4);
+  background-repeat: repeat;
+  background-attachment: local;
 }
 
 /*
@@ -273,6 +551,411 @@
  */
 .composeacts {
   position: relative;
+}
+
+/* ==========================================================================
+   分组 — three zones, two hairlines, on both layouts
+
+   The bar used to be five controls at one weight in one line, so "attach a
+   file", "make this bold" and "send it at six" read as three instances of the
+   same thing and every visit meant reading all five glyphs. Grouped, the eye
+   lands on a zone and then on an icon, which is what "元素，条目，图标要有分组、
+   有主次" is asking for.
+
+   The zones are the same three on the phone and on the desktop, because they
+   are a statement about the *send* rather than about a width:
+
+     1  what rides along with the message   attachments, the options sheet
+                                            (desktop: the recipients/attachments
+                                            summary line, which says the same
+                                            thing in words)
+     2  how the message is written          the formatting strip
+                                            (desktop: it lives on the message
+                                            field's own label row, where it is
+                                            beside the text it formats — moving
+                                            it down here to make the two layouts
+                                            match would be matching the picture
+                                            and breaking the reason)
+     3  when and whether it goes            the send-time button, Schedule, Send
+
+   `--border-subtle`, the same hairline the header rows carry, so the top and
+   the bottom of the screen are divided by one convention and not by two. The
+   divider is `border-inline-start` on the zone rather than a `::after` on its
+   neighbour, so it flips with the writing direction on its own and the Arabic
+   build needs no second rule.
+   ========================================================================== */
+
+.composeacts__zone {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+/* Only the send zone is allowed to give up width: it is the one holding the
+   flexible send-time button, and the other two hold fixed 48px targets that
+   cannot shrink without dropping under the tap floor. */
+.composeacts__zone--when {
+  flex: 1 1 auto;
+}
+.composeacts__zone--format,
+.composeacts__zone--when,
+.actionbar__send {
+  border-inline-start: 1px solid var(--border-subtle);
+  padding-inline-start: var(--sp-1);
+}
+/*
+ * The first zone loses its divider when it is the first thing in the row, which
+ * it is not always: the formatting zone disappears once the body is HTML (see
+ * `ComposeView`), and a hairline hanging off the left edge of the bar with
+ * nothing before it is a line drawn around nothing.
+ */
+.composeacts__zone:first-child {
+  border-inline-start: 0;
+  padding-inline-start: 0;
+}
+
+.actionbar__send {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-inline-start: auto;
+}
+/* On the wide bar the two send buttons are already `--sp-3` apart from the
+   summary by the bar's own gap; the hairline needs a little more room than the
+   phone's `--sp-1` so it does not touch the secondary button's border. */
+.actionbar:not([data-narrow]) .actionbar__send {
+  padding-inline-start: var(--sp-3);
+}
+/* The boundary between 定时 and 立即发送, which falls between two buttons and so
+   cannot be a border on either of them without drawing inside one. Sized off
+   the control ladder rather than as a full-bleed divider: a rule the height of
+   the bar would cut the padding as well as the gap. */
+.actionbar__rule {
+  flex: none;
+  align-self: center;
+  width: 1px;
+  height: var(--ctl-sm);
+  background: var(--border-subtle);
+}
+
+/* ==========================================================================
+   The folded bar — one 34px row while the message has the caret
+
+   34px is below the 44px floor `check-tap-targets` and Android's own guidance
+   both set. That is the whole reason this row holds no control: four
+   half-height buttons directly above a soft keyboard is the worst place on the
+   screen to be ten pixels short, and "the folded row is presentation-only" is
+   the only reading of a 34px row that does not ship a target nobody can hit.
+
+   Nothing becomes unreachable. Every control comes back at its full height on
+   blur, and any tap outside the message box blurs it — including a tap on this
+   strip, which `ComposeView` makes explicit with an `onPointerDown` rather than
+   trusting a WebView's default focus handling. The send shortcut still works
+   while it is folded, and it still goes through the same pre-send card.
+
+   What it shows is the two things worth knowing mid-sentence and neither of
+   which is ever tapped: when this is going out, and whether the work is saved.
+
+   The 19px it gives back lands in the message box, because `.view` is a flex
+   sibling of `.actionbar` and is sized by whatever the bar does not take. It
+   cannot affect the 85% gate in either direction: `layout-probe` measures first
+   paint, where nothing has focus and the bar is its full 53px.
+   ========================================================================== */
+
+.composefold {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 34px;
+  padding-inline: var(--sp-2);
+  color: var(--text-3);
+  font-size: var(--text-sm);
+}
+.actionbar[data-narrow][data-typing] {
+  /* `.sendresult` sticks to the top of this bar and reads the token, so the
+     token has to be what the bar actually measures — the same fix, for the same
+     reason, as the 53px one in `15-compose-narrow.css`. */
+  --actionbar-h: 34px;
+  padding-block: 0;
+}
+.composefold__icon {
+  flex: none;
+}
+.composefold__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The saved stamp is also in the corner of the message box. Here it is the end
+   of a sentence rather than a plate over text, so it needs no background — and
+   it is the one thing on this strip that appears and disappears, which is why
+   it is last: a strip whose *first* item comes and goes would shift the rest of
+   the line under the reader's eye. */
+.composefold__saved {
+  flex: none;
+}
+
+/* ==========================================================================
+   One filled control, and it is the one that sends
+
+   Everything else on this screen is a line icon at the single stroke width
+   `icons.tsx` sets on its shared `<Svg>` (1.75 on a 24px grid — one place, so
+   there is nothing to keep in step). What was not a line was two solid accent
+   pills, and neither of them is a button: the attachment count and the "编辑中"
+   badge. Solid accent is the interface's word for "this is the irreversible
+   one", and spending it on a count meant the send button had to compete with a
+   number for the same signal.
+
+   Stroked in the accent instead. The badge still reads as accent-coloured and
+   still sits where it sat; what it stops doing is looking like something to
+   press.
+   ========================================================================== */
+
+.composeacts__badge {
+  border: 1px solid var(--accent);
+  background: var(--surface-1);
+  color: var(--accent);
+  /* The border adds 2px to a box that was sized to sit in the button's corner;
+     taking it off the line box keeps the badge the size it was. */
+  line-height: 15px;
+}
+.composesummary__edit {
+  border: 1px solid var(--accent);
+  background: transparent;
+  color: var(--accent);
+  line-height: 15px;
+}
+
+/*
+ * And the seven formatting buttons, which were seven filled boxes.
+ *
+ * `.markup__btn` carries `border: 1px solid var(--border)` and
+ * `background: var(--surface-2)` from `16-mail.css`, which is right where that
+ * strip lives in the mail reader — a row of raised keys beside a body of text.
+ * In the action bar it put seven filled controls on a screen that is allowed
+ * one, and the one it is allowed is Send.
+ *
+ * Scoped to `.composeacts` so the reader's own toolbar is untouched. The strip
+ * they sit in is already a panel with a border and a shadow, so the buttons do
+ * not need a second frame each to read as a group.
+ *
+ * Worth writing down, because it is the part of "one stroke width" this round
+ * could not fix: six of the seven glyphs are *letterforms* — B, I, </>, •, 1.,
+ * ❝ — set in the app's own face, not drawn icons, so they have a font weight
+ * rather than a stroke width. Only 链接 is an icon (`IconLink`), and it shares
+ * the single `strokeWidth={1.75}` every icon in the app is drawn at, on the
+ * shared `<Svg>` in `icons.tsx`. At 14px that stroke resolves to ~1.0px against
+ * a ~1.3px stem on the letterforms beside it, which is inside the difference
+ * between two weights of the same face and reads as one set. Making the seven
+ * genuinely one system means drawing six icons, which is `MarkupToolbar`'s
+ * change to make and not this stylesheet's.
+ */
+.composeacts .markup__btn {
+  border-color: transparent;
+  background: transparent;
+}
+.composeacts .markup__btn:hover {
+  border-color: transparent;
+  background: var(--surface-hover);
+  color: var(--text-1);
+}
+
+/* ==========================================================================
+   The attachment strip — what the message is carrying, as pictures
+
+   Behind a button, three files looked exactly like none apart from a small
+   number on an icon; and the commonest attachment mistake is the *wrong* file,
+   which a name and a count cannot catch and a thumbnail can.
+
+   It costs the 85% floor nothing. `layout-probe` reads the share on first paint
+   against a fresh draft, where `draft.attachments` is empty and this element is
+   not rendered at all — not `display: none`, absent — so it contributes 0px to
+   the number the gate holds. Once there is something in it, it is ~54px: a 44px
+   remove control, 1px of border each side and `--sp-1` of breathing room above
+   and below. That is a draft someone has already worked on rather than the
+   screen they opened.
+
+   One line that scrolls sideways, never wrapping. Wrapping is what let the
+   recipient band reach 660px on this same screen (see `.composetop2 .tagfield`),
+   and a second row of attachments would be 54px more off the message with no
+   ceiling on the third.
+   ========================================================================== */
+
+.composefiles {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: var(--sp-2);
+  padding-block: var(--sp-1);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.composefiles::-webkit-scrollbar {
+  display: none;
+}
+
+.composefile {
+  flex: 0 0 auto;
+  /* Two on screen and the edge of a third, which is what says the strip
+     scrolls. The same argument as `.chip--recipient`'s 46%: a cap that fits one
+     item exactly is a strip that looks like it holds one item. */
+  max-width: 62%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding-inline-start: var(--sp-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-sm);
+  background: var(--surface-1);
+}
+.composefile[data-missing] {
+  border-color: var(--danger);
+}
+
+/* Square, and cropped rather than letterboxed: a strip of thumbnails whose
+   heights disagree is a strip with a ragged baseline, and the question these
+   answer ("which picture is that?") survives a crop. */
+.composefile__thumb {
+  flex: none;
+  width: var(--ctl-sm);
+  height: var(--ctl-sm);
+  border-radius: var(--r-xs);
+  object-fit: cover;
+}
+/* Everything that is not an image we have read back — a PDF, a spreadsheet, a
+   file still loading. One glyph rather than a per-format icon set: the name is
+   right beside it and carries the extension, so a second encoding of the same
+   fact would only be a second thing to keep current. */
+.composefile__glyph {
+  flex: none;
+  width: var(--ctl-sm);
+  height: var(--ctl-sm);
+  display: grid;
+  place-items: center;
+  color: var(--text-3);
+}
+.composefile__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-sm);
+  color: var(--text-2);
+}
+/*
+ * Its own remove control, at the full floor.
+ *
+ * 44 and not `--tap-min`'s 48: this row's height *is* this button's height, and
+ * this is the screen with a hard message-box floor — the same trade
+ * `.composetop2 .chip__remove` and `.warnfold__head` above both make, for the
+ * same reason. Its own block name rather than `.btn` because
+ * `check-tap-targets` pools one kind of control at one height across every
+ * screen, and the bar underneath this strip is full of 48px `.btn`s.
+ */
+.composefile__drop {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+}
+.composefile__drop:hover {
+  background: var(--surface-hover);
+  color: var(--danger);
+}
+
+/* ==========================================================================
+   收件人补全 — two characters, and the people you actually write to
+
+   `TagField` used to throw the whole `RecipientPicker` card up the moment the
+   field took focus, and below 840px that card is a bottom sheet — so tapping
+   "To" on a phone covered the screen with a panel that the soft keyboard then
+   covered in turn, before a single character had been typed.
+
+   This is the other half: a short ranked list that appears only once there is
+   something to rank by, hanging directly under the row. Everything in it comes
+   from `core/mail/recipients.ts` — `buildPool` merges the contact book with the
+   sent-to history and weights them, `matchesQuery` matches name, address, tag
+   and the initials of a multi-word name — so the dropdown and the card cannot
+   put the same people in a different order. The card is still there, one tap
+   away, on the button that always opened it.
+
+   ## It cannot cover the field being typed into
+
+   `top: 100%` of `.tagfield-wrap`, which is the row's own box, so the panel
+   starts at the bottom edge of the recipient row and grows downward over the
+   subject row and the head of the message. At 360x800 the recipient row is the
+   first 44px of the screen and the panel is at most 3 rows of `--ctl-md` plus
+   its border — 146px — so it ends around y=190 with the field it belongs to
+   fully visible above it and the send bar untouched below.
+   ========================================================================== */
+
+.tagsuggest {
+  position: absolute;
+  z-index: 6;
+  inset-inline: 0;
+  top: 100%;
+  margin-top: var(--sp-1);
+  display: flex;
+  flex-direction: column;
+  padding: var(--sp-1);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-md);
+  background: var(--surface-1);
+  box-shadow: var(--shadow-lg);
+}
+/* A row of the list, not a button in a row — `.pickitem` above makes the same
+   call for the same reason, and these two are the same object in two places. */
+.tagsuggest__item {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  width: 100%;
+  min-height: var(--ctl-md);
+  padding: 0 var(--sp-3);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-1);
+  font: inherit;
+  font-size: var(--text-base);
+  text-align: start;
+  cursor: pointer;
+}
+/* Hover and keyboard highlight are one state deliberately: the arrow keys and
+   the finger are two ways of pointing at the same row, and two different
+   highlights on screen at once is how people lose track of what Enter does. */
+.tagsuggest__item:hover,
+.tagsuggest__item[data-active] {
+  background: var(--surface-hover);
+}
+.tagsuggest__name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The address is the part that is checked and the part that is long, so it gets
+   what is left and truncates from the end. `--text-sm`, the data rank: it sits
+   beside a name at body size and the difference is what says which is which. */
+.tagsuggest__address {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-sm);
+  color: var(--text-3);
 }
 
 /*

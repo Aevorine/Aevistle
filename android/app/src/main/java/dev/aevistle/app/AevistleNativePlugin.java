@@ -343,6 +343,23 @@ public class AevistleNativePlugin extends Plugin {
         if ("imap".equals(kind)) {
             new InboxCache(getContext()).remove(accountId);
             InboxSyncScheduler.rearm(getContext());
+            /*
+             * And drop any connection parked by MailFetcher.
+             *
+             * 0.3.4 started keeping an authenticated IMAP Store alive for up to
+             * two minutes between operations, which is where most of this
+             * release's sync speedup comes from. That connection cannot be used
+             * to fetch anything for a deleted account — `withInbox` demands a
+             * credential that no longer exists, the account is out of
+             * `InboxCache`, and the parked session has INBOX closed — but a
+             * connected `javax.mail.Service` holds the password inside its
+             * `URLName`, so without this line the keystore copy would be gone
+             * while a heap copy outlived it by up to two minutes.
+             *
+             * Same process, no code path to reach it, low severity. It is still
+             * a window this release opened, and closing it costs one call.
+             */
+            MailFetcher.closeIdleConnections();
         }
         call.resolve();
     }

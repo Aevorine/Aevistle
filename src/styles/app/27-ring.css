@@ -1,0 +1,293 @@
+/* ==========================================================================
+   The countdown ring — `CountdownRing.tsx`
+
+   Not one screen's file. A scheduled send is listed on the schedule screen, on
+   the calendar's day panel and in the outbox strip, and the ring has to be the
+   same object in all three or it is decoration rather than a reading. That is
+   why this file is 27 and not folded into 21-26; see the note at the foot of
+   app.css.
+
+   `.sendring`, not `.ring`: `--ring` is already the focus-outline token
+   (theme.css), and one word meaning two unrelated things in one stylesheet is
+   how a rule gets edited into the wrong feature.
+
+   ## Three states, and none of them is only a colour
+
+   About one man in twelve cannot separate the red from the green here, and a
+   dial whose entire message is its hue tells him nothing at all. So each state
+   differs from the others in *silhouette* first, and the colour is
+   confirmation:
+
+     waiting   thin arc (3), nothing in the middle
+     soon      heavier arc (4) with a bead riding its head
+     overdue   heaviest arc (5), closed all the way round, "!" in the middle
+     done      no arc at all, a tick in the middle
+
+   Photocopy that list to greyscale and the four are still four different
+   pictures: a thin line, a line with a dot on its end, a closed circle with a
+   mark inside, and a tick. The bead is the load-bearing one — it is the
+   difference between "the hand is somewhere" and "the hand is nearly there",
+   and it costs no hue at all.
+
+   And outside all of it: `data-far`, a dashed track, for a send further out
+   than the arc's 24-hour window can represent. An empty solid ring and a
+   stalled ring are the same picture; a dashed one is visibly "not started".
+
+   ## The colours are borrowed, never invented
+
+   `--accent`, `--warning`, `--danger`, `--success` — the four semantic tokens
+   theme.css already defines for all seven visual styles times both themes, and
+   the same four `ScheduleView` already sets `.job__meta` text in. They are
+   held to 4.5:1 as *text* by `npm run check:contrast`; a 2.6-3.5px stroke only
+   needs 3:1, so every one of the fourteen palettes clears this by a margin it
+   has already been measured for. Nothing here adds a colour for
+   `check:contrast` to have an opinion about.
+   ========================================================================== */
+
+.sendring {
+  /* Off the control ladder. `xs` is the list-row rung and the default; the
+     component names the rung and this file owns the number, so a ring never
+     arrives at a size the ladder does not have. */
+  --sendring-size: var(--ctl-xs);
+  --sendring-stroke: 3;
+  --sendring-hue: var(--accent);
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--sendring-size);
+  height: var(--sendring-size);
+}
+
+.sendring[data-size="sm"] {
+  --sendring-size: var(--ctl-sm);
+}
+.sendring[data-size="md"] {
+  --sendring-size: var(--ctl-md);
+}
+
+/* Sized off the token rather than off the parent (`100%`), because the parent
+   grows to 48px when the ring becomes a button and the *drawing* must not.
+   See the hit-area note below. */
+.sendring svg {
+  display: block;
+  width: var(--sendring-size);
+  height: var(--sendring-size);
+  transition: transform var(--dur-fast) var(--ease);
+}
+
+/* --------------------------------------------------------------------------
+   When the ring is a button
+
+   `CountdownRing` renders a `<button>` instead of a `<span>` once it is given
+   an action menu (a live job; never a paused or finished one). Everything above
+   still applies — this only changes the box it is drawn in.
+
+   ## 28px drawn, 48px tappable
+
+   The ring is `--ctl-xs`, 28px, and 28px is 20px under the tap floor. Growing
+   the drawing instead would be a 48px circle in a list row, which is bigger
+   than the row's own text.
+
+   So: a `--tap-min` floor for the *hit* box, and a negative margin that gives
+   the layout its 28px back. That is the `.markup__toggle` trick in
+   `20-short.css`, and the same reasoning — a full-size border box plus an equal
+   negative margin buys the hit area without spending the pixels.
+
+   The margin is derived, not the `--tap-pad` literal that rule uses, because
+   this control has three sizes and only one of them happens to want 10px:
+
+     xs  (28px)   (28 - 48) / 2 = -10px   footprint 48 - 20 = 28   ✓
+     sm  (36px)   (36 - 48) / 2 =  -6px   footprint 48 - 12 = 36   ✓
+     md  (48px)   (48 - 48) / 2 =   0     footprint         = 48   ✓
+
+   At `xs` that is exactly `--tap-pad`, so the two agree where it matters and
+   the other two rungs stay correct instead of overhanging by 4 and 10px.
+
+   ## What the 10px of overhang covers
+
+   Sideways, `.job`'s own `gap: var(--sp-4)` — 16px, so the overhang stays
+   inside it and never reaches `.job__pulse` (not interactive) or `.job__body`
+   (text). Vertically, `--row-pad-y`: 12px at the default density and 8px at
+   compact, where 2px of the hit box lands in `--row-gap` between rows. Nothing
+   interactive is under any of it.
+   -------------------------------------------------------------------------- */
+
+button.sendring {
+  min-width: var(--tap-min);
+  min-height: var(--tap-min);
+  margin: calc((var(--sendring-size) - var(--tap-min)) / 2);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  /* Android paints its own grey flash over a tapped control, on top of a
+     `:active` this file draws deliberately. */
+  -webkit-tap-highlight-color: transparent;
+  /* The long press is ours; the browser must not also start selecting text or
+     hand the gesture to a native callout. */
+  touch-action: manipulation;
+  user-select: none;
+}
+
+button.sendring:hover .sendring__track {
+  stroke: var(--text-3);
+}
+
+button.sendring:active svg {
+  transform: scale(0.92);
+}
+
+/* The global `:focus-visible` in `01-base.css` would draw a square ring around
+   the 48px hit box — 52px of outline around a 28px picture, detached from the
+   thing it is meant to be pointing at, and wide enough to sit under the next
+   row. Moved onto the drawing instead, where it is a circle around a circle. */
+button.sendring:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+button.sendring:focus-visible svg {
+  border-radius: var(--r-full);
+  outline: var(--ring);
+  outline-offset: var(--ring-offset);
+}
+
+/* --------------------------------------------------------------------------
+   The two circles
+   -------------------------------------------------------------------------- */
+
+.sendring__track {
+  fill: none;
+  /* `--border-strong`, not `--border`: in the light theme `--border` is
+     #e6e9ef on a #fafbfc card, which is a 1.06:1 hairline — legible as the
+     edge of a box, invisible as a ring. Same choice `.pairqr__ringTrack`
+     already made. */
+  stroke: var(--border-strong);
+  stroke-width: 2;
+}
+
+/* Further out than the window the arc can draw. The dashes say "the wait has
+   not started counting yet" rather than leaving an empty ring to be read as a
+   stopped one. */
+.sendring[data-far] .sendring__track {
+  stroke-dasharray: 2 3;
+}
+
+.sendring__arc {
+  fill: none;
+  stroke: var(--sendring-hue);
+  stroke-width: var(--sendring-stroke);
+  stroke-linecap: round;
+  /* The arc is quantised to a whole degree so that a tick does not become a
+     React render (see CountdownRing.tsx). One degree is 0.2px here, and in the
+     final minute the ticker steps 6 degrees a second — visible as stepping
+     without this. Linear, not eased: an eased countdown accelerates and
+     decelerates against a clock that does neither.
+
+     theme.css's `prefers-reduced-motion` block cuts this to 0.01ms, which
+     leaves the steps showing honestly. That is the right outcome and not a
+     degradation — the value is still exact at every instant, it simply stops
+     being interpolated. */
+  transition: stroke-dashoffset var(--dur) linear;
+}
+
+/* --------------------------------------------------------------------------
+   State
+   -------------------------------------------------------------------------- */
+
+.sendring[data-state="soon"] {
+  --sendring-hue: var(--warning);
+  --sendring-stroke: 4;
+}
+.sendring[data-state="overdue"] {
+  --sendring-hue: var(--danger);
+  --sendring-stroke: 5;
+}
+.sendring[data-state="done"] {
+  --sendring-hue: var(--success);
+}
+
+/* A sent job has no arc left, so the track is the only ring on screen and it
+   should not still be reading as "unfilled". Tinted rather than swapped to
+   `--success` outright: a solid success ring around a success tick is two
+   voices saying one thing, and at forty rows it shouts. */
+.sendring[data-state="done"] .sendring__track {
+  stroke: color-mix(in srgb, var(--success) 34%, transparent);
+}
+
+/* The bead that rides the head of the arc under ten minutes.
+   `r` is set as an attribute in the component, not here: SVG geometry
+   properties only became settable from CSS in Chromium 64 / Safari 16, and the
+   Android WebView floor this app ships against is older than that. */
+.sendring__bead {
+  fill: var(--warning);
+  stroke: none;
+}
+
+/* --------------------------------------------------------------------------
+   The glyph in the hole
+   -------------------------------------------------------------------------- */
+
+.sendring__glyph {
+  fill: none;
+  stroke: var(--sendring-hue);
+  /* Thinner than the arc on purpose. `icons.tsx` draws its whole set at 1.75
+     on a 24 grid; 2.2 on this 32 grid is the same optical weight, so the mark
+     inside the ring belongs to the same set as every other glyph in the app
+     rather than looking like a second, bolder icon language. */
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* --------------------------------------------------------------------------
+   Closing
+
+   ~200ms, spent as `--dur` (180ms). The ask was "about 200"; the motion ladder
+   has 110 / 180 / 260 and nothing at 200, and minting a fourth rung for one
+   animation is how a ladder turns back into a list of numbers. 180 is the
+   nearest rung and the difference is twenty milliseconds.
+
+   Only ever applied by `data-collapsing`, which the component sets on the
+   *transition* into `done` and only while the row is on screen — so a screenful
+   of already-finished jobs draws forty ticks and plays no animations at all.
+   -------------------------------------------------------------------------- */
+
+@keyframes sendring-close {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.45);
+  }
+}
+
+@keyframes sendring-tick {
+  from {
+    opacity: 0;
+    transform: scale(0.55);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* `transform-box: fill-box` first, both times. Without it a CSS transform on
+   an SVG child takes its origin from the viewBox corner rather than from the
+   shape, and "scale down" becomes "fly to the top-left". */
+.sendring[data-collapsing] .sendring__arc {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: sendring-close var(--dur) var(--ease) forwards;
+}
+
+.sendring[data-collapsing] .sendring__glyph--tick {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: sendring-tick var(--dur) var(--ease-out) backwards;
+}

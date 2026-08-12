@@ -6,8 +6,22 @@ import { IconButton } from './ui'
 import { RecipientPicker } from './RecipientPicker'
 import { useI18n } from '../i18n'
 import { dedupeAddresses, isValidAddress, parseAddressList, extensionOf, isRiskyAttachment } from '../core/mail/validate'
-import { buildPool } from '../core/mail/recipients'
+import { buildPool, matchesQuery } from '../core/mail/recipients'
 import type { Attachment, Contact, RecentRecipient } from '../core/types'
+
+/**
+ * How many characters before the inline dropdown appears, and how many people
+ * it offers.
+ *
+ * Two, because one character matches most of a contact book and offering that
+ * is offering a scrollbar. Three rows, because the panel hangs over the subject
+ * row and the head of the message box on a 360px screen: three `--ctl-md` rows
+ * plus the border is 146px, which clears the recipient row it belongs to and
+ * still leaves the message visible underneath. The full list is one tap away on
+ * the button that has always opened it.
+ */
+const SUGGEST_MIN_CHARS = 2
+const SUGGEST_ROWS = 3
 
 // ---------------------------------------------------------------------------
 // Recipient tag field
@@ -44,6 +58,22 @@ export function TagField({
    * chip is 30px and ten of them are ~190px in a 700px column.
    */
   maxVisible,
+  /**
+   * Complete inline after two characters instead of throwing the picker card up
+   * on focus.
+   *
+   * Opt-in rather than the default, and the reason is the card's own breakpoint:
+   * below 840px `RecipientPicker` becomes a bottom sheet, so on a phone the old
+   * behaviour covered the screen the instant "To" was tapped — before a
+   * character had been typed — and the soft keyboard then covered *that*. Above
+   * 840px the card is an anchored dropdown beside the field and is exactly
+   * right, which is why this is a prop and not a rewrite: the compose screen
+   * passes it on the narrow branch, and every other caller keeps what it had.
+   *
+   * The card is not removed on this path. The button inside the field still
+   * opens it, and it is still the only way to tick a whole group.
+   */
+  inlineSuggest,
 }: {
   values: string[]
   onChange: (v: string[]) => void
@@ -53,9 +83,16 @@ export function TagField({
   pickerLabel?: string
   id?: string
   maxVisible?: number
+  inlineSuggest?: boolean
 }) {
   const [text, setText] = useState('')
   const [pickerOpen, setPickerOpen] = useState(false)
+  /** Which row Enter would take. -1 is "none yet", not "the first one". */
+  const [active, setActive] = useState(-1)
+  /** Escape closes the list without clearing what was typed; the next keystroke
+      brings it back. Per-query, so it can never leave the field permanently
+      without completion. */
+  const [dismissed, setDismissed] = useState(false)
   /* Reveal is per-visit and deliberately not persisted: the cap exists to
      protect the message box, and a field that stayed expanded from last time
      would hand that protection away before the user has typed anything. */
@@ -73,6 +110,41 @@ export function TagField({
   const pool = useMemo(() => buildPool(suggestions, recents), [suggestions, recents])
 
   const showPicker = pickerLabel !== undefined && pickerOpen
+
+  /**
+   * The people worth offering for what has been typed so far.
+   *
+   * `pool` is already ranked — pinned, then frequent, then merely known — so
+   * this only filters and cuts, and the top of the list is the person you write
+   * to most among those that match. Anyone already on the field is dropped:
+   * a completion that re-adds an address the chip beside it already holds is a
+   * row that does nothing when you press Enter on it.
+   */
+  const suggested = useMemo(() => {
+    if (!inlineSuggest || dismissed) return []
+    const query = text.trim()
+    if (query.length < SUGGEST_MIN_CHARS) return []
+    const taken = new Set(values.map((v) => v.trim().toLowerCase()))
+    return pool
+      .filter((p) => !taken.has(p.key) && matchesQuery(p, query))
+      .slice(0, SUGGEST_ROWS)
+  }, [inlineSuggest, dismissed, text, pool, values])
+
+  /*
+   * A highlight held over from the previous query points at whoever now happens
+   * to be in that position, which is how Enter adds the wrong person. Reset
+   * whenever the list changes, and let Enter with nothing highlighted mean "the
+   * top one" — see the key handler.
+   */
+  const suggestOpen = suggested.length > 0
+  const takeSuggestion = (index: number) => {
+    const pick = suggested[index]
+    if (!pick) return
+    onChange(dedupeAddresses([...values, pick.address]))
+    setText('')
+    setActive(-1)
+    inputRef.current?.focus()
+  }
 
   return (
     <div className="tagfield-wrap" ref={wrapRef}>
@@ -132,12 +204,53 @@ export function TagField({
           autoComplete="off"
           spellCheck={false}
           role="combobox"
-          aria-expanded={showPicker}
-          onChange={(e) => setText(e.target.value)}
+          aria-expanded={showPicker || suggestOpen}
+          onChange={(e) => {
+            setText(e.target.value)
+            // The list about to be rendered is a different list. A highlight
+            // held over from the previous query points at whoever now happens to
+            // sit in that position, which is exactly how Enter adds the wrong
+            // person — the same reset `RecipientPicker` does on its own query.
+            setActive(-1)
+            setDismissed(false)
+          }}
           onKeyDown={(e) => {
             // The IME owns Enter while a candidate window is open; committing
             // the raw pinyin there would put "weichen" in as an address.
             if (e.nativeEvent.isComposing) return
+            /*
+             * The inline list gets first refusal on the keys it owns.
+             *
+             * Enter with the list up takes the highlighted row, or the top one
+             * when nothing is highlighted — "type two letters and press Enter"
+             * has to work without an arrow key, because on a phone there is no
+             * arrow key. Enter with the list *down* falls through to the commit
+             * below, which is what makes an address nobody knows still typeable.
+             */
+            if (suggestOpen && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+              e.preventDefault()
+              setActive((at) => {
+                const step = e.key === 'ArrowDown' ? 1 : -1
+                const next = (at < 0 ? (step > 0 ? 0 : suggested.length - 1) : at + step)
+                return (next + suggested.length) % suggested.length
+              })
+              return
+            }
+            if (suggestOpen && e.key === 'Enter') {
+              e.preventDefault()
+              takeSuggestion(active < 0 ? 0 : active)
+              return
+            }
+            if (suggestOpen && e.key === 'Escape') {
+              // Close the list, keep the text. Escape here means "I meant what I
+              // typed" — an address that happens to be a prefix of a contact's
+              // is a real case, and without this there is no way to reach the
+              // commit path while a match is on screen.
+              e.preventDefault()
+              setActive(-1)
+              setDismissed(true)
+              return
+            }
             if (e.key === 'ArrowDown' && pickerLabel !== undefined && !pickerOpen) {
               e.preventDefault()
               setPickerOpen(true)
@@ -162,14 +275,27 @@ export function TagField({
             }
           }}
           onFocus={() => {
-            if (pickerLabel !== undefined) setPickerOpen(true)
+            // Not on the `inlineSuggest` path: below 840px the card is a bottom
+            // sheet, so opening it here covered the screen the instant "To" was
+            // tapped, before a character had been typed, and the soft keyboard
+            // then covered that. The dropdown below is what answers instead, and
+            // the button in the field still opens the card on demand.
+            if (pickerLabel !== undefined && !inlineSuggest) setPickerOpen(true)
           }}
           onBlur={() => {
-            // Only commit leftover text when the card is not up. While it is,
-            // the same text is the card's filter — committing it would turn
+            // Only commit leftover text when neither list is up. While one is,
+            // the same text is that list's filter — committing it would turn
             // "fin" (meaning: show me the finance group) into an invalid
-            // recipient chip the moment focus moved.
-            if (text.trim() && !showPicker) commit(text)
+            // recipient chip the moment focus moved. An address is the one thing
+            // that survives either way, which is the rule `RecipientPicker`'s
+            // own `onClose` already follows.
+            if (!text.trim() || showPicker) return
+            if (suggestOpen && !text.includes('@')) {
+              setText('')
+              setActive(-1)
+              return
+            }
+            commit(text)
           }}
         />
         {pickerLabel !== undefined ? (
@@ -187,6 +313,37 @@ export function TagField({
           </button>
         ) : null}
       </div>
+
+      {/*
+        The two-character dropdown. Hangs under the field, never over it — see
+        `.tagsuggest` for the geometry that keeps it clear of the row on a 360px
+        screen.
+
+        `onPointerDown` preventing default is what makes tapping a row work at
+        all: without it the field blurs first, `onBlur` clears or commits the
+        text, the list unmounts, and the `click` lands on nothing. The row still
+        does its work on `click`, so the keyboard path is unchanged.
+      */}
+      {suggestOpen ? (
+        <div className="tagsuggest" role="listbox" aria-label={pickerLabel}>
+          {suggested.map((pick, index) => (
+            <button
+              key={pick.key}
+              type="button"
+              role="option"
+              aria-selected={index === active}
+              data-active={index === active || undefined}
+              className="tagsuggest__item"
+              onPointerDown={(e) => e.preventDefault()}
+              onMouseEnter={() => setActive(index)}
+              onClick={() => takeSuggestion(index)}
+            >
+              {pick.name ? <span className="tagsuggest__name">{pick.name}</span> : null}
+              <span className="tagsuggest__address">{pick.address}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
 
       {pickerLabel !== undefined ? (
         <RecipientPicker

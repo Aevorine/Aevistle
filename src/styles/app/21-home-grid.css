@@ -46,19 +46,125 @@
    ========================================================================== */
 
 /* --- the hero -------------------------------------------------------------
-   Full-bleed: `.view__inner`'s own gutter is dropped for this screen so the
-   colour reaches both edges, and every child below puts its own back. */
+
+   Full-bleed, and this rule is the one that makes it so.
+
+   Round 7 aimed at `.view__inner` and missed. `.view__inner` has no padding —
+   it is `max-width`, `margin-inline: auto` and a flex column (02-shell.css) —
+   so zeroing its `padding-left/right/top` zeroed three values that were
+   already zero, and the hero went on being inset. The gutter lives one level
+   up, on `.view`: `padding: 0 var(--sp-5) var(--sp-8)` in 02-shell.css,
+   overridden to `var(--page-pad-x)` in 14-growth.css and again to
+   `0 var(--sp-4) var(--sp-6)` inside the phone block of 10-narrow-shell.css.
+   Measured in a 360px window that computes to `0px 16px 24px`, which is why
+   the band was 328px wide with 16px of page showing down both sides and read
+   as a floating card rather than a header — and why the grid card's -24px pull
+   read as two cards overlapping instead of a card lifted into a band.
+
+   `.view--home-grid` sits on `.view` itself, so this cancels the inline half
+   of that padding and leaves the bottom alone — those 24px are the scroll
+   clearance every screen gets under the tab bar, not a gutter.
+
+   The arithmetic, at 360px:
+     .view            360 wide, padding-inline 0        content box 360
+     .view__inner     max-width 100%                    360
+     .homehero        stretches                         360  ← full bleed
+     .homegrid        margin-inline var(--sp-4) = 16    360 - 16 - 16 = 328
+     .homemod         margin-inline var(--sp-4) = 16    328
+   328 is the width a card has on every other screen of the app (a `.view` of
+   360 less its own 16px gutter), which is the point: the hero is the only
+   thing here that is allowed to touch the glass. `--sp-4`, not the `--sp-3`
+   these two carried before — 12px was compensating for the 16px they were
+   already sitting inside, and left alone it would now make every card on this
+   screen 8px wider than every card on the other four.
+
+   `.view__inner`'s `gap` goes too, for the same reason the padding did: it was
+   never accounted for. A `--sp-4` column gap sat between the hero and the grid
+   and cancelled two thirds of `.homegrid`'s -24px pull, so the documented
+   24px overlap was 8px on the glass. Each block below now states its own
+   offset in its own margin and nothing is added behind it. */
+.view--home-grid {
+  padding-inline: 0;
+}
 .view--home-grid .view__inner {
-  padding-left: 0;
-  padding-right: 0;
-  padding-top: 0;
+  gap: 0;
 }
 
+/*
+ * The band's colour, and the ink that is derived from it, as two locals.
+ *
+ * Everything on the hero that is not flat `--accent-text` is mixed *from the
+ * ground it sits on*, so the time-of-day tint below has exactly one definition
+ * and the two dimmed texts follow it without restating it. Set `--hero-bg` and
+ * the sub-line and the stat captions move with it.
+ */
 .homehero {
-  background: var(--accent);
+  --hero-bg: var(--accent);
+  /*
+   * 88%, and it used to be 78% on the sub-line and 76% on the stat captions.
+   *
+   * Two hand-tuned numbers became one measured one. The tint moves the ground
+   * under this ink, and at 78/76 the dimmest state came out *below* what the
+   * untinted hero measures today — which is the one thing a new feature is not
+   * allowed to do. Computed over all 189 accent x theme x style combinations
+   * theme.css can produce: at 88% the sub-line reads 3.03:1 at its worst
+   * (light theme, white on teal, morning) against 2.87:1 for the 78% version
+   * today, and the stat caption 2.56:1 against 2.33:1. Every one of the three
+   * states is at or above the value the single untinted state has now.
+   */
+  --hero-ink: color-mix(in srgb, var(--accent-text) 88%, var(--hero-bg));
+  background: var(--hero-bg);
   color: var(--accent-text);
   /* The bottom pad is what the grid card pulls up into — see `.homegrid`. */
   padding: var(--sp-4) var(--sp-4) var(--sp-8);
+}
+
+/* --- the band follows the clock -------------------------------------------
+
+   Morning lifted, day exactly as it was, night dimmed. `HomeView` stamps
+   `data-tod` from the same `partOfDay()` that picks the greeting, so the words
+   and the colour cannot end up describing different times of day.
+
+   Both mixes are achromatic at the far end, which is the whole reason this is
+   safe: white and black have no hue to contribute, so all seven accents and
+   all seven visual styles stay exactly themselves and only their lightness
+   moves. A warm literal mixed in would have been an eighth colour outside
+   `check-contrast`'s reach, in the one file whose header argues there is no
+   such thing. It also means "warmer" here is a lift rather than a hue shift —
+   a blue accent cannot be made warm without becoming a different blue.
+
+   ## Keeping `--accent-text` legible
+
+   `check:contrast` reads theme.css and skips `color-mix()`, so it cannot see
+   these; the ratios were computed the same way it computes its own — sRGB
+   lerp, WCAG 2.1 — over every `--accent`/`--accent-text` pair the file can
+   produce (189 of them: 7 accents x light/dark x 7 styles, plus the
+   high-contrast palette and the styles that pin their own accent).
+
+   Worst case in each state, with the pair that produces it:
+
+     day      3.74:1  white on teal #0d9488      5.70:1  #06201f on #818cf8
+     morning  3.46:1  same pair, lifted 6%       6.15:1  same pair, lifted
+     night    4.51:1  same pair, dimmed 10%      4.69:1  same pair, dimmed
+
+   The two columns are the two directions the cost falls in: a light theme
+   paints white on a dark accent, so lifting it costs and dimming it pays; a
+   dark theme paints near-black on a light accent, so it is the other way
+   round. That asymmetry is why the two percentages differ — the 6% lift lands
+   on the already-tightest pair in the app and is kept small, while the 10% dim
+   lands on the pair with 5.70:1 of room and is where dimming actually matters,
+   because a phone at night is a phone in dark mode.
+
+   Every state clears 3:1, which is the line the type on this band sits on:
+   the greeting is `--text-lg` bold (18.67px, WCAG "large") and the figures are
+   `--text-value` bold (20px). Nothing here goes below what the untinted hero
+   already measures at 3.74:1 by more than the 0.28 the morning lift costs on
+   that single pair. */
+.homehero[data-tod='morning'] {
+  --hero-bg: color-mix(in srgb, var(--accent) 94%, white);
+}
+.homehero[data-tod='night'] {
+  --hero-bg: color-mix(in srgb, var(--accent) 90%, black);
 }
 
 /* The heading row: the greeting, and the one trailing action — the same
@@ -111,10 +217,11 @@
   font-size: var(--text-base);
   line-height: var(--leading-normal);
   margin: var(--sp-1) 0 0;
-  /* The one place a colour is mixed rather than named: there is no
-     "--accent-text-dim" token and inventing one would mean restating it in
-     all 103 theme blocks. Mixing toward the accent keeps it on-hue. */
-  color: color-mix(in srgb, var(--accent-text) 78%, var(--accent));
+  /* Mixed rather than named: there is no "--accent-text-dim" token and
+     inventing one would mean restating it in all 103 theme blocks. `--hero-ink`
+     mixes toward `--hero-bg` rather than toward `--accent`, so it stays on-hue
+     *and* keeps its distance from the ground when the tint moves it. */
+  color: var(--hero-ink);
 }
 
 /* --- the three figures ---------------------------------------------------- */
@@ -171,7 +278,11 @@
 .homestat__k {
   font-size: var(--text-sm);
   line-height: var(--leading-tight);
-  color: color-mix(in srgb, var(--accent-text) 76%, var(--accent));
+  /* The same dimmed ink as the sub-line, not a second percentage a hair away
+     from it. This one is read against `.homestats`' 13% overlay rather than
+     against the bare band, which is why it measures lower — 2.56:1 at the
+     worst, against 2.33:1 for the 76% it used to carry. */
+  color: var(--hero-ink);
 }
 
 /* --- the eight-cell grid --------------------------------------------------
@@ -182,7 +293,10 @@
   position: relative;
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  margin: calc(var(--sp-6) * -1) var(--sp-3) 0;
+  /* `--sp-4`, the same gutter every other screen's cards get — see the note on
+     `.view--home-grid` for why this used to be `--sp-3`. The -24px is now the
+     whole of the offset, because `.view__inner`'s gap no longer adds 16 back. */
+  margin: calc(var(--sp-6) * -1) var(--sp-4) 0;
   padding: var(--sp-3) var(--sp-1);
   background: var(--surface-1);
   border: 1px solid var(--border-subtle);
@@ -264,7 +378,7 @@
    One shape, used for every block below the grid. A new feature that wants to
    surface something on Home gets one of these; it does not get a layout. */
 .homemod {
-  margin: var(--sp-4) var(--sp-3) 0;
+  margin: var(--sp-4) var(--sp-4) 0;
   background: var(--surface-1);
   border: 1px solid var(--border-subtle);
   border-radius: var(--r-lg);
@@ -418,9 +532,26 @@
      * the grid came out 602px and the module card 201px, both centred on their
      * own content rather than on the column. `width: 100%` gives the auto
      * margins nothing left to absorb, so `max-width` decides the width.
+     *
+     * The `min()` is what keeps these lined up with the hero now that the page
+     * gutter is gone. `.view__inner` is the full window here, so a bare
+     * `max-width: 704px` would put the cards flush against the glass at every
+     * width between 600 and 704 — no gutter at all — while the hero's own
+     * `max()` held its contents 16px in. With it, the two expressions agree at
+     * every width in the range:
+     *
+     *   768px  hero pad max(16, (768-704)/2 = 32) = 32 -> column 704 at x=32
+     *          card  min(704, 768-32 = 736)      = 704 -> auto margin  = 32
+     *   736px  both fall to 16, which is where the two branches cross
+     *   700px  hero pad max(16, -2)              = 16 -> column 668 at x=16
+     *          card  min(704, 668)               = 668 -> auto margin  = 16
+     *   600px  hero pad 16, column 568 at x=16; card 568 at x=16
+     *
+     * Above 736 both read (100% - 704) / 2; below it both read `--sp-4`. There
+     * is no width where a card edge and the hero's first character disagree.
      */
     width: 100%;
-    max-width: 704px;
+    max-width: min(704px, 100% - var(--sp-4) * 2);
     margin-inline: auto;
   }
   /* Restated: `margin-inline` above leaves the top margin alone, but the base
@@ -440,4 +571,77 @@
   display: flex;
   flex-direction: column;
   gap: var(--sp-1);
+}
+
+/* --- arranging the eight --------------------------------------------------
+
+   A list, not the grid it edits. Eight 82px cells is the right shape for
+   *choosing* between eight destinations at a glance and the wrong one for
+   saying "this slot is now the calendar": a picker has to hold a control wide
+   enough to read eleven names in six languages, and four columns of 82px hold
+   two Chinese characters. So the editor is eight rows, in the order the eight
+   cells are drawn, and the reader maps row 1 to the top-left cell the same way
+   they map any numbered list to a grid.
+
+   The grip and the drop line come from `.reorder-handle` / `.reorder-row` in
+   19-runecircuit.css — the same two classes the account list and the inbox tab
+   strip use, so this screen inherits the touch, mouse and Alt+Arrow gestures
+   and the RTL handling without restating any of it. */
+.homearrange {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.homearrange__row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  /* `--ctl-lg`, the same floor `.homemod__row` and every other list row in the
+     app stands at. The `.select` inside is `--ctl-md`, so the row is taller
+     than its tallest child rather than being sized by it. */
+  min-height: var(--ctl-lg);
+  padding: var(--sp-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-md);
+  background: var(--surface-1);
+}
+
+/*
+ * Which cell this row is. Not decoration: the editor is a column and the thing
+ * it edits is a 4x2 grid, so without the number the only way to know that row
+ * five is the first cell of the second line is to count.
+ */
+.homearrange__n {
+  flex: 0 0 auto;
+  min-width: var(--ctl-xs);
+  text-align: center;
+  font-size: var(--text-sm);
+  color: var(--text-3);
+}
+
+/*
+ * `min-width: 0` is what stops the select from setting the row's width. A flex
+ * item's automatic minimum size is its content's, and a `<select>` reports the
+ * width of its longest option — 更早的工作日历订阅 in Chinese, longer still in
+ * Russian — so without this the row could not shrink to 328px and the whole
+ * dialog grew a horizontal scrollbar on the one screen size it exists for.
+ */
+.homearrange__pick {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* The eighth row. It is drawn because the eighth cell exists and is worth
+   seeing in the same list as the seven above it, and it is inert because 更多
+   is the door to whatever the seven left out — see `HOME_GRID_SLOTS`. */
+.homearrange__row--fixed {
+  background: var(--surface-inset);
+  color: var(--text-3);
+}
+
+.homearrange__fixedlabel {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--text-base);
 }

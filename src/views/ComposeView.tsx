@@ -74,6 +74,7 @@ import {
   IconSearch,
   IconSend,
   IconSliders,
+  IconX,
 } from '../components/icons'
 import { useNarrow, useShort } from '../components/useNarrow'
 import type { SendCondition } from '../core/schedule/conditions'
@@ -134,6 +135,20 @@ function errorTitleKey(result: SendResult): TranslationKey {
 }
 
 const BODY_HEIGHT_KEY = 'aevistle.compose.bodyHeight'
+
+/**
+ * How long after the last keystroke the "saved" stamp appears.
+ *
+ * `AppState`'s persistence effect waits `DRAFT_ONLY_DELAY` (1,500 ms) before it
+ * writes a draft-only change — deliberately, because nothing else reads the
+ * draft and the next keystroke is 200 ms away. This is that number plus a
+ * hundred milliseconds, so the stamp appears just *after* the write is issued
+ * rather than just before it. It is not imported because the constant is a
+ * local inside that effect; if it moves, this comment is the trail.
+ */
+const SAVED_STAMP_DELAY = 1_600
+/** And how long it stays. See `.composesaved` for why it is not permanent. */
+const SAVED_STAMP_LINGER = 4_000
 
 /**
  * "Is this screen too narrow for the desktop compose form?"
@@ -322,6 +337,34 @@ export function ComposeView({
    * notice, and the sentences are one tap under it.
    */
   const [warnOpen, setWarnOpen] = useState(false)
+  /**
+   * Whether the message box has the caret.
+   *
+   * Only the action bar reads it, and only on a narrow screen: while someone is
+   * typing, the bar folds to a 34px presentation strip and hands the 19px it was
+   * spending on controls to the box being typed in. See `.composefold` for why
+   * the folded strip carries no control at all rather than four short ones — 34
+   * is under the 44px floor, and a row of half-height buttons above a keyboard
+   * is the worst of both.
+   *
+   * Not part of the 85% measurement: `scripts/layout-probe.mjs` measures first
+   * paint, where nothing has focus and the bar is its full 53px. Folding can
+   * only ever make the box larger than the number the gate sees.
+   */
+  const [bodyFocus, setBodyFocus] = useState(false)
+  /**
+   * When the draft was last written to disk, or `null` for "nothing to say".
+   *
+   * Derived rather than reported: `AppState` persists on a debounce and exposes
+   * only `saveFailing`, so there is no timestamp to read. What this watches is
+   * the same edge that triggers the write — the draft settling — which is why
+   * the delay is `AppState`'s own and not a guess.
+   *
+   * It clears itself. A stamp that stayed would be a permanent label in the
+   * corner of the message box, which is exactly the thing this round deleted
+   * from that corner (see the `.composecount` note in `22-compose.css`).
+   */
+  const [savedAt, setSavedAt] = useState<number | null>(null)
   const [retry, setRetry] = useState<RetryPolicy>(() => editingJob?.retry ?? DEFAULT_RETRY)
   const [burst, setBurst] = useState<BurstPolicy>(() => editingJob?.burst ?? DEFAULT_BURST)
   /** Undefined means "whoever has it enabled" — see `ScheduledJob.executorDeviceId`. */
@@ -559,6 +602,48 @@ export function ComposeView({
     draft.attachments.length > 0
   const rawBytes = totalAttachmentBytes(draft.attachments)
 
+  /*
+   * "已保存 · 12:03", stamped when the typing stops and gone a few seconds later.
+   *
+   * `draft` is a new object on every keystroke, so this effect re-runs on every
+   * keystroke and its cleanup cancels the pending stamp — which is what makes
+   * the timer measure *silence* rather than elapsed time. An empty draft has
+   * nothing to have saved, so `started` also clears whatever a previous draft
+   * left on screen.
+   */
+  useEffect(() => {
+    if (!started) {
+      setSavedAt(null)
+      return
+    }
+    const stamp = window.setTimeout(() => setSavedAt(Date.now()), SAVED_STAMP_DELAY)
+    const clear = window.setTimeout(
+      () => setSavedAt(null),
+      SAVED_STAMP_DELAY + SAVED_STAMP_LINGER,
+    )
+    return () => {
+      window.clearTimeout(stamp)
+      window.clearTimeout(clear)
+    }
+  }, [draft, started])
+
+  /**
+   * The account, short enough to sit on a 44px row beside the recipients.
+   *
+   * The local part only — `work@example.com` becomes `work`. The full address
+   * is on `title` and inside the block the button opens, so nothing is lost;
+   * what is gained is that "which account is this leaving from?" is answerable
+   * without a tap on a phone for the first time. The domain is the half that
+   * repeats across every account someone owns, so it is the half worth cutting
+   * when there is room for one of the two.
+   */
+  const accountShort = useMemo(() => {
+    const address = account?.fromAddress ?? ''
+    if (!address) return ''
+    const at = address.indexOf('@')
+    return at > 0 ? address.slice(0, at) : address
+  }, [account])
+
   /**
    * An empty draft goes back to whatever the initial state for this width is.
    *
@@ -674,7 +759,10 @@ export function ComposeView({
   useEffect(() => {
     const onAction = (event: Event) => {
       const action = (event as CustomEvent<string>).detail
-      if (action === 'send' && !blocked && !sending) void doSend()
+      /* Through the same gate the button is behind. A shortcut that skipped the
+         pre-send card would be a shortcut that skips a check the user asked
+         for — the same reasoning as the `blocked`/`sending` guards beside it. */
+      if (action === 'send' && !blocked && !sending) requestSend()
       if (action === 'schedule' && !blocked && !sending) openSchedule()
       if (action === 'preview' && started) setPreflightOpen(true)
       if (action === 'history') setHistoryOpen(true)
@@ -891,6 +979,34 @@ export function ComposeView({
     } finally {
       setSending(false)
     }
+  }
+
+  /**
+   * The one card between the button and the send, when the setting asks for it.
+   *
+   * Deliberately not a new dialog. `PreflightDialog` already answers exactly the
+   * four questions a confirmation has to — who it leaves from and goes to, how
+   * many messages and recipients that is, what it weighs on the wire, and (for a
+   * scheduled draft) when and how often it fires — and it was already built
+   * here, behind the 预演 button in the top bar, where hardly anyone found it.
+   * Building a second card would have meant two screens describing one send,
+   * drifting apart the first time the merge rules changed.
+   *
+   * `settings.composePreflight` defaults to true and its doc in `core/types.ts`
+   * spells out who turns it off: people sending the same message to the same
+   * person all day, for whom the extra tap costs more than a mis-send would.
+   * `!== false` rather than `=== true`, so an install whose settings predate the
+   * field gets the card rather than silently keeping the old straight-to-send.
+   *
+   * Gated on `started` as well: there is nothing to preview about a blank draft,
+   * and Send is disabled there anyway.
+   */
+  const requestSend = () => {
+    if (state.settings.composePreflight !== false && started) {
+      setPreflightOpen(true)
+      return
+    }
+    void doSend()
   }
 
   const openSchedule = () => {
@@ -1494,13 +1610,57 @@ export function ComposeView({
                 a lower floor. (Lowering the floor was tried once, on this exact
                 screen, and reverted the same day.)
 
-                Account, Cc and Bcc are behind the chevron: each is answered
-                once per draft or never, which is the test for what may fold.
+                Round 8. 账号 joins them, and it is on this row rather than on a
+                third one of its own. The arithmetic is in `22-compose.css` under
+                "Why 账号 is on this row and not on a row of its own"; the short
+                version is that three 44px rows are 134px against a 98px budget,
+                which puts the message box at 79.5%. The account button *is* the
+                chevron — same tap target, same disclosure, same 44px — with the
+                account's own name printed on it instead of nothing. Cc and Bcc
+                stay behind it: each is answered once per draft or never, which
+                is the test for what may fold.
               */}
               {narrow ? (
                 <>
                   <div className="composetop2">
                     <div className="composetop2__row">
+                      {/*
+                        账号, and the way into 账号/抄送/密送, as one control.
+
+                        It replaces an unlabelled chevron. That chevron opened
+                        exactly this block and cost exactly this much room, so
+                        printing the account on it is the one place on this
+                        screen where a fact can be added for nothing — and it is
+                        the fact a phone could not previously see at all: the
+                        `<select>` naming the sending account lives inside the
+                        folded block, so a draft leaving from the wrong account
+                        looked identical to one leaving from the right one.
+
+                        Local part only (see `accountShort`); the full address is
+                        on `title` and on the accessible name.
+                      */}
+                      <button
+                        type="button"
+                        className="composetop2__from"
+                        onClick={() => setHeaderOpen((v) => !v)}
+                        aria-expanded={headerOpen}
+                        aria-controls={headId}
+                        aria-label={
+                          account
+                            ? `${t('compose.account')} · ${account.fromAddress}`
+                            : t('compose.noAccount')
+                        }
+                        title={
+                          account
+                            ? `${t('compose.account')} · ${account.fromAddress}`
+                            : t('compose.noAccount')
+                        }
+                      >
+                        <span className="composetop2__fromtext">
+                          {account ? accountShort : t('compose.fromNone')}
+                        </span>
+                        <IconChevronDown size={14} className="composetop2__chev" />
+                      </button>
                       {editingJob ? (
                         <span className="composesummary__edit">{t('compose.editingBadge')}</span>
                       ) : null}
@@ -1521,18 +1681,10 @@ export function ComposeView({
                            it. Two chips and the pill fit together, and the
                            pill is the part that says there are more. */
                         maxVisible={2}
+                        /* The 2-character dropdown, in place of the full picker
+                           card opening on focus. See `TagField`. */
+                        inlineSuggest
                       />
-                      <button
-                        type="button"
-                        className="composetop2__more"
-                        onClick={() => setHeaderOpen((v) => !v)}
-                        aria-expanded={headerOpen}
-                        aria-controls={headId}
-                        aria-label={t('compose.editHeader')}
-                        title={t('compose.editHeader')}
-                      >
-                        <IconChevronDown size={16} />
-                      </button>
                     </div>
                     <div className="composetop2__row">
                       <label className="composetop2__lb" htmlFor={subjectId}>
@@ -1574,6 +1726,7 @@ export function ComposeView({
                           recents={state.recentRecipients}
                           pickerLabel={t('compose.cc')}
                           maxVisible={3}
+                          inlineSuggest
                         />
                       </Field>
                       <Field label={t('compose.bcc')}>
@@ -1584,6 +1737,7 @@ export function ComposeView({
                           recents={state.recentRecipients}
                           pickerLabel={t('compose.bcc')}
                           maxVisible={3}
+                          inlineSuggest
                         />
                       </Field>
                     </div>
@@ -1804,29 +1958,117 @@ export function ComposeView({
                      message nothing it cannot spare. */
                   onFocus={() => {
                     if (narrow) setHeaderOpen(false)
+                    setBodyFocus(true)
+                    /* The send-time popover hangs off a button that is about to
+                       leave the row. Left open, it would come back on blur still
+                       showing — a menu reopening itself for no reason anybody
+                       could connect to what they just did. */
+                    setPickOpen(false)
                   }}
+                  onBlur={() => setBodyFocus(false)}
                 />
                 {/*
-                  The count, in the corner of the box it counts.
+                  "已保存 · 12:03", in the corner the character count used to
+                  hold.
 
-                  It was in the label row, which is gone on a phone; the action
-                  bar was tried next and measured badly — at 360px six items in
-                  that row left the send-time button **18px wide**, under the
-                  44px floor, and the gate caught it. Overlaid on the textarea
-                  it costs no height at all, which is the whole currency of this
-                  screen, and it sits where the typing is rather than at the far
-                  edge of the screen from it.
+                  Same position, same technique, same reason it may sit over the
+                  text at all: it is absolutely positioned, so it costs the
+                  message box nothing, and it is not a control, so the 44px tap
+                  floor does not reach it (see `.composesaved`).
 
-                  Characters and bytes both, because they disagree by 3× in
-                  Chinese and the disagreement is the information: a draft that
-                  looks half the length of a provider's limit can be over it.
+                  What it replaces is "0 字 · 0 B" — a permanent label reporting
+                  two numbers about a message the person writing it can see. The
+                  one thing nobody can see is whether the work is safe, which is
+                  the question this answers, and it answers it only when there is
+                  an answer: it appears when the typing settles and takes itself
+                  off a few seconds later, so the corner is empty again by the
+                  time anyone would start reading it as chrome.
                 */}
-                {narrow ? (
-                  <span className="composecount" aria-live="polite">
-                    {t('compose.bodyCount', bodyCount)}
+                {narrow && savedAt !== null ? (
+                  <span className="composesaved" aria-live="polite">
+                    {t('compose.savedAt', { time: hhmm(savedAt) })}
                   </span>
                 ) : null}
               </Field>
+
+              {/*
+                What the message is carrying, as pictures rather than as a count
+                behind a button.
+
+                The attachment list used to exist only inside the attachments
+                sheet, so a phone draft with three files on it looked exactly
+                like one with none apart from a small badge on an icon — and the
+                commonest attachment mistake is the wrong file, which a name and
+                a badge cannot catch and a thumbnail can.
+
+                Absent entirely when there are no attachments, which is the state
+                `scripts/layout-probe.mjs` measures: the 85% floor is read on
+                first paint against a fresh draft, so this strip contributes 0px
+                to the number the gate holds this screen to. When it does appear
+                it costs ~54px, and that is a draft that has already been worked
+                on rather than the screen someone opens.
+
+                Narrow only. The wide layout already lists the same files with
+                the same controls in `AttachmentPicker`, permanently, and two
+                lists of one thing is how they drift.
+              */}
+              {narrow && draft.attachments.length > 0 ? (
+                <div className="composefiles" role="list" aria-label={t('compose.attachments')}>
+                  {draft.attachments.map((a) => {
+                    const thumb = thumbnails[a.path]
+                    return (
+                      <div
+                        className="composefile"
+                        role="listitem"
+                        key={a.id}
+                        data-missing={attachmentPresence?.[a.path] === false || undefined}
+                      >
+                        {/* The picture where we have read it back, the generic
+                            document glyph where we have not — a PDF, a
+                            spreadsheet, a file still being read. `alt=""`
+                            because the name is right beside it and a screen
+                            reader announcing both would say it twice. */}
+                        {thumb ? (
+                          <img
+                            className="composefile__thumb"
+                            src={thumb}
+                            alt=""
+                            draggable={false}
+                          />
+                        ) : (
+                          <span className="composefile__glyph" aria-hidden="true">
+                            <IconFileText size={17} />
+                          </span>
+                        )}
+                        <span className="composefile__name" title={a.name}>
+                          {a.name}
+                        </span>
+                        {/* Its own remove control, at the full 44px floor. A
+                            strip you can only add to is a strip that makes the
+                            wrong file harder to get rid of than it was to
+                            attach. Named `__drop` rather than reusing `.btn`
+                            because `check-tap-targets` pools one kind of control
+                            at one height across every screen, and these are 44px
+                            row controls rather than the 48px buttons in the bar
+                            underneath. */}
+                        <button
+                          type="button"
+                          className="composefile__drop"
+                          aria-label={`${t('common.delete')} · ${a.name}`}
+                          title={t('common.delete')}
+                          onClick={() =>
+                            patch({
+                              attachments: draft.attachments.filter((x) => x.id !== a.id),
+                            })
+                          }
+                        >
+                          <IconX size={15} />
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
+              ) : null}
 
               {/* The pictures the message carries, as pictures.
                   Absent entirely when there are none, so it costs the layout
@@ -2262,8 +2504,18 @@ export function ComposeView({
         </div>
       ) : null}
 
-      {/* The two buttons that matter, always visible. */}
-      <div className="actionbar" data-narrow={narrow || undefined}>
+      {/*
+        The two buttons that matter, always visible.
+
+        `data-typing` folds the whole row to a 34px presentation strip while the
+        message box has the caret — see `bodyFocus` above and `.composefold` in
+        `22-compose.css` for why the folded row carries no control at all.
+      */}
+      <div
+        className="actionbar"
+        data-narrow={narrow || undefined}
+        data-typing={(narrow && bodyFocus) || undefined}
+      >
         {/*
           Two different bars, because they are answering two different
           questions.
@@ -2274,81 +2526,156 @@ export function ComposeView({
           second line is hidden there already, so most of that height is spent
           on air around a sentence.
 
-          Narrow: one 52px row that is the form's missing third of the screen.
-          The attachment picker is behind the first button, a list of the times
-          people actually pick behind the second, the options panel behind the
-          third, and the send-time sentence rides on the button that opens it —
-          that question may not be one tap away from being unanswerable.
+          Narrow: one 52px row that is the form's missing third of the screen,
+          in three hairlined zones — what rides along (attachments, the options
+          panel), how the message is written (the formatting strip), and when
+          and whether it goes (the send-time button and Send). The send-time
+          sentence rides on the button that opens it: that question may not be
+          one tap away from being unanswerable.
 
           Four items and the primary button is what 360px holds. Everything
           added to this row since has had to come out of the send-time button,
           which is the only flexible one, and it is already at its floor; see
           the note on `.composeacts__when` and the one on "send now" in the
-          popover below.
+          popover below. The zone dividers are hairlines rather than gaps for
+          exactly that reason — 1px each, against `--sp-1`'s four.
+
+          And it folds. While the message box has the caret the whole row is one
+          34px presentation strip; see `bodyFocus`.
         */}
-        {narrow ? (
+        {narrow && bodyFocus ? (
+          /*
+            Folded, and deliberately not a smaller copy of the bar.
+
+            34px is under the 44px floor `check-tap-targets` and Android's own
+            guidance both set, so a folded row of four half-height buttons would
+            be four controls nobody can hit reliably, directly above a keyboard —
+            the worst place on the screen to be 10px short. So the folded row
+            holds no control at all: it is the send-time sentence and the saved
+            stamp, which are the two things worth knowing while typing and
+            neither of which is tapped.
+
+            Nothing becomes unreachable. Every control comes back at its full
+            height the moment the message box loses focus, and *any* tap outside
+            the box does that — including a tap on this strip, which the
+            `onPointerDown` below makes explicit rather than relying on a
+            WebView's default focus handling. The keyboard's own dismiss key and
+            the send shortcut both still work while it is folded.
+          */
+          <div
+            className="composefold"
+            onPointerDown={() => bodyRef.current?.blur()}
+          >
+            <IconClock size={14} className="composefold__icon" />
+            <span className="composefold__text">{whenLine}</span>
+            {savedAt !== null ? (
+              <span className="composefold__saved">
+                {t('compose.savedAt', { time: hhmm(savedAt) })}
+              </span>
+            ) : null}
+          </div>
+        ) : narrow ? (
+          /*
+            Three zones, hairlined: what rides along | how it is written | when
+            and whether it goes.
+
+            The row used to be five controls at one weight in one line, so
+            "attach a file", "make this bold" and "send it at six" read as three
+            instances of the same thing. Grouping them is what makes the bar
+            scannable without reading every glyph: the eye lands on the zone
+            first and the icon second, which is the difference between four taps
+            and one. The hairlines are `--border-subtle`, the same rule the
+            header rows carry, so the two halves of the screen are divided by
+            one line and not by two conventions.
+          */
           <div className="composeacts">
+            {/* --- zone 1: what rides along with the message --------------- */}
+            <div className="composeacts__zone composeacts__zone--carry">
+              <button
+                type="button"
+                className="btn btn--ghost btn--icon composeacts__btn"
+                aria-label={t('compose.attachments')}
+                title={t('compose.attachments')}
+                onClick={() => setSheet('attachments')}
+              >
+                <IconPaperclip size={18} />
+                {draft.attachments.length > 0 ? (
+                  <span className="composeacts__badge">{draft.attachments.length}</span>
+                ) : null}
+              </button>
+              <button
+                type="button"
+                className="btn btn--ghost btn--icon composeacts__btn"
+                aria-label={t('compose.moreOptions')}
+                title={t('compose.moreOptions')}
+                aria-expanded={sheet === 'more'}
+                onClick={() => setSheet('more')}
+              >
+                <IconSliders size={18} />
+              </button>
+            </div>
+
+            {/* --- zone 2: how the message is written ---------------------- */}
             {/*
-              The formatting toolbar and the byte count moved here from the
-              message field's own label row, which is now gone on a phone — see
-              the note on that `Field`'s `action`. The toolbar keeps its folded
-              behaviour exactly; only its anchor changed, and `.composeacts` is
-              where every other thing you do *to* the message already lives.
+              The formatting toolbar moved here from the message field's own
+              label row, which is now gone on a phone — see the note on that
+              `Field`'s `action`. The toolbar keeps its folded behaviour exactly;
+              only its anchor changed, and `.composeacts` is where every other
+              thing you do *to* the message already lives.
 
               Hidden once the body is HTML, for the reason it always was:
               inserting `**bold**` into HTML puts literal asterisks in the mail.
+              The zone goes with it rather than leaving an empty compartment
+              between two hairlines.
             */}
             {draft.bodyFormat !== 'html' ? (
-              <MarkupToolbar
-                textarea={bodyRef}
-                onChange={(body) => patch({ body, bodyFormat: 'markdown' })}
-              />
+              <div className="composeacts__zone composeacts__zone--format">
+                <MarkupToolbar
+                  textarea={bodyRef}
+                  onChange={(body) => patch({ body, bodyFormat: 'markdown' })}
+                />
+              </div>
             ) : null}
-            <button
-              type="button"
-              className="btn btn--ghost btn--icon composeacts__btn"
-              aria-label={t('compose.attachments')}
-              title={t('compose.attachments')}
-              onClick={() => setSheet('attachments')}
-            >
-              <IconPaperclip size={18} />
-              {draft.attachments.length > 0 ? (
-                <span className="composeacts__badge">{draft.attachments.length}</span>
-              ) : null}
-            </button>
-            {/*
-              The send-time button now answers the question instead of asking
-              it again one layer down.
 
-              What it used to open was the send-time sheet: a full-screen layer
-              whose own "Repeat, retry, conditions…" button opened the Schedule
-              dialog *on top of it*, and inside that, `RecurrenceEditor` — about
-              fourteen tappable things of which exactly one, the Starts picker,
-              is on the way to "Friday at six". Counted end to end, eight taps
-              and two scrolls for the commonest schedule anyone sets.
+            {/* --- zone 3: when it goes ----------------------------------- */}
+            <div className="composeacts__zone composeacts__zone--when">
+              {/*
+                The send-time button now answers the question instead of asking
+                it again one layer down.
 
-              Now it opens a list of the times people actually pick (the same
-              `quickTimes` the dialog offers — one table, so the two cannot
-              disagree), and picking one arms it and closes. Two taps, no
-              layers. Everything the sheet and the dialog do is still there,
-              unchanged, behind this list's last entry.
+                What it used to open was the send-time sheet: a full-screen layer
+                whose own "Repeat, retry, conditions…" button opened the Schedule
+                dialog *on top of it*, and inside that, `RecurrenceEditor` — about
+                fourteen tappable things of which exactly one, the Starts picker,
+                is on the way to "Friday at six". Counted end to end, eight taps
+                and two scrolls for the commonest schedule anyone sets.
 
-              `cron` is the exception and goes straight to the sheet: a cron
-              expression is not a time you can pick off a list, and a menu of
-              wall-clock times would be editing a field that rule does not read.
-            */}
-            <button
-              type="button"
-              className="btn btn--ghost composeacts__when"
-              title={deliveryDetail ?? whenLine}
-              aria-expanded={recurrence.kind === 'cron' ? undefined : pickOpen}
-              onClick={() =>
-                recurrence.kind === 'cron' ? setSheet('when') : setPickOpen((v) => !v)
-              }
-            >
-              <IconClock size={17} />
-              <span className="composeacts__whentext">{whenLine}</span>
-            </button>
+                Now it opens a list of the times people actually pick (the same
+                `quickTimes` the dialog offers — one table, so the two cannot
+                disagree), and picking one arms it and closes. Two taps, no
+                layers. Everything the sheet and the dialog do is still there,
+                unchanged, behind this list's last entry.
+
+                `cron` is the exception and goes straight to the sheet: a cron
+                expression is not a time you can pick off a list, and a menu of
+                wall-clock times would be editing a field that rule does not read.
+              */}
+              <button
+                type="button"
+                className="btn btn--ghost composeacts__when"
+                title={deliveryDetail ?? whenLine}
+                aria-expanded={recurrence.kind === 'cron' ? undefined : pickOpen}
+                onClick={() =>
+                  recurrence.kind === 'cron' ? setSheet('when') : setPickOpen((v) => !v)
+                }
+              >
+                <IconClock size={17} />
+                <span className="composeacts__whentext">{whenLine}</span>
+              </button>
+            </div>
+            {/* Outside the zones on purpose: `.composeacts__picks` is anchored
+                to `.composeacts` (`bottom: 100%`, full width), and a zone with
+                its own stacking or padding between the two would move it. */}
             {pickOpen ? (
               <div
                 className="popover composeacts__picks"
@@ -2381,7 +2708,11 @@ export function ComposeView({
                     disabled={blocked || sending}
                     onClick={() => {
                       setPickOpen(false)
-                      void doSend()
+                      /* Through the pre-send card, like every other route to a
+                         send. An entry that skipped it would be the one place
+                         on the screen where the setting silently did not
+                         apply. */
+                      requestSend()
                     }}
                   >
                     <IconSend size={16} className="pickitem__icon" />
@@ -2420,16 +2751,6 @@ export function ComposeView({
                 </button>
               </div>
             ) : null}
-            <button
-              type="button"
-              className="btn btn--ghost btn--icon composeacts__btn"
-              aria-label={t('compose.moreOptions')}
-              title={t('compose.moreOptions')}
-              aria-expanded={sheet === 'more'}
-              onClick={() => setSheet('more')}
-            >
-              <IconSliders size={18} />
-            </button>
           </div>
         ) : (
           <div className="actionbar__summary">
@@ -2458,77 +2779,115 @@ export function ComposeView({
           </div>
         )}
 
-        {/* Draft history and the send preview used to sit here. They are a
-            recovery route and a check — neither is what this bar is for, and
-            both are now in the page head with the rest of the secondary
-            controls. What is left is the two buttons that send. */}
-        {narrow ? null : (
-          <Button
-            size="lg"
-            variant="secondary"
-            icon={<IconClock size={17} />}
-            disabled={blocked || sending}
-            onClick={openSchedule}
-          >
-            {t('compose.schedule')}
-          </Button>
-        )}
         {/*
-          The one button a phone has room for cannot always say "send now" —
-          `doSend` calls `sendDraftNow`, unconditionally, so a phone with no
-          second button to fall back on was sending immediately no matter
-          what the "when" bar above said, `scheduleSet` included. The wide
-          layout never had this bug: its second button is the one that opens
-          the schedule dialog, sitting right next to a "send now" that always
-          means what it says.
+          The send zone — the third of the three, on both layouts.
 
-          `scheduleSet` is the same flag the "when" bar already sets the
-          moment a time or a repeat rule is touched, so this button starts
-          agreeing with it rather than a moment later.
+          Wrapped rather than left as two loose children of the bar so the
+          hairline that separates it from what comes before it has something to
+          hang on: a `border-inline-start` written on the buttons themselves
+          would fight `.btn--secondary`'s own border on the wide layout and
+          would land inside the filled button on the narrow one.
 
-          It now *arms* rather than opening the dialog. Opening it was the
-          first fix for the bug above and it overshot: a single button was
-          neither "send" nor "schedule" but "ask me again", so a phone with a
-          time set could not arm the job without a modal round-trip and could
-          not send immediately at all without first clearing the time. The
-          reason for the round-trip was that retries, chains and conditions
-          live in that dialog and skipping it would drop whatever a returning
-          user had set — but nothing is dropped: `confirmSchedule` reads the
-          very same state the dialog edits, so a job armed from here carries
-          whatever was last set there, and the defaults when it was never
-          opened. The one thing `openSchedule` did that mattered on this path
-          was seed the job's name from the subject, which `confirmSchedule`
-          now does for itself.
-
-          "Send now" has not gone; it is the first entry in the send-time
-          popover, on the button showing the time it would be overriding. See
-          the note there for why it is not a second button in this row.
+          Folded away entirely while the message box has focus — see
+          `.composefold`. It comes back on blur, at full height.
         */}
-        {narrow && scheduleSet ? (
-          <Button
-            size="lg"
-            variant="primary"
-            icon={<IconClock size={17} />}
-            disabled={blocked || sending || scheduleHasErrors}
-            onClick={() => void confirmSchedule()}
-          >
-            {t('compose.schedule')}
-          </Button>
-        ) : (
-          <Button
-            size="lg"
-            variant="primary"
-            icon={<IconSend size={17} />}
-            disabled={blocked}
-            loading={sending}
-            onClick={doSend}
-          >
-            {sending
-              ? t('compose.sending')
-              : preflight.messageCount > 1
-                ? t('compose.sendNowN', { n: preflight.messageCount })
-                : t('compose.sendNow')}
-          </Button>
+        {narrow && bodyFocus ? null : (
+          <div className="actionbar__send">
+            {/* Draft history and the send preview used to sit here. They are a
+                recovery route and a check — neither is what this bar is for, and
+                both are now in the page head with the rest of the secondary
+                controls. What is left is the two buttons that send. */}
+            {narrow ? null : (
+              <>
+                <Button
+                  size="lg"
+                  variant="secondary"
+                  icon={<IconClock size={17} />}
+                  disabled={blocked || sending}
+                  onClick={openSchedule}
+                >
+                  {t('compose.schedule')}
+                </Button>
+                {/* The third divider, and it only exists on the wide bar. The phone
+                    gets its three zones inside `.composeacts`; here the zones are
+                    the summary line, the schedule button and Send, and the second
+                    boundary falls *between two buttons* — where a
+                    `border-inline-start` would have to be drawn on `.btn--primary`
+                    itself and would land inside the one filled control on the
+                    screen. A rule of its own, `aria-hidden`, costs 1px and says
+                    nothing to a screen reader that the button labels do not. */}
+                <span className="actionbar__rule" aria-hidden="true" />
+              </>
+            )}
+            {/*
+              The one button a phone has room for cannot always say "send now" —
+              `doSend` calls `sendDraftNow`, unconditionally, so a phone with no
+              second button to fall back on was sending immediately no matter
+              what the "when" bar above said, `scheduleSet` included. The wide
+              layout never had this bug: its second button is the one that opens
+              the schedule dialog, sitting right next to a "send now" that always
+              means what it says.
+
+              `scheduleSet` is the same flag the "when" bar already sets the
+              moment a time or a repeat rule is touched, so this button starts
+              agreeing with it rather than a moment later.
+
+              It now *arms* rather than opening the dialog. Opening it was the
+              first fix for the bug above and it overshot: a single button was
+              neither "send" nor "schedule" but "ask me again", so a phone with a
+              time set could not arm the job without a modal round-trip and could
+              not send immediately at all without first clearing the time. The
+              reason for the round-trip was that retries, chains and conditions
+              live in that dialog and skipping it would drop whatever a returning
+              user had set — but nothing is dropped: `confirmSchedule` reads the
+              very same state the dialog edits, so a job armed from here carries
+              whatever was last set there, and the defaults when it was never
+              opened. The one thing `openSchedule` did that mattered on this path
+              was seed the job's name from the subject, which `confirmSchedule`
+              now does for itself.
+
+              "Send now" has not gone; it is the first entry in the send-time
+              popover, on the button showing the time it would be overriding. See
+              the note there for why it is not a second button in this row.
+            */}
+            {narrow && scheduleSet ? (
+              <Button
+                size="lg"
+                variant="primary"
+                icon={<IconClock size={17} />}
+                disabled={blocked || sending || scheduleHasErrors}
+                onClick={() => void confirmSchedule()}
+              >
+                {t('compose.schedule')}
+              </Button>
+            ) : (
+              /*
+                The only filled control on this screen.
+
+                Everything else — the account button, the three zone buttons, the
+                formatting strip, the send-time button, every row in the popovers and
+                every remove control in the attachment strip — is a line icon at the
+                one stroke width `icons.tsx` sets on its shared `<Svg>` (1.75 on a
+                24px grid), drawn in `--text-2` on nothing. So the one solid shape in
+                the interface is the one irreversible action in it, and "which of
+                these actually sends the mail" is answerable without reading a word.
+              */
+              <Button
+                size="lg"
+                variant="primary"
+                icon={<IconSend size={17} />}
+                disabled={blocked}
+                loading={sending}
+                onClick={requestSend}
+              >
+                {sending
+                  ? t('compose.sending')
+                  : preflight.messageCount > 1
+                    ? t('compose.sendNowN', { n: preflight.messageCount })
+                    : t('compose.sendNow')}
+              </Button>
+            )}
+          </div>
         )}
       </div>
 

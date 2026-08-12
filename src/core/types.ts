@@ -949,6 +949,50 @@ export interface Settings {
    */
   navUsage?: Record<string, number>
   /**
+   * The eight Home cells, chosen by hand, in the order they are drawn.
+   *
+   * `undefined` means "nobody has arranged this yet", and the grid falls back
+   * to `navUsage`'s ranking — which is the whole of what 0.3.3 had. The moment
+   * this array exists it wins outright: an arrangement someone sat down and
+   * made is not something a usage counter gets to quietly rearrange under
+   * their finger three days later.
+   *
+   * Exactly `HOME_GRID_SLOTS` entries and no duplicates, enforced by
+   * `sanitiseHomeGrid` in `core/nav.ts` rather than by the type, for the same
+   * reason `navUsage` is a loose `Record`: this is persisted data that outlives
+   * the code that wrote it, and an id retired in a later version has to be
+   * droppable at read time instead of making the settings file fail to parse.
+   *
+   * Not in `AppearanceSettings`, for the same reason `navUsage` is not — see
+   * its note above. A phone's eight and a desktop's eight are different eights.
+   */
+  homeGrid?: string[]
+  /**
+   * Show the one-card summary — who, how many, how big, when — before a send
+   * actually goes. Default on. Off is for people who send the same message to
+   * the same person all day and have measured that the extra tap costs them
+   * more than a mis-send would.
+   */
+  composePreflight?: boolean
+  /**
+   * Repaint a received HTML body for dark mode instead of showing the sender's
+   * white page inside a dark app. Default on, and always overridable per
+   * message from the reader — see `MessageBodyFrame`. Some senders' layouts
+   * do not survive inversion, which is why the escape hatch is per message and
+   * one tap away rather than buried here.
+   */
+  readerDarkInvert?: boolean
+  /** Collapse quoted history in a received message behind one line. */
+  readerFoldQuotes?: boolean
+  /**
+   * Short vibrations on send, on failure, and on copying a code. Android only
+   * — `navigator.vibrate` is a no-op on the desktop build — and off by default
+   * on no device: it is on, because the whole point is knowing a send went
+   * without looking at the screen, and a person who does not want it will find
+   * it here on their first annoyed visit.
+   */
+  haptics?: boolean
+  /**
    * When any `AppearanceSettings` field (`core/backup.ts`) last changed on
    * *this* device. Same last-write-wins role as `workCalendarUpdatedAt` — see
    * its doc — but for the "match my theme" scope instead of the calendar.
@@ -1074,6 +1118,17 @@ export const DEFAULT_SETTINGS: Settings = {
      never happened, and would then have to be out-weighed before the real
      ranking could show through. */
   navUsage: {},
+  /* Absent, not pre-filled with the default eight. The distinction is the
+     feature: `undefined` means "never arranged", which is what lets the grid
+     keep ranking by use until somebody actually arranges it. Writing the
+     default order in here would make every fresh install look like a decision
+     had already been made, and would freeze the order for people who never
+     opened the editor. */
+  homeGrid: undefined,
+  composePreflight: true,
+  readerDarkInvert: true,
+  readerFoldQuotes: true,
+  haptics: true,
   imagePolicyChosen: false,
   digestEnabled: false,
   digestTime: '08:00',

@@ -411,6 +411,107 @@
   content: "\2003";
 }
 
+/* --- the verification code, in the row ------------------------------------
+ *
+ * A copy button for the code, on the row, without the row getting any taller.
+ * That is a hard constraint rather than a preference, and here is the whole of
+ * the budget it had to fit inside.
+ *
+ * ## What a row is made of, at 360x800
+ *
+ *   .job__meta        18.2px   14px `--text-xs` at `--leading-tight` 1.3
+ *   gap                4.0px   `.job__body > .job__name { margin-top: 4px }`
+ *   .job__name        20.8px   16px `--text-base` at the same 1.3
+ *   ------------------------
+ *   content           43.0px
+ *   padding-block     16.0px   `--sp-2` twice (16-mail.css, the phone band)
+ *   border             2.0px
+ *   ------------------------
+ *   row               61.0px   — the number `.job__meta`'s note above measured
+ *   .joblist gap       4.0px   `--sp-1` in the phone band
+ *   ------------------------
+ *   pitch             65.0px
+ *
+ * The pane is 629px, so 629 / 65.0 = 9.67 and nine rows fit. Nine is the floor
+ * `scripts/layout-probe.mjs` asserts. Falling to eight needs the pitch to pass
+ * 629 / 9 = 69.9px, so the row may grow by 4.9px and not one pixel more.
+ *
+ * ## Why this costs zero of those 4.9px
+ *
+ * 14px at 1.3 is an 18.2px box, and there is no vertical padding and no border
+ * to add to it. `vertical-align: middle` centres that box on the parent's
+ * baseline plus half its x-height: 16px text has an ~8.2px x-height, so the
+ * centre sits 4.1px above the baseline and the box reaches 13.2px above it and
+ * 5.0px below. The 16px strut of the line it is on reaches 15.2px above the
+ * baseline and 5.6px below. The capsule is inside the line box on both sides,
+ * so the line box does not grow, so the row does not grow. 61.0px before and
+ * 61.0px after — the floor is untouched, not merely still met.
+ *
+ * A border was tried on paper first and dropped for this reason: 1px top and
+ * bottom makes it 20.2px, which pushes 0.4px past the strut's descender and
+ * would have spent real budget on decoration. The tint carries it instead.
+ *
+ * ## What it displaced, and the one thing it costs
+ *
+ * The snippet, and only on rows that carry a code (`InboxView` renders one or
+ * the other, never both). On a verification mail the first words of the body
+ * are "Do not share this code with anyone" — the code itself is the better
+ * preview, so this is a trade in the reader's favour rather than a sacrifice.
+ *
+ * The honest cost is the tap target. 18.2px tall is under the 48px floor and
+ * there is no arrangement of this row that fixes it: a 44px control here makes
+ * the row 62px and would still be the smallest thing on the ladder, a 48px one
+ * makes it 66px and the pane holds eight, and an invisible `--tap-pad` overlay
+ * cannot help because `.job__name` is `overflow: hidden` for the line clamp and
+ * clips hit-testing with it. So the target is made wide instead of tall — six
+ * digits plus a glyph is ~86px, four times the 44px minimum on that axis — and
+ * the full-size 48px way to the same code stays exactly where it was, on the
+ * Codes screen and in the reader.
+ * ------------------------------------------------------------------------- */
+
+.job__code {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  margin-inline-end: var(--sp-2);
+  /* Zero on the block axis — see the arithmetic above. */
+  padding-block: 0;
+  padding-inline: var(--sp-2);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--text-1);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  line-height: var(--leading-tight);
+  font-weight: 700;
+  font-variant-numeric: var(--numeric);
+  white-space: nowrap;
+  /* The two properties the height depends on. `middle` is what keeps the box
+     inside the 16px strut; `baseline` would hang it below the descender and
+     cost the row ~1px for nothing. */
+  vertical-align: middle;
+  cursor: pointer;
+}
+.job__code:hover {
+  background: color-mix(in srgb, var(--accent) 26%, transparent);
+}
+/* Outline, not border: it paints outside the box and so cannot move the line
+   it is on — the same reason every other focus ring in this app is one. */
+.job__code:focus-visible {
+  outline: var(--ring);
+  outline-offset: 1px;
+}
+.job__code > svg {
+  flex: none;
+  color: var(--accent);
+}
+/* The digits are the point of the capsule, so they are the part that keeps the
+   full text colour while the glyph beside them steps back. */
+.job__codeValue {
+  letter-spacing: var(--tracking-tight);
+}
+
 @media (max-width: 839.98px) {
   /* The band is the first thing on a phone screen and the last thing that
      should take height from the list. `--ctl-md` is the tap floor its two

@@ -1,0 +1,132 @@
+/* ==========================================================================
+   28 — The shapes that are not any one screen's: nothing-here, still-loading,
+        and the 120ms a view takes to arrive
+
+   Round 8. Everything in files 21-26 belongs to exactly one screen. These
+   three do not, and that is the whole reason they are their own file and the
+   last one in the cascade: a shared shape has to be able to win over the
+   per-screen rule that would otherwise contradict it. "所有界面风格统一"
+   is only a property of the build if the shared shape is the one that lands.
+
+   ## What was actually here before
+
+   Both shared pieces already existed and were simply not reached everywhere:
+
+     `EmptyState` (components/ui.tsx, `.empty` in 07-feedback.css)
+         used by 12 files — and bypassed by 7 one-off classes:
+         `homemod__empty`, `detailpane__body--empty`, `dayview__empty`,
+         `dayrow__previewempty`, `palette__empty`, `recipicker__empty`,
+         `zonepick__empty`.
+
+     `Skeleton` (components/Skeleton.tsx, `.skeleton__*` in 13-panels.css)
+         used by exactly one view.
+
+   So this is not a new system. It is the two that exist, plus the one shape
+   that was missing and is why four of those seven one-offs existed at all.
+
+   ## Why the seven were not simply converted to `EmptyState`
+
+   Because four of them are not the same thing. `EmptyState` is a screen with
+   nothing in it: a 48px icon, a title, a sentence, and usually a button that
+   creates the first item. Putting that inside a 220px command-palette dropdown
+   that found no matches would be absurd — there is no "create the first match"
+   action, the icon would be most of the box, and the sentence would push the
+   list you are typing into off the screen.
+
+   "This filtered view found nothing" is a genuinely different state from "this
+   screen has nothing yet", and it was being written seven different ways
+   because there was no shared shape for it. `.nores` below is that shape. The
+   three that really are screen-level empties keep `EmptyState`.
+   ========================================================================== */
+
+/* --- nothing matched -------------------------------------------------------
+   One line, centred, in the secondary rank. No icon and no action, deliberately:
+   the action is "type something else", and the field you would type it into is
+   already directly above this — an explicit button would point at itself.
+
+   `--text-base` and not `--text-sm`: this is a sentence a person reads, and the
+   type floor in theme.css does not have an exemption for small boxes. The
+   colour is what makes it secondary. */
+.nores {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--ctl-lg);
+  padding: var(--sp-4) var(--sp-4);
+  margin: 0;
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  color: var(--text-3);
+  text-align: center;
+  /* Long queries get echoed back inside these strings ("没有匹配 xxx 的时区"),
+     and a 40-character paste must not widen the dropdown it sits in. */
+  overflow-wrap: anywhere;
+}
+
+/* Inside a scrolling result list the row above is already separated by its own
+   border; a second one here would double up. */
+.nores--inlist {
+  min-height: var(--ctl-md);
+  padding-block: var(--sp-3);
+}
+
+/* --- still loading ---------------------------------------------------------
+   The `.skeleton__*` shapes live in 13-panels.css and are unchanged. What is
+   here is the one property they were missing: the shimmer has to stop for
+   anyone who asked the system to stop things moving. A loading placeholder
+   that pulses forever is exactly the class of motion `prefers-reduced-motion`
+   exists to turn off, and it is on screen for longer than any other animation
+   in the app. */
+@media (prefers-reduced-motion: reduce) {
+  .skeleton__bar {
+    animation: none;
+    /* Without the shimmer the bars must still read as "not real content yet",
+       so they keep a flat inset fill rather than becoming invisible. */
+    background: var(--surface-inset);
+  }
+}
+
+/* --- a view arriving -------------------------------------------------------
+   120ms, transform and opacity only.
+
+   Both properties are compositor-only, so this costs no layout and no paint —
+   which is the entire reason the distance is 8px rather than a more visible
+   24px. The requirement this screen is built against is "使用时不卡顿" on
+   phones that are not fast, and an animation that triggers layout on every tab
+   change would be the single most reliable way to break it.
+
+   It runs on `.view__inner` rather than on `.view`: `.view` is the scroll
+   container, and animating a transform on a scroll container makes Android's
+   WebView re-rasterise the whole scrollable area on the first frame.
+
+   No `will-change`. It would keep a compositor layer alive for every view for
+   the whole session to save 120ms once per tab press, and on a 2GB phone that
+   trade is the wrong way round. */
+@keyframes viewarrive {
+  from {
+    opacity: 0;
+    transform: translate3d(8px, 0, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+:root[data-shell='mobile'] .view__inner {
+  animation: viewarrive 120ms ease-out both;
+}
+
+/*
+ * Not on the desktop shell. There the views sit beside a persistent sidebar
+ * and switching is a click on something already on screen — the content
+ * changing IS the feedback, and sliding it as well reads as the window
+ * lurching. On a phone the whole screen replaces itself and the slide is what
+ * says which direction you went.
+ */
+
+@media (prefers-reduced-motion: reduce) {
+  :root[data-shell='mobile'] .view__inner {
+    animation: none;
+  }
+}

@@ -43,6 +43,34 @@ public class InboxSyncWorker extends Worker {
         List<JSONObject> accounts = cache.enabledAccounts();
         if (accounts.isEmpty()) return Result.success();
 
+        try {
+            return syncAll(context, cache, secrets, accounts);
+        } finally {
+            /*
+             * Hand back every IMAP connection before this method returns.
+             *
+             * {@link MailFetcher} keeps an authenticated connection alive for a
+             * couple of minutes after an operation finishes, which is what turns
+             * a burst of reading in the foreground into one handshake instead of
+             * five. In here that is the wrong default and its idle timer is not
+             * a safe way to undo it: once doWork() returns, WorkManager is free
+             * to let this process be killed, and a timer in a dead process never
+             * fires. The socket would survive only as long as the process did,
+             * with nothing scheduled to close it in between — the definition of
+             * a connection held open for no reason.
+             *
+             * Runs after the loop rather than after each account because the
+             * retry path benefits: a run that ends in Result.retry() comes back
+             * on WorkManager's backoff, and the accounts it is retrying are the
+             * same ones. Runs in a finally because a thrown sync must not be the
+             * thing that leaves a connection behind.
+             */
+            MailFetcher.closeIdleConnections();
+        }
+    }
+
+    private Result syncAll(Context context, InboxCache cache, SecretStore secrets,
+                           List<JSONObject> accounts) {
         boolean anyFailure = false;
         for (JSONObject config : accounts) {
             String accountId = config.optString("accountId", "");

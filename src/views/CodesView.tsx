@@ -37,7 +37,6 @@ import {
   type ReactNode,
 } from 'react'
 import {
-  Banner,
   Button,
   EmptyState,
   IconButton,
@@ -73,6 +72,7 @@ import { useCodeCheck, WAIT_PRESETS, type CheckOutcome } from '../state/CodeChec
 import { useI18n } from '../i18n'
 import { CODE_FRESH_MS } from '../core/ops/codeHistory'
 import { copyText } from '../core/platform/clipboard'
+import { haptic } from '../core/haptics'
 import { AXIS_LOCK_PX, resolvePull, type PullState } from '../core/platform/gestures'
 import { encodeQr, qrPath } from '../core/sync/qr'
 import { accountLabel as labelOfAccount } from '../core/mail/accounts'
@@ -374,8 +374,19 @@ export function CodesView({ onGoToInbox }: { onGoToInbox?: () => void }) {
       dispatch({ type: 'markCodeCopied', id: hit.id })
       setJustCopied(hit.id)
       window.setTimeout(() => setJustCopied((id) => (id === hit.id ? null : id)), 2000)
+      /*
+       * The one moment in this app where the screen is the least likely place
+       * the user is looking: the code was wanted for a form in another app,
+       * and the tick that confirms the copy appears on the screen they are
+       * about to leave. `haptic` is a no-op on desktop and when the setting is
+       * off — see core/haptics.ts. It is fired here rather than inside
+       * `copyText` because `copyText` has no access to settings and is also
+       * used for copying diagnostics, which nobody is waiting on.
+       */
+      haptic('copy', state.settings.haptics)
     } else {
       toast.push({ tone: 'error', title: t('inbox.copyFailed') })
+      haptic('fail', state.settings.haptics)
     }
   }
 
@@ -714,18 +725,13 @@ export function CodesView({ onGoToInbox }: { onGoToInbox?: () => void }) {
           />
         )}
 
-        {/* Android's background sync runs on a system-owned 15-minute floor
-            (see InboxSyncWorker.java) that this screen's "Check now" button
-            cannot shorten. Desktop has no such floor, so this only shows on
-            the Android build, and only once there is an inbox account to
-            wait on. `keep` survives the phone's cull of info banners —
-            unlike most of them, this one is reporting something, not
-            explaining the screen. */}
-        {bridge?.platform === 'android' && hasAnyInbox ? (
-          <Banner tone="info" keep>
-            {t('codes.androidBackgroundDelay')}
-          </Banner>
-        ) : null}
+        {/* The Android 15-minute background floor used to be stated here in a
+            permanent info banner. Removed on request (2026-08-12): it was a
+            standing sentence about a system limit this screen cannot change,
+            occupying the band directly above the codes themselves on every
+            single visit. The floor still exists — `InboxSyncWorker.java` still
+            documents it, and "Check now" still exists for when you cannot
+            wait. What is gone is telling you about it every time. */}
 
         {/* D5 — what the last press actually did. Six sentences, not "failed". */}
         {check.lastOutcome ? (

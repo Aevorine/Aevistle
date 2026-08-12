@@ -771,13 +771,9 @@
   overflow-wrap: anywhere;
 }
 
-.zonepick__empty {
-  margin: 0;
-  padding: var(--sp-3);
-  color: var(--text-2);
-  font-size: var(--text-base);
-  overflow-wrap: anywhere;
-}
+/* `.zonepick__empty` was here — now `.nores` in 28-states.css, which kept this
+   one's `overflow-wrap: anywhere` because this is the one that echoes the
+   user's query back into the sentence. */
 
 .zonepick__more {
   margin: 0;

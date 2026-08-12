@@ -66,7 +66,9 @@
      24-inbox.css               ~435 lines  The phone inbox: one title band, the two-line mail row, and 编辑 mode
      25-settings.css            ~190 lines  The phone settings list: identity card, four groups, inline values
      26-tablet.css              ~345 lines  600-839px: the inbox and settings as two panes instead of one
-                            12464 lines   total
+     27-ring.css                ~180 lines  The countdown ring a scheduled send is drawn as
+     28-states.css              ~320 lines  Round 8's shared shapes: empty states, skeletons, view transitions
+                            12964 lines   total
 
    Files 22-25 are round 7, and they are numbered in the order the five phone
    tabs sit on the bar rather than in the order they were written — compose,
@@ -74,6 +76,13 @@
    only styles its own screen's block classes, so none of them can tie with
    another, but they come last so that where one does meet an older rule of
    equal specificity it wins, which is the direction a newer layer should win in.
+
+   27 and 28 are round 8, and they are the two files that are NOT one screen's
+   own. A ring is drawn wherever a scheduled send is listed, and the empty and
+   loading shapes are drawn on every screen that can have nothing in it yet —
+   which is why they are last of all: a shared shape has to be able to win over
+   the per-screen file that would otherwise contradict it, or "统一" is a
+   comment rather than a property of the build.
 */
 
 @import './app/01-base.css';
@@ -102,3 +111,5 @@
 @import './app/24-inbox.css';
 @import './app/25-settings.css';
 @import './app/26-tablet.css';
+@import './app/27-ring.css';
+@import './app/28-states.css';

@@ -189,7 +189,7 @@ export function CalendarDayPanel({
       ) : null}
 
       {entries.length === 0 ? (
-        <p className="dayview__empty">{t('cal.day.none')}</p>
+        <p className="nores">{t('cal.day.none')}</p>
       ) : (
         <ul className="dayview__list">
           {entries
@@ -407,7 +407,7 @@ function BodyPreview({
   }, [draft.body, draft.bodyFormat, sanitizeHtml])
 
   if (!draft.body.trim()) {
-    return <p className="dayrow__previewempty">{t('cal.day.previewEmpty')}</p>
+    return <p className="nores nores--inlist">{t('cal.day.previewEmpty')}</p>
   }
   if (draft.bodyFormat === 'html' && sanitized !== null) {
     return (

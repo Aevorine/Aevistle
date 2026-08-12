@@ -274,7 +274,7 @@ export function CommandPalette({
 
         <div className="palette__list" ref={listRef}>
           {results.length === 0 ? (
-            <div className="palette__empty">{t('palette.nothing')}</div>
+            <div className="nores nores--inlist">{t('palette.nothing')}</div>
           ) : (
             results.map((action, index) => {
               const Icon = action.icon

@@ -746,8 +746,41 @@ async function clearViewport() {
  * for the viewport now in force. Measuring the compose screen without this after
  * a resize measures a component that decided its layout at the old width.
  */
+/**
+ * Wait until the app has actually mounted, rather than until a stopwatch says
+ * it probably has.
+ *
+ * `check-layout.mjs` sleeps 5s after Chrome's CDP port answers, with a comment
+ * explaining that the port is up long before React has hydrated a cold,
+ * unbundled dev-server load. That number was fitted to the app as it was; round
+ * 8 added a component and two stylesheets, and 5s stopped being enough — the
+ * probe failed *deterministically* on `phone 360x800` with `landed on
+ * "unknown"`, which is the string it prints when `document.querySelector('.view')`
+ * returns null, i.e. when nothing has rendered at all.
+ *
+ * A fixed sleep cannot be the right shape for this: it is either longer than
+ * every machine needs or shorter than some machine needs, and the failure it
+ * produces looks exactly like a real layout bug. Polling for the nav to exist
+ * costs nothing on a fast machine and cannot go stale as the app grows.
+ *
+ * Deliberately NOT a longer sleep in `check-layout.mjs`: that would have made
+ * this pass today and broken again at whatever size the app reaches next.
+ */
+async function waitForApp(ms = 30_000) {
+  const until = Date.now() + ms
+  for (;;) {
+    const ready = await evaluate(
+      `!!document.querySelector('.nav__item[data-view]') && !!document.querySelector('.view')`,
+    )
+    if (ready === 'true' || ready === true) return true
+    if (Date.now() > until) return false
+    await sleep(250)
+  }
+}
+
 async function goto(view) {
   const other = view === 'compose' ? 'schedule' : 'compose'
+  await waitForApp()
   const click = async () => {
     await evaluate(`document.querySelector('.nav__item[data-view="${other}"]')?.click(), true`)
     await sleep(200)

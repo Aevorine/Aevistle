@@ -341,11 +341,9 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.palette__empty {
-  padding: var(--sp-6);
-  text-align: center;
-  color: var(--text-3);
-}
+/* `.palette__empty` was here. It, and three others like it, are now the one
+   `.nores` shape in 28-states.css — this one had no `font-size` at all, so
+   "没有匹配的结果" was drawn at whatever the palette happened to inherit. */
 
 /* ===========================================================================
    Status chips

@@ -1,10 +1,12 @@
 import { useMemo, useState } from 'react'
+import { CountdownRing } from '../components/CountdownRing'
 import { HealthAllClear } from '../components/HealthBoard'
 import { VirtualList } from '../components/VirtualList'
 import {
   Button,
   EmptyState,
   IconButton,
+  Modal,
   PageHead,
   StatusChip,
   useConfirm,
@@ -13,6 +15,7 @@ import {
 import { IconClock, IconCopy, IconEdit, IconPause, IconPlay, IconSend, IconTrash } from '../components/icons'
 import { useApp } from '../state/AppState'
 import { useI18n, type TranslationKey } from '../i18n'
+import { planRestagger } from '../core/schedule/reschedule'
 import { summarizeRecurrence } from '../core/schedule/schedule'
 import { isFinished } from '../core/schedule/jobRun'
 import { seedEditJob } from '../core/mail/editJobSeed'
@@ -28,6 +31,17 @@ import { ATMOSPHERE_MOTION_MIN, type ScheduledJob } from '../core/types'
  */
 const INK_BLOOM_MS = 260
 
+/**
+ * How far "postpone" postpones.
+ *
+ * Ten minutes because the action exists for one situation — the ring has gone
+ * amber, the send is minutes away and you are not ready — and the answer to
+ * that is a nudge, not a reschedule. Anything longer is a change to the
+ * schedule and belongs on the compose screen, which is one tap away through
+ * the same row's edit button.
+ */
+const SNOOZE_MS = 10 * 60_000
+
 /** Soonest first; a reminder with nothing left to fire sorts to the bottom. */
 function byNextRun(a: ScheduledJob, b: ScheduledJob) {
   const an = a.occurrences[0] ?? Number.MAX_SAFE_INTEGER
@@ -36,11 +50,20 @@ function byNextRun(a: ScheduledJob, b: ScheduledJob) {
 }
 
 export function ScheduleView({ onCompose }: { onCompose: () => void }) {
-  const { state, dispatch, toggleJob, deleteJob, runJobNow } = useApp()
+  const { state, dispatch, toggleJob, deleteJob, runJobNow, pushUndo, scheduleDraft } = useApp()
   const { t, formatDateTime, formatRelative, formatAgo } = useI18n()
   const toast = useToast()
   const { confirm, confirmElement } = useConfirm()
   const [busy, setBusy] = useState<string | null>(null)
+  /**
+   * Which job's ring menu is open, by id rather than by value.
+   *
+   * By id because the menu outlives a render: the ticker behind the ring
+   * re-renders this screen while the menu is up, and a captured `ScheduledJob`
+   * would go on describing the occurrence list as it was when the ring was
+   * pressed. Looked up fresh below.
+   */
+  const [menuJobId, setMenuJobId] = useState<string | null>(null)
   /**
    * Rows mid-`ink-bloom` (app.css) — present in `state.jobs` for the length of
    * their exit animation rather than gone the instant delete is clicked. Only
@@ -230,6 +253,70 @@ export function ScheduleView({ onCompose }: { onCompose: () => void }) {
     }
   }
 
+  /**
+   * "Postpone ten minutes", and the sentence it has to say first.
+   *
+   * Routed through `planRestagger` (`core/schedule/reschedule.ts`) rather than
+   * nudging `occurrences[0]` here, and that is not tidiness — it is the only
+   * honest implementation available. `ScheduledJob` has no per-occurrence
+   * exception list, so there is nowhere to record "this one send moved and the
+   * rest did not". The only thing that can be written back is the rule's own
+   * time of day, which means a *repeating* reminder pushed ten minutes moves
+   * every future send with it. `planRestagger` exists precisely to say that
+   * out loud, and it refuses outright for the two cases it cannot honour: a
+   * cron expression owns its own minute, and a shift across midnight is a
+   * different operation on a different day.
+   *
+   * So the confirmation body is the plan's own sentence — `cal.stagger.later`
+   * already reads "{n} min later, at {time}, from now on", and "from now on"
+   * is the part that matters. Writing a second sentence here would be a second
+   * place for that warning to drift out of date.
+   *
+   * `reasonValues` goes to `t` unwrapped, unlike `WorkCalendarView`'s
+   * `translateValues(...)` call on the same shape: `planReschedule` can put
+   * translation keys in there, `planRestagger` only ever puts a count and a
+   * clock time.
+   *
+   * `pushUndo` then `scheduleDraft` is the same pair, in the same order, that
+   * `moveJob` and the de-stagger use — the undo entry has to capture the job
+   * *before* the save, or Ctrl+Z restores what it just wrote.
+   */
+  const snooze = async (job: ScheduledJob) => {
+    const plan = planRestagger(job, SNOOZE_MS)
+    if (!plan.recurrence) {
+      toast.push({
+        tone: 'error',
+        title: t('cal.move.cannot'),
+        detail: t(plan.reasonKey as TranslationKey, plan.reasonValues),
+      })
+      return
+    }
+    const ok = await confirm({
+      title: t('ring.snooze10' as TranslationKey),
+      body: t(plan.reasonKey as TranslationKey, plan.reasonValues),
+      confirmLabel: t('ring.snooze10' as TranslationKey),
+      cancelLabel: t('common.cancel'),
+    })
+    if (!ok) return
+    pushUndo(job.name, [{ type: 'upsertJob', job }])
+    await scheduleDraft({ ...job, recurrence: plan.recurrence })
+    toast.push({
+      tone: 'success',
+      title: t('ring.snoozed' as TranslationKey, { n: SNOOZE_MS / 60_000 }),
+      detail: job.name,
+    })
+  }
+
+  /*
+   * Read live out of `state.jobs`, never held. See `menuJobId`.
+   *
+   * A job can also leave the list while its menu is open — the send fires, or
+   * another device's sync deletes it — and this resolving to `undefined` is
+   * what closes the menu rather than leaving three buttons pointing at
+   * nothing.
+   */
+  const menuJob = menuJobId ? state.jobs.find((j) => j.id === menuJobId) : undefined
+
   return (
     <div className="view view--list">
       <div className="view__inner">
@@ -295,6 +382,11 @@ export function ScheduleView({ onCompose }: { onCompose: () => void }) {
           >
             {(job) => {
               const next = job.occurrences[0]
+              /* The instant the ring counts to. A finished job has no
+                 `occurrences[0]` left, so it counts to the send that ended it —
+                 which is what makes the Done tab show closed ticks rather than
+                 empty circles. */
+              const ringAt = next ?? job.lastRunAt
               const summary = summarizeRecurrence(job.recurrence)
               const recipients =
                 job.draft.to.length + job.draft.cc.length + job.draft.bcc.length
@@ -306,6 +398,44 @@ export function ScheduleView({ onCompose }: { onCompose: () => void }) {
                   data-removing={removingIds.has(job.id) || undefined}
                 >
                   <span className="job__pulse" />
+                  {/*
+                    How long is left, as one closed shape. Decoration on top of
+                    the `schedule.nextRun` line below, never instead of it — the
+                    ring is `aria-hidden` and the timestamp is what a screen
+                    reader announces. See `CountdownRing.tsx` for why the arc's
+                    denominator is capped at 24 hours (a three-week wait would
+                    otherwise sit at 99.7% full for its last six days) and why
+                    forty rows share a single ticker.
+
+                    `armedAt` prefers `lastRunAt` over `createdAt`: a daily
+                    reminder created three months ago is not three months into a
+                    wait, it is however long it is since yesterday's send.
+
+                    `.job__pulse` above is now saying a weaker version of the
+                    same thing. It stays for this release rather than being
+                    pulled in the same change that introduced its replacement —
+                    the dot also encodes failed/disabled, and removing it is a
+                    separate decision that should be made while looking at both.
+                  */}
+                  {ringAt && (job.enabled || isFinished(job)) ? (
+                    <CountdownRing
+                      fireAt={ringAt}
+                      armedAt={job.lastRunAt ?? job.createdAt}
+                      done={isFinished(job)}
+                      /*
+                        Actions only while the job is actually live. On the Done
+                        tab two of the three ("send now", "postpone") have
+                        nothing to act on, and handing that tab forty focus
+                        stops leading to a menu that is two-thirds greyed out is
+                        worse than leaving the tick the picture it is.
+                      */
+                      onOpenActions={
+                        job.enabled && !isFinished(job)
+                          ? () => setMenuJobId(job.id)
+                          : undefined
+                      }
+                    />
+                  ) : null}
                   <div className="job__body">
                     <div className="job__name">
                       {job.name}
@@ -461,6 +591,90 @@ export function ScheduleView({ onCompose }: { onCompose: () => void }) {
           </VirtualList>
         )}
       </div>
+
+      {/*
+        The ring's three actions.
+
+        ## Why this is here and not in the row
+
+        It cannot be in the row. `VirtualList` renders its rows inside
+        `.list-pane`, which is `overflow-y: auto` — and an element with one
+        overflow axis not `visible` clips on *both*, so a popover anchored
+        inside a row is cut off at the pane's edge. `position: fixed` does not
+        rescue it either: `VirtualList` puts `transform: translateY(...)` on the
+        row container to position the window, and a transformed ancestor
+        becomes the containing block for fixed descendants, so a fixed popover
+        would be positioned inside — and clipped by — the very scroller it was
+        trying to escape.
+
+        This spot is outside all of it, sitting exactly where `{confirmElement}`
+        already sits for exactly the same reason. That is also why no portal was
+        added: `RecipientPicker` has one, and it needed it because it is opened
+        *from inside* a component that has no view root to reach; this screen
+        has one right here.
+
+        ## Why a `Modal` and not a bespoke menu
+
+        A menu would have needed positioning off a rect, outside-click, Escape,
+        focus handling, `role="menu"` and arrow keys — every one of which
+        `Modal` already has and has already had reviewed. It also brings the
+        scrim's `fade-in var(--dur)`, which theme.css's global
+        `prefers-reduced-motion` block already cuts to 0.01ms, so the open/close
+        animation is handled by not being written twice.
+
+        The narrow shell renders dialogs as full screens (`10-narrow-shell.css`),
+        which is the phone shape this wants anyway.
+      */}
+      {menuJob ? (
+        <Modal
+          open
+          title={menuJob.name}
+          onClose={() => setMenuJobId(null)}
+          closeLabel={t('common.close')}
+        >
+          <div className="btn-row">
+            {/* The same three calls the row's own icon buttons make — `runNow`
+                and `remove` are reused verbatim, not re-implemented, so a fix
+                to either (the skip-reason toast, the chain-aware delete
+                confirmation) reaches both entry points. `snooze` is the only
+                new one, and it is a front door onto `planRestagger`. */}
+            <Button
+              block
+              icon={<IconSend size={16} />}
+              disabled={busy === menuJob.id}
+              onClick={() => {
+                setMenuJobId(null)
+                void runNow(menuJob.id)
+              }}
+            >
+              {t('schedule.runNow')}
+            </Button>
+            <Button
+              block
+              icon={<IconClock size={16} />}
+              onClick={() => {
+                setMenuJobId(null)
+                void snooze(menuJob)
+              }}
+            >
+              {t('ring.snooze10' as TranslationKey)}
+            </Button>
+            <Button
+              block
+              variant="danger"
+              icon={<IconTrash size={16} />}
+              disabled={removingIds.has(menuJob.id)}
+              onClick={() => {
+                setMenuJobId(null)
+                void remove(menuJob.id)
+              }}
+            >
+              {t('common.delete')}
+            </Button>
+          </div>
+        </Modal>
+      ) : null}
+
       {confirmElement}
     </div>
   )

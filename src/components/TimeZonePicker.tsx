@@ -184,7 +184,7 @@ export function TimeZonePicker({
             })}
 
             {rows.length === 0 ? (
-              <p className="zonepick__empty">{t('deliver.zoneNone', { q: query.trim() })}</p>
+              <p className="nores nores--inlist">{t('deliver.zoneNone', { q: query.trim() })}</p>
             ) : null}
           </div>
 

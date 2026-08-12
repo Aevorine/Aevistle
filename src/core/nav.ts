@@ -270,6 +270,61 @@ export function rankHomeDestinations(
 }
 
 /**
+ * A hand-arranged `Settings.homeGrid` turned into exactly the seven cells the
+ * grid is going to draw.
+ *
+ * The grid is always eight cells and the eighth is always 更多 — see
+ * `HOME_GRID_SLOTS`, and `HomeView`'s arrange dialog, which draws the eighth
+ * row as something you can look at and not something you can move. So what is
+ * being sanitised here is the seven, and this function's contract is that it
+ * hands back seven usable destinations no matter what it is given.
+ *
+ * Three things can be wrong with what comes out of `state.json`, and all three
+ * have to be survivable rather than reportable, because the file outlives the
+ * code that wrote it:
+ *
+ *   - **an id that no longer exists.** A destination retired in a later version
+ *     is still named in the arrangement someone made under the old one.
+ *     Dropped, and the slot is refilled below — the alternative is a cell that
+ *     draws no icon and opens nothing, or a throw during render that takes the
+ *     whole screen to its error boundary. The user loses one slot's worth of a
+ *     decision they made about something that no longer exists.
+ *   - **a duplicate.** Two cells opening the same screen is six destinations in
+ *     seven slots; the second occurrence is dropped rather than drawn.
+ *   - **the wrong length.** Too many entries are truncated, too few are topped
+ *     up from `rankHomeDestinations` — so a version that adds an eighth
+ *     destination does not leave an old seven-entry arrangement short, and a
+ *     version that adds a *ninth* slot fills the new one with the thing this
+ *     device actually opens rather than with a blank.
+ *
+ * The top-up is the ranking rather than `HOME_GRID_ORDER` directly so that a
+ * slot the user did not choose is filled with what they use, which is the same
+ * rule the un-arranged grid follows.
+ *
+ * Returns fewer than `HOME_GRID_SLOTS` only if the app itself has fewer
+ * destinations than slots, which it never has. Padding to length with a
+ * repeated or invented id would put a cell on screen that opens nothing, and a
+ * short grid is a visible, honest version of the same shortage.
+ */
+export function sanitiseHomeGrid(
+  ids: readonly string[] | undefined,
+  usage?: Record<string, number>,
+): (ViewId | HomeFeatureId)[] {
+  const live = new Set<string>(ALL_HOME_DESTINATIONS)
+  const out: (ViewId | HomeFeatureId)[] = []
+  const take = (id: string) => {
+    if (!live.has(id)) return false
+    const known = id as ViewId | HomeFeatureId
+    if (out.includes(known)) return false
+    out.push(known)
+    return out.length >= HOME_GRID_SLOTS
+  }
+  for (const id of ids ?? []) if (take(id)) return out
+  for (const id of rankHomeDestinations(usage)) if (take(id)) break
+  return out
+}
+
+/**
  * The bottom bar on a phone: four reflexes and the door to everything else.
  *
  * Five items at ~64px each fit a 360px screen without scrolling, which is the

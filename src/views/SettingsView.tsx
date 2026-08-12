@@ -766,10 +766,13 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
         <Card flush>
           <CardHeader
             title={t('account.title')}
-            /* Only once there is something to arrange. A sentence explaining
-               three ways to reorder a list of one is noise on the screen
-               somebody reaches on their very first run. */
-            hint={state.accounts.length > 1 ? t('account.reorderHint') : undefined}
+            /* No reorder instructions. They used to sit here as a hint
+               whenever there was more than one account; removed on request
+               (2026-08-12). The grip is still draggable, still long-pressable
+               on touch, and still takes Ctrl/Alt + arrows from the keyboard —
+               `aria-keyshortcuts` on the handle is what announces that now,
+               to the people who need it announced, instead of a sentence
+               every sighted user reads once and then reads forever. */
             action={
               <Button
                 variant="primary"
@@ -862,7 +865,6 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
                       type="button"
                       className="reorder-handle"
                       aria-label={t('account.reorderHandle', { name: accountLabel(a) })}
-                      title={t('account.reorderHint')}
                       aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
                       {...reorder.handleProps(a.id)}
                     >
@@ -1271,6 +1273,42 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
                 onChange={(v) => patch({ oneHand: v })}
                 title={t('settings.oneHand')}
                 description={t('settings.oneHandHint')}
+              />
+
+              {/* Round 8's four new behaviours, all defaulting on, all here
+                  rather than each next to the thing it affects.
+
+                  That is a deliberate choice and it cuts against the usual
+                  rule. Each of these is a *quiet* behaviour — a vibration, an
+                  inverted page, a folded quote, an extra confirm card — and the
+                  person who wants one off is, by definition, someone it just
+                  annoyed and who now wants to find the switch. Someone in that
+                  state opens Settings and scans; they do not remember which
+                  screen the behaviour belonged to. Four switches in one place
+                  they can scan beats four switches each correctly filed. */}
+              <Switch
+                checked={s.haptics !== false}
+                onChange={(v) => patch({ haptics: v })}
+                title={t('settings.haptics')}
+                description={t('settings.hapticsHint')}
+              />
+              <Switch
+                checked={s.readerDarkInvert !== false}
+                onChange={(v) => patch({ readerDarkInvert: v })}
+                title={t('settings.readerDarkInvert')}
+                description={t('settings.readerDarkInvertHint')}
+              />
+              <Switch
+                checked={s.readerFoldQuotes !== false}
+                onChange={(v) => patch({ readerFoldQuotes: v })}
+                title={t('settings.readerFoldQuotes')}
+                description={t('settings.readerFoldQuotesHint')}
+              />
+              <Switch
+                checked={s.composePreflight !== false}
+                onChange={(v) => patch({ composePreflight: v })}
+                title={t('settings.composePreflight')}
+                description={t('settings.composePreflightHint')}
               />
 
               <Field label={t('settings.language')}>

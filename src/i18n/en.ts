@@ -162,7 +162,6 @@ export const en = {
   'compose.cc': 'Cc',
   'compose.bcc': 'Bcc',
   'compose.showCcBcc': 'Cc / Bcc',
-  'compose.editHeader': 'Recipients and subject',
   'compose.subject': 'Subject',
   'compose.subjectPlaceholder': 'What is this reminder about?',
   'compose.body': 'Message',
@@ -934,8 +933,6 @@ export const en = {
   'account.group': 'Group',
   'account.groupPlaceholder': 'Work, Personal, a client…',
   'account.ungrouped': 'Ungrouped',
-  'account.reorderHint':
-    'Drag the grip to put your accounts in the order you want. On a touchscreen, hold it first. With a keyboard, focus it and press Ctrl or Alt with the arrow keys.',
   'account.reorderHandle': 'Reorder {name}',
   'account.reorderMoved': '{name} is now {n} of {total}',
   'preflight.title': 'Before it goes out',
@@ -1208,12 +1205,6 @@ export const en = {
   'codes.sourceBody': 'from body',
   'codes.sourceLink': 'from link',
   'codes.notifyTitle': 'Verification code {code}',
-  // Android's WorkManager will not run periodic background work more often
-  // than every 15 minutes — see InboxSyncWorker.java. Desktop has no such
-  // floor, so this only ever shows on the Android build.
-  'codes.androidBackgroundDelay':
-    'On Android, mail is checked at most every 15 minutes while Aevistle is in the background — keep it in the foreground for codes to arrive faster.',
-
   'codes.checkNow': 'Check now',
   'codes.checking': 'Checking…',
   'codes.lastChecked': 'checked {ago}',
@@ -1810,6 +1801,37 @@ export const en = {
   'reliability.deviceStale': 'Last synced {when}',
   'reliability.deviceNeverSynced': 'Has never completed a sync',
   'reliability.sectionAndroid': 'This device',
+
+  /* --- round 8 (0.3.4) --- */
+  'compose.savedAt': 'Saved · {time}',
+  'compose.fromNone': 'Account',
+  'home.arrangeOpen': 'Edit home grid',
+  'home.arrangeTitle': 'Edit home grid',
+  'home.arrangeHint': 'Home always has 8 cells. Drag a handle to reorder them, or pick a different feature for any cell. The 8th cell is always More, and everything else lives behind it.',
+  'home.arrangeSlot': 'Feature in cell {n}',
+  'home.arrangeHandle': 'Move {name}',
+  'home.arrangeMoved': '{name} is now in cell {n} of {total}',
+  'home.arrangeMoreFixed': 'More is fixed in the last cell and cannot be swapped out',
+  'home.arrangeReset': 'Reset to default',
+  'inbox.quoteShow': 'Show {n} quoted lines',
+  'inbox.quoteHide': 'Hide the quoted text',
+  'inbox.rowCodeCopy': 'Copy verification code {code}',
+  'inbox.rowCodeCopied': 'Copied the code {code}',
+  'ring.waiting': 'Waiting to send',
+  'ring.soon': 'Sending in under 10 minutes',
+  'ring.overdue': 'Past its send time and still unsent',
+  'ring.done': 'Sent',
+  'ring.menuLabel': 'Send options, {state}',
+  'ring.snooze10': 'Postpone 10 minutes',
+  'ring.snoozed': 'Postponed by {n} min',
+  'settings.haptics': 'Vibration feedback',
+  'settings.hapticsHint': 'A short buzz when a send goes, when one fails, and when a code is copied — so you know without looking. Phones only.',
+  'settings.readerDarkInvert': 'Repaint received mail for dark mode',
+  'settings.readerDarkInvertHint': 'A sender’s white page becomes a dark one. A few complex layouts do not survive it — any message can be switched back to its original inside the reader.',
+  'settings.readerFoldQuotes': 'Fold quoted history',
+  'settings.readerFoldQuotesHint': 'The quoted copy of the previous message collapses to one line you can open again at any time.',
+  'settings.composePreflight': 'Confirm before sending',
+  'settings.composePreflightHint': 'One card first — who it goes to, how many, how big, and when. Turn this off to send straight away.',
 } as const
 
 export type TranslationKey = keyof typeof en
