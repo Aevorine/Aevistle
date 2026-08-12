@@ -24,6 +24,7 @@ import {
 } from './components/icons'
 import { CommandPalette, type PaletteTarget } from './components/CommandPalette'
 import { CodeCheckProvider } from './state/CodeCheck'
+import { pushBackHandler } from './core/backStack'
 import { claimStartupUpdateCheck, runUpdateCheck } from './core/platform/update'
 import brandMark from './assets/brand.png'
 import { Skeleton } from './components/Skeleton'
@@ -420,6 +421,46 @@ function Shell() {
     const interval = window.setInterval(run, ONE_DAY_MS)
     return () => window.clearInterval(interval)
   }, [ready, bridge, state.settings.updateCheckOnStart, toast, t])
+
+  /**
+   * The bottom of the back stack: where the Android back gesture lands once
+   * nothing is open on top of the screen.
+   *
+   * One rule, and it is the one the report asked for in as many words — 左滑，
+   * 右滑操作不是退出该应用，而是退出该界面。返回到基本界面，进行左滑，右滑操作退出
+   * 该应用. So: any screen that is not Home goes to Home and consumes the
+   * gesture; Home itself declines, and declining is what lets `MainActivity`
+   * close the app.
+   *
+   * Home is the base screen rather than Compose — which is what the window
+   * *opens* on — because on a phone Home is the only door to five of the nine
+   * screens (see `HOME_SECTIONS` in `core/nav.ts`), so it is the one place from
+   * which everything is one tap away. Landing a back press on a half-written
+   * compose form would also be ambiguous in a way a hub is not: you could not
+   * tell whether you had gone back to it or started a new one.
+   *
+   * Registered at the shell, which mounts before any dialog can open, so it is
+   * the *first* entry in the stack and therefore the *last* consulted —
+   * `runBack` walks from the top. That ordering is what makes "close the reader,
+   * leave the inbox where it was" work without either surface knowing about the
+   * other.
+   *
+   * Deliberately no confirmation on the way out. It was asked for explicitly,
+   * and the alternative (a "swipe again to exit" toast) was declined; nothing
+   * here is lost by exiting, since the draft is persisted on every change and
+   * scheduled reminders are the platform's to fire, not this process's.
+   *
+   * `view` is the only dependency: `setView` is a stable setter, and re-running
+   * this on every screen change is a splice and a push on a short array.
+   */
+  useEffect(() => {
+    return pushBackHandler(() => {
+      if (view === 'home') return false
+      setOpenAccountOnMount(false)
+      setView('home')
+      return true
+    })
+  }, [view])
 
   const goToAccounts = () => {
     setOpenAccountOnMount(true)

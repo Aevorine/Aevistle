@@ -2680,3 +2680,66 @@
     --text-2: var(--text-1);
   }
 }
+
+/* ==========================================================================
+   Old engines: the tokens that hold color-mix()
+   ==========================================================================
+
+   ## What this is guarding against
+
+   `color-mix()` is Chromium 111. This app ships against `minSdkVersion 24`, and
+   the device the last three rounds of layout reports came from has already been
+   shown not to have `:has()` — Chromium 105 — so it cannot have `color-mix()`
+   either. Three tokens in this file are defined with it, and a fourth pair in
+   the runecircuit style.
+
+   ## Why a token is so much worse than a declaration
+
+   A declaration the engine cannot parse is *dropped*, and the cascade falls
+   back to whatever was set before it. That is a lost tint and nothing more.
+
+   A **custom property** does not fail that way. Custom properties accept any
+   syntactically valid token sequence, so `--shadow-accent: 0 4px 14px
+   color-mix(…)` is stored without complaint; the failure happens downstream, at
+   `box-shadow: var(--shadow-accent)`, as "invalid at computed-value time". And
+   IACVT does not fall back to an earlier declaration — the property becomes
+   `unset`, so `box-shadow` becomes `none` outright.
+
+   That is the mechanism behind the Home hero going white-on-white; see the long
+   note in `app/21-home-grid.css`, which is where it was diagnosed. These four
+   are the same defect on surfaces where the cost is a missing shadow rather
+   than unreadable text, which is why they are corrected here rather than
+   redesigned.
+
+   ## Why `@supports not`, and why `!important`
+
+   `@supports` is the only mechanism that can decide this, because it is the
+   only one that runs *before* the value is stored. The usual "plain value, then
+   the fancy one" fallback cannot work for a custom property: nothing is
+   dropped, so the plain value is simply overwritten.
+
+   `!important` because these tokens are defined in theme blocks reaching
+   `(0,3,0)` — `:root[data-style="aurora"][data-theme="dark"]` — and a `:root`
+   rule at `(0,1,0)` would lose to every one of them. It costs nothing anywhere
+   else: these declarations only exist at all on an engine where every value
+   they override is already broken.
+
+   `check:css-fallbacks` fails the build if a fifth token is added without a
+   fallback here. */
+
+@supports not (color: color-mix(in srgb, red 50%, blue)) {
+  :root {
+    /* The neutral shadow the same surfaces already use everywhere else, so a
+       primary button keeps a shadow rather than losing depth entirely. */
+    --shadow-accent: var(--shadow-md) !important;
+
+    /* The runecircuit style's 1px grid and its corner nodes. `transparent`,
+       not `var(--border)`: both are drawn as hard-edged gradient stops and the
+       real values carry alpha (34-38%, scaled by `--intensity`). Substituting
+       an opaque token would paint a grid several times louder than the one
+       being replaced — a worse wrong answer than no grid, which is what every
+       other visual style looks like anyway. */
+    --circuit-trace: transparent !important;
+    --circuit-node: transparent !important;
+  }
+}

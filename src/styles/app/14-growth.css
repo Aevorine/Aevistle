@@ -958,6 +958,18 @@
  */
 :root[data-shell='mobile'] .modal[data-variant='reader'] .modal__header {
   flex-wrap: wrap;
+  /*
+   * The last seam. `.modal__header` carries a `gap`, which on this wrapped row
+   * falls between `.btn-row` and the close button — and nowhere else, since the
+   * four inside the row are already flush. Measured, that made the first three
+   * centre-to-centre gaps 59px and the fourth 71px: four icons evenly spread
+   * and the fifth pushed out by exactly the gap.
+   *
+   * `column-gap` alone, not the `gap` shorthand: the row gap is what separates
+   * the icon line from the subject line underneath it, and zeroing that would
+   * close the two-row header back up into one.
+   */
+  column-gap: 0;
 }
 /*
  * `order` swapped rather than the markup: the action row lands on the header's
@@ -970,37 +982,133 @@
  */
 :root[data-shell='mobile'] .modal[data-variant='reader'] .modal__title {
   order: 2;
-  flex-basis: 100%;
+  /*
+   * Just over 100%, and the `1px` is load-bearing rather than a fudge.
+   *
+   * Flex line breaking adds items to a line until the next one would overflow,
+   * and it compares *hypothetical main sizes* — so with the buttons at
+   * `flex-basis: 0` and this at exactly `100%`, the three come to exactly the
+   * container width and the title fits on line one after all. Everything then
+   * shares a single line: the title takes the whole of it and the five buttons,
+   * which grow from a basis of zero out of a free space that is now zero,
+   * collapse to 0px wide. Measured exactly that way.
+   *
+   * It did not show up before because the header carried a 12px `column-gap`,
+   * and two gaps were enough to push the sum past the line and force the wrap.
+   * That made the two-row header depend on a gap nobody had connected to it —
+   * so zeroing the gap to even out the icons (see the rule above) silently took
+   * the second row with it. Exceeding 100% states the requirement directly:
+   * this item cannot share a line with anything, whatever the gap is.
+   */
+  flex-basis: calc(100% + 1px);
   font-size: var(--text-value);
   line-height: 1.35;
 }
-/* Its own solo top line now, still right-aligned rather than trailing off from
-   wherever the header's own left edge happens to be. */
+/*
+ * The top line, shared out evenly across its whole width.
+ *
+ * ## What changed and why
+ *
+ * This row used to be `margin-inline-start: auto` with a `--sp-1` gap: all five
+ * icons correct, all five on the right-hand third of the line, and the other
+ * two thirds empty. That is the 均匀分布 half of the report — the icons were
+ * already on the top line (the previous round put them there), they were just
+ * huddled in the corner.
+ *
+ * ## Why this needs a count from the markup
+ *
+ * The row is not a flat list of five. Its shape is:
+ *
+ *     .modal__header
+ *       .btn-row                    <- flag, delete, and the wrapper below
+ *         .icon-btn                 flag
+ *         .icon-btn                 delete
+ *         .reader__actionsFull      <- day/night (dark messages only), find, full screen
+ *         .reader__more             display:none in this band
+ *       .icon-btn                   close, rendered by `Modal` itself
+ *
+ * so "one fifth each" is not something any single `justify-content` can
+ * express: the five buttons live at two different depths, and one of them
+ * exists only on a dark message. `space-between` on each container would give
+ * equal gaps *within* each container and unequal gaps across the seam — the
+ * delete-to-find gap collapsing to nothing while find-to-fullscreen opened up.
+ *
+ * The fix is proportional shares. Every leaf claims `1`, and each container
+ * claims as many as it holds, so the arithmetic comes out the same as if the
+ * row had been flat. `--reader-actions` is stamped on `.btn-row` by
+ * `InboxView.tsx` (2, or 3 when the day/night toggle is showing) because CSS
+ * cannot count elements; `.btn-row` itself is therefore that plus its own two.
+ *
+ * Flattening the wrapper away was the other option and is not available:
+ * `26-tablet.css` hides `.reader__actionsFull` as a unit in the two-pane band,
+ * where three of the five fold into the overflow menu instead.
+ *
+ * ## The arithmetic on a 360px phone
+ *
+ * 328px of content width, five equal columns, 65.6px each — every one of them
+ * above the 48px `check:tap` floor with room to spare, which is why the gap can
+ * go to zero. The gap is what would otherwise make the columns unequal: a
+ * shared `gap` between `.btn-row`'s three children and a second one between
+ * `.reader__actionsFull`'s two is two different gaps inside one row. Zero, and
+ * the buttons' own padding does the separating.
+ *
+ * `flex-basis: 0` (not `auto`) on every share is what makes them equal
+ * regardless of content: with `auto` the basis is each button's own 38px and
+ * only the *leftover* would be shared, which distributes the remainder evenly
+ * and the total unevenly.
+ */
 :root[data-shell='mobile'] .modal[data-variant='reader'] .modal__header > .btn-row {
   order: 1;
-  margin-inline-start: auto;
+  /* Its own two icons, plus however many the wrapper holds. */
+  flex: calc(var(--reader-actions, 2) + 2) 1 0;
+  min-width: 0;
+  flex-wrap: nowrap;
+  gap: 0;
 }
 /* The header's own close button is a sibling of `.btn-row`, not a member of it
-   — it needs the same `order` to land on the same top line, right after the row
-   it was already trailing. */
+   — it needs the same `order` to land on the same top line. Its *share* is set
+   with the other four leaves below, not here, so there is one rule deciding how
+   wide a header button is rather than two that have to agree. */
 :root[data-shell='mobile'] .modal[data-variant='reader'] .modal__header > .icon-btn {
   order: 1;
 }
+:root[data-shell='mobile'] .modal[data-variant='reader'] .reader__actionsFull {
+  flex: var(--reader-actions, 2) 1 0;
+  min-width: 0;
+  gap: 0;
+}
 /*
- * All of them on that one line, and none of them wrapping off it.
+ * The leaves.
  *
- * Flag, delete, day/night, find and full screen plus the header's own close
- * button is six controls, and they were asked for by name — 标注优先级、删除、
- * 在邮件中查找、关闭 …显示在弹出的页面的最上面一行 — so folding three of them
- * behind an overflow trigger is not the answer here. At 44px each with the
- * `--sp-2` gap they come to 296px against a 328px line on a 360px phone, which
- * fits; `flex-wrap: nowrap` on the row is what guarantees it stays fitting when
- * a locale or a system font scale nudges something, rather than silently
- * spilling one icon onto a third line.
+ * `width: auto` is one load-bearing half: `.icon-btn` is `width: var(--ctl-sm)`
+ * with `display: grid`, and a fixed width beats `flex-grow` — the shares above
+ * would have been computed and then ignored, leaving the row looking exactly as
+ * it did before with more CSS behind it.
+ *
+ * `padding-inline: 0` is the other, and it is the one that is not obvious.
+ * `flex-basis: 0` sizes from the *content* box, but a border-box's used width
+ * can never fall below its own padding, so each button's hypothetical main size
+ * is 12px rather than 0 — and the containers (`.btn-row`,
+ * `.reader__actionsFull`) have no padding of their own, so that 12px is
+ * subtracted from the free space *before* the shares are worked out and then
+ * added back only to the leaves. The result is proportional-plus-a-constant
+ * rather than proportional, which is exactly the shape the measurement showed:
+ * with the padding left in, the five came out 62.5 / 62.5 / 50.5 / 50.5 / 68.5
+ * against a wanted 58.9 each, because the close button is one level up from the
+ * inner two and collects the constant once instead of twice.
+ *
+ * Nothing is lost by removing it. The glyph is centred by `.icon-btn`'s own
+ * `place-items: center`, and the tap target is the slot, which at 360px is
+ * ~59x48 — larger in both axes than the 44px floor the padding was never
+ * providing anyway (the height is untouched here).
  */
-:root[data-shell='mobile'] .modal[data-variant='reader'] .modal__header > .btn-row {
-  flex-wrap: nowrap;
-  gap: var(--sp-1);
+:root[data-shell='mobile'] .modal[data-variant='reader'] .modal__header > .btn-row > .icon-btn,
+:root[data-shell='mobile'] .modal[data-variant='reader'] .reader__actionsFull > .icon-btn,
+:root[data-shell='mobile'] .modal[data-variant='reader'] .modal__header > .icon-btn {
+  flex: 1 1 0;
+  width: auto;
+  min-width: 0;
+  padding-inline: 0;
 }
 /*
  * 20px, not the app-wide 16px default: promoted to the first thing on the

@@ -611,6 +611,15 @@ type Action =
   | { type: 'removeTemplate'; id: string }
   | { type: 'log'; entry: LogEntry }
   | { type: 'clearLogs' }
+  /**
+   * One row off the activity log.
+   *
+   * `clearLogs` was the only way to remove anything, which is all-or-nothing on
+   * the single screen that answers "did my reminders actually go out" — so
+   * clearing one row you had dealt with meant destroying the evidence for every
+   * other. This is the per-row half of the same control.
+   */
+  | { type: 'removeLog'; id: string }
   | { type: 'rebaseAttachments'; from: string; to: string }
   // `pendingSeen` is only meaningful alongside `origin: 'sync'` — it is the
   // `\Seen` pushes still unconfirmed when the result landed (see
@@ -1020,6 +1029,18 @@ export function reducer(state: AppState, action: Action): AppState {
 
     case 'clearLogs':
       return { ...state, logs: [] }
+
+    /**
+     * Identity-checked rather than assumed: an id that is no longer present —
+     * a row the retention sweep already dropped, or a second press of a button
+     * whose row has re-rendered — returns the *same* state object rather than a
+     * new one, so React bails out of the re-render instead of reconciling the
+     * whole log for nothing.
+     */
+    case 'removeLog': {
+      const logs = state.logs.filter((entry) => entry.id !== action.id)
+      return logs.length === state.logs.length ? state : { ...state, logs }
+    }
 
     /**
      * The data folder moved, so every snapshot path saved inside a job now

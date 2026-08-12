@@ -28,6 +28,7 @@ import {
   IconUsers,
 } from './icons'
 import { useApp } from '../state/AppState'
+import { pushBackHandler } from '../core/backStack'
 import { useI18n, type TranslationKey } from '../i18n'
 
 export type PaletteTarget =
@@ -227,6 +228,31 @@ export function CommandPalette({
   useEffect(() => {
     listRef.current?.children[cursor]?.scrollIntoView({ block: 'nearest' })
   }, [cursor])
+
+  /**
+   * Android's back gesture shuts the palette rather than the application.
+   *
+   * Registered here rather than inherited, because this is the one full-screen
+   * surface in the app that is *not* a `Modal` — it paints its own
+   * `.modal-scrim` (see the render below) and owns its own Escape key, so it
+   * would otherwise be the single overlay a back press closed the whole app
+   * from. On a phone it is also reachable from every screen, via the magnifier
+   * `PageHead` puts in each one, which makes it the overlay most likely to be
+   * open when someone swipes.
+   *
+   * `onClose` is read through a ref for the same reason `Modal` does it: the
+   * prop is `useCallback`-stable at the one call site in `App`, but depending on
+   * it here would tie this registration to that staying true.
+   */
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
+  useEffect(() => {
+    if (!open) return
+    return pushBackHandler(() => {
+      onCloseRef.current()
+      return true
+    })
+  }, [open])
 
   if (!open) return null
 

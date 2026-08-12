@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import App from './App'
 import { detectPlatform } from './core/platform/bridge'
+import { installBackBridge } from './core/backStack'
 import { installKeyboardInset } from './core/platform/keyboardInset'
 import {
   MOBILE_SHELL_ATTR,
@@ -54,6 +55,18 @@ document.documentElement.setAttribute(SIZE_CLASS_ATTR, sizeClassFor(window.inner
  * focused field would otherwise paint one frame at the wrong height.
  */
 installKeyboardInset()
+
+/**
+ * And the back gesture, before the first render, for a sharper version of the
+ * same reason: this one is not about a frame painted at the wrong size, it is
+ * about the window in which an edge swipe still closes the application.
+ *
+ * `MainActivity` calls into this the moment the user swipes, which can be
+ * during startup. Publishing it here means the bridge exists as early as any
+ * script of ours runs; the handlers register as their surfaces mount. See
+ * `core/backStack.ts`.
+ */
+installBackBridge()
 
 const container = document.getElementById('root')
 if (!container) throw new Error('#root is missing from index.html')

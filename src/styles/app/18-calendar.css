@@ -252,6 +252,54 @@
   --load-tint: color-mix(in oklab, var(--accent) 34%, transparent);
 }
 
+/* --- the ramp on an engine without color-mix() -----------------------------
+ *
+ * `--load-tint` is a custom property holding `color-mix()`, which is the
+ * failure mode documented at length in `theme.css`'s closing block and in
+ * `21-home-grid.css`: the token stores fine, and `background-image:
+ * linear-gradient(var(--load-tint), var(--load-tint))` then fails at
+ * computed-value time and resolves to `none`.
+ *
+ * This one is not a lost decoration. The ramp is the only thing on the month
+ * grid that says how much mail a day is carrying — five steps, read at a
+ * glance, with a legend beside them — so losing it makes the busiest day of the
+ * month identical to an empty one. The grid keeps drawing, and it quietly stops
+ * answering the question it exists to answer.
+ *
+ * So the steps are kept and only the hue is given up. A neutral grey needs no
+ * colour arithmetic, so it can be written as a literal that any engine parses,
+ * and it works in both themes for the same reason a scrim does: at these
+ * alphas it darkens a light surface and lightens a dark one, which is the
+ * direction "more" should move in either case.
+ *
+ * The alphas are the same five, so the ramp keeps its spacing. Contrast is
+ * safer than the accent version it replaces rather than worse: at step 5 the
+ * ground is ~#d5d5d5 on a light theme against the `--text-3` the ramp was
+ * checked with, which is above the 3.0:1 that block records for the accent.
+ * -------------------------------------------------------------------------- */
+@supports not (color: color-mix(in srgb, red 50%, blue)) {
+  .monthgrid__day[data-load='1'],
+  .swatch--load[data-load='1'] {
+    --load-tint: rgba(128, 128, 128, 0.07) !important;
+  }
+  .monthgrid__day[data-load='2'],
+  .swatch--load[data-load='2'] {
+    --load-tint: rgba(128, 128, 128, 0.13) !important;
+  }
+  .monthgrid__day[data-load='3'],
+  .swatch--load[data-load='3'] {
+    --load-tint: rgba(128, 128, 128, 0.2) !important;
+  }
+  .monthgrid__day[data-load='4'],
+  .swatch--load[data-load='4'] {
+    --load-tint: rgba(128, 128, 128, 0.27) !important;
+  }
+  .monthgrid__day[data-load='5'],
+  .swatch--load[data-load='5'] {
+    --load-tint: rgba(128, 128, 128, 0.34) !important;
+  }
+}
+
 /* --- the day panel -------------------------------------------------------- */
 
 .dayview__actions {
@@ -800,6 +848,11 @@
  * marker that is only on screen when a window is actually moving the send.
  */
 .whenbar__window {
+  /* Plain first, mixed second — an engine without `color-mix()` drops the
+     second at parse time and keeps this. `--accent` rather than `--text-1`
+     because the mix is 78% accent: this line marks a send the delivery window
+     has moved, and reading as accent-coloured is the point of it. */
+  color: var(--accent);
   color: color-mix(in srgb, var(--accent) 78%, var(--text-1));
   font-size: var(--text-base);
   line-height: var(--leading-tight);

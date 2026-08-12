@@ -8,6 +8,7 @@ import android.util.Log;
 import android.view.View;
 import android.webkit.WebView;
 
+import androidx.activity.OnBackPressedCallback;
 import androidx.core.content.IntentCompat;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
@@ -129,7 +130,120 @@ public class MainActivity extends BridgeActivity {
         recordPendingShare(getIntent());
         recordPendingShortcut(getIntent());
         applyWindowInsets();
+        installBackGesture();
     }
+
+    // -----------------------------------------------------------------------
+    // The back gesture
+    // -----------------------------------------------------------------------
+
+    /**
+     * Ask the page what a back press means before assuming it means "quit".
+     *
+     * ## What it did before
+     *
+     * Nothing claimed the gesture at all. Capacitor 8's {@code BridgeActivity}
+     * registers no back callback of its own — there is no {@code onBackPressed}
+     * anywhere in {@code @capacitor/android} — and this project deliberately
+     * does not depend on {@code @capacitor/app}, which is where the
+     * {@code backButton} event other Capacitor apps subscribe to comes from. So
+     * an edge swipe fell through to the platform default for a root activity,
+     * which is to finish it: one stray thumb on the edge of the screen closed
+     * the application from any screen, over any dialog, mid-message.
+     *
+     * ## The contract
+     *
+     * {@code window.__aevistleBack()} (see {@code src/core/backStack.ts}) is
+     * offered the press and answers whether it took it. {@code true} means the
+     * page closed a dialog or stepped back a screen and this activity does
+     * nothing; {@code false} means the user is on Home with nothing open, and
+     * only then is the app allowed to close.
+     *
+     * ## Why an OnBackPressedCallback and not an onBackPressed() override
+     *
+     * {@code targetSdkVersion} is 36. Predictive back is on by default for
+     * apps targeting 33+ and the manifest opt-out stops being honoured at 36,
+     * which means the deprecated {@code onBackPressed()} override is not
+     * reliably called at all on a current device. The dispatcher is the API
+     * that is called in both worlds, and it is what makes the back *animation*
+     * on Android 14+ show the right thing behind the gesture.
+     *
+     * ## Why the decision is asynchronous, and what happens if it never arrives
+     *
+     * {@code evaluateJavascript} hops to the WebView thread and answers through
+     * a callback, so by the time the answer comes back the gesture is over.
+     * That is fine — nothing was going to animate either way — but it does mean
+     * this has to be total about failure: a null result (a WebView that is
+     * tearing down), a bridge that has not loaded yet, an exception out of the
+     * call itself. Every one of those paths exits, which is the behaviour the
+     * app had before this method existed, so a broken bridge degrades to the
+     * old bug rather than to an app that cannot be closed at all.
+     */
+    private void installBackGesture() {
+        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
+            @Override
+            public void handleOnBackPressed() {
+                askPageToGoBack(this);
+            }
+        });
+    }
+
+    /**
+     * Put the question to the page, and close the app if the answer is no.
+     *
+     * The JavaScript is written so that *every* failure mode inside the page
+     * produces {@code false} rather than an exception crossing the bridge: an
+     * absent bridge (startup), a handler that threw (already caught on the
+     * other side, but belt and braces), a non-boolean return. `String(...)`
+     * rather than trusting the value's own serialisation, so the comparison
+     * below is against a shape this expression guarantees.
+     */
+    private void askPageToGoBack(OnBackPressedCallback callback) {
+        com.getcapacitor.Bridge bridge = getBridge();
+        final WebView webView = bridge == null ? null : bridge.getWebView();
+        if (webView == null) {
+            leave(callback);
+            return;
+        }
+        final String js =
+                "(function(){try{"
+                        + "return String(!!(window.__aevistleBack && window.__aevistleBack()))"
+                        + "}catch(e){return 'false'}})()";
+        try {
+            webView.evaluateJavascript(js, value -> {
+                // The value arrives JSON-encoded, so the string `true` is the
+                // five characters "true" *including* the quotes.
+                boolean handled = value != null && value.contains("true");
+                if (!handled) leave(callback);
+            });
+        } catch (Exception e) {
+            Log.w(TAG, "could not ask the page about the back gesture", e);
+            leave(callback);
+        }
+    }
+
+    /**
+     * Let the press through to the platform, which closes the app.
+     *
+     * Disabling this activity's callback and re-dispatching, rather than
+     * calling {@code finish()} directly: that hands the press back to whatever
+     * the platform would have done with it, which is the right thing on a task
+     * this activity may not be the only member of, and it keeps the exit
+     * animation the system's rather than an abrupt teardown.
+     *
+     * The callback is left disabled. It is only ever reached when the app is
+     * on its way out, and {@code onResume} re-arms it for the case where the
+     * exit does not happen — a task the system chose to keep, or a launch
+     * straight back into a still-live activity.
+     */
+    private void leave(OnBackPressedCallback callback) {
+        callback.setEnabled(false);
+        backCallback = callback;
+        getOnBackPressedDispatcher().onBackPressed();
+    }
+
+    /** The callback {@link #leave} disarmed, so {@code onResume} can re-arm it. */
+    private OnBackPressedCallback backCallback = null;
 
     /**
      * Paint the window and the WebView the app's own background before either
@@ -502,6 +616,14 @@ public class MainActivity extends BridgeActivity {
     public void onResume() {
         super.onResume();
         refreshWindowInsets();
+        // Re-arm the back gesture if an exit was started and did not happen —
+        // see {@link #leave}. Without this the *second* back press on a task
+        // the system kept alive would fall through to the platform default,
+        // which is the bug this whole section exists to end.
+        if (backCallback != null) {
+            backCallback.setEnabled(true);
+            backCallback = null;
+        }
     }
 
     @Override

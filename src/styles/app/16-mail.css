@@ -769,6 +769,38 @@
   .swipe .job > .job__actions {
     display: none;
   }
+  /*
+   * And the corner delete goes with them, on this band and on the mail list
+   * only.
+   *
+   * It is added to `.job`, `.log` and the mail rows alike (see the corner-delete
+   * block in `06-lists.css`) because 所有提醒内容的右上角要有删除键 — and
+   * everywhere except here that is free. Here it is not: the gutter it reserves
+   * is 38px off a line the breakdown at the top of this block spent two rounds
+   * winning back, and `check:layout` measured the result at **236px of subject
+   * against a 256px floor**. That floor is not a style preference; it is the
+   * nine-rows-to-a-screen promise the subject clamp and the 8px padding above
+   * were both shortened to keep.
+   *
+   * So this band keeps the arrangement it already had, which is not an absence
+   * of the control but a different placement of it: the trailing swipe removes
+   * the message, and the opened message carries an explicit delete in its header
+   * — which is now first-class, since that header is exactly what was rebuilt to
+   * spread its five icons across the top line. A phone therefore has two visible
+   * routes to it and one gesture; what it does not have is a 38px button on
+   * every row of the longest list in the app.
+   *
+   * Scoped through `.swipe`, so it is the *mail* list that opts out and not
+   * every row: `.job` on the Scheduled screen and `.log` on Activity are wider
+   * per line, carry no clamped subject, and keep their corner delete at this
+   * width. `check:layout` measures all three.
+   */
+  .swipe .job > .rowdel {
+    display: none;
+  }
+  .swipe .job {
+    padding-inline-end: var(--sp-3);
+  }
   /* The avatar is new furniture, and this band has none to spare — the 150px
      breakdown above is why the checkbox and actions left. A 28px circle plus
      its gap would put the subject right back under the 256px floor the 360px

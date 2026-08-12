@@ -416,6 +416,25 @@ textarea.mono {
   padding: var(--sp-3) var(--sp-4);
   border-bottom: 1px solid var(--border-subtle);
 }
+/*
+ * A `.log` row that carries a corner delete, and only those.
+ *
+ * `.log` is the app's general row shape, not the activity log's private one —
+ * ten places render it, including the paired-device list, the sync-conflict
+ * list, a contacts row and five different rows on the reliability screen. Only
+ * the activity log has anything to delete. Putting the gutter on `.log` itself
+ * gave the other nine a 38px empty margin on the right and pushed their own
+ * `.log__actions` in off the edge for a button that was never there.
+ *
+ * So the row opts in. `position: relative` rides along on the modifier rather
+ * than on `.log`, because it exists solely to be the containing block for the
+ * `.rowdel` inside — see the corner-delete block in `06-lists.css`, which
+ * defines `--rowdel-w` and the button itself for both row types.
+ */
+.log--deletable {
+  position: relative;
+  padding-inline-end: calc(var(--sp-4) + var(--rowdel-w));
+}
 .log:last-child {
   border-bottom: 0;
 }

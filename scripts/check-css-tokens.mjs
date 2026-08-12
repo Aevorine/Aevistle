@@ -26,6 +26,7 @@
  * `--selftest` injects both faults and requires this to go red.
  */
 import { allStylesheets, readStylesheets } from './lib/stylesheets.mjs'
+import { modernFeatureIn } from './lib/modern-css.mjs'
 
 const selftest = process.argv.includes('--selftest')
 /* Computed, not spelled. `app.css` was split into `app/*.css` this round and
@@ -77,6 +78,23 @@ if (selftest) {
             '@media (min-width: 2px) {',
             '  .selftest-media { top: 3px; }',
             '}',
+            /* The progressive-enhancement control: a plain value followed by one
+               that needs Chromium 111. That is the fallback idiom this app now
+               depends on (see `lib/modern-css.mjs`) and it must NOT be reported,
+               or every such pair in the stylesheets would have to be baselined
+               by hand. */
+            '.selftest-fallback {',
+            '  background: red;',
+            '  background: color-mix(in srgb, red 50%, blue);',
+            '}',
+            /* And the counter-control, so that exemption cannot be used to hide
+               a real duplicate: two declarations that BOTH need Chromium 111 are
+               not a fallback pair — the first buys the old engine nothing — and
+               this one must still be caught. */
+            '.selftest-bothmodern {',
+            '  background: color-mix(in srgb, red 50%, blue);',
+            '  background: color-mix(in srgb, red 90%, blue);',
+            '}',
             '',
           ].join('\n'),
         }
@@ -100,6 +118,17 @@ for (const { text } of sources) {
 }
 
 const problems = []
+
+/**
+ * Competing declarations this scan accepted as the fallback idiom.
+ *
+ * Reported, not silenced — the same discipline `BASELINE` follows below and for
+ * the same reason: a rule that quietly forgives a shape is a rule nobody can
+ * audit, and this one forgives the exact shape (one property, twice, one rule)
+ * that the scan exists to catch. Printing the list is what lets a reader see
+ * that it forgave four pairs and not four hundred.
+ */
+const enhancements = []
 
 for (const { file, text } of sources) {
   const clean = stripComments(text)
@@ -252,8 +281,13 @@ function scanRules(text) {
         const decl = /^\s*([a-zA-Z-]+)\s*:/.exec(buf)
         if (decl && !decl[1].startsWith('--')) {
           const frame = stack[stack.length - 1]
+          // The value too, so the collision scan below can tell a progressive
+          // enhancement pair from a duplicated rule. Everything after the first
+          // colon; a value containing its own colon (a `url()` with a scheme)
+          // keeps it, which is what `indexOf` rather than a split gives.
+          const value = buf.slice(buf.indexOf(':') + 1).trim()
           for (const sel of frame.selectors) {
-            out.push({ selector: sel, property: decl[1], context: frame.context, line })
+            out.push({ selector: sel, property: decl[1], context: frame.context, line, value })
           }
         }
       }
@@ -303,16 +337,55 @@ const BASELINE = new Map([
   ],
 ])
 
+/**
+ * Is this pair the standard fallback idiom rather than a duplicated rule?
+ *
+ * ```css
+ * background: var(--surface-1);                              /* every engine  *|
+ * background: color-mix(in srgb, var(--accent) 20%, …);       /* Chromium 111+ *|
+ * ```
+ *
+ * Two declarations of one property in one rule, and that is not an accident —
+ * it is the only way to serve an engine that cannot parse the second one. The
+ * old engine drops the modern declaration at parse time and keeps the plain
+ * value above it; a current engine applies both and the later wins. This app
+ * ships to `minSdkVersion 24`, so the idiom is load-bearing here rather than
+ * decorative; see `lib/modern-css.mjs`.
+ *
+ * The test is deliberately narrow, because the whole reason this scan exists is
+ * that a real duplicate looked innocent:
+ *
+ *   - exactly two declarations. Three is not a fallback ladder anyone in this
+ *     codebase needs, and is much more likely to be a mistake.
+ *   - the *last* one needs modern CSS. That is what makes it the enhancement.
+ *   - none of the earlier ones do. If the plain fallback also needs Chromium
+ *     111 it is not a fallback, and the pair buys nothing on the device it was
+ *     written for — which is the failure this would otherwise wave through.
+ *
+ * So a genuinely duplicated `background` is still reported, and a genuinely
+ * duplicated `color-mix()` background is too.
+ */
+function isProgressiveEnhancement(decls) {
+  if (decls.length !== 2) return false
+  const [fallback, enhanced] = decls
+  return Boolean(modernFeatureIn(enhanced.value)) && !modernFeatureIn(fallback.value)
+}
+
 for (const { file, text } of sources) {
   const byKey = new Map()
   for (const d of scanRules(stripComments(text))) {
     const key = `${d.selector}|${d.property}|${d.context}`
-    const at = byKey.get(key) ?? { lines: [], d }
+    const at = byKey.get(key) ?? { lines: [], d, decls: [] }
     at.lines.push(d.line)
+    at.decls.push(d)
     byKey.set(key, at)
   }
-  for (const [, { lines, d }] of byKey) {
+  for (const [, { lines, d, decls }] of byKey) {
     if (lines.length < 2) continue
+    if (isProgressiveEnhancement(decls)) {
+      enhancements.push(`${file}:${lines[0]}  ${d.selector} { ${d.property} }`)
+      continue
+    }
     const where = d.context ? ` inside ${d.context}` : ''
     problems.push({
       kind: 'competing-declaration',
@@ -362,14 +435,24 @@ if (selftest) {
     'plain duplicate': saw('.selftest-dup sets color'),
     'compound/grouped selector': saw('.selftest-outer .selftest-inner sets padding'),
     'collision inside @media': saw('.selftest-media sets top'),
+    'duplicate where both values are modern': saw('.selftest-bothmodern sets background'),
   }
   // The control: `.selftest-media` also appears under a *second* media query,
   // and that pair must NOT be reported. Counted rather than merely absent,
   // because "one report" and "two reports" are the difference between the
   // context key working and it being ignored.
   const mediaHits = problems.filter((p) => p.detail.startsWith('.selftest-media sets top')).length
+  /* The second control, checked in both directions. The fallback pair must not
+     be reported as a collision — and it must have been *forgiven as an
+     enhancement* rather than merely missed, which is why `enhancements` is
+     asserted too: testing only its absence from `problems` would also pass if
+     the whole collision scan had silently stopped running. */
+  const fallbackReported = problems.some((p) =>
+    p.detail.startsWith('.selftest-fallback sets background'),
+  )
+  const fallbackForgiven = enhancements.some((e) => e.includes('.selftest-fallback'))
   const failed = Object.entries(checks).filter(([, ok]) => !ok)
-  if (failed.length > 0 || mediaHits !== 1) {
+  if (failed.length > 0 || mediaHits !== 1 || fallbackReported || !fallbackForgiven) {
     console.log('\n  SELFTEST FAILED:')
     for (const [name, ok] of Object.entries(checks)) console.log(`    ${ok ? 'caught' : 'MISSED'}  ${name}`)
     if (mediaHits !== 1) {
@@ -378,9 +461,22 @@ if (selftest) {
           (mediaHits > 1 ? ' (two different @media blocks were compared as one context)' : ''),
       )
     }
+    if (fallbackReported) {
+      console.log(
+        '    MISSED  .selftest-fallback was reported as a collision — the fallback idiom is not recognised',
+      )
+    }
+    if (!fallbackForgiven) {
+      console.log(
+        '    MISSED  .selftest-fallback was not recorded as an enhancement — the collision scan may not have run',
+      )
+    }
     process.exit(1)
   }
-  console.log('\n  Selftest OK — all four injected faults were caught, and the media-context control was not.')
+  console.log(
+    '\n  Selftest OK — all five injected faults were caught, and both controls held\n' +
+      '  (a different @media context is not a collision; plain-then-modern is a fallback).',
+  )
   process.exit(0)
 }
 
@@ -392,6 +488,14 @@ if (stale.length > 0) {
       '  scripts/check-css-tokens.mjs and this goes green. A baseline that is never pruned\n' +
       '  is a list of defects the gate has agreed to stop noticing.',
   )
+}
+
+if (enhancements.length > 0) {
+  console.log(
+    `\n  ${enhancements.length} progressive-enhancement pair(s) accepted ` +
+      '— a plain value, then one needing newer CSS (see lib/modern-css.mjs):',
+  )
+  for (const e of enhancements) console.log(`    fallback  ${e}`)
 }
 
 if (live.length > 0 || stale.length > 0) process.exit(1)

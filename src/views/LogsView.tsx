@@ -2,6 +2,7 @@ import { useDeferredValue, useMemo, useState } from 'react'
 import {
   Button,
   EmptyState,
+  IconButton,
   PageHead,
   Segmented,
   StatusChip,
@@ -243,6 +244,26 @@ export function LogsView({
     dispatch({ type: 'clearLogs' })
   }
 
+  /**
+   * One row off the log — the corner delete on each entry.
+   *
+   * No confirmation dialog, deliberately, where `clear` above has one. The
+   * asymmetry is the point: clearing the log destroys every record at once and
+   * is worth interrupting for, while a single row is the routine act, and a
+   * dialog on the routine act is what trains the reflex that clicks through the
+   * one that mattered — the argument `useConfirm`'s
+   * `requireTypedConfirmation` doc makes about exactly this list.
+   *
+   * `pushUndo` instead, which is the same safety net `clear` uses and a better
+   * one for a single row: it restores the entry rather than asking the user to
+   * predict whether they wanted it. The undo entry replays the `log` action that
+   * created it, so the row comes back with its original id, level and timestamp.
+   */
+  const removeEntry = (entry: LogEntry) => {
+    pushUndo(t('logs.title'), [{ type: 'log' as const, entry }])
+    dispatch({ type: 'removeLog', id: entry.id })
+  }
+
   const show = (text: string) => (state.settings.redactLogs ? redact(text) : text)
 
   /**
@@ -412,8 +433,12 @@ export function LogsView({
           >
             {(entry) => {
               const receipt = receipts.get(entry.id)
+              // `log--deletable` opts this row into the corner-delete gutter.
+              // `.log` is the app's general row shape — ten places render it,
+              // and only this one has anything to delete — so the reservation is
+              // per-row rather than on the class. See `09-misc.css`.
               return (
-              <div className="log" data-level={entry.level}>
+              <div className="log log--deletable" data-level={entry.level}>
                 <span className="log__dot" />
                 <div className="log__body">
                   <div className="log__title">
@@ -441,6 +466,24 @@ export function LogsView({
                   ) : null}
                 </div>
                 <div className="log__time">{formatDateTime(entry.at, { timeStyle: 'short' })}</div>
+
+                {/*
+                  Delete, in the row's top-right corner — the same `.rowdel` the
+                  reminder rows and the mail list use, so the corner means one
+                  thing across all three (see `06-lists.css`).
+
+                  This screen had no per-row delete at all before: the only way
+                  to remove anything was 清空, which destroys the evidence for
+                  every *other* send in order to tidy away one line you had
+                  already dealt with.
+                */}
+                <IconButton
+                  className="rowdel"
+                  label={t('common.delete')}
+                  onClick={() => removeEntry(entry)}
+                >
+                  <IconTrash size={16} />
+                </IconButton>
               </div>
               )
             }}

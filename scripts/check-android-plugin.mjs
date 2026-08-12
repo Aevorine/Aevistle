@@ -108,6 +108,71 @@ function stripComments(text, backtick = false) {
 let tsSource = stripComments(readFileSync(path.join(ROOT, TS_FILE), 'utf8'), true)
 const javaSource = stripComments(readFileSync(path.join(ROOT, JAVA_FILE), 'utf8'))
 
+/* ---------------------------------------------------------------------------
+   The other JS/Java seam: the back gesture
+
+   Everything above this line is about the plugin bridge, where a name that does
+   not match produces a rejected call. The back gesture does not go through the
+   plugin at all — `MainActivity` reaches the page with a raw
+   `evaluateJavascript` on `window.__aevistleBack`, the same way it already
+   publishes the keyboard inset — so it is a second contract between the same
+   two languages, with no type checker and no bridge in between.
+
+   Its failure mode is worse than the plugin's, and silent. If either side is
+   renamed, the expression evaluates to `undefined`, the `!!` makes that
+   `false`, and `MainActivity` concludes the page did not want the press — so it
+   closes the application. That is precisely the bug the gesture work was done
+   to fix, restored, with no error anywhere and nothing on screen to suggest a
+   name had drifted.
+
+   Checked as a pair of literals rather than by parsing: `backStack.ts` exports
+   the name as a constant for exactly this, and the Java quotes it inside a
+   JavaScript string that no Java tooling will ever look inside.
+   --------------------------------------------------------------------------- */
+const BACK_TS_FILE = 'src/core/backStack.ts'
+/* `MainActivity`, not `AevistleNativePlugin` — the gesture is handled by the
+   activity's `OnBackPressedCallback` and never touches the plugin, which is the
+   whole reason it needs its own assertion here. */
+const BACK_JAVA_FILE = 'android/app/src/main/java/dev/aevistle/app/MainActivity.java'
+const backTs = readFileSync(path.join(ROOT, BACK_TS_FILE), 'utf8')
+const backJava = readFileSync(path.join(ROOT, BACK_JAVA_FILE), 'utf8')
+const backName = /BACK_BRIDGE_NAME\s*=\s*'([^']+)'/.exec(backTs)
+checked++
+if (!backName) {
+  failures.push(
+    `${BACK_TS_FILE} no longer exports BACK_BRIDGE_NAME — the back gesture's ` +
+      'JS/Java contract cannot be checked, and a mismatch closes the app silently',
+  )
+} else {
+  const name = backName[1]
+  checked++
+  // The web side must actually publish it, not merely name it.
+  if (!new RegExp(`window\\[BACK_BRIDGE_NAME\\]|window\\.${name}\\s*=`).test(backTs)) {
+    failures.push(`${BACK_TS_FILE} declares '${name}' but never assigns it onto window`)
+  }
+  checked++
+  /* `\b`, not `includes`. A substring test passes for any *extension* of the
+     name — `window.__aevistleBackX` contains `window.__aevistleBack` — so
+     renaming the Java side by appending a character would have gone unnoticed,
+     which is exactly the drift this is here to catch. Verified by breaking it
+     in both directions. */
+  if (!new RegExp(`window\\.${name}\\b`).test(backJava)) {
+    failures.push(
+      `${BACK_JAVA_FILE} does not call window.${name}() — the back gesture would fall ` +
+        'through to the platform default, which closes the app from every screen',
+    )
+  }
+  checked++
+  // Publishing and calling are not enough: something has to *register* the
+  // callback, or the dispatcher never routes the press here in the first place.
+  if (!/addCallback\s*\(/.test(backJava) || !backJava.includes('OnBackPressedCallback')) {
+    failures.push(
+      `${BACK_JAVA_FILE} no longer registers an OnBackPressedCallback — the page would ` +
+        'never be asked, and the platform default closes the app',
+    )
+  }
+}
+
 if (selftest) {
   tsSource = tsSource.replace(
     new RegExp(`(interface\\s+${ROOT_INTERFACE}\\b[^{]*\\{)`),

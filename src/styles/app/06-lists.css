@@ -12,6 +12,9 @@
   display: flex;
   align-items: center;
   gap: var(--sp-4);
+  /* The containing block for `.rowdel` — see the corner-delete block below.
+     `relative` with no offsets changes nothing about where this row paints. */
+  position: relative;
   /* Reads `--row-pad-y` like every other row-shaped thing, which it had never
      done: it was a flat `--sp-4` on both axes, so the list-density control in
      Settings moved `.log`, `.dayrow` and `.bin-row` and left the mail list —
@@ -19,6 +22,10 @@
      unchanged. At the default that is 12px instead of 16px, so the change also
      gives four pixels a row back to the rows themselves. */
   padding: var(--row-pad-y) var(--sp-4);
+  /* The gutter the corner delete sits in. Written as a second declaration
+     rather than folded into the shorthand above so the density comment there
+     still describes exactly what it set. */
+  padding-inline-end: calc(var(--sp-4) + var(--rowdel-w));
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   background: var(--surface-1);
@@ -115,4 +122,70 @@
   flex: none;
   display: flex;
   gap: var(--sp-1);
+}
+
+/* ==========================================================================
+   The corner delete
+   ==========================================================================
+
+   要求…所有提醒内容的右上角要有删除键.
+
+   One class, one corner, on every kind of row that can be deleted — scheduled
+   reminders, activity-log rows and mail. Before this, "delete this one" was in
+   a different place on each of them: fifth of five icons on a reminder row
+   (bottom-right once the row wrapped on a phone), nowhere at all on a log row,
+   and behind a swipe on a phone's mail row. A control whose position has to be
+   re-learned per screen is a control nobody builds muscle memory for, which is
+   the same argument `StatusChip` and `PageHead` were written from.
+
+   ## Absolute, and what pays for the space
+
+   `position: absolute` against the row, so it is genuinely in the corner rather
+   than "last in a flex row that happens to end there" — that is what made it
+   move when the row wrapped. The row reserves the width with its own
+   `padding-inline-end` (see `--rowdel-w` below), so nothing slides underneath:
+   an absolutely-positioned element is out of flow, and without the reservation
+   a long subject would run under the button and be clipped by it rather than
+   ellipsised before it.
+
+   Kept out of the row's flex flow also means it does not participate in the
+   wrap, so it stays in the top-right corner at every width — 360px phone,
+   two-pane tablet and desktop alike — without a media query of its own.
+
+   ## Why it is `--danger` only on hover
+
+   At rest it is `--text-3`, the same weight as the other row furniture. A
+   permanently red button on every row of a fifty-row list reads as fifty
+   errors. The colour arrives on hover and focus, at the point the user is
+   actually about to press it. */
+
+/* The reserved gutter, named once so the button's width and the row's padding
+   cannot drift apart. `--ctl-sm` is `.icon-btn`'s own size, so the gutter is
+   exactly the button and no more. */
+.job,
+.log--deletable {
+  --rowdel-w: var(--ctl-sm);
+}
+
+.rowdel {
+  position: absolute;
+  top: 0;
+  inset-inline-end: 0;
+  /* Above the row's own content, so the hover target is not stolen by a
+     sibling that happens to paint later. */
+  z-index: 1;
+  color: var(--text-3);
+}
+.rowdel:hover,
+.rowdel:focus-visible {
+  color: var(--danger);
+  /* Mixed from `--danger` rather than `--surface-hover`, so the hover state
+     says which *kind* of action this is before it is pressed. Plain fallback
+     first for engines without `color-mix()` — see theme.css's closing block. */
+  background: var(--surface-hover);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+.rowdel:disabled {
+  opacity: 0.4;
+  cursor: default;
 }

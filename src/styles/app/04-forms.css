@@ -782,7 +782,16 @@
      Mixing the plate against `--surface-1` stops the tint reaching it at all,
      and mixing the digits toward `--text-1` carries the rest — 4.6:1 at the
      worst accent-and-style pairing in the file, against 2.3 before. */
+  /* Two-declaration fallbacks, and here they genuinely work: these are ordinary
+     declarations, so an engine without `color-mix()` drops them at parse time
+     and the plain value above each one stands. (That is *not* true of a custom
+     property holding a mix — see the closing block of theme.css for why those
+     need `@supports` instead.) `--surface-1` and `--text-1` are what the mixes
+     resolve towards, so the fallback is the same plate with no accent in it
+     rather than a different colour. */
+  background: var(--surface-1);
   background: color-mix(in srgb, var(--accent) 20%, var(--surface-1));
+  color: var(--text-1);
   color: color-mix(in srgb, var(--accent) 55%, var(--text-1));
   cursor: pointer;
   transition: transform var(--dur-fast) var(--ease);

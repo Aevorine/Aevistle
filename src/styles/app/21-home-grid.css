@@ -167,6 +167,141 @@
   --hero-bg: color-mix(in srgb, var(--accent) 90%, black);
 }
 
+/* --- the band on an engine without color-mix() -----------------------------
+ *
+ * ## The bug this exists because of
+ *
+ * "晚上好…的背景是蓝色，目前字体与背景多是白色，看不清."
+ *
+ * That report reads as a contradiction — is the background blue or is it white?
+ * — and it is not one. It is a precise description of this file failing on two
+ * of its three time-of-day states and working on the third.
+ *
+ * `color-mix()` is Chromium 111. This app ships against `minSdkVersion 24`, and
+ * the device this was reported from has already been shown not to have `:has()`
+ * (Chromium 105) — see `:has()`'s note in `14-growth.css`. An engine below 105
+ * is necessarily below 111, so none of these mixes resolve there.
+ *
+ * What that does is much worse than losing a tint, and the mechanism is the one
+ * thing about custom properties that is genuinely surprising:
+ *
+ *   1. `--hero-bg: color-mix(…)` **succeeds**. A custom property accepts any
+ *      syntactically valid token sequence, so the old engine stores the text
+ *      happily. Nothing is dropped and nothing is logged.
+ *   2. `background: var(--hero-bg)` then substitutes it, and *that* is where it
+ *      fails — as "invalid at computed-value time".
+ *   3. IACVT does not fall back to an earlier declaration the way an ordinary
+ *      parse error does. The property becomes `unset`, and `background-color`
+ *      is not inherited, so it becomes its initial value: **transparent**.
+ *
+ * So the accent band stops painting entirely, while `color: var(--accent-text)`
+ * — a plain colour, still perfectly valid — keeps painting the text white. The
+ * greeting and the three figures land as white ink on the app's own `--bg`,
+ * which is `#eceef1`. That measures 1.08:1. It is not dim; it is invisible.
+ *
+ * And only in the morning and the evening. `data-tod='day'` never overrides
+ * `--hero-bg`, so it keeps `var(--accent)` from the base rule and paints the
+ * plain blue band the report also describes. Hence both halves of the sentence:
+ * blue at midday, white-on-white at 07:00 and after dark.
+ *
+ * ## Why `@supports not` and not a fallback declaration
+ *
+ * The usual two-declaration fallback — a plain value, then the fancy one — is
+ * exactly what does *not* work here, and it is worth being explicit about,
+ * because it is the fix anyone would reach for first. That trick relies on the
+ * second declaration being **dropped at parse time**; a custom property's is
+ * not dropped, it is stored, so the plain value is overwritten and lost before
+ * the failure ever happens. The failure is downstream, at the consumer.
+ *
+ * `@supports` is the only mechanism that can decide this, because it is the
+ * only one that runs before the declaration is stored. Old engines evaluate the
+ * test as false, `not` makes it true, and they take the plain values below;
+ * modern engines skip the block entirely and keep the mixes above.
+ *
+ * `!important` inside it is deliberate and is not a specificity workaround for
+ * this file — `.homehero[data-tod='night']` is (0,2,0) and the selectors below
+ * would otherwise lose to it. It costs nothing anywhere else, because these
+ * declarations only exist at all on an engine where every value they are
+ * overriding is already broken.
+ *
+ * What is given up on those engines: the 6% morning lift and the 10% evening
+ * dim. The band is the flat accent at every hour instead, which is what this
+ * screen looked like before the tint was added and is measured — see the ratios
+ * in the block above — at 3.74:1 in its worst accent/theme pair. Legible, which
+ * the tint was never worth more than.
+ * -------------------------------------------------------------------------- */
+@supports not (color: color-mix(in srgb, red 50%, blue)) {
+  .homehero[data-tod='morning'],
+  .homehero[data-tod='night'] {
+    --hero-bg: var(--accent) !important;
+  }
+  /* The dimmed ink for the sub-line and the stat captions. `--accent-text` flat
+     is the one foreground guaranteed to read on every accent in both themes —
+     the whole argument this file's header makes — so losing the 88% mix costs
+     a shade of hierarchy and no legibility at all. */
+  .homehero {
+    --hero-ink: var(--accent-text) !important;
+  }
+
+  /*
+   * The strip's own overlays, which fail differently and so are fixed
+   * separately.
+   *
+   * `.homestats`' 13% ground, `.homestat`'s 16% divider and the 15% alert
+   * weight are ordinary declarations rather than custom properties, so they are
+   * dropped at *parse* time — the honest failure, not the IACVT one above. That
+   * costs only the overlay: the figures stay on the accent band and stay
+   * readable (measured at 4.67:1 white on the evening blue). But losing all
+   * three at once is what turns 三张卡片 into one flat block of colour, which is
+   * the visible half of this screen's report and worth having back.
+   *
+   * A veil rather than three literal colours: `--accent-text` is `#ffffff` on
+   * every light theme and a near-black on every dark one — those are the only
+   * two values it takes across all 33 definitions in theme.css — so the hue
+   * decision is made once and the three alphas are read off it. `rgba()` with a
+   * substituted `var()` is Chromium 49, comfortably below anything that could
+   * lack `color-mix`.
+   */
+  .homehero {
+    --veil: 255, 255, 255;
+  }
+  :root[data-theme='dark'] .homehero {
+    --veil: 0, 0, 0;
+  }
+  /*
+   * `!important` on these three for a different reason than the tokens above,
+   * and it is a cascade fact rather than a specificity one: `.homestats` and
+   * `.homestat` are defined *later in this file* than this block, at the same
+   * specificity, so on any engine that keeps both the later one wins. That is
+   * normally moot — on an old engine the later one is a parse error and
+   * disappears — but it was measured not to be: with the fallback unweighted the
+   * strip still came out `rgba(0, 0, 0, 0)`. `!important` settles it, and costs
+   * nothing anywhere else, because this whole block only exists on an engine
+   * where the values it is overriding cannot resolve at all.
+   */
+  .homestats {
+    background: rgba(var(--veil), 0.13) !important;
+  }
+  .homestat {
+    border-left-color: rgba(var(--veil), 0.16) !important;
+  }
+  .homestat[data-alert] {
+    background: rgba(var(--veil), 0.15) !important;
+  }
+}
+/* The third theme selector: `system`, which sets no `data-theme` at all and is
+   the default. Same block, same values — theme.css resolves dark the same way
+   (`:root:not([data-theme="light"])` under the media query) and this has to
+   follow it or a phone left on "follow the system" in dark mode would get the
+   light veil. */
+@media (prefers-color-scheme: dark) {
+  @supports not (color: color-mix(in srgb, red 50%, blue)) {
+    :root:not([data-theme='light']) .homehero {
+      --veil: 0, 0, 0;
+    }
+  }
+}
+
 /* The heading row: the greeting, and the one trailing action — the same
    arrangement `PageHead` gives every other screen, rebuilt here because
    `PageHead` paints its own background and would cut a white stripe across the

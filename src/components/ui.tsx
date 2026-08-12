@@ -14,6 +14,7 @@ import {
 } from 'react'
 import { IconAlert, IconCheckCircle, IconInfo, IconSearch, IconX } from './icons'
 import { useI18n } from '../i18n'
+import { pushBackHandler } from '../core/backStack'
 import { newId } from '../core/types'
 
 /**
@@ -706,6 +707,35 @@ export function Modal({
       document.removeEventListener('keydown', onKey)
       window.clearTimeout(timer)
     }
+  }, [open])
+
+  /**
+   * Android's back gesture closes this dialog rather than the application.
+   *
+   * The same two-stage rule Escape already follows directly above, and read off
+   * the same two refs so the key and the gesture cannot come to disagree: the
+   * message reader steps out of full screen first and closes second, and that
+   * has to be true whichever way the user asked.
+   *
+   * Registered only while `open`, so the handler stack holds exactly the
+   * surfaces that are actually on screen — see `core/backStack.ts` for why the
+   * newest is asked first. Returning `true` is the dialog claiming the gesture;
+   * with no dialog open the stack falls through to the shell, which returns to
+   * Home, and from Home to the platform, which exits.
+   *
+   * A separate effect from the one above rather than another line inside it:
+   * that one also owns the autofocus timer and is documented at length as
+   * depending on `open` alone, and folding a second concern into it is how the
+   * dependency list would eventually grow the entry that broke it before.
+   */
+  useEffect(() => {
+    if (!open) return
+    return pushBackHandler(() => {
+      const escape = onEscapeRef.current
+      if (escape) escape()
+      else onCloseRef.current()
+      return true
+    })
   }, [open])
 
   if (!open) return null

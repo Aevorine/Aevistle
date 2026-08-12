@@ -713,14 +713,34 @@ export function ScheduleView({
                     >
                       {job.enabled ? <IconPause size={16} /> : <IconPlay size={16} />}
                     </IconButton>
-                    <IconButton
-                      label={t('common.delete')}
-                      onClick={() => remove(job.id)}
-                      disabled={removingIds.has(job.id)}
-                    >
-                      <IconTrash size={16} />
-                    </IconButton>
                   </div>
+
+                  {/*
+                    Delete, in the row's top-right corner — 所有提醒内容的右上角
+                    要有删除键.
+
+                    Moved out of `.job__actions` above rather than added
+                    alongside it. It was the fifth of five icons there, which on
+                    a desktop put it at the row's vertical centre and on a phone
+                    put it on a wrapped second line at the *bottom* right — the
+                    two places the report says it should not be. Leaving a copy
+                    behind would have meant two delete buttons on one row.
+
+                    `.rowdel` is shared with the activity log and the mail list
+                    so the corner means the same thing on all three; see the
+                    corner-delete block in `06-lists.css`. It still goes through
+                    the same `remove()` as before, which is what keeps the
+                    typed-confirmation dialog on the path — this moved a button,
+                    it did not make deleting easier.
+                  */}
+                  <IconButton
+                    className="rowdel"
+                    label={t('common.delete')}
+                    onClick={() => remove(job.id)}
+                    disabled={removingIds.has(job.id)}
+                  >
+                    <IconTrash size={16} />
+                  </IconButton>
                 </div>
               )
             }}

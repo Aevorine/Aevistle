@@ -81,6 +81,7 @@ import { useTwoPane } from '../components/useNarrow'
 import { MessageBodyFrame, textAsHtml, type FrameImages } from '../components/MessageBodyFrame'
 import { useApp } from '../state/AppState'
 import { PULL_THRESHOLD_PX, resolvePull, type PullState } from '../core/platform/gestures'
+import { pushBackHandler } from '../core/backStack'
 import { SearchInput } from '../components/inputs'
 import {
   ImageLightbox,
@@ -2980,10 +2981,42 @@ export function InboxView({
                       <IconButton label={t('inbox.tagAs')} onClick={() => cycleTag(m)}>
                         <IconFlag size={16} />
                       </IconButton>
-                      <IconButton label={t('common.delete')} onClick={() => deleteIdSet(new Set([m.id]))}>
-                        <IconTrash size={16} />
-                      </IconButton>
                     </div>
+
+                    {/*
+                      Delete, in the row's top-right corner — the same `.rowdel`
+                      the reminder rows and the log rows use, so the corner means
+                      one thing everywhere (see `06-lists.css`).
+
+                      Moved out of `.job__actions` beside it, not added
+                      alongside: two delete buttons on one row would be worse
+                      than the one in the wrong place. That also changes *where
+                      it exists*, which is the point on a phone —
+                      `.swipe .job > .job__actions` is `display: none` below
+                      840px (see `16-mail.css`, which took the buttons off the
+                      row to give the subject its width back), so on the device
+                      the report came from there was no visible delete on a mail
+                      row at all. `.rowdel` is not inside that element, so it
+                      survives the rule and the corner is now the one place the
+                      control is, at every width.
+
+                      The swipe still deletes and the opened message still has
+                      its own button. Nothing was taken away; a gesture nobody
+                      can find has stopped being the only way.
+
+                      `stopPropagation` because the row underneath opens the
+                      message — the same reason the tag row above needs it.
+                    */}
+                    <IconButton
+                      className="rowdel"
+                      label={t('common.delete')}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        void deleteIdSet(new Set([m.id]))
+                      }}
+                    >
+                      <IconTrash size={16} />
+                    </IconButton>
                   </div>
                 </SwipeableRow>
                 )
@@ -3002,7 +3035,33 @@ export function InboxView({
         onEscape={handleEscape}
         closeLabel={t('common.close')}
         actions={
-          <div className="btn-row">
+          <div
+            className="btn-row"
+            /*
+              How many icons `.reader__actionsFull` is carrying, handed to the
+              stylesheet so it can share the header row out evenly.
+              要求…这五个图标显示在弹出的页面的最上面一行均匀分布.
+
+              The row is not a flat list — flag and delete are direct children
+              here, find/full-screen (and day/night, which only exists on a dark
+              message) are nested one level down inside `.reader__actionsFull`,
+              and the close button is a sibling of this whole div that `Modal`
+              renders. Even distribution across that shape needs each *container*
+              to claim a share proportional to how many buttons it holds, and CSS
+              cannot count children. So the count is stamped here and the
+              stylesheet does the arithmetic — see `14-growth.css`.
+
+              On this div rather than on `.reader__actionsFull` itself, because
+              custom properties inherit downward: the wrapper reads it from here,
+              and this element needs it too in order to size its own share.
+
+              Flattening the wrapper away would have been the other answer, and
+              is not available: `26-tablet.css` hides `.reader__actionsFull` as a
+              unit in the two-pane band, where three of the five icons fold into
+              the overflow menu instead.
+            */
+            style={{ '--reader-actions': readerIsDark ? 3 : 2 } as React.CSSProperties}
+          >
             {/*
               Tag and delete, on the open message.
 
@@ -3733,6 +3792,34 @@ function ReaderShell({
   children: React.ReactNode
 }) {
   const { t } = useI18n()
+
+  /**
+   * Android's back gesture closes the open message in the two-pane band too.
+   *
+   * The dialog half of this component gets it from `Modal`, which registers
+   * itself while open. The pane half is an `<aside>` that is part of the
+   * screen rather than an overlay, so nothing was registering for it — and on
+   * a tablet, which is exactly the device the two-pane band exists for, a back
+   * press with a message open would have skipped straight past it to the
+   * shell's "go to Home" rule. Opening a message and pressing back would have
+   * left the inbox entirely.
+   *
+   * `onEscape` rather than `onClose`, matching the dialog: the reader's Escape
+   * steps out of full screen before it closes anything, and the gesture has to
+   * mean the same thing the key does.
+   *
+   * Hooks cannot be called after the `if (!twoPane)` early return below, so
+   * this sits above it and guards on `twoPane` itself.
+   */
+  const onEscapeRef = useRef(onEscape)
+  onEscapeRef.current = onEscape
+  useEffect(() => {
+    if (!twoPane || !open) return
+    return pushBackHandler(() => {
+      onEscapeRef.current()
+      return true
+    })
+  }, [twoPane, open])
 
   if (!twoPane) {
     return (
