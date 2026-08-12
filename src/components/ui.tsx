@@ -592,6 +592,7 @@ export function Modal({
   onEscape,
   headerExtra,
   bodyClassName = '',
+  variant,
   // No English default: every caller passes a translated label, and a
   // hard-coded fallback would silently ship 'Close' into five other locales.
   closeLabel,
@@ -617,6 +618,25 @@ export function Modal({
   /** Controls that belong beside the title rather than in the footer. */
   headerExtra?: ReactNode
   bodyClassName?: string
+  /**
+   * Which *kind* of dialog this is, stamped on the panel as `data-variant`.
+   *
+   * The stylesheet needed a way to say "the message reader's header, not every
+   * dialog's header", and what it had was `.modal:has(> .modal__body--reader)`
+   * — reaching down to the body class to identify the panel above it. That is a
+   * Chromium 105 selector. This app ships against `minSdkVersion 24`, where a
+   * WebView that has never been updated is Chromium 51 and treats the whole
+   * rule as invalid, so on exactly the devices the rules were written for, the
+   * reader's header rules did not exist: the subject and five icons stayed
+   * crammed onto one row and nothing in the CSS looked wrong. It is the second
+   * time this trap has been sprung here (see the compose screen, 0.3.5).
+   *
+   * An attribute selector is Selectors 2 and works in every engine this app can
+   * run in, and naming the panel is what the stylesheet actually wanted to do:
+   * the body class describes the body, and a rule about the header should not
+   * have to ask the body what it is.
+   */
+  variant?: 'reader'
   closeLabel: string
 }) {
   const panelRef = useRef<HTMLDivElement>(null)
@@ -699,6 +719,7 @@ export function Modal({
     >
       <div
         className={`modal ${wide ? 'modal--wide' : ''} ${fullscreen ? 'modal--fullscreen' : ''}`}
+        data-variant={variant}
         role="dialog"
         aria-modal="true"
         aria-label={title}

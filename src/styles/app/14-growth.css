@@ -911,93 +911,109 @@
  * 1056 at 1100, 1240 vs 1311 at 1366, 1240 vs 1474 at 1536, 1497 vs 1600 at
  * 1920 — smaller everywhere, and never the half-screen it used to be.
  *
- * Hooked off `.modal__body--reader` rather than a new modifier because `Modal`
- * belongs to another file; `:has()` is already load-bearing in this stylesheet
- * (see the settings grid), so this adds no new requirement.
+ * Hooked off `[data-variant='reader']`, which `Modal` stamps on the panel, and
+ * emphatically not off `:has(> .modal__body--reader)` the way this block and
+ * the one below it used to be. `:has()` is Chromium 105; this app ships against
+ * `minSdkVersion 24`, and on a WebView old enough to lack it the *entire rule*
+ * is invalid and silently does nothing — see the note on `variant` in `ui.tsx`
+ * for what that cost the reader's header. An attribute selector works in every
+ * engine this can run in.
  */
-.modal:has(> .modal__body--reader):not(.modal--fullscreen) {
+.modal[data-variant='reader']:not(.modal--fullscreen) {
   width: min(1500px, 94vw, max(1240px, 78vw));
   max-height: 88vh;
 }
 
 /**
- * The reader header on a phone: the subject and its four action buttons
- * stopped sharing a row entirely, rather than being nudged to share it more
- * politely.
+ * The reader header on a touch device: the subject and its action buttons stop
+ * sharing a row entirely, rather than being nudged to share it more politely.
  *
- * `min-width: 0` above (on `.modal__title` generally) stops the worst of it —
- * a title no longer forces one word per line — but four 38px icon buttons
- * plus a close button is still ~215px taken off a ~320px content width
- * before the subject gets a single character, and a subject that only ever
- * reaches two or three words of room reads as broken even without wrapping
- * to single words. `flex-wrap` plus `flex-basis: 100%` on the title forces
- * it onto a line of its own — the full width of the header, every time,
- * regardless of how long the title or how many buttons follow it — and the
- * buttons wrap to a second line where they have the whole row to themselves.
- * Scoped to the reader specifically, not every `.modal__header`, because
- * every other dialog's header title is short enough that the one-row layout
- * still reads fine at this width, and moving all of them to two rows would
- * cost every settings dialog a line of height it does not need back.
+ * `min-width: 0` above (on `.modal__title` generally) stops the worst of it — a
+ * title no longer forces one word per line — but five 44px icon buttons plus a
+ * close button is ~264px taken off a ~328px content width before the subject
+ * gets a single character, and a subject that only ever reaches two or three
+ * words of room reads as broken even without wrapping to single words.
+ * `flex-wrap` plus `flex-basis: 100%` on the title forces it onto a line of its
+ * own — the full width of the header, every time, regardless of how long the
+ * title or how many buttons follow it — and the buttons take the line above,
+ * where they have the whole row to themselves. That is 图标显示在最上面一行，
+ * 主题显示在第二行, and it is now what the markup produces rather than what the
+ * markup would have produced on an engine that understood the selector.
+ *
+ * Scoped to the reader specifically, not every `.modal__header`, because every
+ * other dialog's header title is short enough that the one-row layout still
+ * reads fine at this width, and moving all of them to two rows would cost every
+ * settings dialog a line of height it does not need back.
+ *
+ * ## Why the shell attribute and not a width query
+ *
+ * This was `@media (max-width: 839.98px)`, which is a phone. A 1024px Android
+ * tablet is past that boundary and got the desktop one-row header — the same
+ * complaint, on the other half of the same report (手机/平板). `data-shell`
+ * is set for a narrow window *or* a native mobile platform (see
+ * `useMobileShell`), which is the question actually being asked here: this is
+ * about a screen held in two hands with no pointer on it, not about a number of
+ * pixels. A desktop window dragged narrow gets it too, and should — at that
+ * width the header has the same problem for the same reason.
  */
-@media (max-width: 839.98px) {
-  .modal:has(> .modal__body--reader) .modal__header {
-    flex-wrap: wrap;
-  }
-  /*
-   * `order` swapped rather than the markup: the action row now lands on the
-   * header's first line and the subject wraps alone underneath it, not the
-   * other way around. The buttons are what someone opening the message on a
-   * phone reaches for first — closing, flagging, deleting — and the row
-   * they are on was the one thing not visible without scrolling past the
-   * subject first. Reordering with `order` leaves the DOM (and so tab order
-   * and screen-reader order) exactly as it was; only paint order moves.
-   */
-  .modal:has(> .modal__body--reader) .modal__title {
-    order: 2;
-    flex-basis: 100%;
-    font-size: var(--text-value);
-    line-height: 1.35;
-  }
-  /* Its own solo top line now, still right-aligned rather than trailing off
-     from wherever the header's own left edge happens to be. */
-  .modal:has(> .modal__body--reader) .modal__header > .btn-row {
-    order: 1;
-    margin-inline-start: auto;
-  }
-  /* The header's own close button is a sibling of `.btn-row`, not a member
-     of it — it needs the same `order` to land on the same top line, right
-     after the row it was already trailing. */
-  .modal:has(> .modal__body--reader) .modal__header > .icon-btn {
-    order: 1;
-  }
-  /*
-   * Even right-aligned and on a line of its own, five icons (flag, delete,
-   * day/night, find, full screen) plus the header's own close button is
-   * still enough to wrap to a second line on a phone — the exact crowding
-   * the rule above this one was written to get rid of. Day/night, find and
-   * full screen fold behind the single `.reader__more` trigger instead, so
-   * the row stays flag + delete + more: three icons, one line, always.
-   */
-  .reader__actionsFull {
-    display: none;
-  }
-  .reader__more {
-    display: flex;
-  }
-  /*
-   * 20px, not the app-wide 16px default: promoted to the first thing on the
-   * screen, these are now read as the primary way to act on the message
-   * rather than a row of secondary chrome, and the 44px tap target around a
-   * 16px glyph was reading as mostly empty padding. Scoped to the reader's
-   * own header buttons — `.reader__moreItem` (the opened popover's menu
-   * rows) keeps its own 16px, since those sit next to a text label and were
-   * never the thing this was about.
-   */
-  .modal:has(> .modal__body--reader) .modal__header > .btn-row .icon-btn svg,
-  .modal:has(> .modal__body--reader) .modal__header > .icon-btn svg {
-    width: var(--icon-sm);
-    height: var(--icon-sm);
-  }
+:root[data-shell='mobile'] .modal[data-variant='reader'] .modal__header {
+  flex-wrap: wrap;
+}
+/*
+ * `order` swapped rather than the markup: the action row lands on the header's
+ * first line and the subject wraps alone underneath it, not the other way
+ * around. The buttons are what someone opening the message on a phone reaches
+ * for first — closing, flagging, deleting — and the row they are on was the one
+ * thing not visible without scrolling past the subject first. Reordering with
+ * `order` leaves the DOM (and so tab order and screen-reader order) exactly as
+ * it was; only paint order moves.
+ */
+:root[data-shell='mobile'] .modal[data-variant='reader'] .modal__title {
+  order: 2;
+  flex-basis: 100%;
+  font-size: var(--text-value);
+  line-height: 1.35;
+}
+/* Its own solo top line now, still right-aligned rather than trailing off from
+   wherever the header's own left edge happens to be. */
+:root[data-shell='mobile'] .modal[data-variant='reader'] .modal__header > .btn-row {
+  order: 1;
+  margin-inline-start: auto;
+}
+/* The header's own close button is a sibling of `.btn-row`, not a member of it
+   — it needs the same `order` to land on the same top line, right after the row
+   it was already trailing. */
+:root[data-shell='mobile'] .modal[data-variant='reader'] .modal__header > .icon-btn {
+  order: 1;
+}
+/*
+ * All of them on that one line, and none of them wrapping off it.
+ *
+ * Flag, delete, day/night, find and full screen plus the header's own close
+ * button is six controls, and they were asked for by name — 标注优先级、删除、
+ * 在邮件中查找、关闭 …显示在弹出的页面的最上面一行 — so folding three of them
+ * behind an overflow trigger is not the answer here. At 44px each with the
+ * `--sp-2` gap they come to 296px against a 328px line on a 360px phone, which
+ * fits; `flex-wrap: nowrap` on the row is what guarantees it stays fitting when
+ * a locale or a system font scale nudges something, rather than silently
+ * spilling one icon onto a third line.
+ */
+:root[data-shell='mobile'] .modal[data-variant='reader'] .modal__header > .btn-row {
+  flex-wrap: nowrap;
+  gap: var(--sp-1);
+}
+/*
+ * 20px, not the app-wide 16px default: promoted to the first thing on the
+ * screen, these are read as the primary way to act on the message rather than a
+ * row of secondary chrome, and the 44px tap target around a 16px glyph was
+ * reading as mostly empty padding. Scoped to the reader's own header buttons —
+ * `.reader__moreItem` (the opened popover's menu rows) keeps its own 16px,
+ * since those sit next to a text label and were never the thing this was about.
+ */
+:root[data-shell='mobile'] .modal[data-variant='reader'] .modal__header > .btn-row .icon-btn svg,
+:root[data-shell='mobile'] .modal[data-variant='reader'] .modal__header > .icon-btn svg {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
 }
 
 /*

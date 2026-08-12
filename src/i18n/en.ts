@@ -1878,9 +1878,31 @@ export const en = {
   'codes.bigDigits': 'Big digits',
   'codes.bigDigitsExit': 'Back to the list',
 
+  /*
+   * The whole sentence, still used — by the chip `ScheduleView` and `LogsView`
+   * put above the rows each figure opens, so the count you pressed and the list
+   * you land on repeat one wording rather than two.
+   */
   'home.todayQueued': '{n} to send today',
   'home.todayFailed': '{n} failed today',
   "home.todaySent": "{n} sent today",
+  /*
+   * The same three facts, split for Home's own tiles: the figure on one line
+   * and what it counts on the next.
+   *
+   * A third of a 360px phone is about 109px, which is not a sentence — so the
+   * caption is the shortest phrasing of the fact that still says *today*, and
+   * `.homestat__k` ellipsises rather than wraps if a locale still overruns.
+   * Chinese carries its measure word on the figure (`{n} 封`, `{n} 次`) because
+   * a bare number reads as unfinished there; the Latin locales do not have one
+   * to carry.
+   */
+  'home.todayQueuedN': '{n}',
+  'home.todayQueuedLabel': 'To send today',
+  'home.todaySentN': '{n}',
+  'home.todaySentLabel': 'Sent today',
+  'home.todayFailedN': '{n}',
+  'home.todayFailedLabel': 'Failed today',
   'home.cellEdit': 'Rename {name}, or change its icon',
   'home.cellName': 'Name',
   'home.cellIcon': 'Icon',

@@ -26,6 +26,25 @@ const MAX_ROWS = 3
  * in lines rather than pixels; this file only decides which rows get it.
  */
 
+/**
+ * Issues this strip does not print, however loudly `collectHealth` reports them.
+ *
+ * `spent` — "1 条提醒开着，但已经没有下一次了" — is the whole list, and it was
+ * asked for by name. It is not a fault: a one-off that has already fired and a
+ * rule whose end date has passed are both jobs that did exactly what they were
+ * set up to do. Saying so at warning rank on the screen somebody opened to
+ * *write a message* makes the compose form shorter to report something nobody
+ * has to act on, and it is the one row on this strip that never clears by
+ * itself — every finished reminder adds to it and stays there.
+ *
+ * Muted here rather than dropped from `collectHealth`, because that function has
+ * a second reader: `HealthAllClear` on the schedule screen, where the same fact
+ * is worth knowing — that is the screen holding the list, and "all clear" would
+ * otherwise be printed over rows that will never fire again. One strip stops
+ * showing a row; nothing else changes its mind about anything.
+ */
+const MUTED_HERE: ReadonlySet<string> = new Set(['spent'])
+
 const ICONS: Record<HealthLevel, typeof IconAlert> = {
   danger: IconAlert,
   warning: IconAlert,
@@ -102,17 +121,24 @@ export function HealthBoard({ onGo }: { onGo?: (where: NonNullable<HealthIssue['
     [],
   )
 
+  // The muted rows come out first, before anything counts how many are left.
+  // Filtering them inside the `actionable` test below would have missed the one
+  // case that matters most — a strip whose *only* issue is `spent`, where
+  // `actionable` is empty and the `issues.slice(0, 1)` fallback prints the very
+  // row that was just suppressed.
+  const visible = issues.filter((issue) => !MUTED_HERE.has(issue.id))
+
   // Nothing wrong and nothing scheduled is a new install, not a clean bill of
   // health; there is nothing worth taking up the space for.
-  if (issues.length === 0) return null
+  if (visible.length === 0) return null
 
   // When something is actually wrong, the informational lines are noise —
   // "3 sends due this week" is not what you need to read directly above
   // "1 account has no password". And the whole strip is capped at three rows
   // because it sits on top of the compose form, which has to stay on one
   // screen; a fourth problem is still counted, just not spelled out.
-  const actionable = issues.filter((issue) => issue.level !== 'info')
-  const relevant = actionable.length > 0 ? actionable : issues.slice(0, 1)
+  const actionable = visible.filter((issue) => issue.level !== 'info')
+  const relevant = actionable.length > 0 ? actionable : visible.slice(0, 1)
   const shown = relevant.slice(0, MAX_ROWS)
   const hidden = relevant.length - shown.length
 

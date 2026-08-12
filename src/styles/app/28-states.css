@@ -113,8 +113,38 @@
   }
 }
 
+/*
+ * `backwards`, emphatically not `both` — and this is the whole bug behind
+ * 设置界面弹出的界面左右是空白的，没有完全覆盖.
+ *
+ * `both` keeps the *last* keyframe applied after the animation finishes, so
+ * `transform: translate3d(0, 0, 0)` — an identity transform that moves nothing
+ * and looks like nothing — stayed on `.view__inner` for the rest of the
+ * session. A non-`none` transform makes an element the containing block for
+ * every `position: fixed` descendant, and `.modal-scrim` is `position: fixed;
+ * inset: 0`. So the scrim stopped being the viewport and became the view's own
+ * padded column: measured at 360x800 with the Appearance section open, the
+ * scrim was 328x1326 and the dialog inside it 328px wide at x=16 — a 16px
+ * stripe of page down each side and a box taller than the screen. Every dialog
+ * opened from inside a view on a phone or tablet was affected, which is why the
+ * report named Settings but the inbox reader looked the same.
+ *
+ * `backwards` fills only *before* the animation starts. There is no delay here,
+ * so that window is zero-length and the entrance is pixel-identical; what
+ * changes is that the transform is gone the moment the 120ms is up. Same
+ * measurement after: scrim and dialog both 360x800 at x=0.
+ *
+ * `opacity` loses its fill too and that is safe: the `to` value is 1, which is
+ * what the element computes to with no animation at all.
+ *
+ * `scripts/check-fixed-containing-block.mjs` fails the build if any rule that
+ * animates a transform on an ancestor of a fixed-position element ever comes
+ * back with a forward fill, because nothing about the symptom points at this
+ * line — the dialog is simply the wrong size, in a file that never mentions
+ * dialogs.
+ */
 :root[data-shell='mobile'] .view__inner {
-  animation: viewarrive 120ms ease-out both;
+  animation: viewarrive 120ms ease-out backwards;
 }
 
 /*

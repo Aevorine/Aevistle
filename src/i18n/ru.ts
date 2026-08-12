@@ -1855,6 +1855,15 @@ export const ru: Translations = {
   'home.todayQueued': 'Сегодня к отправке: {n}',
   'home.todayFailed': 'Сбоев сегодня: {n}',
   "home.todaySent": "Отправлено сегодня: {n}",
+  /* «сегодня» опущено: подпись плитки — треть экрана шириной 360 px, а
+     «К отправке сегодня» там не помещается. Все три плитки на этом экране
+     относятся к сегодняшнему дню, поэтому слово ничего не различает. */
+  'home.todayQueuedN': '{n}',
+  'home.todayQueuedLabel': 'К отправке',
+  'home.todaySentN': '{n}',
+  'home.todaySentLabel': 'Отправлено',
+  'home.todayFailedN': '{n}',
+  'home.todayFailedLabel': 'Сбоев',
   'home.cellEdit': 'Переименовать «{name}» или сменить значок',
   'home.cellName': 'Название',
   'home.cellIcon': 'Значок',

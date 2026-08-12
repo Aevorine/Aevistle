@@ -1857,6 +1857,14 @@ export const fr: Translations = {
   'home.todayQueued': '{n} à envoyer aujourd’hui',
   'home.todayFailed': '{n} échecs aujourd’hui',
   "home.todaySent": "{n} envoyés aujourd'hui",
+  /* « aujourd’hui » abrégé en « auj. » : la légende d’une tuile fait un tiers
+     d’un écran de 360 px, et la forme longue y serait tronquée. */
+  'home.todayQueuedN': '{n}',
+  'home.todayQueuedLabel': 'À envoyer auj.',
+  'home.todaySentN': '{n}',
+  'home.todaySentLabel': 'Envoyés auj.',
+  'home.todayFailedN': '{n}',
+  'home.todayFailedLabel': 'Échecs auj.',
   'home.cellEdit': 'Renommer « {name} » ou changer son icône',
   'home.cellName': 'Nom',
   'home.cellIcon': 'Icône',

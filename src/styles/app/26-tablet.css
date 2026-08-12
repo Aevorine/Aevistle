@@ -289,25 +289,25 @@
   }
 
   /*
-   * Three icons in the pane header, not five.
+   * Three icons in the pane header, not five — and this band only.
    *
-   * 14-growth.css intends exactly this below 840px — it folds day/night, find
-   * and full screen behind one `.reader__more` trigger so the header stays
-   * flag + delete + more — but the intent does not reach the page: its
-   * `@media (max-width: 839.98px)` block sets `.reader__actionsFull` to `none`
-   * at line 981, and then the unconditional `.reader__actionsFull { display:
-   * flex }` at line 1011 restates the same property at the same specificity,
-   * later in the same file, and wins at every width. `.reader__more` is
-   * hidden by the same inversion. So the *phone* reader has been showing five
-   * inline icons and no overflow menu ever since, which is a live defect in a
-   * file this round was not given (and it is reported rather than reached
-   * into: 14-growth.css styles every screen in the app).
+   * 14-growth.css used to *say* it folded day/night, find and full screen
+   * behind one `.reader__more` trigger below 840px, and never did: its
+   * `@media (max-width: 839.98px)` block set `.reader__actionsFull` to `none`,
+   * and the unconditional `.reader__actionsFull { display: flex }` later in the
+   * same file restated the same property at the same specificity and won at
+   * every width. Those two dead rules are gone now, because the five inline
+   * icons they failed to hide turned out to be the ones asked for by name —
+   * 标注优先级、删除、在邮件中查找、关闭…显示在最上面一行 — so the dialog keeps
+   * all five and puts the subject on its own line underneath instead.
    *
-   * Inside the pane it is fixed here, at a specificity that settles it, and
-   * only here. Five 48px buttons is 264px of a ~420px pane header, and one of
-   * the five is "full screen", which in a column that is already a column has
-   * nothing to toggle — `InboxView.tsx` drops that item from the menu in this
-   * band for the same reason.
+   * Inside the pane the fold is still right, and is done here, at a specificity
+   * that settles it. Five 48px buttons is 264px of a ~420px pane header — and
+   * unlike the dialog, this header shares its line with nothing it can push
+   * onto a second row, because the pane's title is `.detailhead__title` and
+   * sits beside them. One of the five is "full screen", which in a column that
+   * is already a column has nothing to toggle; `InboxView.tsx` drops that item
+   * from the menu in this band for the same reason.
    */
   .detailhead .reader__actionsFull {
     display: none;

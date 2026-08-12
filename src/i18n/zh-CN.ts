@@ -1840,6 +1840,14 @@ export const zhCN: Translations = {
   'home.todayQueued': '今天要发 {n} 封',
   'home.todayFailed': '今天失败 {n} 次',
   "home.todaySent": "今天已发 {n} 封",
+  /* 主页三张卡片，数字一行、说明一行。量词跟着数字走（0 封 / 0 次），
+     所以拆成两行之后一个字也没少。 */
+  'home.todayQueuedN': '{n} 封',
+  'home.todayQueuedLabel': '今天要发',
+  'home.todaySentN': '{n} 封',
+  'home.todaySentLabel': '今天已发',
+  'home.todayFailedN': '{n} 次',
+  'home.todayFailedLabel': '今天失败',
   'home.cellEdit': '给「{name}」改个名字或换个图标',
   'home.cellName': '名字',
   'home.cellIcon': '图标',

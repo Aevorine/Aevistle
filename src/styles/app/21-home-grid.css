@@ -181,82 +181,13 @@
 }
 
 /* `.homehero__greet` used to be here — 18.67px bold, the top line of the band.
-   The greeting moved down to `.homehero__sub` and the rule went with it rather
-   than being left behind: a selector nothing renders is a rule the next person
-   has to prove is dead before they can touch anything near it. The rank it
-   carried did not move — `.homehero__fact` below is the same 18.67px bold in
-   the same position, which is why the band's contrast maths still holds. */
+   It is `.homehero__sub` that sits on this line now, at ordinary body size: the
+   loud thing on this screen is the three figures below, and a greeting that is
+   true at 07:00 whatever the app is doing does not outrank them.
 
-/* --- what today looks like -------------------------------------------------
- *
- * Two pressable figures where the greeting used to be, at the same rank the
- * greeting had. `--text-lg` bold is deliberately *not* raised to make them
- * louder: the line is in the loudest position on the screen already, and the
- * hero's contrast maths (see the tint section above) was computed for
- * `--text-lg` bold on this band. A larger size here would be a fourth thing to
- * re-measure across 189 accent x theme x style combinations for no gain.
- *
- * `flex-wrap` because two of these are much longer in Russian and French than
- * in Chinese — «3 к отправке сегодня» against 今天待发 3 封 — and the row also
- * carries a 48px search button. Wrapping costs the hero one line at those
- * widths; the alternative, ellipsising a figure, would clip the number itself.
- */
-.homehero__today {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--sp-2);
-  margin: 0;
-  min-width: 0;
-}
-
-/*
- * Each figure is a real button and it is `--ctl-md` tall, which is what keeps
- * `.homehero__top`'s own 48px floor honest: the row is as tall as these are,
- * not taller because of them.
- *
- * The 13% overlay is what makes the three of them read as one family of
- * "figures you can press" rather than as three words that happen to be bold.
- * Mixed from `--accent-text` rather than named, for the reason the whole file
- * gives: it is the one foreground guaranteed to read on every accent, in both
- * themes, under all seven visual styles.
- *
- * These pills *are* the figures. There used to be a second, separate strip of
- * three stat tiles under the hero painted in the same overlay — that is what
- * this note used to point at, and it is gone: the numbers moved up into the
- * hero's own line, where they sit beside the greeting instead of below it.
- */
-.homehero__fact {
-  display: flex;
-  align-items: center;
-  min-height: var(--ctl-md);
-  padding: 0 var(--sp-3);
-  border: 0;
-  border-radius: var(--r-md);
-  background: color-mix(in srgb, var(--accent-text) 13%, transparent);
-  color: var(--accent-text);
-  font-size: var(--text-lg);
-  font-weight: var(--fw-bold);
-  line-height: var(--leading-tight);
-  cursor: pointer;
-}
-.homehero__fact:hover {
-  background: color-mix(in srgb, var(--accent-text) 20%, transparent);
-}
-/*
- * Something failed today.
- *
- * A heavier overlay, not `--danger`. This band is `--accent` in one of seven
- * hues and `--danger` has no contrast guarantee against any of them — the file
- * header's whole argument. Weight is the signal instead, which survives every
- * palette and does not depend on colour being seen at all.
- */
-.homehero__fact[data-alert] {
-  background: color-mix(in srgb, var(--accent-text) 26%, transparent);
-}
-.homehero__fact[data-alert]:hover {
-  background: color-mix(in srgb, var(--accent-text) 32%, transparent);
-}
+   `.homehero__fact` was here too, briefly — the three figures as a wrapping row
+   of pills on this same line. It is gone with its markup. See `.homestats`
+   below for the measurement that took it out and what replaced it. */
 
 .homehero__search {
   flex: 0 0 var(--ctl-md);
@@ -295,15 +226,123 @@
   color: var(--hero-ink);
 }
 
-/* The three-tile stat strip that used to sit here — `.homestats`, `.homestat`,
-   `.homestat__n`, `.homestat__k` — is gone. `HomeView` renders its three
-   numbers as `.homehero__fact` buttons on the hero's own line and has done
-   since this screen was rebuilt as a grid; the strip's rules survived the
-   rebuild and matched nothing in any of the six languages, at any width, in
-   any of the seven styles. Removed rather than left: 60 lines of plausible,
-   well-commented CSS for an element that does not exist is the most expensive
-   kind of dead code, because the next person to read it has to prove that
-   before they can change anything near it. */
+/* --- the three figures -----------------------------------------------------
+ *
+ * A grid of exactly three equal columns, and that is the whole point of it.
+ *
+ * These three spent one release as `.homehero__fact` — a `flex-wrap` row of
+ * pills sharing the hero's top line with the search button. Measured at 360x800
+ * in Chinese: 今天要发 0 封 / 今天已发 0 封 / 今天失败 0 次 at `--text-lg` bold
+ * come to roughly 460px of pill against 280px of usable line, so the row wrapped
+ * to three lines, one figure each, and the band grew from 48px to 168px to say
+ * three numbers. That is the report 要求像之前一样并排显示, and it is not a
+ * tuning problem: a wrapping row is a layout that declines to promise a shape,
+ * and the answer at every screen width and in all six languages has to be the
+ * same shape.
+ *
+ * `repeat(3, 1fr)` promises it. A third of the width is a third of the width in
+ * Russian too, and the tile below clamps rather than wraps, so the strip is one
+ * height in every language rather than one height in the two languages somebody
+ * checked.
+ *
+ * The 13% overlay is the ground restored — the same mix, from the same
+ * `--accent-text`, that this strip carried before the grid rebuild and that the
+ * pills carried after it. Mixed rather than named for the reason the file header
+ * gives: `--accent-text` is the one foreground guaranteed to read on every
+ * accent, in both themes, under all seven visual styles, so a value derived from
+ * it needs no separate contrast argument. `overflow: hidden` is what lets the
+ * dividers below run to the rounded corners without poking through them.
+ */
+.homestats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  margin-top: var(--sp-4);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--accent-text) 13%, transparent);
+  overflow: hidden;
+}
+
+/*
+ * Exactly `--ctl-lg`, not "at least" it. The padding is `--sp-1` rather than
+ * `--sp-2` because at `--sp-2` the content stack (a 20px figure at 1.15 and a
+ * 14px caption at 1.3) came to 59px and pushed past the 56px floor — a 59 among
+ * 48s and 56s, which is precisely the kind of drift `check:tap` counts and
+ * precisely how seventeen different control heights accumulated the last time.
+ * The floor is the height; nothing inside is allowed to raise it.
+ *
+ * The 1px inner border is the 卡片形式隔开 — three cards cut out of one plate
+ * rather than three plates with gaps between them, which is what keeps the strip
+ * a single 56px band instead of three boxes that have to be aligned to each
+ * other. Mixed from the same `--accent-text` as the ground it divides.
+ */
+.homestat {
+  min-height: var(--ctl-lg);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: var(--sp-1) var(--sp-1);
+  border: 0;
+  border-left: 1px solid color-mix(in srgb, var(--accent-text) 16%, transparent);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: center;
+  /* A grid item's automatic minimum size is its content, so a long caption in
+     Russian would push its own column wider than 1fr and take the other two out
+     of step. This is what makes the three columns actually equal. */
+  min-width: 0;
+}
+.homestat:first-child {
+  border-left: 0;
+}
+.homestat:hover {
+  background: color-mix(in srgb, var(--accent-text) 8%, transparent);
+}
+/*
+ * Something failed today.
+ *
+ * A heavier overlay, not `--danger`. This band is `--accent` in one of seven
+ * hues and `--danger` has no contrast guarantee against any of them — the file
+ * header's whole argument. Weight is the signal instead, which survives every
+ * palette and does not depend on colour being seen at all.
+ */
+.homestat[data-alert] {
+  background: color-mix(in srgb, var(--accent-text) 15%, transparent);
+}
+.homestat[data-alert]:hover {
+  background: color-mix(in srgb, var(--accent-text) 22%, transparent);
+}
+
+/*
+ * `--text-value`, the 20px rank, and this is what that rank is for: a single
+ * figure that is the entire content of its own box. It is the only step on the
+ * ladder between body and a screen title, and using body size here would make
+ * the number no louder than the word under it.
+ *
+ * One line, always. "0 封" cannot wrap and neither can "12 封"; a figure that
+ * broke across two lines would take the strip past its own 56px floor.
+ */
+.homestat__n {
+  font-size: var(--text-value);
+  font-weight: var(--fw-bold);
+  line-height: 1.15;
+  white-space: nowrap;
+}
+.homestat__k {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-sm);
+  line-height: var(--leading-tight);
+  /* The same dimmed ink as the sub-line, not a second percentage a hair away
+     from it. This one is read against `.homestats`' 13% overlay rather than
+     against the bare band, which is why it measures lower — 2.56:1 at the
+     worst, against 2.33:1 for the 76% it used to carry. */
+  color: var(--hero-ink);
+}
 
 /* --- the eight-cell grid --------------------------------------------------
    Pulled up into the hero's bottom padding so the card overlaps the colour —

@@ -969,65 +969,22 @@ export function HomeView({
                 colour off `--accent` accordingly — the tint and the greeting
                 are one fact and are stamped from one variable. */}
             <header className="homehero" aria-label={t('nav.home')} data-tod={tod}>
+              {/*
+                The greeting, and the one trailing action.
+
+                The three figures used to be on this line, laid out as a wrapping
+                row of pills with the greeting pushed underneath them. On a 360px
+                phone that row does not fit: 今天要发 0 封 / 今天已发 0 封 /
+                今天失败 0 次 at `--text-lg` bold is ~460px of pill before the
+                48px search button, so `flex-wrap` broke it into three stacked
+                lines — one figure per line, 168px of accent band spent on three
+                numbers, which is the 要求像之前一样并排显示 this answers. A
+                wrapping row cannot promise a shape; a three-column grid can, so
+                the figures moved into `.homestats` below and the greeting came
+                back up to the line it was on before.
+              */}
               <div className="homehero__top">
-                {/*
-                  What the top line says, and why it stopped being a greeting.
-
-                  早上好 is true at 07:00 whatever the app is doing. These two
-                  figures are not: they are how many sends are set for today and
-                  how many things failed today, and they are the two facts that
-                  decide whether this screen needs anything from you. The
-                  greeting keeps its words and moves down one line, where the
-                  sub-line was — it is still worth saying, it was just never
-                  worth the loudest line on the screen.
-
-                  Each figure is a button, and each opens the screen that holds
-                  the records it was counted from — the schedule, and the log.
-                  That is the rule the three tiles below already follow, and the
-                  reason neither of these is allowed to be a number this screen
-                  computed on its own: a figure you cannot press through to is a
-                  figure nobody can check.
-
-                  The failures button is drawn the same whether the count is
-                  zero or nine, and it is drawn at all when it is zero. "0 failed
-                  today" is information — it is the answer to the question the
-                  person is opening the app with — and a control that appears
-                  only on bad days is one nobody learns the position of.
-                */}
-                {/*
-                  Each figure now opens its screen *already narrowed to itself*
-                  — see `DestFocus`. Before this, pressing 今天失败 3 次 opened
-                  the whole activity log, newest first, and left the reader to
-                  find the three among a few hundred rows they had just been
-                  told the count of. The figure and the list it opens are one
-                  claim, so they are now filtered by one predicate, and each
-                  screen repeats the figure's own sentence in a chip above the
-                  rows so the two counts can be read off the same screen.
-                */}
-                <p className="homehero__today">
-                  <button
-                    type="button"
-                    className="homehero__fact"
-                    onClick={() => openDest('schedule', 'today')}
-                  >
-                    {t('home.todayQueued', { n: todayQueued })}
-                  </button>
-                  <button
-                    type="button"
-                    className="homehero__fact"
-                    onClick={() => openDest('logs', 'sentToday')}
-                  >
-                    {t('home.todaySent', { n: todaySent })}
-                  </button>
-                  <button
-                    type="button"
-                    className="homehero__fact"
-                    data-alert={todayFailed > 0 || undefined}
-                    onClick={() => openDest('logs', 'failedToday')}
-                  >
-                    {t('home.todayFailed', { n: todayFailed })}
-                  </button>
-                </p>
+                <p className="homehero__sub">{t(GREETING_KEY[tod])}</p>
                 <button
                   type="button"
                   className="homehero__search"
@@ -1037,13 +994,68 @@ export function HomeView({
                   <IconSearch size={19} />
                 </button>
               </div>
-              {/* The greeting, at the rank it is worth: one line of ordinary
-                  body type under the two figures that are not. */}
-              <p className="homehero__sub">{t(GREETING_KEY[tod])}</p>
-              {/* The three all-time tiles that used to sit here are gone; see
-                  `todaySent` for the measurement. Two of the three repeated a
-                  figure the line above already states, and the third is now up
-                  there with them, scoped to today like its neighbours. */}
+              {/*
+                The three figures, side by side, in the strip this screen used to
+                carry — `.homestats` and `.homestat` are the same class names and
+                the same 13% overlay on the accent band they had before the grid
+                rebuild took them out. What is different is what they count: the
+                old three were all-time (待命 / 已发 / 失败) and two of them
+                restated a figure that was already on the hero's own line. These
+                three are today's, which is what the line that replaced them
+                counted, so nothing on this screen says the same thing twice.
+
+                Each tile is the number over its caption rather than one sentence
+                across the tile. A third of a 360px phone is ~109px and 今天要发
+                0 封 needs ~130px at the size a headline figure is worth reading
+                at, so a single-line sentence in a third of the width can only be
+                paid for by shrinking the number — the one thing on the tile
+                somebody is looking at from across a desk.
+
+                Each figure opens its screen *already narrowed to itself* — see
+                `DestFocus`. Before this, pressing 今天失败 3 次 opened the whole
+                activity log, newest first, and left the reader to find the three
+                among a few hundred rows they had just been told the count of.
+                The figure and the list it opens are one claim, so they are
+                filtered by one predicate, and each screen repeats the figure's
+                own sentence in a chip above the rows so the two counts can be
+                read off the same screen.
+
+                The failures tile is drawn the same whether the count is zero or
+                nine, and it is drawn at all when it is zero. "0 failed today" is
+                information — it is the answer to the question the person is
+                opening the app with — and a control that appears only on bad
+                days is one nobody learns the position of. `data-alert` is the
+                one thing that changes, and it changes weight rather than hue:
+                this band is `--accent` in one of seven colours and `--danger`
+                has no contrast guarantee against any of them.
+              */}
+              <div className="homestats">
+                <button
+                  type="button"
+                  className="homestat"
+                  onClick={() => openDest('schedule', 'today')}
+                >
+                  <span className="homestat__n">{t('home.todayQueuedN', { n: todayQueued })}</span>
+                  <span className="homestat__k">{t('home.todayQueuedLabel')}</span>
+                </button>
+                <button
+                  type="button"
+                  className="homestat"
+                  onClick={() => openDest('logs', 'sentToday')}
+                >
+                  <span className="homestat__n">{t('home.todaySentN', { n: todaySent })}</span>
+                  <span className="homestat__k">{t('home.todaySentLabel')}</span>
+                </button>
+                <button
+                  type="button"
+                  className="homestat"
+                  data-alert={todayFailed > 0 || undefined}
+                  onClick={() => openDest('logs', 'failedToday')}
+                >
+                  <span className="homestat__n">{t('home.todayFailedN', { n: todayFailed })}</span>
+                  <span className="homestat__k">{t('home.todayFailedLabel')}</span>
+                </button>
+              </div>
             </header>
 
             <nav className="homegrid" aria-label={t('nav.home')}>

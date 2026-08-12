@@ -3299,13 +3299,15 @@ export function InboxView({
                   The bar people now see on most messages, so it had to stop
                   being an alarm.
 
-                  Remote pictures default to *not* loading (`DEFAULT_IMAGE_POLICY`
-                  is 'never'), which turned this from an occasional bar on a
-                  mailbox somebody had deliberately locked down into the ordinary
-                  state of ordinary mail. `warning` was right when it meant "this
-                  message is behaving unusually" and is wrong now that it means
-                  "this app is behaving normally" — a red-adjacent bar on every
-                  newsletter teaches people to stop reading bars.
+                  This bar appears only where remote pictures did *not* load, and
+                  `DEFAULT_IMAGE_POLICY` is 'always', so on a default install
+                  that is the mailbox somebody has deliberately locked down
+                  rather than ordinary mail. `info` rather than `warning` all the
+                  same: it was `warning` while blocking was the default and every
+                  newsletter carried it, and a red-adjacent bar people see daily
+                  is one they learn to stop reading. The tone belongs to what the
+                  bar *is* — a control offering to fetch something — not to how
+                  often the current default happens to show it.
 
                   `keep` because `tone="info"` is culled on phones (see the
                   760px block in app.css): info banners are usually explanations
@@ -3609,6 +3611,7 @@ function ReaderShell({
         open={open}
         fullscreen={immersive}
         wide
+        variant="reader"
         bodyClassName="modal__body--reader"
         title={title}
         onClose={onClose}

@@ -1395,8 +1395,9 @@ export interface InboxFolder {
 /**
  * What a received message is allowed to do about the images it points at.
  *
- * `always` is the default, and it does *not* mean the body iframe reaches the
- * network — it never does. The sanitizer still replaces every remote `<img
+ * `always` is the default (see `DEFAULT_IMAGE_POLICY`), and it does *not* mean
+ * the body iframe reaches the network — it never does. The sanitizer still
+ * replaces every remote `<img
  * src>` with a blank pixel and hands the URLs back separately, and the CSP
  * still forbids the frame from loading anything but `data:`; "always" only
  * decides whether the reader kicks off the main-process fetch by itself
@@ -1411,19 +1412,38 @@ export type RemoteImagePolicy = 'never' | 'always' | 'allowlist'
 /**
  * What the app defaults to before the user has expressed a preference.
  *
- * `'never'`. Fetching a remote image is a network request to a host the sender
- * chose, at the moment the message is opened, from the reader's own address —
- * which is why marketing mail embeds one. Loading it by default answers three
- * questions nobody asked to answer: that this address is live, when it was
- * read, and what IP read it. Blocking by default is what Thunderbird and Apple
- * Mail do, and it is the only setting under which the "load images" button
- * below is a decision rather than a formality.
+ * `'always'` — 收件箱要求默认显示图片内容, asked for after the 'never' default
+ * shipped, and it is a decision rather than a correction, so here is the trade
+ * written down where the constant is.
  *
- * Images that travel *inside* the message — `cid:` parts, already on disk —
- * are unaffected by any of this. They cost no request and leak nothing, and
- * they render whatever this is set to.
+ * What it costs: fetching a remote image is a network request to a host the
+ * sender chose, at the moment the message is opened, from the reader's own
+ * address — which is exactly why marketing mail embeds one. Loading it
+ * automatically answers three questions nobody asked to answer: that this
+ * address is live, when it was read, and what IP read it. Thunderbird and Apple
+ * Mail block by default for that reason, and under 'never' the "load images"
+ * button is a decision rather than a formality.
+ *
+ * What it does *not* cost, and what makes the trade smaller than it sounds:
+ *
+ *   · The body frame still never reaches the network. The sanitizer replaces
+ *     every remote `<img src>` with a blank pixel and hands the URLs back
+ *     separately, and the CSP still forbids the frame from loading anything but
+ *     `data:`. This constant only decides whether the reader starts the
+ *     main-process fetch by itself instead of waiting for a click.
+ *   · `electron/remoteImage.ts`'s SSRF and private-address shield is on that
+ *     path either way, so 'always' cannot be used to reach anything on the
+ *     local network.
+ *   · Images that travel *inside* the message — `cid:` parts, already on disk
+ *     when the message arrived — cost no request and leak nothing, and have
+ *     always rendered whatever this is set to.
+ *
+ * The control is still in Settings and still offers all three values, so this
+ * is the starting point rather than the only point: anyone who wants the
+ * blocking behaviour has it one row away, and `imagePolicyChosen` means their
+ * choice, once made, outranks whatever this constant later becomes.
  */
-export const DEFAULT_IMAGE_POLICY: RemoteImagePolicy = 'never'
+export const DEFAULT_IMAGE_POLICY: RemoteImagePolicy = 'always'
 
 /**
  * The policy actually in force.
