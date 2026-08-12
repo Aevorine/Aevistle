@@ -180,6 +180,96 @@ export const HOME_FEATURES: HomeFeatureItem[] = [
 ]
 
 /**
+ * How many destinations the phone Home grid shows before 更多.
+ *
+ * Seven, because the eighth cell is the door to the rest and is never anything
+ * else. That is the entire mechanism behind 新加的功能不会破坏界面美感: this
+ * screen's height and layout do not depend on how many destinations exist, so
+ * a twelfth or a fortieth changes which seven are on top and nothing more.
+ * Four columns × two rows is also the shape that fits 360px — see the note on
+ * column width in `styles/app/21-home-grid.css`.
+ */
+export const HOME_GRID_SLOTS = 7
+
+/**
+ * Every destination the phone Home grid can show, in the order a device that
+ * has never been used shows them.
+ *
+ * The five `HOME_SECTIONS` first: on a phone this hub is the *only* door to
+ * them, so a cold install must be able to reach all five without opening 更多.
+ * Then the two `HOME_FEATURES` that answer a question rather than configure
+ * something — "will my reminders go out" and "is my other device linked" —
+ * and the four that are genuinely settings fall below the fold into 更多.
+ *
+ * Not derived by concatenating the two lists, because that would put `digest`
+ * and `greetings` (both preferences) ahead of `reliability` purely because
+ * `HOME_FEATURES` happens to declare them first, and this order is a judgement
+ * about what a phone reaches for, not a restatement of declaration order.
+ */
+export const HOME_GRID_ORDER: (ViewId | HomeFeatureId)[] = [
+  'schedule',
+  'workcal',
+  'contacts',
+  'templates',
+  'logs',
+  'reliability',
+  'pairing',
+  'digest',
+  'greetings',
+  'calendarsub',
+  'selfcheck',
+]
+
+/**
+ * Every destination the phone Home screen is responsible for, derived rather
+ * than listed.
+ *
+ * This is the load-bearing half of "新加的功能不会破坏界面美感". The bound of
+ * eight cells is what stops the *layout* changing; this is what stops a new
+ * feature going missing. `HOME_GRID_ORDER` above is hand-written, so a feature
+ * added to `HOME_FEATURES` and not also added there would render nowhere on a
+ * phone — no error, no empty cell, just a screen the user cannot reach. Taking
+ * the set from the two source lists and using `HOME_GRID_ORDER` only for
+ * *priority* means the worst a forgotten edit can do is put the new feature
+ * last, behind 更多, where it is still reachable.
+ */
+const ALL_HOME_DESTINATIONS: (ViewId | HomeFeatureId)[] = [
+  ...HOME_SECTIONS,
+  ...HOME_FEATURES.map((f) => f.id),
+]
+
+/**
+ * Rank the Home destinations by how often this device has opened them.
+ *
+ * Stable by construction: ties — including the all-zero tie on a fresh
+ * install, which is every pair of destinations — fall back to the default
+ * order, so two destinations with the same count keep the same relative order
+ * they had yesterday. A grid whose cells move when nothing was chosen is a
+ * grid people stop building muscle memory for, which would cost more than the
+ * ranking buys. (`HomeView` freezes the result at launch as well, so it does
+ * not move *within* a session either — see `sessionOrder` there.)
+ *
+ * The default order is `HOME_GRID_ORDER` with anything it forgot appended, and
+ * anything it names that no longer exists dropped. Ids in `usage` that are not
+ * destinations are ignored — see `Settings.navUsage`'s doc for why the
+ * persisted map is allowed to outlive the ids it names.
+ */
+export function rankHomeDestinations(
+  usage: Record<string, number> | undefined,
+): (ViewId | HomeFeatureId)[] {
+  const live = new Set(ALL_HOME_DESTINATIONS)
+  const preferred = HOME_GRID_ORDER.filter((id) => live.has(id))
+  const forgotten = ALL_HOME_DESTINATIONS.filter((id) => !HOME_GRID_ORDER.includes(id))
+  const order = [...preferred, ...forgotten]
+  if (!usage) return order
+  return [...order].sort((a, b) => {
+    const byUse = (usage[b] ?? 0) - (usage[a] ?? 0)
+    if (byUse !== 0) return byUse
+    return order.indexOf(a) - order.indexOf(b)
+  })
+}
+
+/**
  * The bottom bar on a phone: four reflexes and the door to everything else.
  *
  * Five items at ~64px each fit a 360px screen without scrolling, which is the

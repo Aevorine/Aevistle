@@ -160,8 +160,12 @@
      result banner sits on top of and which has to agree with this. */
   padding: var(--sp-2) var(--sp-5);
   border-top: 1px solid var(--border-subtle);
-  background: color-mix(in srgb, var(--surface-1) 88%, transparent);
-  backdrop-filter: blur(14px) saturate(150%);
+  /* Opaque, for the same reason as `.page-head` — see 02-shell.css. A sticky
+     bar with a `backdrop-filter` costs a full-viewport readback per scroll
+     frame in the Android WebView, and this one is pinned over the compose
+     form, which is the longest scroller in the app. The `border-top` above
+     already separates it from the message box. */
+  background: var(--surface-1);
 }
 .actionbar__summary {
   flex: 1;
@@ -177,10 +181,12 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* `--text-2`, not `--text-3`. The action bar is translucent over the page
-   below it, which costs the tertiary tone enough contrast to land at 3.96:1 in
-   the light theme — under AA. This line carries the sender address and the
-   provider's daily limit, which is not text to squint at. */
+/* `--text-2`, not `--text-3`. This started as a contrast fix — the bar used to
+   be translucent over the page below it, which cost the tertiary tone enough
+   contrast to land at 3.96:1 in the light theme, under AA. The bar is opaque
+   now, so the tertiary tone would pass again, but the line still carries the
+   sender address and the provider's daily limit and is still not text to
+   squint at. Kept deliberately. */
 .actionbar__meta {
   font-size: var(--text-sm);
   color: var(--text-2);

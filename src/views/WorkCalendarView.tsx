@@ -183,6 +183,23 @@ const STATUS_MATCH_WINDOW_MS = 3 * 60 * 60_000
 /** Remembers which country's names to use for the chips. See `holidayNameFor`. */
 const PRESET_MEMORY_KEY = 'aevistle.workcal.preset'
 
+/**
+ * How many date chips the holiday and make-up lists draw before stopping.
+ *
+ * These two lists had no cap at all. That is fine for the dozen days somebody
+ * types in by hand and ruinous for the thing the screen actively invites — one
+ * click on a country preset imports several years of statutory holidays, and
+ * every one of them became a chip carrying its own remove button and its own
+ * formatted `title`. Thousands of DOM nodes built on a screen that only ever
+ * shows the first screenful of them.
+ *
+ * 60 rather than a smaller number because these wrap several to a row: 60 is
+ * still roughly one year of holidays, so the common case of "check what the
+ * preset gave me" never has to press anything. Matches the paging step in
+ * `CalendarDayPanel`'s series list, which is the same affordance.
+ */
+const DATE_CHIP_PAGE = 60
+
 export function WorkCalendarView({ onCompose }: { onCompose?: () => void } = {}) {
   const { state, dispatch, pushUndo, undo, toggleJob, scheduleDraft, bridge } = useApp()
   const { t, dir, formatDateTime } = useI18n()
@@ -256,10 +273,11 @@ export function WorkCalendarView({ onCompose }: { onCompose?: () => void } = {})
   /**
    * The locale's short time, built once.
    *
-   * `formatDateTime` from `useI18n` constructs a fresh `Intl.DateTimeFormat` on
-   * every call, and this one is called up to three times per day square — 126
-   * constructions per render of a month, for a string that only needs one
-   * formatter. Same locale resolution as the weekday and month labels above.
+   * `formatDateTime` from `useI18n` caches its formatters now, so this is no
+   * longer the difference between 126 `Intl.DateTimeFormat` constructions per
+   * render of a month and one. It stays because it is still one fewer lookup
+   * per day square, and because it resolves the locale the same way the
+   * weekday and month labels above do.
    */
   const timeFormat = useMemo(
     () => new Intl.DateTimeFormat(undefined, { timeStyle: 'short' } as Intl.DateTimeFormatOptions),
@@ -396,7 +414,13 @@ export function WorkCalendarView({ onCompose }: { onCompose?: () => void } = {})
 
   /** Exact date → name, from the Chinese tables. Rebuilt when a year is fetched. */
   const statutory = useMemo(() => statutoryNames(cached), [cached])
-  const nameFor = (iso: IsoDate) => holidayNameFor(iso, { presetId, statutory })
+  // `useCallback`, not a bare arrow: `DateChipList` below memoises a whole
+  // page of formatted chips against this, and a fresh identity every render
+  // would throw that work away every render.
+  const nameFor = useCallback(
+    (iso: IsoDate) => holidayNameFor(iso, { presetId, statutory }),
+    [presetId, statutory],
+  )
 
   const conflictScan = useMemo(
     () => findConflicts(state.jobs, calendar, { now: Date.now() }),
@@ -1904,38 +1928,17 @@ export function WorkCalendarView({ onCompose }: { onCompose?: () => void } = {})
                 {calendar[list].length === 0 ? (
                   <EmptyState icon={<IconCalendar size={20} />} title={t('workcal.none')} />
                 ) : (
-                  <div className="workcal__dates">
-                    {calendar[list].map((iso) => {
-                      const name = list === 'holidays' ? nameFor(iso) : undefined
-                      return (
-                        <span key={iso} className={`chip ${list === 'workdays' ? 'chip--warning' : ''}`}>
-                          <span
-                            className="chip__text"
-                            title={formatDateTime(parseIsoDate(iso).getTime(), {
-                              dateStyle: 'full',
-                              timeStyle: undefined,
-                            })}
-                          >
-                            {iso}
-                            {name ? <span className="chip__note">{name}</span> : null}
-                          </span>
-                          <button
-                            type="button"
-                            className="chip__remove"
-                            aria-label={t('common.delete')}
-                            onClick={() =>
-                              save(
-                                { [list]: calendar[list].filter((d) => d !== iso) } as Partial<WorkCalendar>,
-                                t('cal.undo.calendar'),
-                              )
-                            }
-                          >
-                            <IconX size={12} />
-                          </button>
-                        </span>
+                  <DateChipList
+                    dates={calendar[list]}
+                    warning={list === 'workdays'}
+                    nameFor={list === 'holidays' ? nameFor : undefined}
+                    onRemove={(iso) =>
+                      save(
+                        { [list]: calendar[list].filter((d) => d !== iso) } as Partial<WorkCalendar>,
+                        t('cal.undo.calendar'),
                       )
-                    })}
-                  </div>
+                    }
+                  />
                 )}
               </div>
             </Card>
@@ -1979,6 +1982,89 @@ export function WorkCalendarView({ onCompose }: { onCompose?: () => void } = {})
       {dragPreview ? <DragTimezoneTip x={dragPreview.x} y={dragPreview.y} lines={dragPreview.lines} /> : null}
 
       {confirmElement}
+    </div>
+  )
+}
+
+/**
+ * One of the two date lists on the working calendar — the holidays, or the
+ * make-up workdays — drawn a page at a time.
+ *
+ * Its own component rather than an inline `.map()` for two reasons, both of
+ * which were costing frames on a phone:
+ *
+ *   - **The cap needs state, and state needs a component.** The lists used to
+ *     render every entry they held. A country preset imports years at a time,
+ *     so "every entry" is thousands of chips — each with a remove button and a
+ *     `title` — for a box that shows perhaps two rows. `visible` cannot live in
+ *     the parent's `.map()` callback, because hooks cannot.
+ *   - **The formatting comes out of the render body.** `parseIsoDate` plus
+ *     `formatDateTime` ran inline per chip, so they re-ran on every render of
+ *     the whole screen — every calendar click, every filter change — for chips
+ *     whose text had not moved. Hoisted into a `useMemo` keyed on the dates and
+ *     the page size, they now run when the list itself changes and not
+ *     otherwise.
+ *
+ * `visible` deliberately does not reset when `dates` changes. Removing a chip
+ * writes a new array, and collapsing the list back to the first page under
+ * somebody who had expanded it and was working through the tail is worse than
+ * the stale number.
+ */
+function DateChipList({
+  dates,
+  warning,
+  nameFor,
+  onRemove,
+}: {
+  dates: readonly IsoDate[]
+  /** The make-up workday list, which is toned differently from the holidays. */
+  warning?: boolean
+  /** Holidays only — make-up days have no name to show. */
+  nameFor?: (iso: IsoDate) => string | undefined
+  onRemove: (iso: IsoDate) => void
+}) {
+  const { t, formatDateTime } = useI18n()
+  const [visible, setVisible] = useState(DATE_CHIP_PAGE)
+
+  const shown = useMemo(
+    () =>
+      dates.slice(0, visible).map((iso) => ({
+        iso,
+        name: nameFor?.(iso),
+        // `parseIsoDate`, never `new Date(iso)` — a bare date string is UTC
+        // midnight per spec, which is the previous day west of UTC.
+        title: formatDateTime(parseIsoDate(iso).getTime(), {
+          dateStyle: 'full',
+          timeStyle: undefined,
+        }),
+      })),
+    [dates, visible, nameFor, formatDateTime],
+  )
+  const hidden = dates.length - shown.length
+
+  return (
+    <div className="workcal__dates">
+      {shown.map(({ iso, name, title }) => (
+        <span key={iso} className={`chip ${warning ? 'chip--warning' : ''}`}>
+          <span className="chip__text" title={title}>
+            {iso}
+            {name ? <span className="chip__note">{name}</span> : null}
+          </span>
+          <button
+            type="button"
+            className="chip__remove"
+            aria-label={t('common.delete')}
+            onClick={() => onRemove(iso)}
+          >
+            <IconX size={12} />
+          </button>
+        </span>
+      ))}
+      {hidden > 0 ? (
+        <Button variant="ghost" onClick={() => setVisible((n) => n + DATE_CHIP_PAGE)}>
+          {t('workcal.moreDates', { n: hidden })}
+        </Button>
+      ) : null}
     </div>
   )
 }

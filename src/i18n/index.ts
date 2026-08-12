@@ -158,6 +158,74 @@ export function translate(
   )
 }
 
+/**
+ * Built formatters, keyed by locale + the exact option set they were built
+ * with.
+ *
+ * `new Intl.DateTimeFormat(...)` is one of the most expensive constructors a
+ * JS engine has — it resolves the locale, loads the calendar and number data
+ * for it and compiles a pattern — and `formatDateTime` used to run one per
+ * call. Several call sites are inside `.map()` bodies, so that was one full
+ * construction *per rendered list row*, thrown away immediately afterwards.
+ * The app only ever asks for a handful of distinct shapes (a medium date, a
+ * full date, a weekday…) in one locale at a time, so the whole working set is
+ * a few dozen objects that can simply be kept.
+ *
+ * Module scope, not inside `createI18n`: the context value is rebuilt whenever
+ * the language changes, and a cache that died with it would be no cache at all.
+ * The key space is bounded by the code (option sets appearing in call sites x
+ * six locales), not by anything a user can type, so this cannot grow without
+ * limit.
+ */
+const dateTimeFormatters = new Map<string, Intl.DateTimeFormat>()
+const numberFormatters = new Map<string, Intl.NumberFormat>()
+
+/**
+ * A cache key covering every input that can change the output: the locale tag
+ * and every option field, including `timeZone`.
+ *
+ * Two details this has to get right, because a key that collides silently
+ * returns the wrong time — far worse than being slow:
+ *
+ * - Keys are sorted, so `{hour, timeZone}` and `{timeZone, hour}` — the same
+ *   request written two ways — share one formatter instead of two.
+ * - An explicitly `undefined` field is skipped, because that is exactly how
+ *   `Intl` reads it: `{dateStyle: 'full', timeStyle: undefined}` builds the
+ *   same formatter as `{dateStyle: 'full'}`, so both must key the same. This
+ *   is not hypothetical — `formatDateTime(ms, {dateStyle: 'full', timeStyle:
+ *   undefined})` is written that way in several views to cancel the default
+ *   time part.
+ */
+function formatterKey(locale: string, opts: Record<string, unknown>): string {
+  let key = locale
+  for (const name of Object.keys(opts).sort()) {
+    const value = opts[name]
+    if (value === undefined) continue
+    key += ` ${name}${String(value)}`
+  }
+  return key
+}
+
+function dateTimeFormatter(locale: string, opts: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
+  const key = formatterKey(locale, opts as Record<string, unknown>)
+  let formatter = dateTimeFormatters.get(key)
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat(locale, opts)
+    dateTimeFormatters.set(key, formatter)
+  }
+  return formatter
+}
+
+function numberFormatter(locale: string, opts: Intl.NumberFormatOptions): Intl.NumberFormat {
+  const key = formatterKey(locale, opts as Record<string, unknown>)
+  let formatter = numberFormatters.get(key)
+  if (!formatter) {
+    formatter = new Intl.NumberFormat(locale, opts)
+    numberFormatters.set(key, formatter)
+  }
+  return formatter
+}
+
 export interface I18n {
   locale: LocaleId
   dir: 'ltr' | 'rtl'
@@ -188,7 +256,7 @@ export function createI18n(locale: LocaleId): I18n {
   const t = (key: TranslationKey, values?: Interpolations) => translate(locale, key, values)
 
   const formatDateTime = (ms: number, opts?: Intl.DateTimeFormatOptions) =>
-    new Intl.DateTimeFormat(meta.intlTag, {
+    dateTimeFormatter(meta.intlTag, {
       dateStyle: 'medium',
       timeStyle: 'short',
       ...opts,
@@ -222,7 +290,7 @@ export function createI18n(locale: LocaleId): I18n {
       unit++
     }
     const digits = value < 10 ? 1 : 0
-    return `${new Intl.NumberFormat(meta.intlTag, {
+    return `${numberFormatter(meta.intlTag, {
       maximumFractionDigits: digits,
       minimumFractionDigits: digits,
     }).format(value)} ${units[unit]}`

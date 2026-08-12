@@ -307,8 +307,16 @@
   min-height: var(--pagehead-h);
   padding: var(--sp-2) 0;
   margin-bottom: var(--sp-1);
-  background: color-mix(in srgb, var(--bg) 88%, transparent);
-  backdrop-filter: blur(12px) saturate(140%);
+  /* Opaque `--bg`, not a translucent one with a blur behind it.
+     `backdrop-filter` on a `position: sticky` element is the single most
+     expensive thing this stylesheet can ask an Android WebView for: the
+     compositor has to read back the pixels underneath the bar and re-blur
+     them on every scroll frame, so the cost is paid continuously for as long
+     as a finger is moving — exactly when the app must not stutter. The bar's
+     job is only that content does not bleed through it, and an opaque surface
+     does that outright. The band still reads as a band: `::after` below draws
+     the rule. */
+  background: var(--bg);
 }
 /* The rule runs the full width of the scroll area, not just the content
    column, so the heading reads as a band rather than a floating label. */

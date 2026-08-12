@@ -9,8 +9,12 @@
   display: grid;
   place-items: center;
   padding: var(--sp-5);
+  /* `--scrim` alone, no blur. The scrim covers the whole viewport, so its
+     `backdrop-filter` made the compositor blur every pixel behind it — a cost
+     paid on open, on the fade-in animation, and again on every scroll inside
+     the dialog. The token is already dark enough to push the page behind out
+     of the way; the 3px of blur on top of it was not doing visible work. */
   background: var(--scrim);
-  backdrop-filter: blur(3px);
   animation: fade-in var(--dur) var(--ease);
 }
 .modal {

@@ -60,7 +60,8 @@
      18-calendar.css           1026 lines   The calendar as a scheduling console
      19-runecircuit.css         486 lines   The runecircuit visual style, and the last responsive odds
      20-short.css               ~120 lines  Short windows: phone landscape, and one-primary-action-per-screen
-                            10874 lines   total
+     21-home-grid.css           ~290 lines  The phone Home screen: hero, stat strip, eight-cell function grid
+                            11164 lines   total
 */
 
 @import './app/01-base.css';
@@ -83,3 +84,4 @@
 @import './app/18-calendar.css';
 @import './app/19-runecircuit.css';
 @import './app/20-short.css';
+@import './app/21-home-grid.css';

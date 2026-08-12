@@ -211,6 +211,29 @@
   overflow-wrap: anywhere;
 }
 
+/*
+ * `.mono` is 14px because 14px is the data rank and machine strings are data:
+ * an SSL error, a file path, a host:port readout. All of those are read, not
+ * typed into. When the same class landed on a control the reader types into —
+ * the two PIN inputs in Settings — it took a focusable field below the 16px
+ * floor, and that floor is not a matter of taste. iOS and Android zoom the
+ * page when a focused field is under 16px, so the one screen where a phone
+ * would zoom on you is the one asking for a six-digit code.
+ *
+ * Found by `check-tap-targets.mjs` once it was fixed to walk every screen:
+ * "input text renders at 2 different sizes [16px on 撰写/工作日历/发送记录/设置;
+ * 14px on 设置]". One class, two jobs; this splits them by what the element is
+ * rather than by what it is called.
+ */
+.mono.input,
+.mono.select,
+.mono.textarea,
+input.mono,
+select.mono,
+textarea.mono {
+  font-size: var(--text-base);
+}
+
 /* --- data folder ---------------------------------------------------------- */
 
 .path-row {

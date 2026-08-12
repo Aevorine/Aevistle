@@ -7,6 +7,21 @@ export const en = {
   'nav.compose': 'Compose',
   'nav.home': 'Home',
   'home.subtitle': 'Schedules, contacts, templates, the working calendar and the send log.',
+  'home.greetMorning': 'Good morning',
+  'home.greetAfternoon': 'Good afternoon',
+  'home.greetEvening': 'Good evening',
+  'home.heroArmed': '{n} waiting to go out — all kept on this device',
+  'home.heroClear': 'Nothing waiting to go out',
+  'home.statArmed': 'Waiting',
+  'home.statSent': 'Sent',
+  'home.statErrors': 'Errors',
+  'home.tomorrow': 'Tomorrow',
+  'home.more': 'More',
+  'home.moreTitle': 'More features',
+  'home.moreEmpty': 'Everything fits on the home screen — nothing is hidden here.',
+  'home.upcoming': 'Coming up',
+  'home.upcomingAll': 'All {n}',
+  'home.upcomingEmpty': 'Nothing scheduled yet.',
 
   // Self-check. Layer names, not friendly names: the point of this panel is to
   // say which part of the stack gave way, so "Native bridge" is more useful
@@ -1037,6 +1052,7 @@ export const en = {
   'workcal.rejected': '{n} could not be read: {list}',
   'workcal.noneParsed': 'No dates could be read from that',
   'workcal.none': 'None yet',
+  'workcal.moreDates': 'Show more ({n} left)',
 
   // --- activity export and delivery receipts ---
   'logs.exported': '{n} rows exported',

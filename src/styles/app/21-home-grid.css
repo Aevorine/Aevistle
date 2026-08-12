@@ -1,0 +1,443 @@
+/* ==========================================================================
+   21 — The phone Home screen: hero, stat strip, function grid, module cards
+
+   Round 6 of 界面要统一, and the one structural change in it. Home was eleven
+   identical rows in a scrolling list: five screens a phone can only reach from
+   here, plus six features promoted out of Settings. Eleven rows of one shape
+   say nothing about which of them matters, and the list grows by one every
+   time a feature is added — which is exactly the failure mode the user named,
+   "以后新加的功能不能破坏界面美感".
+
+   The answer is a grid with a fixed capacity rather than a list with none.
+
+   ## Why eight cells, and why the eighth is always 更多
+
+   Seven destinations ranked by how often this device has actually opened them,
+   and an eighth cell that is permanently the door to everything else. That
+   bound is the whole mechanism: a twelfth, twentieth or fortieth feature
+   changes which seven are on top, never how tall this screen is or how it is
+   laid out. Nothing here needs revisiting when the app grows, which is what
+   "future features cannot spoil it" has to mean if it is to mean anything
+   checkable.
+
+   Four columns rather than five: at 360px minus the card's own margins a
+   column is 82px, and an icon plate plus a two-character label fits that with
+   room to breathe. Five columns is 65px, which clips 工作日历 and 发送记录 in
+   Chinese and every one of the six languages' longer words.
+
+   ## Why the hero is the accent colour
+
+   The reference for this screen is the coloured header every Chinese finance
+   and messaging app opens with, and the app already owns exactly one colour
+   that is allowed to be that saturated: `--accent`. Using it rather than a new
+   dark literal keeps the screen inside the token system — all seven accents
+   and all seven visual styles get a correct hero for free, in both themes, and
+   `--accent-text` is already the foreground guaranteed to read on it. A
+   hard-coded slate would have been one more colour outside `check-contrast`'s
+   reach, in a file whose whole point is that there is no such thing.
+
+   ## Order in the cascade
+
+   Last, deliberately. `.hometile` in 14-growth.css styles the row shape this
+   screen used to be, and the desktop still uses it — see `HomeView.tsx`, which
+   draws the old tile list when `narrow` is false. These rules only ever apply
+   under `.view--home-grid`, which only the phone markup carries, so the two
+   never meet; being last means that if they ever do, this one wins.
+   ========================================================================== */
+
+/* --- the hero -------------------------------------------------------------
+   Full-bleed: `.view__inner`'s own gutter is dropped for this screen so the
+   colour reaches both edges, and every child below puts its own back. */
+.view--home-grid .view__inner {
+  padding-left: 0;
+  padding-right: 0;
+  padding-top: 0;
+}
+
+.homehero {
+  background: var(--accent);
+  color: var(--accent-text);
+  /* The bottom pad is what the grid card pulls up into — see `.homegrid`. */
+  padding: var(--sp-4) var(--sp-4) var(--sp-8);
+}
+
+/* The heading row: the greeting, and the one trailing action — the same
+   arrangement `PageHead` gives every other screen, rebuilt here because
+   `PageHead` paints its own background and would cut a white stripe across the
+   colour. See the note in `HomeView.tsx` for why that is an exception rather
+   than a divergence. */
+.homehero__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  min-height: var(--ctl-md);
+}
+
+.homehero__greet {
+  font-size: var(--text-lg);
+  font-weight: var(--fw-bold);
+  line-height: var(--leading-tight);
+  margin: 0;
+  min-width: 0;
+}
+
+.homehero__search {
+  flex: 0 0 var(--ctl-md);
+  width: var(--ctl-md);
+  height: var(--ctl-md);
+  display: grid;
+  place-items: center;
+  /* -12px, so the 48px target keeps its full size while the glyph inside it
+     lines up with the hero's own gutter rather than sitting 12px in from it. */
+  margin-right: calc(var(--sp-3) * -1);
+  border: 0;
+  border-radius: var(--r-full);
+  background: transparent;
+  color: var(--accent-text);
+  cursor: pointer;
+}
+.homehero__search:hover {
+  background: color-mix(in srgb, var(--accent-text) 14%, transparent);
+}
+
+/*
+ * Not `--text-xs`. This is a sentence a person reads, and the type floor says
+ * anything read as language is 16px or larger no matter what it sits under —
+ * see the ladder's doc in theme.css. 14px on this screen is reserved for the
+ * three stat captions below, which are labels on figures rather than prose.
+ */
+.homehero__sub {
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  margin: var(--sp-1) 0 0;
+  /* The one place a colour is mixed rather than named: there is no
+     "--accent-text-dim" token and inventing one would mean restating it in
+     all 103 theme blocks. Mixing toward the accent keeps it on-hue. */
+  color: color-mix(in srgb, var(--accent-text) 78%, var(--accent));
+}
+
+/* --- the three figures ---------------------------------------------------- */
+.homestats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  margin-top: var(--sp-4);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--accent-text) 13%, transparent);
+  overflow: hidden;
+}
+
+/*
+ * Exactly `--ctl-lg`, not "at least" it. The padding is `--sp-1` rather than
+ * `--sp-2` because at `--sp-2` the content stack (a 20px figure at 1.15 and a
+ * 14px caption at 1.3) came to 59px and pushed past the 56px floor — a 59
+ * among 48s and 56s, which is precisely the kind of drift `check:tap` counts
+ * and precisely how seventeen different control heights accumulated the last
+ * time. The floor is the height; nothing inside is allowed to raise it.
+ */
+.homestat {
+  min-height: var(--ctl-lg);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: var(--sp-1) var(--sp-1);
+  border: 0;
+  border-left: 1px solid color-mix(in srgb, var(--accent-text) 16%, transparent);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: center;
+}
+.homestat:first-child {
+  border-left: 0;
+}
+.homestat:hover {
+  background: color-mix(in srgb, var(--accent-text) 8%, transparent);
+}
+
+/*
+ * `--text-value`, the 20px rank, and this is what that rank is for: a single
+ * figure that is the entire content of its own box. It is the only step on the
+ * ladder between body and a screen title, and using body size here would make
+ * the number no louder than the word under it.
+ */
+.homestat__n {
+  font-size: var(--text-value);
+  font-weight: var(--fw-bold);
+  line-height: 1.15;
+}
+.homestat__k {
+  font-size: var(--text-sm);
+  line-height: var(--leading-tight);
+  color: color-mix(in srgb, var(--accent-text) 76%, var(--accent));
+}
+
+/* --- the eight-cell grid --------------------------------------------------
+   Pulled up into the hero's bottom padding so the card overlaps the colour —
+   the join every app this borrows from uses, and the reason the hero carries
+   `--sp-8` of bottom pad rather than `--sp-4`. */
+.homegrid {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  margin: calc(var(--sp-6) * -1) var(--sp-3) 0;
+  padding: var(--sp-3) var(--sp-1);
+  background: var(--surface-1);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-md);
+}
+
+.homegrid__cell {
+  /* 88px: a 44px plate, the gap, and one line of label at the data rank.
+     Comfortably over the 48px tap floor in both dimensions at 360px, where a
+     column is 82px wide. */
+  min-height: 88px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) 2px;
+  border: 0;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  border-radius: var(--r-md);
+  text-align: center;
+}
+.homegrid__cell:hover {
+  background: var(--surface-hover);
+}
+.homegrid__cell:active {
+  background: var(--surface-active);
+}
+
+.homegrid__plate {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+}
+/* The eighth cell is a door, not a destination — it reads as neutral so the
+   seven that are destinations keep the accent to themselves. */
+.homegrid__cell--more .homegrid__plate {
+  background: var(--surface-inset);
+  color: var(--text-3);
+}
+
+.homegrid__label {
+  font-size: var(--text-sm);
+  line-height: var(--leading-tight);
+  /* One line, always. A wrapped label makes its cell taller than its seven
+     neighbours, which is the whole grid stopping being a grid. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+/* A count on a plate — armed reminders, unread mail, fresh codes. */
+.homegrid__badge {
+  position: absolute;
+  top: -4px;
+  right: -6px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: var(--r-full);
+  background: var(--danger);
+  color: var(--text-inverse);
+  font-size: var(--text-sm);
+  line-height: 18px;
+  text-align: center;
+}
+
+/* --- module cards ---------------------------------------------------------
+   One shape, used for every block below the grid. A new feature that wants to
+   surface something on Home gets one of these; it does not get a layout. */
+.homemod {
+  margin: var(--sp-4) var(--sp-3) 0;
+  background: var(--surface-1);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+}
+.homemod:last-child {
+  margin-bottom: var(--sp-4);
+}
+
+.homemod__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  min-height: var(--ctl-md);
+  padding: var(--sp-2) var(--sp-4);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.homemod__title {
+  font-size: var(--text-lg);
+  font-weight: var(--fw-bold);
+  margin: 0;
+}
+.homemod__more {
+  min-height: var(--ctl-md);
+  padding: 0 var(--sp-2);
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-size: var(--text-base);
+  cursor: pointer;
+  border-radius: var(--r-sm);
+}
+.homemod__more:hover {
+  background: var(--surface-hover);
+}
+
+.homemod__row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  min-height: var(--ctl-lg);
+  padding: var(--sp-2) var(--sp-4);
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.homemod__row:first-of-type {
+  border-top: 0;
+}
+.homemod__row:hover {
+  background: var(--surface-hover);
+}
+
+.homemod__when {
+  flex: 0 0 auto;
+  min-width: 46px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--accent);
+  font-size: var(--text-sm);
+  line-height: var(--leading-tight);
+}
+.homemod__when b {
+  font-size: var(--text-base);
+  font-weight: var(--fw-bold);
+}
+
+.homemod__text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/*
+ * `display: block` is not cosmetic here. Both lines are `<span>`s, and on an
+ * inline box `white-space: nowrap` and `text-overflow: ellipsis` do nothing —
+ * so a short second line sat on the end of the title ("每日备份提醒me@example.com")
+ * and a long one ran out under the chevron instead of being clipped. Two lines
+ * of a row have to be two blocks before they can be told to behave like them.
+ */
+.homemod__t1,
+.homemod__t2 {
+  display: block;
+}
+.homemod__t1 {
+  font-size: var(--text-base);
+  line-height: var(--leading-tight);
+  color: var(--text-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.homemod__t2 {
+  font-size: var(--text-sm);
+  line-height: var(--leading-tight);
+  color: var(--text-3);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.homemod__empty {
+  padding: var(--sp-4);
+  font-size: var(--text-base);
+  color: var(--text-3);
+}
+
+/* --- tablets --------------------------------------------------------------
+   A tablet is still `data-shell="mobile"` (the shell switches at 840px), so
+   everything above applies at 768px too — and at 768px four columns make each
+   cell 186px wide around a 44px icon, which reads as a grid that lost most of
+   its contents rather than as a generous one.
+
+   Eight columns, so the whole grid is one row. That is the same eight cells in
+   the same order with the same eighth-is-更多 rule; only the wrap point moves.
+   600px, one of the three breakpoints — not a fourth invented for this. */
+@media (min-width: 600px) {
+  .homegrid {
+    grid-template-columns: repeat(8, 1fr);
+  }
+
+  /*
+   * One column width, 704px, shared by the hero's contents and by every card
+   * below it, so their left edges line up at any width from 600px to the
+   * 840px shell switch. Stretched to the full 768px instead, the three figures
+   * end up a third of a screen apart — further than the eye groups them.
+   *
+   * The hero keeps its colour full-bleed and centres its *contents* by growing
+   * its own side padding, rather than capping the band. `max()` never lets that
+   * fall below the phone's `--sp-4` gutter, so nothing changes under 736px.
+   */
+  .homehero {
+    padding-inline: max(var(--sp-4), calc((100% - 704px) / 2));
+  }
+  .homegrid,
+  .homemod {
+    /*
+     * `width: 100%` is load-bearing, not belt-and-braces. These two are flex
+     * items of `.view__inner` (a column flex container), and on a flex item an
+     * auto margin absorbs the free space in the cross axis — which makes the
+     * item shrink-wrap its content instead of stretching. Measured without it:
+     * the grid came out 602px and the module card 201px, both centred on their
+     * own content rather than on the column. `width: 100%` gives the auto
+     * margins nothing left to absorb, so `max-width` decides the width.
+     */
+    width: 100%;
+    max-width: 704px;
+    margin-inline: auto;
+  }
+  /* Restated: `margin-inline` above leaves the top margin alone, but the base
+     rule set it in a shorthand and this is the one that must survive — it is
+     what pulls the grid card up into the hero. */
+  .homegrid {
+    margin-top: calc(var(--sp-6) * -1);
+  }
+}
+
+/* --- the 更多 sheet --------------------------------------------------------
+   Everything the grid did not have room for, in the row shape the whole app
+   already uses for a list of destinations. Deliberately the old `.hometile`
+   look rather than a second grid: a grid says "these are the important ones",
+   and by construction these are the ones that are not. */
+.homemore {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}

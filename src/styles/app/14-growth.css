@@ -2671,21 +2671,34 @@
  * `scripts/layout-probe.mjs` asserts all three ranks separately.
  */
 
-/* The name of a field is the name of a function — 四号, one step above the
-   value it labels. Applies to every label on the screen, so the addressing row,
-   the message and the send time are all titled the same way. */
-/* `.field__labelrow` is listed as well as the bare label, and that omission was
-   a live bug rather than a tidiness point: measured on the compose screen, four
-   of the five field labels rendered at 18.67px and 正文 rendered at 16px — the
-   same kind of text, two ranks, on one screen. The cause is that `>` is a
-   direct-child combinator and the body field is the one field that grew a tools
-   row, so its label sits at `.field > .field__labelrow > .field__label` and
-   stopped matching. Nothing errored; it simply fell back to the 16px base rule
-   forty lines up. This is exactly the failure mode 界面不统一 is made of — a
-   selector that was right when it was written and silently stopped being right
-   when the markup underneath it grew a level. */
-.view--compose .field > .field__label,
-.view--compose .field > .field__labelrow > .field__label,
-.view--compose .switch__title {
-  font-size: var(--text-lg);
-}
+/* Removed in round 6: `.view--compose .field__label { font-size: --text-lg }`.
+ *
+ * The argument it was written on was "the name of a field is the name of a
+ * function — 四号, one step above the value it labels", and read on its own
+ * that is a coherent principle. It was applied on one screen.
+ *
+ * The round before this one already found a bug inside it — the body field's
+ * label had grown an extra markup level, stopped matching a `>` combinator and
+ * silently fell back to 16px, so 撰写 was showing four labels at 18.67px and
+ * one at 16px — and fixed it by widening the selector. That fix was correct
+ * about the symptom and wrong about the scale of the problem: the same kind of
+ * text was still rendering at two ranks, just across screens instead of within
+ * one. `check-tap-targets.mjs` sees the whole app now and reported exactly
+ * that: "field label renders at 2 different sizes [18.6672px on 撰写; 16px on
+ * 工作日历/设置]".
+ *
+ * The ladder in `theme.css` settles which side gives way, and it is not the
+ * one this rule took: 小四 16px is defined there as "body copy, labels,
+ * buttons, inputs", and 四号 18.67px as "the name of a function or section".
+ * A field label is a label. Raising all 101 of them app-wide to match compose
+ * would be the alternative reading, and it would make the sixteen-section
+ * Settings screen materially taller for no request anyone made.
+ *
+ * It pays for itself twice: the comment above records that this rule's label
+ * row cost 44px of height on a 360x800 phone, and the textarea is the only
+ * thing on that card with `flex-grow`, so every pixel it gives back lands in
+ * the message box — the one measurement on that screen that has a hard floor.
+ *
+ * `.switch__title` went with it, for the same reason and to keep the compose
+ * screen's switches the size of every other screen's.
+ */

@@ -923,6 +923,32 @@ export interface Settings {
    */
   oneHand?: boolean
   /**
+   * How many times each Home destination has been opened on *this* device.
+   *
+   * The phone Home screen is an eight-cell grid: seven destinations ranked by
+   * this map, and an eighth cell that is permanently 更多. That bound is the
+   * mechanism behind "新加的功能不会破坏界面美感" — a twelfth or fortieth
+   * feature changes which seven are on top and nothing else, because the
+   * screen's shape does not depend on how many destinations exist. See
+   * `styles/app/21-home-grid.css` and `views/HomeView.tsx`.
+   *
+   * Deliberately NOT part of `AppearanceSettings` (`core/ops/backup.ts`), so
+   * it does not travel over the 'appearance' sync scope. Two devices are used
+   * differently — a phone opens codes and the inbox, a desktop opens the
+   * calendar and the log — and a ranking is only useful if it describes the
+   * device you are holding. It is still inside `Settings`, so an ordinary
+   * backup carries it and a restored install starts from a familiar layout
+   * rather than the cold default order.
+   *
+   * Keys are `ViewId | HomeFeatureId` (`core/nav.ts`). Untyped as
+   * `Record<string, number>` rather than a mapped type over those unions
+   * because a persisted file outlives the code that wrote it: an id that has
+   * since been renamed or removed must be able to sit in this map harmlessly
+   * and be ignored at read time, not make the whole settings object fail to
+   * type-check after an upgrade.
+   */
+  navUsage?: Record<string, number>
+  /**
    * When any `AppearanceSettings` field (`core/backup.ts`) last changed on
    * *this* device. Same last-write-wins role as `workCalendarUpdatedAt` — see
    * its doc — but for the "match my theme" scope instead of the calendar.
@@ -1042,6 +1068,12 @@ export const DEFAULT_SETTINGS: Settings = {
   listDensity: 'standard',
   textScale: 'standard',
   oneHand: false,
+  /* Empty, not a seeded order. The grid falls back to `HOME_GRID_ORDER`'s
+     hand-chosen default until this device has actually opened something —
+     see `core/nav.ts`. Seeding counts here would be inventing usage that
+     never happened, and would then have to be out-weighed before the real
+     ranking could show through. */
+  navUsage: {},
   imagePolicyChosen: false,
   digestEnabled: false,
   digestTime: '08:00',
