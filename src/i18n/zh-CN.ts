@@ -1438,6 +1438,22 @@ export const zhCN: Translations = {
   'cal.confirm.clearTitle': '清空「{list}」？',
   'cal.confirm.clearBody': '这会删除全部 {n} 个日期，包括你自己输入的。Ctrl+Z 可以撤销。',
   'inbox.imagesLoading': '正在加载 {n} 张图片…',
+  /* --- 隐私图片代理 --------------------------------------------------------
+     远程图片是在邮件【到达时】就取好、扫描并重新编码的，不是打开时才取。
+     下面这些是事后告诉用户发生了什么。见 core/mail/imageProxy.ts。 */
+  'inbox.imagesPrefetched': '图片来自本机，打开这封邮件没有联系任何人。',
+  'inbox.imagesBlocked': '有 {n} 张没通过安全扫描。',
+  'inbox.trackersFound': '有 {n} 张像是追踪像素。',
+  'inbox.imageBlock.why': '为什么？',
+  'inbox.imageBlock.hide': '收起',
+  'inbox.imageBlock.typeMismatch': '文件的真实格式和服务器声称的对不上。',
+  'inbox.imageBlock.scriptableFormat': '是 SVG，这种格式能夹带代码、还能自己联网。',
+  'inbox.imageBlock.trailingData': '图片结束之后还藏着多余的数据。',
+  'inbox.imageBlock.undecodable': '图片已损坏，或者是专门用来搞坏解码器的。',
+  'inbox.imageBlock.tooLarge': '太大了，没法安全处理。',
+  'inbox.imageBlock.notAnImage': '服务器发来的根本不是图片。',
+  'inbox.imageBlock.refusedTarget': '它指向的是你自己内网里的地址。',
+  'inbox.imageBlock.fetchFailed': '没能下载下来。',
   'inbox.imagesFailed': '有 {n} 张图片没能加载出来。',
   'inbox.imagesRetry': '重试',
   'inbox.alwaysAllowSender': '始终允许 {domain}',

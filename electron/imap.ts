@@ -43,6 +43,7 @@ import { classifyError, type InboxMessageBody } from '../src/core/platform/bridg
 import { accessTokenForAccount, hasOAuthGrant, noteOAuthAuthFailure } from './oauth'
 import { resolveHostCached } from './mailer'
 import { sanitizeMessageHtml } from './sanitizeHtml'
+import { prefetchImages } from './imagePrefetch'
 import {
   attachmentMeta,
   peekMessageBody,
@@ -251,6 +252,22 @@ async function parseCacheAndReturn(
     // wrote — for that one, absent means unknown, not "no attachments".
     attachments: attachmentMeta(attachments),
   })
+
+  /*
+   * Fetch the pictures now, while nobody is looking.
+   *
+   * This is the single line that decouples "the message arrived" from "the
+   * message was read" — see `imagePrefetch.ts` for why that is the whole
+   * privacy claim rather than a performance tweak. It sits here, after the body
+   * is safely on disk, because this function is the one place a body is ever
+   * parsed: both the eager sync pass and the on-demand `fetchMessageBody` go
+   * through it, so neither can forget.
+   *
+   * Deliberately not awaited, and deliberately incapable of throwing. A message
+   * has to render whether or not its pictures were prefetched, and a picture
+   * nobody has asked for yet must never be a reason a sync fails.
+   */
+  prefetchImages(remoteImages)
 
   return {
     text: parsed.text,

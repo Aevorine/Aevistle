@@ -1465,6 +1465,23 @@ export const en = {
   'cal.confirm.clearTitle': 'Clear {list}?',
   'cal.confirm.clearBody': 'This removes all {n} date(s), including any you typed in yourself. Ctrl+Z puts them back.',
   'inbox.imagesLoading': 'Loading {n} images…',
+  /* --- privacy image proxy ------------------------------------------------
+     Remote pictures are fetched, scanned and re-encoded when the message
+     ARRIVES, not when it is read - see `core/mail/imageProxy.ts`. These are
+     what the reader is told about that afterwards. */
+  'inbox.imagesPrefetched': 'Pictures came from this device — opening this message contacted nobody.',
+  'inbox.imagesBlocked': '{n} refused by the safety scan.',
+  'inbox.trackersFound': '{n} look like tracking pixels.',
+  'inbox.imageBlock.why': 'Why?',
+  'inbox.imageBlock.hide': 'Hide',
+  'inbox.imageBlock.typeMismatch': 'The file was not the kind of picture the server said it was.',
+  'inbox.imageBlock.scriptableFormat': 'An SVG, which can carry code and fetch things of its own.',
+  'inbox.imageBlock.trailingData': 'Extra data was hidden after the end of the picture.',
+  'inbox.imageBlock.undecodable': 'The picture is damaged, or built to break the decoder.',
+  'inbox.imageBlock.tooLarge': 'Too large to process safely.',
+  'inbox.imageBlock.notAnImage': 'The server sent something that is not a picture.',
+  'inbox.imageBlock.refusedTarget': 'It pointed at an address on your own network.',
+  'inbox.imageBlock.fetchFailed': 'It could not be downloaded.',
   'inbox.imagesFailed': '{n} images could not be loaded.',
   'inbox.imagesRetry': 'Try again',
   'inbox.alwaysAllowSender': 'Always allow {domain}',

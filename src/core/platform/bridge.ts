@@ -11,6 +11,7 @@ import type { ControlAuditEntry, ControlEndpoint, ControlRequest, ControlRespons
 import type { DispatchLedgerEntry } from '../ops/dispatchLedger'
 import type { FeedResponse } from '../schedule/feeds'
 import type { OAuthAccountStatus, OAuthConsentResult } from '../mail/oauth'
+import type { ProxiedImage } from '../mail/imageProxy'
 import type { PairingEvent, PairingPayload, PairMode } from '../sync/pairing'
 import type { PairingEnvelope } from '../sync/pairingCrypto'
 import type {
@@ -659,12 +660,17 @@ export interface PlatformBridge {
     items: Array<{ folderPath: string; uid: number }>,
   ): Promise<void>
   /**
-   * Download a remote image through the trusted main process and return it as
-   * a `data:` URI, so a sanitized message body never makes its own network
-   * request (which is how a tracking pixel would otherwise leak the reader's
-   * IP and confirm the message was opened).
+   * Put one remote picture through the privacy proxy on the trusted side and
+   * return its verdict, so a sanitized message body never makes its own network
+   * request (which is how a tracking pixel would otherwise leak the reader's IP
+   * and confirm the message was opened).
+   *
+   * On a synced message the answer normally comes off disk: the bytes were
+   * fetched, scanned and re-encoded when the message *arrived*, hours earlier —
+   * see `electron/imagePrefetch.ts`. That is what makes opening a message
+   * produce no network traffic at all.
    */
-  fetchRemoteImage?(url: string): Promise<string>
+  fetchRemoteImage?(url: string): Promise<ProxiedImage>
   /**
    * Read one of the two public feeds named in `feeds.ts` through the trusted
    * side, because the renderer's `connect-src 'self'` forbids it from doing so

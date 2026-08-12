@@ -791,3 +791,24 @@
      would put the subject back under the 256px floor the 360px check holds it
      to, and the unread dot already does that job here. */
 }
+
+/* --- what the privacy proxy did, when it did anything ----------------------
+ *
+ * The reason list a blocked picture's "Why?" opens. Inside a `Banner`, so it
+ * inherits its ink and its width and only has to undo the browser's own list
+ * defaults — a `<ul>` with a 40px start padding inside a bar that is already
+ * indented reads as a nested quote rather than as three short facts.
+ *
+ * `--text-sm` because these are explanations attached to a control rather than
+ * prose somebody reads on their own, which is the rank the type ladder in
+ * theme.css reserves for exactly that.
+ */
+.imageblock__why {
+  margin: var(--sp-2) 0 0;
+  padding-inline-start: var(--sp-4);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+}
+.imageblock__why > li + li {
+  margin-top: var(--sp-1);
+}

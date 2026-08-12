@@ -7,6 +7,7 @@
  * the JS side in Capacitor Preferences.
  */
 
+import { asProxiedImage, type ProxiedImage } from '../mail/imageProxy'
 import { registerPlugin } from '@capacitor/core'
 import { Preferences } from '@capacitor/preferences'
 import { StatusBar, Style } from '@capacitor/status-bar'
@@ -355,7 +356,14 @@ interface AevistleNativePlugin extends AndroidPermissionApi {
     config: InboxAccountState
     items: Array<{ folderPath: string; uid: number }>
   }): Promise<void>
-  fetchRemoteImage(opts: { url: string }): Promise<{ value: string }>
+  /**
+   * The native proxy's verdict. `value` is the pre-0.3.8 shape — a bare data
+   * URI and nothing else — and is still accepted so a JS bundle that ships
+   * ahead of the APK degrades to "the picture, no verdict" rather than to a
+   * blank inbox. See `asProxiedImage`.
+   */
+  fetchRemoteImage(opts: { url: string }): Promise<Partial<ProxiedImage> & { value?: string }>
+  clearImageCache(): Promise<void>
   fetchFeed(opts: { url: string }): Promise<FeedResponse>
   /**
    * Relay one POST to a LAN endpoint — the WebView is as CSP-blocked from a
@@ -787,7 +795,14 @@ export function createAndroidBridge(): PlatformBridge & AndroidPermissionApi {
       Native.setMessageFlags({ config, folderPath, uid, patch }),
     deleteInboxMessages: (accountId, items) => Native.deleteInboxMessages({ accountId, items }),
     purgeInboxMessages: (config, items) => Native.purgeInboxMessages({ config, items }),
-    fetchRemoteImage: (url) => Native.fetchRemoteImage({ url }).then((r) => r.value),
+    clearImageCache: () => Native.clearImageCache(),
+    fetchRemoteImage: (url) =>
+      Native.fetchRemoteImage({ url }).then((r) =>
+        // `status` is the field only the new native side sets, so it is what
+        // tells the two shapes apart — not the presence of `value`, which the
+        // new side also sets for exactly that reason.
+        r.status ? (r as ProxiedImage) : asProxiedImage(r.value ?? null),
+      ),
     fetchFeed: (url) => Native.fetchFeed({ url }),
 
     // JOINER: one POST to the address the QR code carried.

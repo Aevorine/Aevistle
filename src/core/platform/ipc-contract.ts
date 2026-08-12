@@ -12,6 +12,7 @@
  * no `fs` module leaking through.
  */
 
+import type { ProxiedImage } from '../mail/imageProxy'
 import type {
   AppState,
   Attachment,
@@ -276,7 +277,13 @@ export interface DesktopApi {
     config: InboxAccountState,
     items: Array<{ folderPath: string; uid: number }>,
   ): Promise<void>
-  fetchRemoteImage(url: string): Promise<string>
+  /**
+   * Fetch, scan, re-encode and classify one remote picture. Returns the whole
+   * verdict rather than a data URI — a blocked image and a failed one look
+   * identical from a bare string, and the reader is entitled to be told apart.
+   * See `core/mail/imageProxy.ts`.
+   */
+  fetchRemoteImage(url: string): Promise<ProxiedImage>
   /** Read one of the two allow-listed public feeds. See `core/feeds.ts`. */
   fetchFeed(url: string): Promise<FeedResponse>
   /** Drop the on-disk remote-image cache. Part of "reset everything". */

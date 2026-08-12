@@ -100,6 +100,7 @@ import {
   resolveRemoteImages,
 } from '../core/mail/remoteImagePlaceholder'
 import { resolveWithCache } from '../core/mail/imageCache'
+import { BLOCKED_IMAGE, blockReasonKey, type ImageBlockReason } from '../core/mail/imageProxy'
 import { getCachedBody, putCachedBody } from '../core/mail/bodyMemo'
 import { CHAIN_STAGES, buildChain, leadLabelKey } from '../core/schedule/chain'
 import { extractDates, type DateHit } from '../core/schedule/dateExtract'
@@ -455,6 +456,24 @@ export function InboxView({
   const [imageStage, setImageStage] = useState<'blocked' | 'loading' | 'done' | 'failed'>('blocked')
   /** How many distinct URLs the last attempt could not fetch. */
   const [imageFailures, setImageFailures] = useState(0)
+  /**
+   * How many distinct pictures arrived and were refused by the scanner, and on
+   * what grounds.
+   *
+   * Kept apart from `imageFailures` throughout, because they are different
+   * facts with different answers: a failure is worth a "try again" button, and
+   * a refusal is not — the bytes already arrived and re-running the scanner
+   * over identical bytes produces an identical refusal at the cost of another
+   * request to the sender.
+   */
+  const [imageBlocked, setImageBlocked] = useState(0)
+  const [imageBlockReasons, setImageBlockReasons] = useState<ImageBlockReason[]>([])
+  /** How many of this message's pictures looked like they were measuring the reader. */
+  const [trackerCount, setTrackerCount] = useState(0)
+  /** True when every picture came off disk — i.e. opening this message hit no network. */
+  const [imagesFromCache, setImagesFromCache] = useState(false)
+  /** Is the "why was this blocked" detail open? */
+  const [blockDetailOpen, setBlockDetailOpen] = useState(false)
   /**
    * *Why* the last attempt failed, in the four shapes that are distinguishable
    * from here — reset in `openDetail`.
@@ -1440,14 +1459,62 @@ export function InboxView({
       setImageFailures(0)
       setImageFailReason(null)
       setImageFailDetail('')
+      setImageBlocked(0)
+      setImageBlockReasons([])
+      setTrackerCount(0)
       try {
         // Cached by URL, deduplicated, and persisted in the main process —
-        // see `core/imageCache` and `electron/remoteImage.ts`.
-        const resolved = await resolveWithCache(urls, (url) => bridge.fetchRemoteImage!(url), {
+        // see `core/imageCache` and `electron/remoteImage.ts`. On a synced
+        // message this normally resolves entirely from disk without touching
+        // the network: the proxy fetched these when the message *arrived*.
+        const verdicts = await resolveWithCache(urls, (url) => bridge.fetchRemoteImage!(url), {
           retryFailures: options?.retry,
         })
         if (run !== imageRun.current) return
-        const failed = new Set(urls.filter((_, i) => resolved[i] === null)).size
+
+        /*
+         * One verdict becomes one of three things on screen.
+         *
+         *   ok       the picture
+         *   blocked  a grey block — the bytes arrived and the scanner refused
+         *            them, which is a different fact from "did not arrive" and
+         *            the reader asked to be able to tell them apart
+         *   failed   `null`, which `BROKEN_IMAGE` fills in below
+         *
+         * `BLOCKED_IMAGE` is a base64 data URI precisely so it can travel this
+         * ordinary path and satisfy the same `safeImageDataUri` gate every
+         * other resolved picture passes.
+         */
+        const resolved = verdicts.map((v) =>
+          v.status === 'ok' ? v.dataUri : v.status === 'blocked' ? BLOCKED_IMAGE : null,
+        )
+
+        // Counted over unique URLs, like the failure count: one tracking pixel
+        // repeated twelve times in one newsletter is one tracker, not twelve.
+        const seenUrl = new Set<string>()
+        let blocked = 0
+        let trackers = 0
+        const reasons = new Set<ImageBlockReason>()
+        urls.forEach((url, i) => {
+          if (seenUrl.has(url)) return
+          seenUrl.add(url)
+          const v = verdicts[i]
+          if (!v) return
+          if (v.status === 'blocked') {
+            blocked++
+            if (v.reason) reasons.add(v.reason)
+          }
+          if (v.tracker) trackers++
+        })
+        setImageBlocked(blocked)
+        setImageBlockReasons([...reasons])
+        setTrackerCount(trackers)
+        // "Everything came from cache" is what proves the prefetch worked, and
+        // it is the sentence the privacy banner is allowed to say — see
+        // `inbox.imagesPrefetched`. One live fetch is enough to withdraw it.
+        setImagesFromCache(verdicts.length > 0 && verdicts.every((v) => v.fromCache))
+
+        const failed = new Set(urls.filter((_, i) => verdicts[i]?.status === 'failed')).size
         // Only now is `BROKEN_IMAGE` right: every URL has been tried, so a
         // null really is a failure rather than a fetch still in flight.
         //
@@ -1651,6 +1718,14 @@ export function InboxView({
       setImageFailures(0)
       setImageFailReason(null)
       setImageFailDetail('')
+      // Every proxy verdict is about the message being closed, not the one
+      // being opened. A count left standing would report the last newsletter's
+      // trackers against this reply.
+      setImageBlocked(0)
+      setImageBlockReasons([])
+      setTrackerCount(0)
+      setImagesFromCache(false)
+      setBlockDetailOpen(false)
       setRawStyle(false)
       // The date offers are looked for again from scratch, after this
       // message's body has painted — see `datesReady`.
@@ -3292,6 +3367,60 @@ export function InboxView({
                     {t('inbox.imagesFailed', { n: imageFailures })}
                     {imageFailReason ? ` ${t(imageFailKey(imageFailReason))}` : ''}
                     {imageFailDetail ? ` ${imageFailDetail}` : ''}
+                  </Banner>
+                ) : null}
+
+                {/*
+                  What the proxy did to this message, on one line.
+
+                  Three facts can be true at once and each is worth different
+                  words, so they share a bar rather than stacking three:
+
+                    · every picture came off disk — nothing about opening this
+                      message reached the network, which is the entire promise
+                      and the only place the app is allowed to claim it;
+                    · N pictures were refused, with a tap for which rule;
+                    · N looked like they were measuring the reader.
+
+                  Suppressed entirely when none of the three applies, which is
+                  the ordinary case for ordinary mail. A privacy bar on every
+                  message is a bar nobody reads by the second week.
+
+                  `tone="info"` and `keep` for the reason the bar below gives:
+                  info banners are culled on phones as explanations, and this is
+                  a statement of what happened plus a control.
+                */}
+                {imageStage === 'done' && (imagesFromCache || imageBlocked > 0 || trackerCount > 0) ? (
+                  <Banner
+                    tone="info"
+                    keep
+                    action={
+                      imageBlocked > 0 ? (
+                        <Button variant="ghost" onClick={() => setBlockDetailOpen((v) => !v)}>
+                          {t(blockDetailOpen ? 'inbox.imageBlock.hide' : 'inbox.imageBlock.why')}
+                        </Button>
+                      ) : undefined
+                    }
+                  >
+                    {/* The order is deliberate: what protected you, then what
+                        was withheld, then what was found. */}
+                    {imagesFromCache ? t('inbox.imagesPrefetched') : ''}
+                    {imageBlocked > 0
+                      ? `${imagesFromCache ? ' ' : ''}${t('inbox.imagesBlocked', { n: imageBlocked })}`
+                      : ''}
+                    {trackerCount > 0
+                      ? `${imagesFromCache || imageBlocked > 0 ? ' ' : ''}${t('inbox.trackersFound', { n: trackerCount })}`
+                      : ''}
+                    {/* Each rule that fired, spelled out — one line each, only
+                        when asked for. A reason code in a banner is a reason
+                        nobody can act on. */}
+                    {blockDetailOpen && imageBlockReasons.length > 0 ? (
+                      <ul className="imageblock__why">
+                        {imageBlockReasons.map((reason) => (
+                          <li key={reason}>{t(blockReasonKey(reason) as 'inbox.imageBlock.undecodable')}</li>
+                        ))}
+                      </ul>
+                    ) : null}
                   </Banner>
                 ) : null}
 

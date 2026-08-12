@@ -137,6 +137,7 @@ import {
   pruneInboxCache,
 } from './inboxStore'
 import { clearImageCache, downloadRemoteImage } from './remoteImage'
+import { resumeImagePrefetch, stopImagePrefetch } from './imagePrefetch'
 import { sanitizeMessageHtml } from './sanitizeHtml'
 import { fetchFeed } from './feedFetch'
 import { buildIcs, calendarToEvents } from '../src/core/schedule/ics'
@@ -2357,7 +2358,21 @@ function registerIpc(): void {
 
   ipcMain.handle(IPC.fetchRemoteImage, (_e, url: string) => downloadRemoteImage(url))
   ipcMain.handle(IPC.fetchFeed, (_e, url: string) => fetchFeed(url))
-  ipcMain.handle(IPC.clearImageCache, () => clearImageCache())
+  ipcMain.handle(IPC.clearImageCache, async () => {
+    /*
+     * Stop the queue before emptying the folder, and clear what it remembers.
+     *
+     * Order matters and the wrong one is silent: a prefetch worker mid-flight
+     * writes its result *after* the folder is deleted, so "reset everything"
+     * would leave entries behind — and the entries it left would be exactly
+     * the ones being fetched at the moment the user asked the app to forget
+     * everything. `resumeImagePrefetch` puts it back afterwards, because the
+     * reset clears a cache, it does not turn the feature off.
+     */
+    stopImagePrefetch()
+    await clearImageCache()
+    resumeImagePrefetch()
+  })
 
   ipcMain.handle(IPC.notify, (_e, title: string, body: string, messageId?: string) =>
     showNotification(title, body, messageId),

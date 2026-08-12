@@ -1117,6 +1117,30 @@ public class AevistleNativePlugin extends Plugin {
         });
     }
 
+    /**
+     * Empty the proxy's picture cache. Part of "reset everything".
+     *
+     * New on Android, because the cache is new on Android — the fetcher used to
+     * keep nothing, so there was nothing for a reset to miss. There is now, and
+     * the folder is a record of which mail was opened even though every picture
+     * in it was already public on someone else's server. A reset that leaves it
+     * behind has not done what it said.
+     *
+     * The queue is stopped before the folder is emptied and resumed after, and
+     * that order is not cosmetic: a prefetch worker mid-flight writes its result
+     * *after* the delete, so the entries left behind would be exactly the ones
+     * being fetched at the moment the user asked the app to forget everything.
+     */
+    @PluginMethod
+    public void clearImageCache(final PluginCall call) {
+        io.execute(() -> {
+            ImagePrefetch.stop();
+            ImageCacheStore.clear(getContext());
+            ImagePrefetch.resume();
+            call.resolve();
+        });
+    }
+
     @PluginMethod
     public void fetchRemoteImage(final PluginCall call) {
         final String url = call.getString("url");
@@ -1125,13 +1149,56 @@ public class AevistleNativePlugin extends Plugin {
             return;
         }
         io.execute(() -> {
+            /*
+             * The whole verdict, not just the bytes.
+             *
+             * On a synced message this normally resolves from disk without
+             * touching the network at all: the picture was fetched, scanned and
+             * re-encoded when the message *arrived* — see `ImagePrefetch`. That
+             * is what makes opening a message produce no traffic, and the
+             * `fromCache` flag is how the reader gets told so.
+             *
+             * `call.reject` is reserved for "there is no url" above. A picture
+             * that could not be fetched, or that the scanner refused, is a
+             * result rather than an error: rejecting would collapse two facts
+             * the reader is entitled to tell apart into one red banner.
+             */
             try {
-                String dataUri = RemoteImageFetcher.fetch(url);
+                JSONObject cached = ImageCacheStore.read(getContext(), url);
+                JSONObject verdict;
+                if (cached != null) {
+                    verdict = cached;
+                } else {
+                    try {
+                        RemoteImageFetcher.Fetched fetched = RemoteImageFetcher.fetch(url);
+                        verdict = ImageProxy.process(url, fetched.bytes, fetched.mime);
+                        ImageCacheStore.write(getContext(), url, verdict);
+                    } catch (SecurityException e) {
+                        // "Refusing to connect to a private address" — a
+                        // decision this app made about the target, not network
+                        // weather, and named differently for that reason.
+                        verdict = ImageProxy.blocked("refusedTarget", e.getMessage());
+                    } catch (IllegalArgumentException e) {
+                        verdict = ImageProxy.blocked("refusedTarget", e.getMessage());
+                    } catch (Exception e) {
+                        verdict = ImageProxy.blocked("fetchFailed", e.getMessage());
+                    }
+                }
                 JSObject result = new JSObject();
-                result.put("value", dataUri);
+                java.util.Iterator<String> keys = verdict.keys();
+                while (keys.hasNext()) {
+                    String key = keys.next();
+                    result.put(key, verdict.get(key));
+                }
+                // Kept for a JS bundle older than this APK: it reads `value`
+                // and knows nothing about the verdict fields. `status` is what
+                // the new bridge keys off, so this costs nothing.
+                if ("ok".equals(verdict.optString("status"))) {
+                    result.put("value", verdict.optString("dataUri"));
+                }
                 call.resolve(result);
-            } catch (Exception e) {
-                call.reject("Could not load the image: " + e.getMessage(), e);
+            } catch (Throwable t) {
+                call.reject("Could not load the image: " + t.getMessage());
             }
         });
     }

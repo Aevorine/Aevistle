@@ -17,6 +17,8 @@
  * store for megabytes of them.
  */
 
+import { asProxiedImage, failedImage, type ProxiedImage } from './imageProxy'
+
 /** Entries before the oldest is dropped. Data URLs are large; this is not a lot of memory at 60. */
 const MAX_ENTRIES = 60
 
@@ -32,18 +34,34 @@ const MAX_ENTRIES = 60
  */
 const FAILURE_TTL_MS = 60_000
 
-type Entry = { dataUrl: string | null; at: number }
+/**
+ * A whole verdict, not a data URI.
+ *
+ * This memo used to hold `string | null` — the picture, or nothing. That was
+ * enough while the only question was "what are the bytes". The proxy now
+ * answers three more (was it refused, why, and did it look like a tracking
+ * pixel), and those have to travel with the picture: a reopened message reads
+ * entirely out of caches, so anything not carried here is a fact the second
+ * open cannot state. See `core/mail/imageProxy.ts`.
+ */
+type Entry = { result: ProxiedImage; at: number }
 
 /** Insertion-ordered, which is what makes the eviction below least-recently-used. */
 const cache = new Map<string, Entry>()
 
-export function getCached(url: string): string | null | undefined {
+export function getCached(url: string): ProxiedImage | undefined {
   const entry = cache.get(url)
   if (!entry) return undefined
-  // A stale failure reports as "never seen", so the next resolve retries it.
-  // Successes never expire here: the bytes cannot go bad, and the size cap is
-  // what bounds them.
-  if (entry.dataUrl === null && Date.now() - entry.at > FAILURE_TTL_MS) {
+  /*
+   * A stale failure reports as "never seen", so the next resolve retries it.
+   *
+   * `failed` only — never `blocked`. A network failure is weather and is worth
+   * trying again; a scanner refusal is a property of the bytes themselves, and
+   * retrying it would mean a fresh request to the sender's server on every
+   * reopen, which is exactly the signal the proxy exists to stop sending.
+   * Successes never expire: the bytes cannot go bad.
+   */
+  if (entry.result.status === 'failed' && Date.now() - entry.at > FAILURE_TTL_MS) {
     cache.delete(url)
     return undefined
   }
@@ -51,15 +69,15 @@ export function getCached(url: string): string | null | undefined {
   // used rather than first ever seen.
   cache.delete(url)
   cache.set(url, entry)
-  return entry.dataUrl
+  return entry.result
 }
 
 /**
  * Remember a result — including a failure, but only for `FAILURE_TTL_MS`.
  */
-export function putCached(url: string, dataUrl: string | null): void {
+export function putCached(url: string, result: ProxiedImage): void {
   cache.delete(url)
-  cache.set(url, { dataUrl, at: Date.now() })
+  cache.set(url, { result, at: Date.now() })
   while (cache.size > MAX_ENTRIES) {
     const oldest = cache.keys().next()
     if (oldest.done) break
@@ -67,10 +85,17 @@ export function putCached(url: string, dataUrl: string | null): void {
   }
 }
 
-/** Drop remembered failures for these URLs, so an explicit retry really retries. */
+/**
+ * Drop remembered failures for these URLs, so an explicit retry really retries.
+ *
+ * Blocked images are left alone on purpose: "try again" is offered for pictures
+ * that did not arrive, and a picture the scanner refused did arrive. Re-running
+ * the scanner over identical bytes produces an identical refusal and costs
+ * another request to the sender.
+ */
 export function forgetFailures(urls: string[]): void {
   for (const url of urls) {
-    if (cache.get(url)?.dataUrl === null) cache.delete(url)
+    if (cache.get(url)?.result.status === 'failed') cache.delete(url)
   }
 }
 
@@ -85,9 +110,9 @@ export function forgetFailures(urls: string[]): void {
  */
 export async function resolveWithCache(
   urls: string[],
-  fetchOne: (url: string) => Promise<string>,
+  fetchOne: (url: string) => Promise<ProxiedImage | string>,
   options?: { retryFailures?: boolean },
-): Promise<Array<string | null>> {
+): Promise<ProxiedImage[]> {
   if (options?.retryFailures) forgetFailures(urls)
 
   const missing = urls.filter((url) => getCached(url) === undefined)
@@ -98,14 +123,14 @@ export async function resolveWithCache(
   await Promise.all(
     unique.map(async (url) => {
       try {
-        putCached(url, await fetchOne(url))
-      } catch {
-        putCached(url, null)
+        putCached(url, asProxiedImage(await fetchOne(url)))
+      } catch (e) {
+        putCached(url, failedImage('fetchFailed', e instanceof Error ? e.message : String(e)))
       }
     }),
   )
 
-  return urls.map((url) => getCached(url) ?? null)
+  return urls.map((url) => getCached(url) ?? failedImage('fetchFailed'))
 }
 
 /** Only for tests and for "forget everything" in settings. */

@@ -1212,7 +1212,7 @@ final class MailFetcher {
                         Parsed parsed = extract(batch.get(i),
                                 new InlineSink(context, accountId, "INBOX", batchUids.get(i)));
                         InboxBodyStore.writeBody(context, accountId, "INBOX", batchUids.get(i),
-                                parsed.toBodyJson());
+                                parsed.toBodyJson(context));
                     } catch (Exception ignored) {
                         // One body that will not parse is not worth abandoning
                         // the rest of the tail over — it loads on demand later
@@ -1304,7 +1304,7 @@ final class MailFetcher {
             try {
                 Parsed parsed = extract(wanted.get(i),
                         new InlineSink(context, accountId, "INBOX", uids.get(i)));
-                InboxBodyStore.writeBody(context, accountId, "INBOX", uids.get(i), parsed.toBodyJson());
+                InboxBodyStore.writeBody(context, accountId, "INBOX", uids.get(i), parsed.toBodyJson(context));
                 rows.get(i).put("snippet", snippetOf(parsed));
                 rows.get(i).put("bodyCached", true);
             } catch (Exception ignored) {
@@ -1439,7 +1439,7 @@ final class MailFetcher {
             if (m == null) throw new IllegalStateException("Message not found");
             Parsed parsed = extract(m,
                     new InlineSink(context, config.optString("accountId", ""), folderPath, uid));
-            JSONObject body = parsed.toBodyJson();
+            JSONObject body = parsed.toBodyJson(context);
             InboxBodyStore.writeBody(context, config.optString("accountId", ""), folderPath, uid, body);
             return body;
         });
@@ -1545,7 +1545,7 @@ final class MailFetcher {
                         Parsed parsed = extract(batch.get(i),
                                 new InlineSink(context, accountId, folderPath, batchUids.get(i)));
                         InboxBodyStore.writeBody(context, accountId, folderPath, batchUids.get(i),
-                                parsed.toBodyJson());
+                                parsed.toBodyJson(context));
                         count++;
                     } catch (Exception ignored) {
                         // One neighbour that will not parse is not worth
@@ -1734,13 +1734,33 @@ final class MailFetcher {
         String html;
         final List<JSONObject> attachments = new ArrayList<>();
 
-        JSONObject toBodyJson() throws Exception {
+        JSONObject toBodyJson(Context context) throws Exception {
             JSONObject o = new JSONObject();
             if (text != null) o.put("text", text);
             if (html != null) {
                 JSONObject sanitized = InboxSanitizer.sanitize(html);
                 o.put("sanitizedHtml", sanitized.getString("html"));
-                o.put("remoteImages", sanitized.getJSONArray("remoteImages"));
+                JSONArray remote = sanitized.getJSONArray("remoteImages");
+                o.put("remoteImages", remote);
+                /*
+                 * Fetch the pictures now, while nobody is looking.
+                 *
+                 * The single call that decouples "the message arrived" from
+                 * "the message was read" — see {@link ImagePrefetch} for why
+                 * that is the whole privacy claim rather than a speed tweak.
+                 * It sits here because this is the one place a body is turned
+                 * into JSON, so the eager sync pass and the on-demand fetch
+                 * both reach it and neither can forget.
+                 *
+                 * Returns immediately and cannot throw: a message has to render
+                 * whether or not its pictures were prefetched.
+                 */
+                List<String> urls = new ArrayList<>(remote.length());
+                for (int i = 0; i < remote.length(); i++) {
+                    String u = remote.optString(i, null);
+                    if (u != null && !u.isEmpty()) urls.add(u);
+                }
+                ImagePrefetch.offer(context, urls);
             }
             JSONArray atts = new JSONArray();
             for (JSONObject a : attachments) atts.put(a);

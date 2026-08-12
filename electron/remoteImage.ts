@@ -32,6 +32,8 @@ import dns from 'node:dns'
 import net from 'node:net'
 import type { LookupFunction } from 'node:net'
 import { dataLocation } from './store'
+import { processImage } from './imageProxy'
+import { failedImage, type ImageBlockReason, type ProxiedImage } from '../src/core/mail/imageProxy'
 
 const FETCH_TIMEOUT_MS = 8_000
 const MAX_BYTES = 5 * 1024 * 1024
@@ -125,7 +127,13 @@ function safeLookup(
   })
 }
 
-async function fetchOverNetwork(url: string): Promise<string> {
+/** What the socket produced: the bytes, and the type the server claimed for them. */
+interface FetchedBytes {
+  buffer: Buffer
+  mime: string
+}
+
+async function fetchOverNetwork(url: string): Promise<FetchedBytes> {
   const parsed = new URL(url)
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
     throw new Error('Unsupported URL scheme')
@@ -151,7 +159,7 @@ async function fetchOverNetwork(url: string): Promise<string> {
 
   const requestFn = parsed.protocol === 'https:' ? httpsRequest : httpRequest
 
-  return new Promise<string>((resolve, reject) => {
+  return new Promise<FetchedBytes>((resolve, reject) => {
     const req = requestFn(
       parsed,
       {
@@ -207,8 +215,15 @@ async function fetchOverNetwork(url: string): Promise<string> {
           chunks.push(chunk)
         })
         res.on('end', () => {
-          const buffer = Buffer.concat(chunks)
-          resolve(`data:${mime};base64,${buffer.toString('base64')}`)
+          /*
+           * Raw bytes and the server's declared type, handed straight to the
+           * scanner. This function deliberately no longer builds a data URI:
+           * that used to mean a stranger's bytes went from the socket into
+           * already-sanitized HTML with only a `Content-Type` check between
+           * them. Everything that decides whether these bytes are an image —
+           * and turns them into bytes this app wrote — is in `imageProxy.ts`.
+           */
+          resolve({ buffer: Buffer.concat(chunks), mime })
         })
         res.on('error', reject)
       },
@@ -263,23 +278,96 @@ function cacheFile(url: string): string {
   return path.join(cacheDir(), `${createHash('sha256').update(url).digest('hex')}.txt`)
 }
 
-async function readCached(url: string): Promise<string | null> {
+/**
+ * A cache entry is the whole verdict, not just the picture.
+ *
+ * It used to be a bare data URI, and that was enough when the only question was
+ * "what are the bytes". Now every entry also carries whether the scanner
+ * refused it and whether it looked like a tracking pixel — and those have to
+ * survive a restart for the same reason the bytes do. Without it, a message
+ * whose images were all prefetched would reopen tomorrow reporting no trackers,
+ * because the analysis lived in the fetch that no longer happens.
+ *
+ * A *blocked* image is cached too, deliberately. The refusal is a property of
+ * the bytes, not of the moment; re-fetching a picture the scanner has already
+ * refused would mean a fresh request to the sender's server every single time
+ * the message is opened — which is precisely the signal this whole file exists
+ * to stop sending.
+ */
+interface CacheEntry {
+  v: 2
+  status: ProxiedImage['status']
+  dataUri: string | null
+  reason?: ImageBlockReason
+  detail?: string
+  tracker: boolean
+  trackerRules: ProxiedImage['trackerRules']
+  width: number
+  height: number
+  bytes: number
+}
+
+async function readCached(url: string): Promise<ProxiedImage | null> {
   try {
     const file = cacheFile(url)
     const text = await fs.readFile(file, 'utf8')
-    if (!text.startsWith('data:image/')) return null // truncated or foreign file — refetch
-    // mtime is the LRU clock, so a hit has to touch it. Failing to is not
-    // worth reporting: the worst case is the entry looks older than it is.
+    /*
+     * v1 entries were a bare `data:image/...` string. Read them rather than
+     * discarding them: an existing cache is a record of requests already made,
+     * and throwing it away would re-announce the reader to every server in it.
+     * They carry no verdict, so they are reported as a picture that passed with
+     * nothing else known — which is exactly what they were.
+     */
+    if (text.startsWith('data:image/')) {
+      const now = new Date()
+      void fs.utimes(file, now, now).catch(() => {})
+      return {
+        dataUri: text,
+        status: 'ok',
+        tracker: false,
+        trackerRules: [],
+        width: 0,
+        height: 0,
+        bytes: text.length,
+        fromCache: true,
+      }
+    }
+    const entry = JSON.parse(text) as CacheEntry
+    if (entry.v !== 2) return null
     const now = new Date()
     void fs.utimes(file, now, now).catch(() => {})
-    return text
+    return {
+      dataUri: entry.dataUri,
+      status: entry.status,
+      reason: entry.reason,
+      detail: entry.detail,
+      tracker: entry.tracker,
+      trackerRules: entry.trackerRules ?? [],
+      width: entry.width,
+      height: entry.height,
+      bytes: entry.bytes,
+      fromCache: true,
+    }
   } catch {
     return null // a miss and an unreadable cache are the same thing to the caller
   }
 }
 
-async function writeCached(url: string, dataUri: string): Promise<void> {
-  if (Buffer.byteLength(dataUri) > CACHE_MAX_ENTRY_BYTES) return
+async function writeCached(url: string, result: ProxiedImage): Promise<void> {
+  const entry: CacheEntry = {
+    v: 2,
+    status: result.status,
+    dataUri: result.dataUri,
+    reason: result.reason,
+    detail: result.detail,
+    tracker: result.tracker,
+    trackerRules: result.trackerRules,
+    width: result.width,
+    height: result.height,
+    bytes: result.bytes,
+  }
+  const text = JSON.stringify(entry)
+  if (Buffer.byteLength(text) > CACHE_MAX_ENTRY_BYTES) return
   try {
     const dir = cacheDir()
     await fs.mkdir(dir, { recursive: true })
@@ -287,7 +375,7 @@ async function writeCached(url: string, dataUri: string): Promise<void> {
     // Write-then-rename, so a crash mid-write cannot leave a half-file that
     // reads back as a corrupt image.
     const tmp = `${file}.${process.pid}.tmp`
-    await fs.writeFile(tmp, dataUri, 'utf8')
+    await fs.writeFile(tmp, text, 'utf8')
     await fs.rename(tmp, file)
   } catch {
     /* the picture still displays; it just will not be there next time */
@@ -340,18 +428,45 @@ async function prune(): Promise<void> {
 }
 
 /**
- * Fetch an image, from disk if it is already there.
+ * The proxy, end to end: cache, then fetch, scan, re-encode, classify, store.
  *
- * Only successes are stored. A failure is a moment in time — a dropped
- * connection, a server having a bad minute — and writing those down would
- * make one bad minute permanent.
+ * Never throws. Every caller of this — the prefetch queue and the renderer's
+ * open-time resolve — wants a verdict, and an exception is a verdict nobody can
+ * put on the screen. Network failures are reported as `failed` and are *not*
+ * written to the cache: a dropped connection is a moment in time, and recording
+ * it would make one bad minute permanent. Scanner refusals are `blocked` and
+ * *are* cached — see `CacheEntry`.
  */
-export async function downloadRemoteImage(url: string): Promise<string> {
+export async function downloadRemoteImage(url: string): Promise<ProxiedImage> {
   const cached = await readCached(url)
   if (cached) return cached
-  const dataUri = await fetchOverNetwork(url)
-  await writeCached(url, dataUri)
-  return dataUri
+
+  let fetched: { buffer: Buffer; mime: string }
+  try {
+    fetched = await fetchOverNetwork(url)
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e)
+    // "Refusing to connect to a private address" and "Unsupported URL scheme"
+    // are decisions this app made about the target, not network weather, and
+    // the reader is entitled to see them named differently.
+    const refused = /Refusing to connect|Unsupported URL scheme/.test(message)
+    return failedImage(refused ? 'refusedTarget' : 'fetchFailed', message)
+  }
+
+  const result = processImage(url, fetched.buffer, fetched.mime)
+  await writeCached(url, result)
+  return result
+}
+
+/**
+ * Is this URL already in the cache?
+ *
+ * The prefetch queue's own question, and the reason it is separate from
+ * `downloadRemoteImage`: asking "do I need to fetch this" must not itself
+ * fetch. Used to skip work, never to decide what to show.
+ */
+export async function isImageCached(url: string): Promise<boolean> {
+  return (await readCached(url)) !== null
 }
 
 /**

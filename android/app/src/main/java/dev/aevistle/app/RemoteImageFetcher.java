@@ -1,7 +1,5 @@
 package dev.aevistle.app;
 
-import android.util.Base64;
-
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
@@ -36,7 +34,26 @@ final class RemoteImageFetcher {
     private RemoteImageFetcher() {
     }
 
-    static String fetch(String url) throws Exception {
+    /** Raw bytes plus the type the server claimed for them. */
+    static final class Fetched {
+        final byte[] bytes;
+        final String mime;
+
+        Fetched(byte[] bytes, String mime) {
+            this.bytes = bytes;
+            this.mime = mime;
+        }
+    }
+
+    /**
+     * Get the bytes. Deciding whether they are an image — and turning them into
+     * bytes this app wrote rather than bytes a stranger wrote — is
+     * {@link ImageProxy}'s job, not this one's. This function deliberately no
+     * longer builds a data URI: that used to mean a stranger's bytes went from
+     * the socket into already-sanitized HTML with only a Content-Type check
+     * between them.
+     */
+    static Fetched fetch(String url) throws Exception {
         URL parsed = new URL(url);
         String protocol = parsed.getProtocol();
         if (!"http".equals(protocol) && !"https".equals(protocol)) {
@@ -83,8 +100,7 @@ final class RemoteImageFetcher {
             }
 
             String mime = contentType.split(";")[0].trim();
-            String base64 = Base64.encodeToString(buffer.toByteArray(), Base64.NO_WRAP);
-            return "data:" + mime + ";base64," + base64;
+            return new Fetched(buffer.toByteArray(), mime);
         } finally {
             conn.disconnect();
         }

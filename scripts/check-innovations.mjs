@@ -370,10 +370,38 @@ ok('preflight: no account blocks', noAccount.blocked)
 const img = await load('src/core/mail/imageCache.ts', 'imageCache')
 
 let fetches = 0
+/**
+ * The proxy's verdict shape, not a bare data URI — see `core/mail/imageProxy.ts`.
+ * `bad` throws (the network did not come back); `refused` returns a verdict
+ * saying the scanner refused the bytes. Those two are different facts and the
+ * assertions below exist to keep them from collapsing back into one.
+ */
 const fakeFetch = async (url) => {
   fetches++
   if (url.includes('bad')) throw new Error('blocked')
-  return `data:image/png;base64,${url.length}`
+  if (url.includes('refused')) {
+    return {
+      dataUri: null,
+      status: 'blocked',
+      reason: 'scriptableFormat',
+      tracker: false,
+      trackerRules: [],
+      width: 0,
+      height: 0,
+      bytes: 0,
+      fromCache: false,
+    }
+  }
+  return {
+    dataUri: `data:image/png;base64,${url.length}`,
+    status: 'ok',
+    tracker: url.includes('pixel'),
+    trackerRules: url.includes('pixel') ? ['pixelSized'] : [],
+    width: 1,
+    height: 1,
+    bytes: 42,
+    fromCache: false,
+  }
 }
 
 img.clearImageCache()
@@ -382,18 +410,43 @@ const cachedRun = await img.resolveWithCache(['a.png', 'b.png', 'a.png'], fakeFe
 check('imageCache: duplicates are fetched once', fetches, 2)
 check('imageCache: results keep input order and length', cachedRun.length, 3)
 ok('imageCache: the repeat resolves to the same data', cachedRun[0] === cachedRun[2])
+check('imageCache: a resolved entry carries its status', cachedRun[0].status, 'ok')
 
 fetches = 0
 await img.resolveWithCache(['a.png', 'b.png'], fakeFetch)
 check('imageCache: a second pass fetches nothing', fetches, 0)
 
+// The tracker verdict has to survive the cache. It is computed once, in the
+// fetch that happened when the message arrived; a reopened message reads
+// entirely out of caches, so anything not carried here reports zero forever
+// after the first open.
+fetches = 0
+const tracked = await img.resolveWithCache(['pixel.png'], fakeFetch)
+ok('imageCache: a tracker verdict survives the first fetch', tracked[0].tracker === true)
+const trackedAgain = await img.resolveWithCache(['pixel.png'], fakeFetch)
+ok('imageCache: a tracker verdict survives a cache hit', trackedAgain[0].tracker === true)
+check('imageCache: the cache hit made no request', fetches, 1)
+
 fetches = 0
 const failed = await img.resolveWithCache(['bad.png'], fakeFetch)
-check('imageCache: a failure resolves to null', failed, [null])
+check('imageCache: a thrown fetch resolves to a failed verdict', failed[0].status, 'failed')
+ok('imageCache: a failed verdict carries no picture', failed[0].dataUri === null)
 await img.resolveWithCache(['bad.png'], fakeFetch)
 // A blocked private address will be blocked identically next time; retrying it
 // on every reopen is a slow way to get the same answer.
 check('imageCache: failures are remembered too', fetches, 1)
+
+// Blocked and failed must stay distinguishable all the way through the cache:
+// the reader is offered "try again" for one and an explanation for the other.
+fetches = 0
+const refused = await img.resolveWithCache(['refused.png'], fakeFetch)
+check('imageCache: a scanner refusal resolves to blocked, not failed', refused[0].status, 'blocked')
+check('imageCache: a refusal keeps its reason', refused[0].reason, 'scriptableFormat')
+// `retryFailures` is the "try again" button. It must clear failures and must
+// NOT clear refusals — re-running the scanner over identical bytes produces an
+// identical refusal at the cost of another request to the sender.
+await img.resolveWithCache(['bad.png', 'refused.png'], fakeFetch, { retryFailures: true })
+check('imageCache: try-again retries the failure and not the refusal', fetches, 2)
 
 img.clearImageCache()
 for (let i = 0; i < 80; i++) await img.resolveWithCache([`u${i}.png`], fakeFetch)
