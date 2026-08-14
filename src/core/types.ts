@@ -1240,11 +1240,13 @@ export const DEFAULT_SETTINGS: Settings = {
   homeGridNames: undefined,
   homeGridIcons: undefined,
   composePreflight: true,
-  // Off by default: the strip this gates (HealthBoard's info-level notes plus
-  // Send Guardian's non-blocking guesses, e.g. "未来 7 天有 N 次发送") was asked
-  // to be gone from the compose screen, repeatedly. An error that actually
-  // blocks Send is a different set (`visibleBannerIssues` filtered to
-  // `severity === 'error'`) and still shows regardless of this flag.
+  // Off by default: what this gates (HealthBoard's info-level notes plus Send
+  // Guardian's non-blocking guesses, e.g. "未来 7 天有 N 次发送") was asked to be
+  // gone from the compose screen, repeatedly — and is no longer shown there at
+  // all regardless of this flag; see `guardianFindings` in `ComposeView.tsx`,
+  // now surfaced only in `PreflightDialog` at Send. An error that actually
+  // blocks Send is a different set (`ComposeView`'s `issues`/`blocked`) and
+  // still shows — and still blocks — regardless of this flag.
   composeAdvisoriesEnabled: false,
   composeAdvisoriesChosen: false,
   readerDarkInvert: true,

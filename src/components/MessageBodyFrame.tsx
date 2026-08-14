@@ -35,6 +35,7 @@ import {
   remoteIndexOfPlaceholder,
   safeImageDataUri,
 } from '../core/mail/remoteImagePlaceholder'
+import { lockAxis, resolveSwipe, type Axis } from '../core/platform/gestures'
 
 /**
  * The families received mail is set in, named literally.
@@ -967,6 +968,7 @@ export function MessageBodyFrame({
   images,
   onImagesUnplaced,
   onScroll,
+  onSwipeDismiss,
   themeKey = '',
 }: {
   html: string
@@ -1010,6 +1012,17 @@ export function MessageBodyFrame({
   onImagesUnplaced?: () => void
   /** The message's own scroll offset. The body scrolls *inside* this frame. */
   onScroll?: (top: number) => void
+  /**
+   * A finger swipe across the message body, left or right — either direction
+   * means the same thing here, "close this and go back to the list", so the
+   * direction itself is not reported.
+   *
+   * Mouse drags never trigger this (text selection has to keep working), and a
+   * vertical scroll releases it the same way `useSwipe` releases a list row:
+   * once the drag is unambiguously vertical, this stops watching for the rest
+   * of that gesture rather than fighting the scroll for it.
+   */
+  onSwipeDismiss?: () => void
   /**
    * Anything that moves the app's palette or type scale: the theme, the
    * accent, the visual style, the text-size setting.
@@ -1060,6 +1073,10 @@ export function MessageBodyFrame({
   /** Read by the frame's own scroll listener, for the same reason `linkRef` is. */
   const scrollRef = useRef(onScroll)
   scrollRef.current = onScroll
+
+  /** Read by the frame's own swipe listener, for the same reason `linkRef` is. */
+  const dismissRef = useRef(onSwipeDismiss)
+  dismissRef.current = onSwipeDismiss
 
   /**
    * The current answer to "is this message being painted for a dark room",
@@ -1112,6 +1129,51 @@ export function MessageBodyFrame({
         () => scrollRef.current?.(doc.documentElement?.scrollTop ?? 0),
         { passive: true },
       )
+      /*
+       * Swipe-to-close, tracked the same way the click and the scroll above
+       * are: a listener the *outer* page attaches to the frame's own document
+       * via `allow-same-origin`, not a script running inside it. Nothing here
+       * executes in the sandboxed frame's own context.
+       *
+       * `lockAxis`/`resolveSwipe` are the same arithmetic `useSwipe` uses for
+       * a list row — reused rather than re-derived so a swipe means the same
+       * distance and the same flick speed everywhere in this app. There is no
+       * `useSwipe` call here because that hook returns React pointer handlers
+       * for a JSX element in *this* document; the gesture happens in the
+       * frame's document instead, so only the pure functions are reusable.
+       */
+      let swipeStart: { x: number; y: number; t: number } | null = null
+      let swipeAxis: Axis = 'undecided'
+      doc.addEventListener('pointerdown', (e: PointerEvent) => {
+        // Mouse excluded for the same reason `useSwipe` excludes it: this
+        // frame is also where the reader's text gets selected with a mouse,
+        // and a selection drag becoming a swipe would eat that.
+        if (e.pointerType === 'mouse') return
+        swipeStart = { x: e.clientX, y: e.clientY, t: e.timeStamp }
+        swipeAxis = 'undecided'
+      })
+      doc.addEventListener('pointermove', (e: PointerEvent) => {
+        if (!swipeStart) return
+        if (swipeAxis === 'undecided') {
+          swipeAxis = lockAxis(e.clientX - swipeStart.x, e.clientY - swipeStart.y)
+          // Locked vertical: this is a scroll, not a swipe. Let go completely
+          // so the rest of the drag is free to scroll the message.
+          if (swipeAxis === 'vertical') swipeStart = null
+        }
+      })
+      const endSwipe = (e: PointerEvent) => {
+        const from = swipeStart
+        swipeStart = null
+        if (!from || swipeAxis !== 'horizontal') return
+        const width = doc.documentElement?.clientWidth || doc.body?.clientWidth || 0
+        if (!width) return
+        const result = resolveSwipe(from, { x: e.clientX, y: e.clientY, t: e.timeStamp }, width)
+        if (result) dismissRef.current?.()
+      }
+      doc.addEventListener('pointerup', endSwipe)
+      doc.addEventListener('pointercancel', () => {
+        swipeStart = null
+      })
       // The families are named literally rather than inherited, and the size
       // and leading with them — see `READER_FONT_STACK` for why `inherit`
       // could never have worked across a document boundary and for what this

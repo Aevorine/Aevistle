@@ -8,7 +8,6 @@
  */
 
 import {
-  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -21,7 +20,6 @@ import {
   Button,
   Card,
   Field,
-  IconButton,
   Modal,
   Segmented,
   Switch,
@@ -241,15 +239,6 @@ function seedRecurrence(now = Date.now()): Recurrence {
   return { ...defaultRecurrence(now), startAt: at, timeOfDay: hhmm(at) }
 }
 
-/**
- * Whether the "N 项发送前提醒" strip has been closed for the draft currently
- * open — module scope on purpose. See the comment on `warnDismissed` inside
- * `ComposeView`: `state.draft` outlives a tab switch, `ComposeView` does not,
- * and a plain `useState` there forgot the dismissal every time the view
- * remounted. One flag is correct because there is only ever one open draft.
- */
-const warnDismissedRef = { current: false }
-
 export function ComposeView({
   onNavigate,
 }: {
@@ -343,14 +332,6 @@ export function ComposeView({
    */
   const [pickOpen, setPickOpen] = useState(false)
   /**
-   * Whether the pre-send warning strip is expanded.
-   *
-   * Collapsed is the initial state and the state it returns to: what is on
-   * screen unasked is the *count*, which is the part a warning has to make you
-   * notice, and the sentences are one tap under it.
-   */
-  const [warnOpen, setWarnOpen] = useState(false)
-  /**
    * Whether the message box has the caret.
    *
    * Only the action bar reads it, and only on a narrow screen: while someone is
@@ -414,7 +395,6 @@ export function ComposeView({
   const headId = useFieldId('head')
   const moreId = useFieldId('more')
   const whenId = useFieldId('when')
-  const warnId = useFieldId('warn')
 
   /**
    * The body box remembers how tall it was dragged.
@@ -557,31 +537,21 @@ export function ComposeView({
   const blocked = hasErrors(issues)
 
   /**
-   * What the banner under the card is allowed to say.
-   *
-   * "No subject" and "the body is empty" are advisory, and they fire on a draft
-   * that is simply half-written — the moment a recipient is typed, before a
-   * subject could reasonably exist. A two-line banner appearing there costs the
-   * message box ~70px, so the field the screen exists to fill shrinks as a
-   * reward for starting to use it.
-   *
-   * They are not lost: `preflight.warn.noSubject` and `preflight.warn.emptyBody`
-   * report both in the send preview, which is the screen for "check this before
-   * it goes out". This filter only drops them from the always-on banner; errors,
-   * which block Send, are untouched.
-   */
-  const bannerIssues = useMemo(
-    () => issues.filter((i) => i.key !== 'validate.noSubject' && i.key !== 'validate.emptyBody'),
-    [issues],
-  )
-
-  /**
    * Send Guardian: a second, separate set of checks — see `core/sendGuardian.ts`
    * for why these are not folded into `issues` above. `scheduledAt` is only
    * given for a one-off ("once") schedule; a recurring one has no single fixed
    * instant a relative-date phrase in the body could be judged stale against,
    * so `checkStaleDatePhrase` is deliberately given nothing to compare in that
    * case (see that function's doc comment).
+   *
+   * Nothing here blocks Send and nothing here shows on the compose screen
+   * itself any more — both sets used to sit in an always-visible "N 项发送前
+   * 提醒" strip above the message box, which cost real screen space on every
+   * draft whether or not anything was actually wrong with it. They still
+   * matter, so they still show — just at the moment Send is actually about to
+   * happen: `visibleGuardianFindings` is passed into `PreflightDialog` below,
+   * the same "check this before it goes out" screen `preflight.warn.*` already
+   * used for the advisory half of `issues`.
    */
   const guardianFindings = useMemo(
     () =>
@@ -599,12 +569,9 @@ export function ComposeView({
     [draft, scheduleSet, recurrence, state.recentRecipients],
   )
   /**
-   * `settings.composeAdvisoriesEnabled` (default off, see `types.ts`) turning
-   * the strip off entirely turns off *advisories* — it must never hide the
-   * reason Send is disabled, or the button looks broken instead of
-   * explained. So an error that actually blocks Send survives the filter
-   * even with the setting off; `guardianFindings` cannot block Send at all
-   * (see the comment below) and is dropped whole.
+   * `settings.composeAdvisoriesEnabled` (default off, see `types.ts`) turns
+   * off *advisories* only — it must never hide the reason Send is disabled,
+   * which is `blocked` above and is never gated on this.
    *
    * Read through `effectiveComposeAdvisories`, not the raw field: anyone who
    * already ran 0.3.11 has `composeAdvisoriesEnabled: true` sitting in their
@@ -617,56 +584,7 @@ export function ComposeView({
     state.settings.composeAdvisoriesEnabled,
     state.settings.composeAdvisoriesChosen,
   )
-  const visibleBannerIssues = advisoriesEnabled
-    ? bannerIssues
-    : bannerIssues.filter((i) => i.severity === 'error')
   const visibleGuardianFindings = advisoriesEnabled ? guardianFindings : []
-  /**
-   * How many things there are to look at before sending, both sets together.
-   *
-   * The two sets stay separate everywhere else — `bannerIssues` are facts about
-   * the draft and `guardianFindings` are guesses about intent, and only the
-   * first kind can block Send — but on a phone they were two stacked full-width
-   * cards measuring ~150px between them, taken straight off the message box.
-   * One number is what goes on screen unasked; both lists are one tap under it,
-   * still labelled and still in their two groups.
-   */
-  const warnCount = visibleBannerIssues.length + visibleGuardianFindings.length
-  const warnBlocking = bannerIssues.some((i) => i.severity === 'error')
-  /* Nothing left to show means nothing left expanded. Without this the strip
-     would come back open the next time it appeared, having been left open on a
-     draft that has since been sent. */
-  useEffect(() => {
-    if (warnCount === 0) setWarnOpen(false)
-  }, [warnCount])
-  /**
-   * Every other banner in this app can be closed — see `Banner`'s own
-   * `banner__close`, which "N 项发送前提醒" never had, being a bespoke strip
-   * rather than a `<Banner>`. Dismissing it does not fix whatever it was
-   * reporting: a draft that still has no recipient still cannot be sent, this
-   * only stops saying so on screen, the same trade `Banner`'s close button
-   * already makes for every `warning`/`danger` banner elsewhere in the app.
-   *
-   * Backed by `warnDismissedRef` (module scope, below) rather than plain
-   * `useState`: `draft` lives in `state.draft`, which survives switching to
-   * another tab and back, but `ComposeView` itself unmounts on that switch —
-   * a `useState` here forgot the dismissal on every remount, which is what
-   * "closed it, came back, and it was back" was. There is only ever one
-   * draft open at a time in this app (see `MessageDraft` — no `id`), so one
-   * module-level flag is the whole of what "which draft" needs to mean here.
-   *
-   * Reset the moment the strip would naturally have nothing to show — the
-   * same rule `warnOpen` follows just above — so dismissing today's warnings
-   * does not also hide an unrelated one that shows up on a later draft.
-   */
-  const [warnDismissed, setWarnDismissedState] = useState(() => warnDismissedRef.current)
-  const setWarnDismissed = useCallback((v: boolean) => {
-    warnDismissedRef.current = v
-    setWarnDismissedState(v)
-  }, [])
-  useEffect(() => {
-    if (warnCount === 0) setWarnDismissed(false)
-  }, [warnCount, setWarnDismissed])
   const recipientCount = draft.to.length + draft.cc.length + draft.bcc.length
   /** Has the user put anything in the draft yet? Nothing is "wrong" until so. */
   const started =
@@ -675,13 +593,7 @@ export function ComposeView({
     draft.body.trim().length > 0 ||
     draft.attachments.length > 0
   const rawBytes = totalAttachmentBytes(draft.attachments)
-  /**
-   * Over the hard limit, which is the size at which the send does not happen.
-   *
-   * Against `attachmentMaxMb`, not `attachmentWarnMb`: the warn threshold is
-   * already one of the things `warnCount` counts, and this flag exists for the
-   * state where there is nothing to warn about except the number itself.
-   */
+  /** Over the hard limit, which is the size at which the send does not happen. */
   const attachOver = rawBytes > state.settings.attachmentMaxMb * 1048576
 
   /*
@@ -2519,56 +2431,20 @@ export function ComposeView({
           </Card>
 
           {/*
-            One strip, folded, and only once there is something to be wrong
-            about.
+            No always-on strip here any more. What was reported before Send
+            was pressed — the validation list and Send Guardian's advisories —
+            now shows only in `PreflightDialog`, the "check this before it
+            goes out" screen `requestSend` opens on Send (see `usePreflight`,
+            `visibleGuardianFindings` below). Nothing that used to block Send
+            stopped blocking it: `blocked` above is untouched by any of this.
 
-            Two things happened here in order. First: an untouched form used to
-            open with four stacked red banners — 242px of alarm telling the user
-            off for not having typed yet — so nothing is said at all until the
-            draft has been started, because blank is not an error and Send is
-            disabled until it is not.
-
-            Then, on a draft that *is* under way, the two boxes that remained —
-            the validation list and Send Guardian's — measured ~150px together
-            at 360px, one fifth of the phone, permanently, for text that is read
-            once and then scrolled past. They are now one 44px row: the count,
-            which is the part a warning exists to make you notice, and a chevron
-            to the sentences.
-
-            Nothing is dropped and nothing is merged into a single undifferent-
-            iated list. Expanded, the two sets are still two labelled groups in
-            the order they were in — facts about the draft first, then the
-            guesses about intent, which never block Send (see
-            `core/sendGuardian.ts` for why those two are separate at all).
-
-            The strip carries the tone of the worse set: `danger` the moment
-            something in it actually blocks Send, `warning` otherwise, so "you
-            cannot send this yet" and "have a look at this" do not look alike
-            from across the room.
+            The one thing kept here is the single case that was ever a
+            decision rather than a report on an otherwise-idle screen:
+            attachments already over the hard limit, which fails Send and is
+            worth knowing about while still attaching files, not only at the
+            moment Send is pressed.
           */}
-          {/*
-            And the third state: the same row, saying nothing is wrong.
-
-            `11-status.css` records the rule this has to answer to — never a
-            permanent "all good" banner on a screen people open every day,
-            because a status line that always says the same thing is one nobody
-            reads on the day it changes. This is not that: it is gated on
-            `started`, so it appears once there is a draft to have an opinion
-            about and is absent on the empty screen. Mid-draft is exactly when
-            "is this sendable" is the question, and answering it in the row
-            that would otherwise carry the warning means the answer is always
-            in the same place — a glance at one strip, not a hunt for the
-            absence of one.
-
-            "可以发送" — a plain "you're ready" restated in words next to a Send
-            button that already says the same thing by being enabled — is
-            gone on request: it named nothing an idle reader needed decided.
-            What is left is the one case in this branch that was ever a
-            decision rather than a report: attachments over the hard limit,
-            which still fails Send and still deserves the same warning it
-            already had before Send is pressed rather than after.
-          */}
-          {started && warnCount === 0 && attachOver ? (
+          {started && attachOver ? (
             <div className="banner banner--danger warnfold warnfold--ok">
               <div className="warnfold__head warnfold__head--static">
                 <IconAlert size={16} className="warnfold__icon" />
@@ -2579,68 +2455,6 @@ export function ComposeView({
                   })}
                 </span>
               </div>
-            </div>
-          ) : null}
-          {started && warnCount > 0 && !warnDismissed ? (
-            <div
-              className={`banner banner--${warnBlocking ? 'danger' : 'warning'} warnfold`}
-              role={warnBlocking ? 'alert' : undefined}
-            >
-              <button
-                type="button"
-                className="warnfold__head"
-                aria-expanded={warnOpen}
-                aria-controls={warnId}
-                onClick={() => setWarnOpen((v) => !v)}
-              >
-                <IconAlert size={16} className="warnfold__icon" />
-                <span className="warnfold__count">{t('compose.warnFold', { n: warnCount })}</span>
-                <IconChevronDown size={16} className="warnfold__chev" />
-              </button>
-              {/*
-                Same close button every other `Banner` in the app already has
-                (see `banner__close` there) — this strip is hand-built rather
-                than a `<Banner>`, which is why it never got one. Dismissing
-                does not fix whatever is still true about the draft (a
-                missing recipient still blocks Send), it only stops saying so
-                here; see `warnDismissed` above for why it re-arms instead of
-                staying closed forever.
-              */}
-              <IconButton
-                className="banner__close warnfold__close"
-                label={t('common.close')}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  setWarnDismissed(true)
-                }}
-              >
-                <IconX size={15} />
-              </IconButton>
-              {warnOpen ? (
-                <div className="warnfold__body" id={warnId}>
-                  {visibleBannerIssues.length > 0 ? (
-                    <ul className="banner__list">
-                      {visibleBannerIssues.map((issue, i) => (
-                        <li key={`${issue.key}-${i}`}>
-                          {t(issue.key as 'validate.noRecipients', issue.values)}
-                        </li>
-                      ))}
-                    </ul>
-                  ) : null}
-                  {visibleGuardianFindings.length > 0 ? (
-                    <>
-                      <div className="warnfold__title">{t('sendGuardian.title')}</div>
-                      <ul className="banner__list">
-                        {visibleGuardianFindings.map((finding) => (
-                          <li key={finding.rule}>
-                            {t(finding.key as TranslationKey, finding.values)}
-                          </li>
-                        ))}
-                      </ul>
-                    </>
-                  ) : null}
-                </div>
-              ) : null}
             </div>
           ) : null}
         </div>
@@ -3092,6 +2906,7 @@ export function ComposeView({
       <PreflightDialog
         open={preflightOpen}
         report={preflight}
+        guardianFindings={visibleGuardianFindings}
         sending={sending}
         outlook={outlook}
         retry={scheduleSet ? retry : null}

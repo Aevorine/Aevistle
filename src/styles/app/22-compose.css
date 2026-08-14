@@ -1257,33 +1257,21 @@
 }
 
 /* ==========================================================================
-   The pre-send warning strip, folded
-
-   Two full-width cards used to stack here: the validation list and Send
-   Guardian's. Measured together on a phone-shaped draft they came to ~150px —
-   about a fifth of a 360x800 screen, held permanently, for text that is read
-   once and then scrolled past.
-
-   Folded, the same information is a 44px row carrying the count and a chevron.
-   The count is the part that has to be on screen unasked: a warning that has
-   to be opened before you know there is one is not a warning. The sentences
-   are one tap under it, still in their two labelled groups.
-
-   `.banner` is `display: flex` with its own padding, both of which this
-   replaces — the tone (background, border, text colour) is all this reuses
-   from it, and reusing it is the point: the strip is the same object as the
-   banners it stands for, only closed.
+   The one static warning row left on the compose screen: attachments already
+   over the hard limit. Everything else that used to live here — the
+   validation list and Send Guardian's advisories, folded behind a 44px
+   count-and-chevron strip — is gone; that information now shows only in
+   `PreflightDialog` at the moment Send is pressed. `.banner` is `display:
+   flex` with its own padding, both of which this replaces — the tone
+   (background, border, text colour) is all this reuses from it.
    ========================================================================== */
 
 .warnfold {
   display: block;
-  /* Containing block for `.warnfold__close` — see that rule below for why it
-     has to be absolute rather than a third flex item on `.warnfold__head`. */
-  position: relative;
   padding: 0;
-  /* The head button provides the row's own padding, so the strip has none of
-     its own; without this the folded row is 44px of button inside 24px of
-     banner padding, which is 68px for one sentence. */
+  /* The head row provides its own padding, so the strip has none of its own;
+     without this it would be 44px of content inside 24px of banner padding,
+     which is 68px for one sentence. */
   overflow: hidden;
 }
 
@@ -1298,47 +1286,20 @@
      .chip__remove` above makes, for the same reason. */
   min-height: 44px;
   padding: var(--sp-2) var(--sp-4);
-  /* Room for `.warnfold__close`, which sits over this end of the row — see
-     that rule below. Without this the chevron paints underneath the close
-     button instead of beside it. */
-  padding-inline-end: calc(var(--sp-4) + var(--ctl-sm));
   border: 0;
   background: transparent;
-  /* Inherited from `.banner--warning` / `.banner--danger`, so the count is the
-     tone of the thing it is counting without this rule knowing which. */
+  /* Inherited from `.banner--danger`, so the text is the tone of the banner
+     it is inside without this rule knowing which. */
   color: inherit;
   font: inherit;
   font-size: var(--text-base);
   text-align: start;
-  cursor: pointer;
-}
-:root[data-shell="mobile"] .warnfold__head {
-  padding-inline-end: calc(var(--sp-4) + var(--tap-min));
 }
 
-/*
- * The strip's own close button, every other `Banner` in the app already has —
- * see `.banner__close` in 07-feedback.css, whose sizing/hover/tone rules this
- * class also carries (the JSX sets both classes). Positioned rather than a
- * third item on `.warnfold__head`'s flex row because that row is a `<button>`
- * and a button cannot contain another button — same reason `.rowdel` in
- * 06-lists.css is absolute against its row instead of a flex child of it.
- */
-.warnfold__close {
-  position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  inset-inline-end: var(--sp-2);
-  z-index: 1;
-}
-
-/* The same row with nothing to open.
-
-   `div`, not `button`, so it does not advertise a tap that does nothing, and
-   `cursor`/`text-align` are the only things it has to take back from the head
-   rule above. It keeps the 44px so the strip does not change height when a
-   draft crosses from "one warning" to "none" — a row that resizes as you type
-   moves the message box under your caret. */
+/* `div`, not `button` — there is nothing to expand here, only one static
+   sentence, so `cursor: default` takes back the pointer the shared row rule
+   above does not set in the first place; kept as its own class in case a
+   future row here ever is interactive again. */
 .warnfold__head--static {
   cursor: default;
 }
@@ -1350,26 +1311,6 @@
 .warnfold__count {
   flex: 1 1 auto;
   min-width: 0;
-  font-weight: 700;
-}
-
-.warnfold__chev {
-  flex: none;
-}
-.warnfold__head[aria-expanded='true'] .warnfold__chev {
-  transform: rotate(180deg);
-}
-
-.warnfold__body {
-  padding: 0 var(--sp-4) var(--sp-3);
-}
-
-/* Send Guardian's own heading, kept. Expanded, these are still two sets — a
-   list of facts about the draft and a list of guesses about intent, only one
-   of which can block Send — and running them together under one bullet list
-   would be the one thing this fold is not allowed to do. */
-.warnfold__title {
-  margin-top: var(--sp-2);
   font-weight: 700;
 }
 

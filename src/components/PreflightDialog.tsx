@@ -17,6 +17,7 @@ import {
   useAttachmentImages,
 } from './ImageLightbox'
 import { buildPreflight, type PreflightReport } from '../core/mail/preflight'
+import type { GuardianFinding } from '../core/mail/sendGuardian'
 import { useApp } from '../state/AppState'
 import { useI18n, type TranslationKey } from '../i18n'
 import type { SendCondition } from '../core/schedule/conditions'
@@ -111,6 +112,7 @@ function formatWait(seconds: number, t: (k: TranslationKey, v?: Record<string, s
 export function PreflightDialog({
   open,
   report,
+  guardianFindings = [],
   onClose,
   onConfirm,
   confirmLabel,
@@ -120,6 +122,15 @@ export function PreflightDialog({
 }: {
   open: boolean
   report: PreflightReport
+  /**
+   * Send Guardian's advisories — see `core/mail/sendGuardian.ts` — pre-filtered
+   * by the caller against `settings.composeAdvisoriesEnabled`. Never blocks
+   * `onConfirm`; that is `report.blocked`'s job alone. This is the only place
+   * these are shown at all: the compose screen used to carry them in a
+   * permanent strip above the message box, which is what this dialog now
+   * replaces them with — surfaced at the moment Send is actually pressed.
+   */
+  guardianFindings?: GuardianFinding[]
   onClose: () => void
   onConfirm: () => void
   confirmLabel: string
@@ -305,6 +316,21 @@ export function PreflightDialog({
             <div key={`${w.key}-${i}`} className={`preflight__note preflight__note--${w.severity}`}>
               {w.severity === 'warning' ? <IconAlert size={14} /> : <IconCheckCircle size={14} />}
               <span>{t(w.key as TranslationKey, w.values)}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {/* Send Guardian's advisories — guesses about intent rather than facts
+          about the draft, which is why they are a labelled group of their own
+          rather than folded into `others` above. See `guardianFindings`. */}
+      {guardianFindings.length > 0 ? (
+        <div className="preflight__notes">
+          <div className="preflight__label">{t('sendGuardian.title')}</div>
+          {guardianFindings.map((finding) => (
+            <div key={finding.rule} className="preflight__note preflight__note--warning">
+              <IconAlert size={14} />
+              <span>{t(finding.key as TranslationKey, finding.values)}</span>
             </div>
           ))}
         </div>

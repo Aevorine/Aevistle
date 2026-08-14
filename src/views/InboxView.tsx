@@ -3556,6 +3556,10 @@ export function InboxView({
                   /* The message scrolls inside the frame, so this is the only
                      way the sticky header above knows it is being read. */
                   onScroll={onBodyScroll}
+                  /* A left/right finger swipe over the open message closes it
+                     back to the list — the same action as the reader's own
+                     close button, just reachable without aiming for it. */
+                  onSwipeDismiss={() => setOpenMessage(null)}
                   /* Both branches of that `??` above go through the same fold:
                      a reply quoted with `>` in a text/plain part and one quoted
                      as `<blockquote>` in an HTML part are the same message to
