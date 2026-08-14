@@ -3574,6 +3574,11 @@ export function InboxView({
                      back to the list — the same action as the reader's own
                      close button, just reachable without aiming for it. */
                   onSwipeDismiss={() => setOpenMessage(null)}
+                  /* Escape has to reach the same two-stage ladder whether
+                     focus is on the reader's own chrome or inside the frame —
+                     see `MessageBodyFrame`'s `onEscapeKey` for why it
+                     otherwise reaches neither. */
+                  onEscapeKey={handleEscape}
                   /* Both branches of that `??` above go through the same fold:
                      a reply quoted with `>` in a text/plain part and one quoted
                      as `<blockquote>` in an HTML part are the same message to

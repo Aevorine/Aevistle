@@ -495,14 +495,19 @@ check('INBOX-05', 'Remote-image fetch blocks private addresses given as literal 
   return null
 })
 
-check('INBOX-06', 'Remote-image private-address filter covers CGNAT, benchmarking, multicast and reserved ranges', () => {
+check('INBOX-06', 'Remote-image private-address filter covers CGNAT, multicast and reserved ranges', () => {
   const remote = read('electron/remoteImage.ts')
   if (!remote) return { severity: 'info', detail: 'No inbox pipeline yet.', fix: '' }
   const problems = []
   if (!/a === 100 && b >= 64 && b <= 127/.test(remote)) problems.push('100.64.0.0/10 (CGNAT) is not blocked')
-  if (!/a === 198 && \(b === 18/.test(remote)) problems.push('198.18.0.0/15 (benchmarking) is not blocked')
   if (!/a >= 224 && a <= 239/.test(remote)) problems.push('224.0.0.0/4 (multicast) is not blocked')
   if (!/a >= 240/.test(remote)) problems.push('240.0.0.0/4 (reserved) is not blocked')
+  // 198.18.0.0/15 (RFC 2544 benchmarking) is deliberately absent from this
+  // list — see the comment above its removed check in isDisallowedAddress()
+  // in electron/remoteImage.ts. It is not a real reachable network for a
+  // typical reader, and it is the specific block several "fake-ip" DNS
+  // proxies (Clash/mihomo, sing-box) use for every synthetic answer, so
+  // blocking it broke every remote image for anyone running one of those.
   if (problems.length === 0) return null
   return {
     severity: 'medium',

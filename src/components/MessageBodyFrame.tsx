@@ -969,6 +969,7 @@ export function MessageBodyFrame({
   onImagesUnplaced,
   onScroll,
   onSwipeDismiss,
+  onEscapeKey,
   themeKey = '',
 }: {
   html: string
@@ -1024,6 +1025,20 @@ export function MessageBodyFrame({
    */
   onSwipeDismiss?: () => void
   /**
+   * Escape, pressed while the body frame itself holds focus.
+   *
+   * The frame is a separate document, so a keydown fired inside it never
+   * bubbles to the outer document a plain `document.addEventListener` on the
+   * reader dialog listens on — cross-document keyboard events do not
+   * propagate that way. Confirmed directly: click into the message body (the
+   * ordinary way anyone reads one), press Escape, and the reader's own
+   * two-stage close (leave full screen, then close) did not advance at all —
+   * the key reached nothing. Wired the same way `onSwipeDismiss` already is,
+   * so Escape keeps working no matter which side of the frame boundary focus
+   * happens to be on.
+   */
+  onEscapeKey?: () => void
+  /**
    * Anything that moves the app's palette or type scale: the theme, the
    * accent, the visual style, the text-size setting.
    *
@@ -1078,6 +1093,10 @@ export function MessageBodyFrame({
   const dismissRef = useRef(onSwipeDismiss)
   dismissRef.current = onSwipeDismiss
 
+  /** Read by the frame's own Escape listener, for the same reason `linkRef` is. */
+  const escapeKeyRef = useRef(onEscapeKey)
+  escapeKeyRef.current = onEscapeKey
+
   /**
    * The current answer to "is this message being painted for a dark room",
    * for `handleLoad` — which is registered once and would otherwise close over
@@ -1114,6 +1133,17 @@ export function MessageBodyFrame({
         linkRef.current(target.href)
       }
       doc.addEventListener('click', handler)
+      /*
+       * Escape, forwarded out — see `onEscapeKey`'s own comment for why this
+       * has to be a listener on *this* document rather than relying on the
+       * reader dialog's. `isComposing` excluded for the same reason the
+       * dialog's own listener excludes it: Escape during an IME candidate
+       * window cancels the candidate, not the reader.
+       */
+      doc.addEventListener('keydown', (e: KeyboardEvent) => {
+        if (e.key !== 'Escape' || e.isComposing) return
+        escapeKeyRef.current?.()
+      })
       /*
        * The message's own scroll, forwarded out.
        *

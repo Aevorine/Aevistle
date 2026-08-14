@@ -51,7 +51,30 @@ function isDisallowedAddress(ip: string): boolean {
     if (a === 0) return true
     if (a === 100 && b >= 64 && b <= 127) return true // RFC6598 carrier-grade NAT
     if (a === 192 && b === 0 && c === 0) return true // RFC6890 IETF protocol assignments
-    if (a === 198 && (b === 18 || b === 19)) return true // RFC2544 benchmarking
+    /*
+     * 198.18.0.0/15 (RFC 2544 benchmarking) is deliberately NOT refused here,
+     * unlike the other reserved ranges above.
+     *
+     * It was, until a report came back with a sender's image failing with
+     * "Refusing to connect to a private address (198.18.0.192)" — a range
+     * that is not merely unrouted (like the ranges above genuinely are on a
+     * reader's own LAN) but is the specific block RFC 2544 set aside for
+     * benchmarking *precisely because* nothing real is ever supposed to sit
+     * there, which several "fake-ip" DNS schemes (Clash/mihomo, sing-box,
+     * and others in the same family, all common on Windows and Android)
+     * exploit for exactly that reason: it is guaranteed never to collide with
+     * a real destination, so it is safe to hand back as a synthetic answer
+     * for *any* hostname and translate for real at a TUN adapter underneath
+     * the OS network stack. Under that setup a sender's actual, ordinary
+     * image host resolves to an address in this block on that machine, and
+     * every DNS lookup — this proxy's own `safeLookup` included — sees the
+     * same synthetic answer; refusing to connect to it does not protect the
+     * reader from anything reachable, it just makes every image from every
+     * sender fail identically for anyone running that kind of proxy. The
+     * ranges above stay refused because they can genuinely be a reader's real
+     * LAN; this one is refused by nothing real ever using it, which a
+     * fake-ip resolver relies on rather than violates.
+     */
     if (a >= 224 && a <= 239) return true // multicast
     if (a >= 240) return true // reserved, incl. 255.255.255.255 broadcast
     return false
