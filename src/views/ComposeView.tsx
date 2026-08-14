@@ -20,6 +20,7 @@ import {
   Button,
   Card,
   Field,
+  IconButton,
   Modal,
   Segmented,
   Switch,
@@ -628,6 +629,22 @@ export function ComposeView({
      draft that has since been sent. */
   useEffect(() => {
     if (warnCount === 0) setWarnOpen(false)
+  }, [warnCount])
+  /**
+   * Every other banner in this app can be closed — see `Banner`'s own
+   * `banner__close`, which "N 项发送前提醒" never had, being a bespoke strip
+   * rather than a `<Banner>`. Dismissing it does not fix whatever it was
+   * reporting: a draft that still has no recipient still cannot be sent, this
+   * only stops saying so on screen, the same trade `Banner`'s close button
+   * already makes for every `warning`/`danger` banner elsewhere in the app.
+   *
+   * Reset the moment the strip would naturally have nothing to show — the
+   * same rule `warnOpen` follows just above — so dismissing today's warnings
+   * does not also hide an unrelated one that shows up on a later draft.
+   */
+  const [warnDismissed, setWarnDismissed] = useState(false)
+  useEffect(() => {
+    if (warnCount === 0) setWarnDismissed(false)
   }, [warnCount])
   const recipientCount = draft.to.length + draft.cc.length + draft.bcc.length
   /** Has the user put anything in the draft yet? Nothing is "wrong" until so. */
@@ -2548,7 +2565,7 @@ export function ComposeView({
               </div>
             </div>
           ) : null}
-          {started && warnCount > 0 ? (
+          {started && warnCount > 0 && !warnDismissed ? (
             <div
               className={`banner banner--${warnBlocking ? 'danger' : 'warning'} warnfold`}
               role={warnBlocking ? 'alert' : undefined}
@@ -2564,6 +2581,25 @@ export function ComposeView({
                 <span className="warnfold__count">{t('compose.warnFold', { n: warnCount })}</span>
                 <IconChevronDown size={16} className="warnfold__chev" />
               </button>
+              {/*
+                Same close button every other `Banner` in the app already has
+                (see `banner__close` there) — this strip is hand-built rather
+                than a `<Banner>`, which is why it never got one. Dismissing
+                does not fix whatever is still true about the draft (a
+                missing recipient still blocks Send), it only stops saying so
+                here; see `warnDismissed` above for why it re-arms instead of
+                staying closed forever.
+              */}
+              <IconButton
+                className="banner__close warnfold__close"
+                label={t('common.close')}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setWarnDismissed(true)
+                }}
+              >
+                <IconX size={15} />
+              </IconButton>
               {warnOpen ? (
                 <div className="warnfold__body" id={warnId}>
                   {visibleBannerIssues.length > 0 ? (

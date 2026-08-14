@@ -1277,6 +1277,9 @@
 
 .warnfold {
   display: block;
+  /* Containing block for `.warnfold__close` — see that rule below for why it
+     has to be absolute rather than a third flex item on `.warnfold__head`. */
+  position: relative;
   padding: 0;
   /* The head button provides the row's own padding, so the strip has none of
      its own; without this the folded row is 44px of button inside 24px of
@@ -1295,6 +1298,10 @@
      .chip__remove` above makes, for the same reason. */
   min-height: 44px;
   padding: var(--sp-2) var(--sp-4);
+  /* Room for `.warnfold__close`, which sits over this end of the row — see
+     that rule below. Without this the chevron paints underneath the close
+     button instead of beside it. */
+  padding-inline-end: calc(var(--sp-4) + var(--ctl-sm));
   border: 0;
   background: transparent;
   /* Inherited from `.banner--warning` / `.banner--danger`, so the count is the
@@ -1304,6 +1311,25 @@
   font-size: var(--text-base);
   text-align: start;
   cursor: pointer;
+}
+:root[data-shell="mobile"] .warnfold__head {
+  padding-inline-end: calc(var(--sp-4) + var(--tap-min));
+}
+
+/*
+ * The strip's own close button, every other `Banner` in the app already has —
+ * see `.banner__close` in 07-feedback.css, whose sizing/hover/tone rules this
+ * class also carries (the JSX sets both classes). Positioned rather than a
+ * third item on `.warnfold__head`'s flex row because that row is a `<button>`
+ * and a button cannot contain another button — same reason `.rowdel` in
+ * 06-lists.css is absolute against its row instead of a flex child of it.
+ */
+.warnfold__close {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  inset-inline-end: var(--sp-2);
+  z-index: 1;
 }
 
 /* The same row with nothing to open.
