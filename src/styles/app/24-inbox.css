@@ -659,10 +659,20 @@
 }
 
 /* The sender is the item on the line whose length is arbitrary, so it is the
-   one that gives way; everything else on the line is short and fixed. */
+   one that gives way; everything else on the line is short and fixed.
+   `min-width: 0` alone let it shrink but not clip — with no `white-space` of
+   its own a long name just wrapped inside its shrunk box instead of eliding,
+   growing `.job__meta` (which is `flex-wrap: wrap`) onto a second line and
+   pushing `.job__time` down with it, which is what made a row's timestamp and
+   later text look like they had fallen off the edge and needed a horizontal
+   swipe to reach — the same shape as the account-tab and log-actions bugs
+   this codebase has hit before with a missing ellipsis escape valve. */
 .job__from {
   flex: 0 1 auto;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 /* Never shrinks below its own content. Measured before this rule existed: in a
    nowrap row the bare timestamp was the one item with no `white-space` of its

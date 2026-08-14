@@ -1575,8 +1575,13 @@ export function ComposeView({
               )}
 
               {/* Whatever is quietly wrong, on the screen that gets opened most.
-                  Absent entirely when there is nothing to report. */}
-              <HealthBoard onGo={onNavigate} />
+                  Absent entirely when there is nothing to report, and — like
+                  the warnfold strip below — entirely absent when
+                  `composeAdvisoriesEnabled` is off. This strip has no item
+                  that blocks Send (that is `visibleBannerIssues`'s job, in
+                  the warnfold strip), so unlike that strip it has nothing to
+                  keep showing with the setting off. */}
+              {advisoriesEnabled ? <HealthBoard onGo={onNavigate} /> : null}
 
               {/* Anything the network stopped from leaving. Absent when empty. */}
               <OutboxStrip />

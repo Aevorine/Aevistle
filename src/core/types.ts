@@ -1225,7 +1225,12 @@ export const DEFAULT_SETTINGS: Settings = {
   homeGridNames: undefined,
   homeGridIcons: undefined,
   composePreflight: true,
-  composeAdvisoriesEnabled: true,
+  // Off by default: the strip this gates (HealthBoard's info-level notes plus
+  // Send Guardian's non-blocking guesses, e.g. "未来 7 天有 N 次发送") was asked
+  // to be gone from the compose screen, repeatedly. An error that actually
+  // blocks Send is a different set (`visibleBannerIssues` filtered to
+  // `severity === 'error'`) and still shows regardless of this flag.
+  composeAdvisoriesEnabled: false,
   readerDarkInvert: true,
   readerFoldQuotes: true,
   haptics: true,
