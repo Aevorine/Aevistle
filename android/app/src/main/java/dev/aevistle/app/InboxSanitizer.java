@@ -18,9 +18,9 @@ import java.util.regex.Pattern;
  * Mirrors `electron/sanitizeHtml.ts` in intent — same tag allowlist, same
  * `javascript:`/`vbscript:` rejection via protocol restriction, same
  * blank-pixel-placeholder treatment for remote `<img>` sources, and — as of
- * the property-level {@link #filterStyle} pass below — the same seven-property
+ * the property-level {@link #filterStyle} pass below — the same nine-property
  * `style` allowlist (color, background-color, font-weight, font-style,
- * font-size, text-align, text-decoration). Jsoup's {@link Safelist} can only
+ * font-size, width, max-width, text-align, text-decoration). Jsoup's {@link Safelist} can only
  * allow or reject the whole `style` attribute, not individual CSS
  * *properties*, so `SAFELIST` allows it and {@link #filterStyle} does the
  * per-property filtering by hand afterwards — the same precision the desktop
@@ -89,11 +89,20 @@ final class InboxSanitizer {
         return cid.toLowerCase(java.util.Locale.ROOT);
     }
 
-    /** Mirrors `ALLOWED_STYLES` in `electron/sanitizeHtml.ts` — same properties, same value patterns. */
+    /**
+     * Mirrors `ALLOWED_STYLES` in `electron/sanitizeHtml.ts` — same properties, same value
+     * patterns, including `width`/`max-width`: without them, a sender who lays a message out
+     * with CSS (`style="max-width:600px"`) rather than the legacy `width` HTML attribute had
+     * that declaration dropped entirely, and `MessageBodyFrame`'s `centreOuter` rule — which
+     * only matches a surviving `style*="width"` attribute — never got a chance to centre it.
+     * The body then rendered at its natural width, left-aligned, in the unconstrained rest of
+     * the frame: content packed against the left edge, the right side blank.
+     */
     private static final Pattern COLOR_VALUE = Pattern.compile("^[a-zA-Z#][a-zA-Z0-9(),.%\\s#]*$");
     private static final Pattern FONT_WEIGHT_VALUE = Pattern.compile("^[a-zA-Z0-9]+$");
     private static final Pattern FONT_STYLE_VALUE = Pattern.compile("^[a-zA-Z]+$");
     private static final Pattern FONT_SIZE_VALUE = Pattern.compile("^[0-9.]+(px|pt|em|rem|%)$");
+    private static final Pattern WIDTH_VALUE = Pattern.compile("^[0-9.]+(px|pt|em|rem|%)$");
     private static final Pattern TEXT_ALIGN_VALUE = Pattern.compile("^(left|right|center|justify)$");
     private static final Pattern TEXT_DECORATION_VALUE = Pattern.compile("^[a-zA-Z\\s]+$");
 
@@ -150,6 +159,10 @@ final class InboxSanitizer {
                     break;
                 case "font-size":
                     allowed = FONT_SIZE_VALUE.matcher(value).matches();
+                    break;
+                case "width":
+                case "max-width":
+                    allowed = WIDTH_VALUE.matcher(value).matches();
                     break;
                 case "text-align":
                     allowed = TEXT_ALIGN_VALUE.matcher(value).matches();

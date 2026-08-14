@@ -58,6 +58,20 @@ const ALLOWED_ATTRIBUTES: sanitizeHtmlLib.IOptions['allowedAttributes'] = {
  * list — omission, not a regex scan for `url(`, is what keeps CSS from being
  * a second image-loading channel. Every property below is one whose CSS
  * value grammar cannot embed a URL.
+ *
+ * `width`/`max-width` matter beyond their own effect: they are also the only
+ * hook `MessageBodyFrame`'s `centreOuter` rule has for a *CSS*-width layout —
+ * `table[style*="width"]`/`body>:is(div,center,...)[style*="width"]` can only
+ * ever match a `style` attribute this allowlist let through. Before these two
+ * were added, every sender that laid a message out with `style="max-width:
+ * 600px"` (the common shape for a template built without the legacy `width`
+ * HTML attribute — most transactional mail and modern newsletters) had that
+ * declaration stripped entirely, so the body rendered at its unconstrained
+ * natural width, left-aligned, with `centreOuter` never getting a `style`
+ * attribute to match against: content packed into the left portion of the
+ * window with the rest left blank. Confirmed by sanitizing that exact input
+ * before and after this change. The `table[width]` (HTML-attribute) case this
+ * does not touch was already centred as of 0.3.5.
  */
 const ALLOWED_STYLES: sanitizeHtmlLib.IOptions['allowedStyles'] = {
   '*': {
@@ -66,6 +80,8 @@ const ALLOWED_STYLES: sanitizeHtmlLib.IOptions['allowedStyles'] = {
     'font-weight': [/^[a-zA-Z0-9]+$/],
     'font-style': [/^[a-zA-Z]+$/],
     'font-size': [/^[0-9.]+(px|pt|em|rem|%)$/],
+    width: [/^[0-9.]+(px|pt|em|rem|%)$/],
+    'max-width': [/^[0-9.]+(px|pt|em|rem|%)$/],
     'text-align': [/^(left|right|center|justify)$/],
     'text-decoration': [/^[a-zA-Z\s]+$/],
   },
