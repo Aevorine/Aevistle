@@ -133,12 +133,29 @@ interface FetchedBytes {
   mime: string
 }
 
-async function fetchOverNetwork(url: string): Promise<FetchedBytes> {
-  const parsed = new URL(url)
+/**
+ * How many redirect hops `fetchOverNetwork` will follow before giving up.
+ *
+ * Real senders route open-tracking and CDN-hosted images through one or two
+ * redirects routinely (Mailchimp, SendGrid, Substack, plain http->https
+ * upgrades); refusing every 3xx outright — the previous behaviour — turned
+ * "the image failed to load" into the common case rather than the rare one.
+ * Three hops covers that without turning this into an open-ended crawl.
+ */
+const MAX_REDIRECTS = 3
+
+/**
+ * Throws unless `url` is a scheme and address this proxy is willing to
+ * connect to — the same check `fetchOverNetwork` always ran on its one and
+ * only request, now shared with every redirect hop too. A redirect target is
+ * exactly as attacker-influenced as the original URL (more so: the sender's
+ * server chose it, not the sender), so skipping this on hop 2 would make
+ * following redirects at all a private-network bypass.
+ */
+function assertFetchable(parsed: URL): void {
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
     throw new Error('Unsupported URL scheme')
   }
-
   /**
    * A literal IP in the URL never reaches `safeLookup` at all.
    *
@@ -156,10 +173,30 @@ async function fetchOverNetwork(url: string): Promise<FetchedBytes> {
   if (net.isIP(host) && isDisallowedAddress(host)) {
     throw new Error(`Refusing to connect to a private address (${host})`)
   }
+}
 
+async function fetchOverNetwork(url: string): Promise<FetchedBytes> {
+  let parsed = new URL(url)
+  assertFetchable(parsed)
+
+  for (let redirects = 0; ; redirects++) {
+    const next = await fetchOnce(parsed)
+    if (next.kind === 'ok') return next.value
+    // A relative Location resolves against the URL that sent it, same as a
+    // browser would; an absolute one (the common case) ignores `parsed`.
+    const target = new URL(next.location, parsed)
+    if (redirects >= MAX_REDIRECTS) throw new Error('Too many redirects')
+    assertFetchable(target)
+    parsed = target
+  }
+}
+
+type FetchOnceResult = { kind: 'ok'; value: FetchedBytes } | { kind: 'redirect'; location: string }
+
+function fetchOnce(parsed: URL): Promise<FetchOnceResult> {
   const requestFn = parsed.protocol === 'https:' ? httpsRequest : httpRequest
 
-  return new Promise<FetchedBytes>((resolve, reject) => {
+  return new Promise<FetchOnceResult>((resolve, reject) => {
     const req = requestFn(
       parsed,
       {
@@ -169,8 +206,16 @@ async function fetchOverNetwork(url: string): Promise<FetchedBytes> {
       },
       (res) => {
         const status = res.statusCode ?? 0
-        // No redirects: a redirect target needs the same private-address
-        // check and this keeps that from being an easy bypass to reintroduce.
+        if (status >= 300 && status < 400) {
+          const location = res.headers.location
+          res.resume()
+          if (!location) {
+            reject(new Error(`HTTP ${status}`))
+            return
+          }
+          resolve({ kind: 'redirect', location })
+          return
+        }
         if (status < 200 || status >= 300) {
           res.resume()
           reject(new Error(`HTTP ${status}`))
@@ -223,7 +268,7 @@ async function fetchOverNetwork(url: string): Promise<FetchedBytes> {
            * them. Everything that decides whether these bytes are an image —
            * and turns them into bytes this app wrote — is in `imageProxy.ts`.
            */
-          resolve({ buffer: Buffer.concat(chunks), mime })
+          resolve({ kind: 'ok', value: { buffer: Buffer.concat(chunks), mime } })
         })
         res.on('error', reject)
       },

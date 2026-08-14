@@ -686,10 +686,12 @@ export function InboxView({
   const allMessages = useMemo(() => enabledInboxes.flatMap((i) => i.messages), [enabledInboxes])
 
   /* The "showing the most recent 50 of N" banner and the `inboxServerTotal`
-     memo that fed it were removed on request (2026-08-12). The limit itself is
-     unchanged — `INBOX_LIST_FETCH_LIMIT` still bounds what a sync fetches — but
-     a permanent band above the list restating it on every visit was not worth
-     the row it cost. */
+     memo that fed it were removed on request (2026-08-12). A sync now lists
+     the whole folder up to `INBOX_LIST_FETCH_CEILING` (src/core/types.ts) —
+     high enough that an everyday mailbox never hits it — so the gap the
+     banner used to report is no longer the everyday case either; a permanent
+     band above the list restating it on every visit was not worth the row it
+     cost even before that. */
 
   const accountLabel = useCallback(
     (accountId: string) => {

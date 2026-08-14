@@ -837,9 +837,10 @@ export interface Settings {
    * Opening a message whose body was not prefetched costs a full IMAP ladder —
    * six to eight sequential round trips at 50-150 ms each on a phone, before
    * the first byte of text moves — so the coverage of this prefetch is
-   * essentially the whole "why is opening a mail slow" question. Both platforms
-   * list `INBOX_LIST_FETCH_LIMIT` messages and both now cover all of them on an
-   * unmetered link.
+   * essentially the whole "why is opening a mail slow" question. A sync lists
+   * up to `INBOX_LIST_FETCH_CEILING` messages, but this prefetch only ever
+   * covers the newest `INBOX_LIST_FETCH_LIMIT` of them on an unmetered link —
+   * everything past that, listed or not, loads on demand when opened.
    *
    * The choice this setting offers is only about a *metered* one:
    *
@@ -1053,6 +1054,16 @@ export interface Settings {
    */
   composePreflight?: boolean
   /**
+   * Show the "N things to check" strip on the compose screen — the count of
+   * non-blocking advisories (`validate.noSubject`, a stale-looking date
+   * phrase, and the rest of `core/sendGuardian.ts`'s guesses about intent).
+   * Default on. Off does not hide an error that actually blocks Send — a
+   * missing recipient still has to be visible, or Send looks broken rather
+   * than disabled for a reason — it only stops the advisory-only strip from
+   * appearing on every draft that has one.
+   */
+  composeAdvisoriesEnabled?: boolean
+  /**
    * Repaint a received HTML body for dark mode instead of showing the sender's
    * white page inside a dark app. Default on, and always overridable per
    * message from the reader — see `MessageBodyFrame`. Some senders' layouts
@@ -1214,6 +1225,7 @@ export const DEFAULT_SETTINGS: Settings = {
   homeGridNames: undefined,
   homeGridIcons: undefined,
   composePreflight: true,
+  composeAdvisoriesEnabled: true,
   readerDarkInvert: true,
   readerFoldQuotes: true,
   haptics: true,
@@ -1355,18 +1367,29 @@ export function isRetryableSeenFailure(reason: SeenFlagReason | undefined): bool
 }
 
 /**
- * How many of a folder's most recent messages `electron/imap.ts`'s
- * `runSync` populates the list with, per account, per sync.
+ * The hard ceiling on how many of a folder's most recent messages a sync will
+ * ever list, per account, per sync — not the everyday number.
  *
- * Shared rather than redeclared: `runSync` is the only place that enforces
- * it, but the UI needs the identical number to tell the user honestly what
- * they are looking at (`InboxView.tsx`'s "showing the most recent N"
- * banner) — a copy typed separately in each file is exactly the kind of
- * number that quietly drifts apart from what the code actually does. There
- * is no pagination yet: a folder with more than this many messages on the
- * server has the rest sitting there, unseen by this app, until a load-older
- * page is built. See `InboxFolder.totalCount`, which is where the gap
- * between "on the server" and "in this list" becomes visible.
+ * There is still no "load older" page, but the everyday number used to be a
+ * flat 50 regardless of mailbox size, which is what made "accept all my
+ * mail" a real, reachable complaint on an inbox that had only 52 messages in
+ * it. `runSync` now lists everything the folder has, up to *this* ceiling —
+ * high enough that only a genuinely huge mailbox notices it, existing purely
+ * so one sync cannot try to page in tens of thousands of headers and take
+ * minutes to finish. See `InboxFolder.totalCount`, which is where the gap
+ * between "on the server" and "in this list" becomes visible if the ceiling
+ * is ever actually hit.
+ */
+export const INBOX_LIST_FETCH_CEILING = 2000
+
+/**
+ * How many of the *listed* messages a sync eagerly downloads the body for,
+ * counting the background pass (`PREFETCH_TAIL_LIMIT` in `electron/imap.ts`).
+ *
+ * Deliberately not the same number as `INBOX_LIST_FETCH_CEILING` any more:
+ * every listed message still opens instantly on demand (see `BODY_PREFETCH_LIMIT`'s
+ * doc comment in that file), so raising how many headers a sync lists does not
+ * have to mean eagerly downloading thousands of bodies nobody has opened yet.
  */
 export const INBOX_LIST_FETCH_LIMIT = 50
 
@@ -1385,9 +1408,8 @@ export interface InboxFolder {
   /**
    * The folder's true size on the server (IMAP `EXISTS`), not how many of its
    * messages made it into `InboxAccountState.messages` — that list is capped
-   * at `INBOX_LIST_FETCH_LIMIT`. The two agreeing is the common case; the two
-   * disagreeing is the fact `InboxView.tsx`'s recent-mail banner exists to
-   * surface rather than leave silent.
+   * at `INBOX_LIST_FETCH_CEILING`, high enough that the two disagreeing is
+   * now the rare case rather than the every-mailbox-over-50 case it used to be.
    */
   totalCount: number
 }

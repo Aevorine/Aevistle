@@ -1849,6 +1849,8 @@ export const zhCN: Translations = {
   'settings.readerFoldQuotesHint': '把信里重复引用的上一封收起来，只留一行「显示引用的 N 行」。随时可以展开。',
   'settings.composePreflight': '发送前先确认一下',
   'settings.composePreflightHint': '按下发送后先给你看一张卡：发给谁、几个人、多大、什么时候发。关掉就直接发。',
+  'settings.composeAdvisories': '撰写页发送前提醒',
+  'settings.composeAdvisoriesHint': '正文/主题为空、日期像是写错了这类提醒条。关掉后，真正会拦下发送的错误（比如没填收件人）仍会显示。',
 
   'codes.bigDigits': '大字模式',
   'codes.bigDigitsExit': '回到列表',

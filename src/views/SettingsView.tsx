@@ -1514,6 +1514,12 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
                 title={t('settings.composePreflight')}
                 description={t('settings.composePreflightHint')}
               />
+              <Switch
+                checked={s.composeAdvisoriesEnabled !== false}
+                onChange={(v) => patch({ composeAdvisoriesEnabled: v })}
+                title={t('settings.composeAdvisories')}
+                description={t('settings.composeAdvisoriesHint')}
+              />
 
               <Field label={t('settings.language')}>
                 <select

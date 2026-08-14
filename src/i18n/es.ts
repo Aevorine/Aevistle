@@ -1863,6 +1863,8 @@ export const es: Translations = {
   'settings.readerFoldQuotesHint': 'La copia citada del mensaje anterior se pliega en una línea que puedes abrir cuando quieras.',
   'settings.composePreflight': 'Confirmar antes de enviar',
   'settings.composePreflightHint': 'Primero una tarjeta: a quién va, a cuántos, qué tamaño y cuándo. Desactívalo para enviar de inmediato.',
+  'settings.composeAdvisories': 'Avisos previos al envío en la redacción',
+  'settings.composeAdvisoriesHint': 'La franja para cosas como un asunto vacío o una fecha que parece errónea. Al desactivarla, un error que realmente bloquea el envío —un destinatario faltante, por ejemplo— sigue mostrándose.',
 
   'codes.bigDigits': 'Dígitos grandes',
   'codes.bigDigitsExit': 'Volver a la lista',

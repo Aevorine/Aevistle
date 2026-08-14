@@ -1855,6 +1855,8 @@ export const ar: Translations = {
   'settings.readerFoldQuotesHint': 'تُطوى النسخة المقتبسة من الرسالة السابقة في سطر واحد يمكنك فتحه في أي وقت.',
   'settings.composePreflight': 'التأكيد قبل الإرسال',
   'settings.composePreflightHint': 'بطاقة واحدة أولاً: إلى مَن، وكم عدد المستلمين، وما الحجم، ومتى. أوقِف هذا للإرسال مباشرة.',
+  'settings.composeAdvisories': 'تنبيهات ما قبل الإرسال في شاشة الكتابة',
+  'settings.composeAdvisoriesHint': 'الشريط الخاص بأمور مثل موضوع فارغ أو عبارة تاريخ تبدو خاطئة. عند الإيقاف، يظل يظهر أي خطأ يمنع الإرسال فعلاً — مثل عدم تحديد مستلم.',
 
   'codes.bigDigits': 'أرقام كبيرة',
   'codes.bigDigitsExit': 'العودة إلى القائمة',

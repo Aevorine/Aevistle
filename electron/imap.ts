@@ -22,6 +22,7 @@
 import { ImapFlow } from 'imapflow'
 import { simpleParser } from 'mailparser'
 import {
+  INBOX_LIST_FETCH_CEILING,
   INBOX_LIST_FETCH_LIMIT,
   type InboxAccountState,
   type InboxFolder,
@@ -57,17 +58,18 @@ const INBOX_PATH = 'INBOX'
 /**
  * How many of the most recent messages populate the list per sync.
  *
- * `INBOX_LIST_FETCH_LIMIT` (`src/core/types.ts`), not a number restated
- * here — see that constant's own comment for why the UI needs to agree with
- * this file on the exact value rather than a copy of it.
+ * `INBOX_LIST_FETCH_CEILING` (`src/core/types.ts`), not a number restated
+ * here. This used to be a flat 50 regardless of mailbox size — the "why does
+ * it only show 50 of my 52 messages" complaint — so it is now a high ceiling
+ * rather than an everyday cap: a sync lists the whole folder up to it.
  */
-const LIST_FETCH_LIMIT = INBOX_LIST_FETCH_LIMIT
+const LIST_FETCH_LIMIT = INBOX_LIST_FETCH_CEILING
 /**
  * Of those, how many the sync itself waits for before it can answer.
  *
  * Unchanged at fifteen. What changed is that they now arrive in one batched
  * `FETCH` rather than fifteen sequential `fetchOne` calls, and that everything
- * *past* fifteen is covered too — by `PREFETCH_TAIL_LIMIT` below, after the
+ * *past* fifteen, up to `PREFETCH_TAIL_LIMIT` below, is covered too, after the
  * list is already on screen.
  */
 const BODY_PREFETCH_LIMIT = 15

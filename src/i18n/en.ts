@@ -1891,6 +1891,8 @@ export const en = {
   'settings.readerFoldQuotesHint': 'The quoted copy of the previous message collapses to one line you can open again at any time.',
   'settings.composePreflight': 'Confirm before sending',
   'settings.composePreflightHint': 'One card first — who it goes to, how many, how big, and when. Turn this off to send straight away.',
+  'settings.composeAdvisories': 'Pre-send advisories on compose',
+  'settings.composeAdvisoriesHint': 'The strip for things like an empty subject or a date phrase that looks wrong. Turned off, an error that actually blocks Send — a missing recipient, say — still shows.',
 
   'codes.bigDigits': 'Big digits',
   'codes.bigDigitsExit': 'Back to the list',

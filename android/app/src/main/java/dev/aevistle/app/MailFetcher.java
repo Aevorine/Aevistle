@@ -53,6 +53,17 @@ final class MailFetcher {
 
     private static final String TAG = "MailFetcher";
     private static final int LIST_LIMIT = 50;
+    /**
+     * The hard ceiling on how many of a folder's most recent messages a sync
+     * will ever list — not the everyday number. Mirrors
+     * {@code INBOX_LIST_FETCH_CEILING} in {@code src/core/types.ts}: a flat
+     * {@link #LIST_LIMIT} regardless of mailbox size is what made "accept all
+     * my mail" a real complaint on an inbox with only slightly more than 50
+     * messages in it. {@link #LIST_LIMIT} still bounds the eager body
+     * prefetch (see {@link PrefetchBudget#messages}) — everything listed
+     * beyond it still opens instantly, it just loads on demand.
+     */
+    private static final int LIST_FETCH_CEILING = 2000;
     private static final long ATTACHMENT_MAX_BYTES = 10L * 1024 * 1024;
 
     private MailFetcher() {
@@ -811,9 +822,9 @@ final class MailFetcher {
     // -----------------------------------------------------------------------
 
     /**
-     * Fetch envelope data for the most recent {@link #LIST_LIMIT} messages and
-     * merge it into whatever the caller already had cached, then prefetch a
-     * bounded number of bodies for messages that do not have one yet.
+     * Fetch envelope data for the most recent {@link #LIST_FETCH_CEILING}
+     * messages and merge it into whatever the caller already had cached, then
+     * prefetch a bounded number of bodies for messages that do not have one yet.
      *
      * Returns the updated `InboxAccountState` JSON — same shape `syncInbox`
      * returns on the desktop, so `bridge-android.ts` needs no translation.
@@ -885,7 +896,7 @@ final class MailFetcher {
                 return unchanged;
             }
 
-            int start = Math.max(1, total - LIST_LIMIT + 1);
+            int start = Math.max(1, total - LIST_FETCH_CEILING + 1);
             Message[] range = total > 0 ? inbox.getMessages(start, total) : new Message[0];
 
             javax.mail.FetchProfile profile = new javax.mail.FetchProfile();

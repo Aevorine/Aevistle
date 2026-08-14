@@ -588,6 +588,19 @@ export function ComposeView({
     [draft, scheduleSet, recurrence, state.recentRecipients],
   )
   /**
+   * `settings.composeAdvisoriesEnabled` (default on) turning off the strip
+   * entirely turns off *advisories* — it must never hide the reason Send is
+   * disabled, or the button looks broken instead of explained. So an error
+   * that actually blocks Send survives the filter even with the setting off;
+   * `guardianFindings` cannot block Send at all (see the comment below) and
+   * is dropped whole.
+   */
+  const advisoriesEnabled = state.settings.composeAdvisoriesEnabled !== false
+  const visibleBannerIssues = advisoriesEnabled
+    ? bannerIssues
+    : bannerIssues.filter((i) => i.severity === 'error')
+  const visibleGuardianFindings = advisoriesEnabled ? guardianFindings : []
+  /**
    * How many things there are to look at before sending, both sets together.
    *
    * The two sets stay separate everywhere else — `bannerIssues` are facts about
@@ -597,7 +610,7 @@ export function ComposeView({
    * One number is what goes on screen unasked; both lists are one tap under it,
    * still labelled and still in their two groups.
    */
-  const warnCount = bannerIssues.length + guardianFindings.length
+  const warnCount = visibleBannerIssues.length + visibleGuardianFindings.length
   const warnBlocking = bannerIssues.some((i) => i.severity === 'error')
   /* Nothing left to show means nothing left expanded. Without this the strip
      would come back open the next time it appeared, having been left open on a
@@ -2537,20 +2550,20 @@ export function ComposeView({
               </button>
               {warnOpen ? (
                 <div className="warnfold__body" id={warnId}>
-                  {bannerIssues.length > 0 ? (
+                  {visibleBannerIssues.length > 0 ? (
                     <ul className="banner__list">
-                      {bannerIssues.map((issue, i) => (
+                      {visibleBannerIssues.map((issue, i) => (
                         <li key={`${issue.key}-${i}`}>
                           {t(issue.key as 'validate.noRecipients', issue.values)}
                         </li>
                       ))}
                     </ul>
                   ) : null}
-                  {guardianFindings.length > 0 ? (
+                  {visibleGuardianFindings.length > 0 ? (
                     <>
                       <div className="warnfold__title">{t('sendGuardian.title')}</div>
                       <ul className="banner__list">
-                        {guardianFindings.map((finding) => (
+                        {visibleGuardianFindings.map((finding) => (
                           <li key={finding.rule}>
                             {t(finding.key as TranslationKey, finding.values)}
                           </li>

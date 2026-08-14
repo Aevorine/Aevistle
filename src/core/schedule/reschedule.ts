@@ -92,6 +92,7 @@ export function planReschedule(job: ScheduledJob, from: IsoDate, to: IsoDate): R
         ...base,
         outcome: 'single',
         reasonKey: 'cal.move.oneOff',
+        reasonValues: { from, to },
         recurrence: { ...rec, startAt: shiftInstantByDays(rec.startAt, delta) },
       }
 
