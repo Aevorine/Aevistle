@@ -5,7 +5,6 @@
  */
 export const en = {
   'nav.compose': 'Compose',
-  'compose.warnFold': '{n} checks before sending',
   "compose.readyAttachOver": "{n} attachments · {size} total · over the limit, will not send",
   'compose.quickCustom': 'Custom…',
   'quick.friday': 'This Friday 18:00',

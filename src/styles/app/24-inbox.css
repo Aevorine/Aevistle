@@ -430,6 +430,37 @@
   background: var(--surface-1);
 }
 
+/*
+ * On the desktop shell, "full screen" still wasn't: `.modal--fullscreen`
+ * (08-modal.css) caps out at `min(1600px, 96vw)` / `92vh`, and `.modal-scrim`
+ * always keeps `padding: var(--sp-5)` around whatever it centers — both
+ * deliberate, for a dialog whose content has no width control of its own (a
+ * settings form, the compose screen), where an edge-to-edge 2560px-wide line
+ * of text would be its own bug. The reader is not that case: the message
+ * itself is already line-length-limited from *inside* the iframe
+ * (`MessageBodyFrame`'s `--aev-measure`, independent of how wide the frame
+ * around it is), so stretching the frame to the window buys back the margin
+ * without reintroducing the wide-line problem the cap exists for. Requested
+ * directly — the reader should fill the screen the moment a message opens,
+ * with nothing held back "for later, on the windowed step".
+ *
+ * `position: fixed; inset: 0` rather than fighting `.modal-scrim`'s own
+ * padding and `place-items: center`: it pulls the dialog out of the grid
+ * placement entirely, the same technique the mobile-shell rules in
+ * `10-narrow-shell.css` use for the identical reason, so this does not need a
+ * matching change to the scrim to take effect.
+ */
+.modal[data-variant='reader'].modal--fullscreen {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  max-height: 100vh;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+}
+
 /* --- the sticky header ----------------------------------------------------
  *
  * Sender, time and — from the tablet up — the three actions a message is most

@@ -1498,6 +1498,14 @@ export function InboxView({
         let blocked = 0
         let trackers = 0
         const reasons = new Set<ImageBlockReason>()
+        // The first failed verdict's own detail — "HTTP 403", "Timed out",
+        // "Refusing to connect to a private address (…)" — beats the generic
+        // "fetch" bucket below, which used to be the only thing a `failed`
+        // status ever showed even though the proxy had already worked out
+        // exactly what went wrong. Kept to one line: a wall of per-image
+        // reasons for a newsletter with forty broken images is worse than a
+        // representative first one.
+        let firstFailedDetail: string | undefined
         urls.forEach((url, i) => {
           if (seenUrl.has(url)) return
           seenUrl.add(url)
@@ -1506,6 +1514,9 @@ export function InboxView({
           if (v.status === 'blocked') {
             blocked++
             if (v.reason) reasons.add(v.reason)
+          }
+          if (v.status === 'failed' && firstFailedDetail === undefined && v.detail) {
+            firstFailedDetail = v.detail
           }
           if (v.tracker) trackers++
         })
@@ -1532,7 +1543,10 @@ export function InboxView({
         // decisive in the direction it is used here: false means every one of
         // those fetches was doomed before it left, and "you are offline" is a
         // far more useful sentence than "the sender's server refused".
-        if (failed > 0) setImageFailReason(navigator.onLine === false ? 'offline' : 'fetch')
+        if (failed > 0) {
+          setImageFailReason(navigator.onLine === false ? 'offline' : 'fetch')
+          if (firstFailedDetail) setImageFailDetail(firstFailedDetail)
+        }
         setImageStage(failed > 0 ? 'failed' : 'done')
       } catch (e) {
         if (run !== imageRun.current) return

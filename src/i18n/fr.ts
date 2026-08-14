@@ -2,7 +2,6 @@ import type { Translations } from './en'
 
 export const fr: Translations = {
   'nav.compose': 'Rédiger',
-  'compose.warnFold': '{n} points à vérifier avant l’envoi',
   "compose.readyAttachOver": "{n} pièces jointes · {size} au total · dépasse la limite, ne partira pas",
   'compose.quickCustom': 'Personnalisé…',
   'quick.friday': 'Ce vendredi 18:00',

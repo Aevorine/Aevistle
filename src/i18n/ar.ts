@@ -2,7 +2,6 @@ import type { Translations } from './en'
 
 export const ar: Translations = {
   'nav.compose': 'إنشاء',
-  'compose.warnFold': '{n} تنبيهات قبل الإرسال',
   "compose.readyAttachOver": "{n} مرفقات · {size} إجمالاً · يتجاوز الحد، لن يُرسَل",
   'compose.quickCustom': 'مخصص…',
   'quick.friday': 'الجمعة هذه 18:00',
