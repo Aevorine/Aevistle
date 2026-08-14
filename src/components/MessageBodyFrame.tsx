@@ -1138,10 +1138,14 @@ export function MessageBodyFrame({
        * has to be a listener on *this* document rather than relying on the
        * reader dialog's. `isComposing` excluded for the same reason the
        * dialog's own listener excludes it: Escape during an IME candidate
-       * window cancels the candidate, not the reader.
+       * window cancels the candidate, not the reader. `repeat` excluded for
+       * the same reason `Modal`'s own listener excludes it — see that
+       * comment in `components/ui.tsx`: a key held a fraction of a second too
+       * long fires several of these before it lifts, and the ladder this
+       * forwards into has more than one stage.
        */
       doc.addEventListener('keydown', (e: KeyboardEvent) => {
-        if (e.key !== 'Escape' || e.isComposing) return
+        if (e.key !== 'Escape' || e.isComposing || e.repeat) return
         escapeKeyRef.current?.()
       })
       /*

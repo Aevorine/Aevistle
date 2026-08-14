@@ -670,6 +670,19 @@ export function Modal({
       // window is up. Escape there means "cancel the candidate", not "throw
       // away the dialog I am typing into".
       if (e.key !== 'Escape' || e.isComposing) return
+      /*
+       * `repeat` is true for every synthetic keydown the OS fires while a key
+       * stays physically down — Windows' default is one after ~500ms, then
+       * roughly every 30ms after that. Without this guard, a single press of
+       * Escape held a fraction of a second too long fired this handler five
+       * or six times before the finger lifted, and on the reader — whose
+       * Escape is a two-stage ladder (leave full screen, then close) — that
+       * walked both stages in one motion: reported as "Escape closes the
+       * reader instead of leaving full screen", on a build where the ladder
+       * itself was correct and the *first* stage did fire, just followed
+       * immediately by the second because the key was still down.
+       */
+      if (e.repeat) return
       const escape = onEscapeRef.current
       if (escape) escape()
       else onCloseRef.current()
