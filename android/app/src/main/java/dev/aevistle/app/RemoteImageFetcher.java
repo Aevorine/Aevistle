@@ -97,7 +97,13 @@ final class RemoteImageFetcher {
             // same private-address check as the original URL, and the
             // built-in follower has no hook to run it before connecting.
             conn.setInstanceFollowRedirects(false);
-            conn.setRequestProperty("User-Agent", "Aevistle");
+            // A literal "Aevistle" User-Agent was the actual cause behind
+            // "images won't load" for at least Google's notification mail: a
+            // self-identifying, obviously-not-a-browser UA is exactly what
+            // that kind of sender-side filtering exists to reject. Mirrors
+            // electron/remoteImage.ts's identical fix and reasoning.
+            conn.setRequestProperty("User-Agent",
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36");
 
             try {
                 int status = conn.getResponseCode();

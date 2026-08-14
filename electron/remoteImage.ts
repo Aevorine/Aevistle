@@ -202,7 +202,21 @@ function fetchOnce(parsed: URL): Promise<FetchOnceResult> {
       {
         lookup: safeLookup as unknown as LookupFunction,
         timeout: FETCH_TIMEOUT_MS,
-        headers: { 'User-Agent': 'Aevistle' },
+        // A literal `User-Agent: Aevistle` here was the actual cause behind
+        // "images won't load" for at least Google's notification mail (and
+        // plausibly other senders with the same anti-bot posture): a
+        // self-identifying, obviously-not-a-browser UA is exactly what that
+        // kind of filtering exists to reject, and the request came back a
+        // non-2xx that this function correctly, but unhelpfully, reported as
+        // "the sending server did not hand the images over" — true, but not
+        // why. Thunderbird and Apple Mail present ordinary browser UAs for
+        // this exact reason; this does the same rather than being the one
+        // mail client whose own name in a header quietly broke image
+        // loading for whichever senders bother to check it.
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+        },
       },
       (res) => {
         const status = res.statusCode ?? 0
