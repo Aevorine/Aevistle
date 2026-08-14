@@ -3,8 +3,6 @@ import type { Translations } from './en'
 export const es: Translations = {
   'nav.compose': 'Redactar',
   'compose.warnFold': '{n} comprobaciones antes de enviar',
-  "compose.ready": "Listo para enviar",
-  "compose.readyAttach": "{n} adjuntos · {size} en total · listo para enviar",
   "compose.readyAttachOver": "{n} adjuntos · {size} en total · supera el límite, no se enviará",
   'compose.quickCustom': 'Personalizado…',
   'quick.friday': 'Este viernes 18:00',

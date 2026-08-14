@@ -8,6 +8,7 @@
  */
 
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -65,7 +66,6 @@ import { PreflightDialog, useFilePresence, usePreflight } from '../components/Pr
 import { SendResultDetails } from '../components/SendDetails'
 import {
   IconAlert,
-  IconCheckCircle,
   IconChevronDown,
   IconChevronRight,
   IconClock,
@@ -240,6 +240,15 @@ function seedRecurrence(now = Date.now()): Recurrence {
   const at = nextWholeHour(now)
   return { ...defaultRecurrence(now), startAt: at, timeOfDay: hhmm(at) }
 }
+
+/**
+ * Whether the "N 项发送前提醒" strip has been closed for the draft currently
+ * open — module scope on purpose. See the comment on `warnDismissed` inside
+ * `ComposeView`: `state.draft` outlives a tab switch, `ComposeView` does not,
+ * and a plain `useState` there forgot the dismissal every time the view
+ * remounted. One flag is correct because there is only ever one open draft.
+ */
+const warnDismissedRef = { current: false }
 
 export function ComposeView({
   onNavigate,
@@ -638,14 +647,26 @@ export function ComposeView({
    * only stops saying so on screen, the same trade `Banner`'s close button
    * already makes for every `warning`/`danger` banner elsewhere in the app.
    *
+   * Backed by `warnDismissedRef` (module scope, below) rather than plain
+   * `useState`: `draft` lives in `state.draft`, which survives switching to
+   * another tab and back, but `ComposeView` itself unmounts on that switch —
+   * a `useState` here forgot the dismissal on every remount, which is what
+   * "closed it, came back, and it was back" was. There is only ever one
+   * draft open at a time in this app (see `MessageDraft` — no `id`), so one
+   * module-level flag is the whole of what "which draft" needs to mean here.
+   *
    * Reset the moment the strip would naturally have nothing to show — the
    * same rule `warnOpen` follows just above — so dismissing today's warnings
    * does not also hide an unrelated one that shows up on a later draft.
    */
-  const [warnDismissed, setWarnDismissed] = useState(false)
+  const [warnDismissed, setWarnDismissedState] = useState(() => warnDismissedRef.current)
+  const setWarnDismissed = useCallback((v: boolean) => {
+    warnDismissedRef.current = v
+    setWarnDismissedState(v)
+  }, [])
   useEffect(() => {
     if (warnCount === 0) setWarnDismissed(false)
-  }, [warnCount])
+  }, [warnCount, setWarnDismissed])
   const recipientCount = draft.to.length + draft.cc.length + draft.bcc.length
   /** Has the user put anything in the draft yet? Nothing is "wrong" until so. */
   const started =
@@ -2539,28 +2560,23 @@ export function ComposeView({
             in the same place — a glance at one strip, not a hunt for the
             absence of one.
 
-            It also carries the attachment total, which is the other number
-            that decides whether a send succeeds. Red the moment the total is
-            over the hard limit, so the fact that a message will bounce is on
-            screen before Send rather than after.
+            "可以发送" — a plain "you're ready" restated in words next to a Send
+            button that already says the same thing by being enabled — is
+            gone on request: it named nothing an idle reader needed decided.
+            What is left is the one case in this branch that was ever a
+            decision rather than a report: attachments over the hard limit,
+            which still fails Send and still deserves the same warning it
+            already had before Send is pressed rather than after.
           */}
-          {started && warnCount === 0 ? (
-            <div
-              className={`banner banner--${attachOver ? 'danger' : 'success'} warnfold warnfold--ok`}
-            >
+          {started && warnCount === 0 && attachOver ? (
+            <div className="banner banner--danger warnfold warnfold--ok">
               <div className="warnfold__head warnfold__head--static">
-                {attachOver ? (
-                  <IconAlert size={16} className="warnfold__icon" />
-                ) : (
-                  <IconCheckCircle size={16} className="warnfold__icon" />
-                )}
+                <IconAlert size={16} className="warnfold__icon" />
                 <span className="warnfold__count">
-                  {draft.attachments.length > 0
-                    ? t(attachOver ? 'compose.readyAttachOver' : 'compose.readyAttach', {
-                        n: draft.attachments.length,
-                        size: formatBytes(rawBytes),
-                      })
-                    : t('compose.ready')}
+                  {t('compose.readyAttachOver', {
+                    n: draft.attachments.length,
+                    size: formatBytes(rawBytes),
+                  })}
                 </span>
               </div>
             </div>

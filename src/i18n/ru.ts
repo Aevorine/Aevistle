@@ -3,8 +3,6 @@ import type { Translations } from './en'
 export const ru: Translations = {
   'nav.compose': 'Написать',
   'compose.warnFold': 'Проверок перед отправкой: {n}',
-  "compose.ready": "Готово к отправке",
-  "compose.readyAttach": "Вложений: {n} · всего {size} · готово к отправке",
   "compose.readyAttachOver": "Вложений: {n} · всего {size} · превышен лимит, не отправится",
   'compose.quickCustom': 'Свой вариант…',
   'quick.friday': 'В эту пятницу 18:00',

@@ -3,8 +3,6 @@ import type { Translations } from './en'
 export const zhCN: Translations = {
   'nav.compose': '撰写',
   'compose.warnFold': '{n} 项发送前提醒',
-  "compose.ready": "可以发送",
-  "compose.readyAttach": "{n} 个附件 · 合计 {size} · 可以发送",
   "compose.readyAttachOver": "{n} 个附件 · 合计 {size} · 超过上限，发不出去",
   'compose.quickCustom': '自定义…',
   'quick.friday': '本周五 18:00',
