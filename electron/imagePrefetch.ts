@@ -36,9 +36,15 @@
  * It does not know or care which account a URL came from, and it does not
  * record what it fetched. The cache is keyed by URL hash alone (see
  * `remoteImage.ts`), so nothing here builds a per-message history of anything.
- * Failures are dropped silently: this is speculative work for a message nobody
- * has asked for yet, and there is no one to tell. The open-time path will
- * retry, report and surface any error itself.
+ * A *permanent* failure — the scanner refusing the bytes, the SSRF shield
+ * refusing the target — is dropped silently, on purpose: this is speculative
+ * work for a message nobody has asked for yet, and re-running an identical
+ * request against an identical refusal has no better outcome to find. A
+ * *transient* one is not the same fact and gets `MAX_RETRIES` below instead —
+ * see the note there for why a single dropped TLS handshake used to mean an
+ * image nobody would ever see prefetched, silently, for the rest of the
+ * session, with the open-time path left to run into the same dead end and
+ * report it as if the sender's server had never had the picture at all.
  */
 
 import { downloadRemoteImage, isImageCached } from './remoteImage'
@@ -83,6 +89,41 @@ const seen = new Set<string>()
 const SEEN_MAX = 10_000
 
 /**
+ * How many times a *transient* prefetch failure gets a second look, and how
+ * long it waits before the next one.
+ *
+ * Before this, one dropped connection — a TLS handshake reset mid-way, a
+ * momentary DNS hiccup, a proxy having a bad second — was final: the worker's
+ * `try/catch` never inspected what `downloadRemoteImage` actually returned,
+ * so a `failed` verdict and an `ok` one were handled identically, and `seen`
+ * (below) then blocked that URL from ever being offered to the queue again
+ * for the rest of the session. The image was never cached, so the open-time
+ * path tried it again from scratch — and if the same brief network condition
+ * was still in effect, hit the identical failure and reported it verbatim
+ * ("the sending server did not hand the images over"), which is how a
+ * one-second blip during sync turned into a message that looked permanently
+ * broken.
+ *
+ * Excludes `refusedTarget` on purpose: that verdict is this app's own
+ * decision about the address, arrived at *before* any request left the
+ * machine (see `assertFetchable`), and asking again is not going to leave
+ * with a different answer.
+ *
+ * Bounded and capped, not because retrying is dangerous — a retry runs the
+ * exact same SSRF-shielded fetch → scan → re-encode pipeline as the first
+ * attempt, with nothing new exposed to the sender's server or trusted from
+ * it — but because this is still speculative work for a message nobody has
+ * opened, and three attempts spread over a few seconds is a generous
+ * allowance for weather to pass without turning a genuinely dead server into
+ * a background loop.
+ */
+const MAX_RETRIES = 2
+const RETRY_DELAY_MS = 4_000
+
+/** Retry attempts already spent per URL this session. Cleared with `seen`. */
+const retriesUsed = new Map<string, number>()
+
+/**
  * Stop prefetching, and forget what is queued.
  *
  * Called when the policy turns off and by "reset everything". A queue that
@@ -93,6 +134,7 @@ export function stopImagePrefetch(): void {
   paused = true
   queue.clear()
   seen.clear()
+  retriesUsed.clear()
 }
 
 /** Allow prefetching again. */
@@ -142,7 +184,10 @@ async function worker(): Promise<void> {
       const url = next.value
       queue.delete(url)
 
-      if (seen.size >= SEEN_MAX) seen.clear()
+      if (seen.size >= SEEN_MAX) {
+        seen.clear()
+        retriesUsed.clear()
+      }
       seen.add(url)
 
       try {
@@ -150,7 +195,24 @@ async function worker(): Promise<void> {
         // a restart re-fetching everything already on disk, and the try/catch
         // is because this is speculative work — a failure here must never
         // become an unhandled rejection in the main process.
-        if (!(await isImageCached(url))) await downloadRemoteImage(url)
+        if (!(await isImageCached(url))) {
+          const result = await downloadRemoteImage(url)
+          if (result.status === 'failed' && result.reason === 'fetchFailed') {
+            const used = retriesUsed.get(url) ?? 0
+            if (used < MAX_RETRIES) {
+              retriesUsed.set(url, used + 1)
+              // `seen` already holds `url`, so this cannot go through
+              // `prefetchImages()` — its dedup guard exists for the ordinary
+              // case (the same pixel offered by thirty newsletters) and would
+              // silently drop exactly the retry this is trying to schedule.
+              setTimeout(() => {
+                if (paused) return
+                queue.add(url)
+                pump()
+              }, RETRY_DELAY_MS)
+            }
+          }
+        }
       } catch {
         /* speculative work for a message nobody has opened; nothing to report */
       }

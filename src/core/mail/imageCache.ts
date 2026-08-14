@@ -123,7 +123,25 @@ export async function resolveWithCache(
   await Promise.all(
     unique.map(async (url) => {
       try {
-        putCached(url, asProxiedImage(await fetchOne(url)))
+        let result = asProxiedImage(await fetchOne(url))
+        /*
+         * One silent retry for a `fetchFailed` result, before the reader ever
+         * sees a failure banner for it.
+         *
+         * `fetchFailed` is weather — a TLS handshake reset mid-way, a
+         * momentary DNS hiccup — not a verdict about the picture, and it is
+         * common enough on an ordinary connection that a message opened
+         * seconds after it arrives (before the prefetch queue's own retries,
+         * see `electron/imagePrefetch.ts`, have had a turn) used to surface
+         * it to the reader on the very first try. `blocked` results are left
+         * alone: those are the scanner's own decision about bytes that did
+         * arrive, and asking again reaches the same decision at the cost of
+         * a second request to the sender.
+         */
+        if (result.status === 'failed' && result.reason === 'fetchFailed') {
+          result = asProxiedImage(await fetchOne(url))
+        }
+        putCached(url, result)
       } catch (e) {
         putCached(url, failedImage('fetchFailed', e instanceof Error ? e.message : String(e)))
       }
