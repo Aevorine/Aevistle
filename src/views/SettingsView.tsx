@@ -61,7 +61,13 @@ import {
 import { useReorder } from '../components/useReorder'
 import { useApp } from '../state/AppState'
 import { LOCALES, useI18n, type TranslationKey } from '../i18n'
-import { DEFAULT_RETRY, defaultRecurrence, effectiveImagePolicy, emptyDraft } from '../core/types'
+import {
+  DEFAULT_RETRY,
+  defaultRecurrence,
+  effectiveComposeAdvisories,
+  effectiveImagePolicy,
+  emptyDraft,
+} from '../core/types'
 import type {
   AccentBase,
   AccentCyber,
@@ -1515,8 +1521,8 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
                 description={t('settings.composePreflightHint')}
               />
               <Switch
-                checked={s.composeAdvisoriesEnabled !== false}
-                onChange={(v) => patch({ composeAdvisoriesEnabled: v })}
+                checked={effectiveComposeAdvisories(s.composeAdvisoriesEnabled, s.composeAdvisoriesChosen)}
+                onChange={(v) => patch({ composeAdvisoriesEnabled: v, composeAdvisoriesChosen: true })}
                 title={t('settings.composeAdvisories')}
                 description={t('settings.composeAdvisoriesHint')}
               />

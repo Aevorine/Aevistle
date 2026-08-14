@@ -99,6 +99,7 @@ import {
   DEFAULT_BURST,
   DEFAULT_RETRY,
   defaultRecurrence,
+  effectiveComposeAdvisories,
   newId,
 
   type Attachment,
@@ -588,14 +589,24 @@ export function ComposeView({
     [draft, scheduleSet, recurrence, state.recentRecipients],
   )
   /**
-   * `settings.composeAdvisoriesEnabled` (default on) turning off the strip
-   * entirely turns off *advisories* — it must never hide the reason Send is
-   * disabled, or the button looks broken instead of explained. So an error
-   * that actually blocks Send survives the filter even with the setting off;
-   * `guardianFindings` cannot block Send at all (see the comment below) and
-   * is dropped whole.
+   * `settings.composeAdvisoriesEnabled` (default off, see `types.ts`) turning
+   * the strip off entirely turns off *advisories* — it must never hide the
+   * reason Send is disabled, or the button looks broken instead of
+   * explained. So an error that actually blocks Send survives the filter
+   * even with the setting off; `guardianFindings` cannot block Send at all
+   * (see the comment below) and is dropped whole.
+   *
+   * Read through `effectiveComposeAdvisories`, not the raw field: anyone who
+   * already ran 0.3.11 has `composeAdvisoriesEnabled: true` sitting in their
+   * saved state from that version's default, and a changed default in
+   * `DEFAULT_SETTINGS` cannot out-rank an explicitly stored value. The helper
+   * ignores the stored value until `composeAdvisoriesChosen` says a person,
+   * not a default, set it.
    */
-  const advisoriesEnabled = state.settings.composeAdvisoriesEnabled !== false
+  const advisoriesEnabled = effectiveComposeAdvisories(
+    state.settings.composeAdvisoriesEnabled,
+    state.settings.composeAdvisoriesChosen,
+  )
   const visibleBannerIssues = advisoriesEnabled
     ? bannerIssues
     : bannerIssues.filter((i) => i.severity === 'error')

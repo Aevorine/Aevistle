@@ -1064,6 +1064,21 @@ export interface Settings {
    */
   composeAdvisoriesEnabled?: boolean
   /**
+   * Whether `composeAdvisoriesEnabled` is the user's own choice yet.
+   *
+   * The field shipped in 0.3.11 with the setting *itself* defaulting to on,
+   * then 0.3.12 changed the default to off — but `{...DEFAULT_SETTINGS,
+   * ...stored.settings}` (see `AppState`'s load path) means anyone who had
+   * already run 0.3.11 has `composeAdvisoriesEnabled: true` sitting in their
+   * saved state, and a changed *default* cannot out-rank a value that is
+   * already stored. Same shape as `imagePolicyChosen`: until this is `true`,
+   * `effectiveComposeAdvisories` ignores whatever `composeAdvisoriesEnabled`
+   * currently holds and answers `false`, so the strip actually goes away
+   * regardless of what an earlier version already wrote to disk. Set once,
+   * the moment somebody touches the Settings toggle either direction.
+   */
+  composeAdvisoriesChosen?: boolean
+  /**
    * Repaint a received HTML body for dark mode instead of showing the sender's
    * white page inside a dark app. Default on, and always overridable per
    * message from the reader — see `MessageBodyFrame`. Some senders' layouts
@@ -1231,6 +1246,7 @@ export const DEFAULT_SETTINGS: Settings = {
   // blocks Send is a different set (`visibleBannerIssues` filtered to
   // `severity === 'error'`) and still shows regardless of this flag.
   composeAdvisoriesEnabled: false,
+  composeAdvisoriesChosen: false,
   readerDarkInvert: true,
   readerFoldQuotes: true,
   haptics: true,
@@ -1486,6 +1502,23 @@ export function effectiveImagePolicy(
 ): RemoteImagePolicy {
   if (!chosen) return DEFAULT_IMAGE_POLICY
   return stored ?? DEFAULT_IMAGE_POLICY
+}
+
+/**
+ * Same shape as `effectiveImagePolicy`, for `composeAdvisoriesEnabled`.
+ *
+ * Until `composeAdvisoriesChosen` records that the user has touched the
+ * Settings toggle, `false` wins regardless of what `stored` holds — which is
+ * what makes the strip actually disappear for someone who already ran 0.3.11
+ * (and so already has `composeAdvisoriesEnabled: true` on disk) rather than
+ * only for a install with no saved value at all.
+ */
+export function effectiveComposeAdvisories(
+  stored: boolean | undefined,
+  chosen: boolean | undefined,
+): boolean {
+  if (!chosen) return false
+  return stored !== false
 }
 
 /**
