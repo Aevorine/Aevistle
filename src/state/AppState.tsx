@@ -38,7 +38,6 @@ import {
   type MailAccount,
   type MessageDraft,
   type ScheduledJob,
-  type SecretKind,
   type SendResult,
   type Settings,
   type Template,
@@ -51,9 +50,6 @@ import {
   type JobRun,
   type PlatformBridge,
 } from '../core/platform/bridge'
-// Type-only: a value import would pull the Capacitor runtime into the desktop
-// and web bundles for the sake of three methods that do not exist there.
-import type { AndroidPermissionApi } from '../core/platform/bridge-android'
 import type { PermissionSnapshot } from '../core/ops/health'
 import { pruneLogs } from '../core/ops/logRetention'
 import {
@@ -80,7 +76,7 @@ import { windowsForRecipients, windowsOf } from '../components/deliveryPreview'
 import { buildDigest, DIGEST_JOB_ID } from '../core/mail/digest'
 import { renderDigestBody, renderDigestSubject } from '../core/mail/digestText'
 import { greetingYears, holidayNameMap } from '../core/mail/greetings'
-import { captureSnapshot, type SnapshotReason } from '../core/sync/snapshots'
+import type { SnapshotReason } from '../core/sync/snapshots'
 import type { NewHit } from '../core/ops/codeHistory'
 import {
   afterAttempt,
@@ -97,6 +93,18 @@ import { mergeRemoved, rememberRemoved, restoreRemoved, withoutRemoved } from '.
 import { applyCodeHistoryAction } from './services/codeHistoryReducer'
 import { applyOutboxAction } from './services/outboxReducer'
 import { applyJobAction } from './services/jobReducer'
+import { applyContactAction } from './services/contactsReducer'
+import { applyTemplateAction } from './services/templatesReducer'
+import { applyLogAction } from './services/logsReducer'
+import { applyAttachmentAction } from './services/attachmentsReducer'
+import { applyDraftAction } from './services/draftReducer'
+import { applyAccountAction } from './services/accountsReducer'
+import { useUndo } from './hooks/useUndo'
+import { useAccountActions } from './hooks/useAccountActions'
+import { usePairingActions } from './hooks/usePairingActions'
+import { useAndroidPermissions } from './hooks/useAndroidPermissions'
+import { useResetEverything } from './hooks/useResetEverything'
+import { useRelocateData } from './hooks/useRelocateData'
 import { executeControl } from './controlExecutor'
 import { effectiveControlScopes, type ControlRequest } from '../core/sync/control'
 import { createI18n, detectLocale, localeMeta, useLocaleReady, type I18n, type TranslationKey } from '../i18n'
@@ -482,31 +490,6 @@ function recomputeJobsForCalendar(
 }
 
 /**
- * Delete a batch of stored credentials and report, in one string, whichever
- * ones refused to go.
- *
- * Every caller here deletes secrets as the last step of removing something the
- * user can see, so a rejected promise has no natural place to surface: the row
- * is already gone. Returning the failures instead of swallowing them lets the
- * caller say so, and the empty case stays cheap — `null` means "all clear".
- */
-async function forgetSecrets(
-  bridge: PlatformBridge | null,
-  targets: Array<[accountId: string, kind?: SecretKind]>,
-): Promise<string | null> {
-  if (!bridge) return null
-  const failures: string[] = []
-  for (const [accountId, kind] of targets) {
-    try {
-      await bridge.deleteSecret(accountId, kind)
-    } catch (e) {
-      failures.push(`${accountId}${kind ? `/${kind}` : ''}: ${e instanceof Error ? e.message : String(e)}`)
-    }
-  }
-  return failures.length ? failures.join('; ') : null
-}
-
-/**
  * Does a bridge call's return value *say* it failed?
  *
  * `PlatformBridge.setMessageFlags` is declared `Promise<void>`, and both
@@ -834,137 +817,20 @@ export function reducer(state: AppState, action: Action): AppState {
       }
     }
 
+    // The compose draft and its autosave history — see
+    // `services/draftReducer.ts` for the case-by-case logic, moved there
+    // unchanged.
     case 'setDraft':
-      return { ...state, draft: { ...state.draft, ...action.patch } }
-
     case 'resetDraft':
-      return {
-        ...state,
-        draft: emptyDraft(action.accountId ?? state.draft.accountId),
-      }
+      return applyDraftAction(state, action)
 
-    case 'upsertAccount': {
-      const exists = state.accounts.some((a) => a.id === action.account.id)
-      const accounts = exists
-        ? state.accounts.map((a) => (a.id === action.account.id ? action.account : a))
-        : [...state.accounts, action.account]
-      // A configured default wins; otherwise the first account added becomes
-      // the draft's sender automatically.
-      const draft =
-        state.draft.accountId || exists
-          ? state.draft
-          : { ...state.draft, accountId: state.settings.defaultAccountId || action.account.id }
-      return { ...state, accounts, draft }
-    }
-
-    /**
-     * The user dragged an account somewhere, and this is where it sticks.
-     *
-     * The action carries the *whole* intended sequence of ids rather than
-     * "move X above Y". A move instruction has to be replayed against whatever
-     * the array happens to look like when it lands, and the two screens that
-     * send these do not read the array — they read the grouped, sorted view of
-     * it. Sending the finished sequence means the reducer never has to
-     * reconstruct which of several possible starting states the drag was aimed
-     * at; there is exactly one answer and the caller already computed it.
-     *
-     * Two pieces of paranoia, both cheap:
-     *
-     *   - ids that name nothing, and ids named twice, are dropped. The list is
-     *     assembled from a rendered view, and a render that raced a deletion
-     *     would otherwise resurrect an account here by putting its id back into
-     *     `accounts` — with `byId.get` returning `undefined` and the array
-     *     growing a hole that every later `a.id` read would throw on.
-     *   - accounts the caller did not mention are appended, keeping their
-     *     relative order. The inbox strip only lists mailboxes with syncing
-     *     switched on, so it *cannot* name every account; without this, one
-     *     drag in the inbox would delete every account that has no inbox.
-     *
-     * Then every account is renumbered densely from zero — not just the ones
-     * that moved. Reusing the old numbers and only patching the moved row is
-     * how ties accumulate: two accounts on `order: 3` sort by array position,
-     * which is the thing the user just overrode. A dense renumber has no ties
-     * to accumulate, and it is also what converts a store that predates the
-     * field: after the first drag every account carries an `order`, so the
-     * "absent sorts last" branch in `core/accounts` stops being reachable.
-     *
-     * Returning `state` untouched when nothing actually moved matters more
-     * here than it looks. A new `accounts` array identity is what the save
-     * effect watches, and `dragover` fires on every pixel of pointer travel —
-     * a commit that changed nothing would still rewrite the whole document to
-     * disk, and on Android that is a real write to real storage.
-     */
-    case 'reorderAccounts': {
-      const byId = new Map(state.accounts.map((a) => [a.id, a]))
-      const taken = new Set<string>()
-      const sequence: MailAccount[] = []
-      for (const id of action.ids) {
-        const account = byId.get(id)
-        if (!account || taken.has(id)) continue
-        taken.add(id)
-        sequence.push(account)
-      }
-      for (const account of state.accounts) {
-        if (!taken.has(account.id)) sequence.push(account)
-      }
-
-      const accounts = sequence.map((account, index) =>
-        account.order === index ? account : { ...account, order: index },
-      )
-      const settled = accounts.every((account, index) => state.accounts[index] === account)
-      return settled ? state : { ...state, accounts }
-    }
-
-    case 'removeAccount': {
-      const accounts = state.accounts.filter((a) => a.id !== action.id)
-      // Any job pointing at the deleted account is disabled rather than
-      // silently retargeted — sending from a different address without saying
-      // so would be worse than not sending.
-      const jobs = state.jobs.map((j) =>
-        j.draft.accountId === action.id ? { ...j, enabled: false, status: 'paused' as const } : j,
-      )
-      /*
-       * A default pointing at a now-deleted account is dead state, not a
-       * preference — clear it so the next account falls back cleanly.
-       *
-       * All three of them. `defaultAccountId` was the only one cleared, and
-       * the other two are read the same way: `digestAccountId ||
-       * defaultAccountId || accounts[0]`. A dangling id short-circuits that
-       * chain, `find` returns undefined, and the sender gives up at its
-       * `if (!account) return`. Delete the account the daily digest was using
-       * and the digest switch still reads ON, the "no account" notice stays
-       * hidden because there IS an account, and no digest is ever sent again —
-       * with nothing anywhere saying so. Same for holiday greetings.
-       */
-      const settings =
-        state.settings.defaultAccountId === action.id ||
-        state.settings.digestAccountId === action.id ||
-        state.settings.greetingAccountId === action.id
-          ? {
-              ...state.settings,
-              defaultAccountId:
-                state.settings.defaultAccountId === action.id
-                  ? undefined
-                  : state.settings.defaultAccountId,
-              digestAccountId:
-                state.settings.digestAccountId === action.id
-                  ? undefined
-                  : state.settings.digestAccountId,
-              greetingAccountId:
-                state.settings.greetingAccountId === action.id
-                  ? undefined
-                  : state.settings.greetingAccountId,
-            }
-          : state.settings
-      const draft =
-        state.draft.accountId === action.id
-          ? { ...state.draft, accountId: settings.defaultAccountId || accounts[0]?.id || '' }
-          : state.draft
-      // An inbox for a deleted account is dead state, not a paused feature —
-      // there is no credential left to sync it with.
-      const inboxAccounts = state.inboxAccounts.filter((i) => i.accountId !== action.id)
-      return { ...state, accounts, jobs, draft, inboxAccounts, settings }
-    }
+    // Mail-account add/edit, reorder, and delete — see
+    // `services/accountsReducer.ts` for the case-by-case logic, moved there
+    // unchanged.
+    case 'upsertAccount':
+    case 'reorderAccounts':
+    case 'removeAccount':
+      return applyAccountAction(state, action)
 
     // Job creation/replacement and deletion — see `services/jobReducer.ts`
     // for the case-by-case logic, moved there unchanged. `jobRan` (just
@@ -993,84 +859,29 @@ export function reducer(state: AppState, action: Action): AppState {
     case 'removeJob':
       return applyJobAction(state, action)
 
-    case 'upsertContact': {
-      const exists = state.contacts.some((c) => c.id === action.contact.id)
-      // Stamped here rather than at every call site — `pinned` toggles,
-      // imports and the edit dialog all go through this one action, and
-      // `updatedAt` exists for `core/syncConflict.ts` to tell "changed since
-      // the last sync" apart from "always looked like this".
-      const contact = { ...action.contact, updatedAt: Date.now() }
-      return {
-        ...state,
-        contacts: exists
-          ? state.contacts.map((c) => (c.id === contact.id ? contact : c))
-          : [...state.contacts, contact],
-      }
-    }
-
+    // Contact add/edit/remove — see `services/contactsReducer.ts` for the
+    // case-by-case logic, moved there unchanged.
+    case 'upsertContact':
     case 'removeContact':
-      return { ...state, contacts: state.contacts.filter((c) => c.id !== action.id) }
+      return applyContactAction(state, action)
 
-    case 'upsertTemplate': {
-      const exists = state.templates.some((t) => t.id === action.template.id)
-      return {
-        ...state,
-        templates: exists
-          ? state.templates.map((t) => (t.id === action.template.id ? action.template : t))
-          : [...state.templates, action.template],
-      }
-    }
-
+    // Template add/edit/remove — see `services/templatesReducer.ts` for the
+    // case-by-case logic, moved there unchanged.
+    case 'upsertTemplate':
     case 'removeTemplate':
-      return { ...state, templates: state.templates.filter((t) => t.id !== action.id) }
+      return applyTemplateAction(state, action)
 
+    // Activity log append/clear/remove — see `services/logsReducer.ts` for
+    // the case-by-case logic, moved there unchanged.
     case 'log':
-      return { ...state, logs: pruneLogs([action.entry, ...state.logs], state.settings) }
-
     case 'clearLogs':
-      return { ...state, logs: [] }
+    case 'removeLog':
+      return applyLogAction(state, action)
 
-    /**
-     * Identity-checked rather than assumed: an id that is no longer present —
-     * a row the retention sweep already dropped, or a second press of a button
-     * whose row has re-rendered — returns the *same* state object rather than a
-     * new one, so React bails out of the re-render instead of reconciling the
-     * whole log for nothing.
-     */
-    case 'removeLog': {
-      const logs = state.logs.filter((entry) => entry.id !== action.id)
-      return logs.length === state.logs.length ? state : { ...state, logs }
-    }
-
-    /**
-     * The data folder moved, so every snapshot path saved inside a job now
-     * points at a file that is no longer there. Without this, a reminder
-     * scheduled last week would fire and quietly send with nothing attached.
-     */
-    case 'rebaseAttachments': {
-      const { from, to } = action
-      if (!from || !to || from === to) return state
-      const rebase = (p: string): string =>
-        p.startsWith(from) ? to + p.slice(from.length) : p
-      return {
-        ...state,
-        jobs: state.jobs.map((job) => ({
-          ...job,
-          draft: {
-            ...job.draft,
-            attachments: job.draft.attachments.map((a) =>
-              a.source === 'copy' ? { ...a, path: rebase(a.path) } : a,
-            ),
-          },
-        })),
-        draft: {
-          ...state.draft,
-          attachments: state.draft.attachments.map((a) =>
-            a.source === 'copy' ? { ...a, path: rebase(a.path) } : a,
-          ),
-        },
-      }
-    }
+    // Data-folder-move path repair — see `services/attachmentsReducer.ts`
+    // for the logic, moved there unchanged.
+    case 'rebaseAttachments':
+      return applyAttachmentAction(state, action)
 
     case 'upsertInboxAccount': {
       // Belt and braces: `syncInboxAccount` already refuses to dispatch this
@@ -1204,34 +1015,13 @@ export function reducer(state: AppState, action: Action): AppState {
         ),
       }
 
-    /**
-     * Record the current draft, if it is worth recording. `captureSnapshot`
-     * returns null for "nothing changed" and for "too soon", and returning the
-     * identical state object in that case is what stops an autosave from
-     * re-rendering the tree while someone is mid-sentence.
-     */
-    case 'snapshotDraft': {
-      if (state.settings.draftHistoryEnabled === false) return state
-      const next = captureSnapshot(state.draftSnapshots, state.draft, action.reason)
-      return next ? { ...state, draftSnapshots: next } : state
-    }
-
-    /**
-     * Put a past version back on screen — and snapshot what it replaces first,
-     * so "restore" is itself undoable. Restoring over unsaved work and losing
-     * it would reproduce, inside the recovery feature, the exact problem the
-     * recovery feature exists to solve.
-     */
-    case 'restoreSnapshot': {
-      const target = state.draftSnapshots.find((s) => s.id === action.id)
-      if (!target) return state
-      const preserved =
-        captureSnapshot(state.draftSnapshots, state.draft, 'beforeRestore') ?? state.draftSnapshots
-      return { ...state, draft: { ...target.draft }, draftSnapshots: preserved }
-    }
-
+    // The draft autosave history — see `services/draftReducer.ts` for the
+    // case-by-case logic, moved there unchanged (same domain as `setDraft`/
+    // `resetDraft` above, kept as one file).
+    case 'snapshotDraft':
+    case 'restoreSnapshot':
     case 'clearSnapshots':
-      return { ...state, draftSnapshots: [] }
+      return applyDraftAction(state, action)
 
     // The offline send queue's own array in state — see
     // `services/outboxReducer.ts`'s doc comment for what stayed behind here
@@ -1552,7 +1342,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
    * the only trace was a line in a console with no window.
    */
   const [saveFailing, setSaveFailing] = useState(false)
-  const [permissions, setPermissions] = useState<PermissionSnapshot | null>(null)
   const [bootError, setBootError] = useState<string | null>(null)
   /**
    * Jobs that boot could not rebuild and therefore disabled.
@@ -2370,140 +2159,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [bridge, ready, addLog])
 
-  // --- undo ---------------------------------------------------------------
-  //
-  // Deliberately *not* persisted. An undo offered after a restart would claim
-  // to restore something from a session whose other half is gone — and the
-  // things worth undoing here (a deleted reminder, a cleared log) are decisions
-  // people reverse within seconds, not next Tuesday.
-  //
-  // Stored as the *inverse actions* rather than a snapshot of the whole state,
-  // so undoing a deleted contact does not also roll back the four unrelated
-  // things that happened while the toast was still on screen.
-
-  type UndoEntry = { label: string; actions: Action[] }
-  const [undoStack, setUndoStack] = useState<UndoEntry[]>([])
-  /**
-   * The same stack, readable synchronously.
-   *
-   * `undo()` has to return what it just restored so the caller can name it in
-   * a toast, and a functional `setState` updater cannot be relied on to have
-   * run by the time the call returns. The state copy exists only to re-render
-   * whatever shows that an undo is available.
-   */
-  const undoRef = useRef<UndoEntry[]>([])
-
-  const pushUndo = useCallback((label: string, actions: Action[]) => {
-    undoRef.current = [{ label, actions }, ...undoRef.current].slice(0, 20)
-    setUndoStack(undoRef.current)
-  }, [])
-
-  const undo = useCallback((): string | null => {
-    const [top, ...rest] = undoRef.current
-    if (!top) return null
-    for (const action of top.actions) dispatch(action)
-    undoRef.current = rest
-    setUndoStack(rest)
-    return top.label
-  }, [])
+  // --- undo -----------------------------------------------------------------
+  // See `hooks/useUndo.ts` — moved out unchanged.
+  const { undoStack, pushUndo, undo } = useUndo<Action>(dispatch)
 
   // --- actions ------------------------------------------------------------
+  // Mail-account effects — see `hooks/useAccountActions.ts`, moved out
+  // unchanged.
+  const { saveAccount, deleteAccount } = useAccountActions(bridge, addLog, dispatch)
 
-  const saveAccount = useCallback(
-    async (account: MailAccount, secret?: string) => {
-      if (!bridge) return
-      if (secret) {
-        await bridge.setSecret(account.id, secret)
-      }
-      const hasSecret = await bridge.hasSecret(account.id)
-      dispatch({
-        type: 'upsertAccount',
-        account: { ...account, hasSecret, updatedAt: Date.now() },
-      })
-    },
-    [bridge],
-  )
-
-  const deleteAccount = useCallback(
-    async (id: string) => {
-      // A deleted account's IMAP credential and cached mail are dead weight —
-      // there is no UI left that could ever ask for them again.
-      const failed = await forgetSecrets(bridge, [[id], [id, 'imap']])
-
-      /*
-       * The OAuth2 grant, which `forgetSecrets` cannot reach and used to be
-       * left behind.
-       *
-       * It is stored under its own keystore kinds — `oauth` for the refresh
-       * token and `oauth-grant` for the record beside it — and those are not in
-       * `SecretKind`, so there is no `deleteSecret` call that would remove
-       * them. Deleting an account therefore took away the row, the password and
-       * the IMAP credential, and quietly left a *long-lived refresh token* in
-       * the OS keystore: a credential strictly more valuable than the password
-       * next to it, because it mints new access tokens without anyone being
-       * asked anything. Nothing errored, nothing was logged, and the user had
-       * every reason to believe the account was gone.
-       *
-       * `oauthDisconnect` is the cleanup both platforms already implement —
-       * Electron's `forgetOAuthAccount` even documents itself as "called when
-       * it is deleted", which until now it was not. Called for every account
-       * rather than only those currently marked `oauth2`: an account switched
-       * back to a password keeps its grant until something clears it, and that
-       * orphan is the one nobody would think to look for. The call is a no-op
-       * when there is nothing stored.
-       *
-       * Failure is swallowed on purpose. The keystore write is best-effort
-       * cleanup of something already unreachable, and a deletion that refuses
-       * to complete because of it would leave the user with an account they
-       * cannot remove — a worse outcome than a stale token, and one they could
-       * do nothing about.
-       */
-      try {
-        await bridge?.oauthDisconnect?.(id)
-      } catch (e) {
-        addLog({
-          kind: 'security',
-          level: 'warn',
-          title: 'Account removed, but its sign-in grant could not be deleted',
-          detail: e instanceof Error ? e.message : String(e),
-        })
-      }
-
-      dispatch({ type: 'removeAccount', id })
-      // The row disappears either way, so a swallowed failure here reads as
-      // "the password is gone" while it is still sitting in the OS credential
-      // store. Logged after the dispatch so the entry survives it.
-      if (failed) {
-        addLog({
-          kind: 'security',
-          level: 'warn',
-          title: 'Account removed, but its saved password could not be deleted',
-          detail: failed,
-        })
-      }
-    },
-    [bridge, addLog],
-  )
-
-  const revokePairedDevice = useCallback(
-    async (id: string) => {
-      const failed = bridge ? await forgetSecrets(bridge, [[id, 'sync']]) : null
-      dispatch({ type: 'removePairedDevice', id })
-      if (failed) {
-        addLog({
-          kind: 'security',
-          level: 'warn',
-          title: 'Device removed, but its sync key could not be deleted',
-          detail: failed,
-        })
-      }
-    },
-    [bridge, addLog],
-  )
-
-  const restoreSyncConflict = useCallback((id: string) => {
-    dispatch({ type: 'restoreSyncConflict', id })
-  }, [])
+  // Paired-device effects — see `hooks/usePairingActions.ts`, moved out
+  // unchanged.
+  const { revokePairedDevice, restoreSyncConflict } = usePairingActions(bridge, addLog, dispatch)
 
   /**
    * Send one draft.
@@ -2822,149 +2489,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [state.jobs, sendDraftNow, conditionContext, addLog, i18n],
   )
 
-  /**
-   * Read Android's view of its own permissions, now and whenever the window
-   * comes back to the foreground.
-   *
-   * The foreground check is the load-bearing half. Both of these are changed on
-   * a system settings screen, which means leaving the app — so the only moment
-   * the answer can have changed is the moment we return. Without it the strip
-   * would keep saying "notifications are off" after the user had just turned
-   * them on, which reads as the fix not working.
-   */
-  useEffect(() => {
-    if (!bridge) return
-    const android = bridge as Partial<AndroidPermissionApi>
-    if (!android.permissionState) return
-    let live = true
-    const read = () => {
-      android
-        .permissionState?.()
-        .then((s) => {
-          if (live) setPermissions(s)
-        })
-        // A permission read that fails tells us nothing, and there is nothing
-        // the user could do about it. Leaving the previous answer in place is
-        // better than flapping the strip.
-        .catch(() => {})
-    }
-    read()
-    const onVisible = () => {
-      if (document.visibilityState === 'visible') read()
-    }
-    document.addEventListener('visibilitychange', onVisible)
-    return () => {
-      live = false
-      document.removeEventListener('visibilitychange', onVisible)
-    }
-  }, [bridge])
+  // Android's own permission strip (read + fix) — see
+  // `hooks/useAndroidPermissions.ts`, moved out unchanged.
+  const { permissions, fixPermission } = useAndroidPermissions(bridge)
 
-  const fixPermission = useCallback(
-    async (
-      what:
-        | 'requestNotifications'
-        | 'openNotificationSettings'
-        | 'openExactAlarmSettings'
-        | 'openBatteryOptimizationSettings',
-    ) => {
-      const android = bridge as Partial<AndroidPermissionApi> | null
-      if (!android) return
-      try {
-        if (what === 'requestNotifications') {
-          const after = await android.requestNotificationPermission?.()
-          if (after) setPermissions(after)
-          return
-        }
-        // The settings/dialog routes answer nothing themselves — the result
-        // arrives via the visibility listener above, when the user comes back.
-        if (what === 'openNotificationSettings') await android.openNotificationSettings?.()
-        else if (what === 'openExactAlarmSettings') await android.openExactAlarmSettings?.()
-        else await android.openBatteryOptimizationSettings?.()
-      } catch {
-        // Same reasoning as the read: an OEM build with no such screen is not
-        // something to throw a dialog about.
-      }
-    },
-    [bridge],
-  )
+  // "Reset everything" — see `hooks/useResetEverything.ts`, moved out
+  // unchanged.
+  const resetEverything = useResetEverything(bridge, state.accounts, addLog, dispatch)
 
-  const resetEverything = useCallback(async () => {
-    const failed = await forgetSecrets(
-      bridge,
-      state.accounts.flatMap((a) => [[a.id], [a.id, 'imap'] as [string, SecretKind]]),
-    )
-    // The cached copies of remote images live outside the state document, so
-    // clearing state does not touch them. The pictures themselves were public
-    // on someone else's server, but the folder of them is a record of which
-    // mail was opened — and a reset that leaves it behind has not done what it
-    // said. Failure is deliberately silent: unlike a password, nothing here is
-    // a secret, and a stubborn cache file is not a reason to report a reset as
-    // failed when the accounts and schedule really are gone.
-    await bridge?.clearImageCache?.().catch(() => {})
-    dispatch({ type: 'reset' })
-    // "Reset everything" is the strongest promise in the app. If a password
-    // outlived it, that has to be said out loud rather than covered by the
-    // success toast the caller shows next.
-    if (failed) {
-      addLog({
-        kind: 'security',
-        level: 'warn',
-        title: 'Reset finished, but some saved passwords could not be deleted',
-        detail: failed,
-      })
-    }
-  }, [bridge, state.accounts, addLog])
-
-  /**
-   * Move the data folder and repair everything that pointed into the old one.
-   *
-   * The bridge only moves files. The paths recorded inside each scheduled job
-   * are ours to fix, and the platform scheduler is holding a copy of those jobs
-   * — so it is re-armed here explicitly rather than waiting for the signature
-   * effect, which watches fire times and would not notice a path change.
-   */
-  const relocateData = useCallback(
-    async (change: DataFolderChange, previousPath: string) => {
-      if (!change.changed || !change.moved) return
-      const from = previousPath
-      const to = change.path
-      if (!from || from === to) return
-
-      dispatch({ type: 'rebaseAttachments', from, to })
-
-      const rebase = (p: string) => (p.startsWith(from) ? to + p.slice(from.length) : p)
-      const repaired = state.jobs
-        .filter((j) => j.enabled)
-        .map((job) => ({
-          ...job,
-          draft: {
-            ...job.draft,
-            attachments: job.draft.attachments.map((a) =>
-              a.source === 'copy' ? { ...a, path: rebase(a.path) } : a,
-            ),
-          },
-        }))
-      try {
-        await bridge?.syncJobs(repaired, state.accounts, {
-          notifyOnSuccess: state.settings.notifyOnSuccess,
-          notifyOnFailure: state.settings.notifyOnFailure,
-          localDeviceId: state.settings.localDeviceId,
-        })
-      } catch (e) {
-        // The files did move, so the caller reports success and nothing else in
-        // this flow would ever mention that the scheduler is still holding
-        // paths into the old folder. Left silent, the first symptom is a
-        // scheduled send going out hours later with a missing attachment.
-        addLog({
-          kind: 'schedule',
-          level: 'error',
-          title: 'Data folder moved, but reminders still point at the old one',
-          detail: e instanceof Error ? e.message : String(e),
-        })
-      }
-    },
-    [bridge, state.jobs, state.accounts, addLog],
-  )
+  // Data-folder relocation — see `hooks/useRelocateData.ts`, moved out
+  // unchanged.
+  const relocateData = useRelocateData(bridge, state.jobs, state.accounts, state.settings, addLog, dispatch)
 
   /**
    * The message ids each account was known to hold before the sync now
