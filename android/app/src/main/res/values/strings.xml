@@ -10,23 +10,25 @@
 
         Everything else in this app is translated in `src/i18n/*.ts` and reaches
         Android as an already-worded string in the `notify` bridge call. These
-        four cannot be: they are used by `InboxSyncWorker`, which runs on
-        WorkManager's schedule with no WebView in the process and therefore no
-        access to the app's own i18n table at all. Android's own resource
-        qualifiers hold the translations — see `values-zh-rCN` and its siblings,
-        which `check-android-strings.mjs` holds to the same key set as this file
-        — but `InboxSyncWorker` no longer lets the *device* locale pick which one
-        loads. It asks `AppSettingsSignal` for the app's own display-language
-        setting first (the same one the settings screen writes) and only falls
-        back to the device locale when that is `'system'` or unset — otherwise a
-        phone set to a different system language than the one the user chose in
-        the app got background notifications in a language the rest of the app
-        was not showing.
+        six cannot be: they are used by `InboxSyncRunner`/`InboxIdleService`,
+        which run on WorkManager's schedule or a foreground service with no
+        WebView in the process and therefore no access to the app's own i18n
+        table at all. Android's own resource qualifiers hold the translations —
+        see `values-zh-rCN` and its siblings, which `check-android-strings.mjs`
+        holds to the same key set as this file — but neither lets the *device*
+        locale pick which one loads. Each asks `AppSettingsSignal` for the app's
+        own display-language setting first (the same one the settings screen
+        writes) and only falls back to the device locale when that is
+        `'system'` or unset — otherwise a phone set to a different system
+        language than the one the user chose in the app got background
+        notifications in a language the rest of the app was not showing.
     -->
     <string name="notify_new_mail_one">Mail from %1$s</string>
     <string name="notify_new_mail_many">%1$d new messages · latest from %2$s</string>
     <string name="notify_new_mail_summary">%1$d new messages</string>
     <string name="notify_no_subject">(no subject)</string>
+    <string name="notify_sync_title">Aevistle</string>
+    <string name="notify_sync_body">Checking for new mail in the background</string>
     <!--
         The two quick-action button labels raised entirely from native code —
         InboxSyncWorker's new-mail notification (mark read) and SendWorker's

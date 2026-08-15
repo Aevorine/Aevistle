@@ -264,6 +264,25 @@
                 android:resource="@xml/widget_next_send_info" />
         </receiver>
 
+        <!--
+            The foreground service half of "even with the app closed" — see
+            its class doc for why a foreground service exists alongside
+            InboxSyncWorker rather than instead of it. `dataSync` is the
+            foreground-service type Android 14+ requires be declared for a
+            service whose job is fetching data in the background; it is also
+            what lets `startForeground` skip specifying a type in code, since
+            the manifest already says which one this is.
+
+            Not exported: nothing outside this app has any business starting
+            or binding to it, and an exported service with no permission
+            check would let any app on the device turn this app's background
+            sync on or off.
+        -->
+        <service
+            android:name=".InboxIdleService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
@@ -324,6 +343,19 @@
         `Permissions.batteryOptimized` and `openBatteryOptimizationSettings`.
     -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
+    <!--
+        Run `InboxIdleService` — the foreground service that repeats the
+        inbox check every couple of minutes instead of waiting on
+        WorkManager's 15-minute floor, because a foreground service is
+        exempt from the Doze/App Standby throttling an ordinary background
+        process is not. `FOREGROUND_SERVICE_DATA_SYNC` is the Android 14+
+        companion permission a `dataSync`-typed foreground service must also
+        declare; without it the service is blocked from starting at all on
+        those versions, not merely warned about.
+    -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
     <!-- Finish an in-flight send if the screen goes off mid-upload. -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />

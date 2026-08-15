@@ -5,6 +5,8 @@
     <string name="notify_new_mail_many">%1$d mensajes nuevos · el último de %2$s</string>
     <string name="notify_new_mail_summary">%1$d mensajes nuevos</string>
     <string name="notify_no_subject">(sin asunto)</string>
+    <string name="notify_sync_title">Aevistle</string>
+    <string name="notify_sync_body">Buscando correo nuevo en segundo plano</string>
     <string name="notify_mark_read">Marcar como leído</string>
     <string name="notify_retry_now">Reintentar ahora</string>
     <string name="shortcut_compose_short">Nuevo</string>

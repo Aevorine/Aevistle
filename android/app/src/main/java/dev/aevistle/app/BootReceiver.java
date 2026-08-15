@@ -25,6 +25,13 @@ import android.os.Build;
  * comment beside this receiver's declaration for why that broadcast, which
  * only reaches a component explicitly marked {@code directBootAware}, would
  * never have fired here regardless of what any intent-filter claimed.
+ *
+ * Also restarts {@link InboxIdleService}. Unlike a WorkManager periodic
+ * request, a foreground service is not something the platform remembers and
+ * recreates on its own after a reboot — without this call, background mail
+ * notifications would silently fall back to `InboxSyncWorker`'s 15-minute
+ * floor until the app was next opened, which is indistinguishable from the
+ * service having stopped working.
  */
 public class BootReceiver extends BroadcastReceiver {
 
@@ -36,6 +43,7 @@ public class BootReceiver extends BroadcastReceiver {
         if (Intent.ACTION_BOOT_COMPLETED.equals(action)
                 || Intent.ACTION_MY_PACKAGE_REPLACED.equals(action)) {
             AevistleScheduler.rearmAll(context);
+            InboxSyncScheduler.rearm(context);
             return;
         }
 

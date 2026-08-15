@@ -59,6 +59,10 @@ final class Notifier {
     static final String CHANNEL_STATUS = "aevistle_status";
     static final String CHANNEL_CODES = "aevistle_codes";
     static final String CHANNEL_MAIL = "aevistle_mail";
+    static final String CHANNEL_SYNC = "aevistle_sync";
+
+    /** {@link InboxIdleService}'s own foreground-service notification id. */
+    static final int ID_SYNC_FOREGROUND = 4900;
 
     /** Distinct bases so a code never replaces a send result, or the reverse. */
     private static final int ID_STATUS_BASE = 4100;
@@ -193,6 +197,36 @@ final class Notifier {
         builder.setGroup(GROUP_MAIL);
         builder.setGroupSummary(true);
         post(context, ID_MAIL_SUMMARY, builder);
+    }
+
+    /**
+     * The notification a foreground service is legally required to show while
+     * it runs — Android will not let a service claim the foreground without
+     * one. `IMPORTANCE_MIN` so it sits collapsed at the bottom of the shade
+     * with no status-bar icon rather than reading as something to check on;
+     * this is "the app is doing background work", not news.
+     *
+     * `setOngoing(true)`/no auto-cancel: a foreground-service notification the
+     * user could swipe away would either leave the service running with
+     * nothing to show for it or, worse, look dismissible when Android
+     * ignores the swipe and reposts it anyway. Not routed through {@link
+     * #base}, which sets `setAutoCancel(true)` for exactly the opposite
+     * reason every other notification here wants.
+     */
+    static Notification foregroundSyncing(Context context, String title, String body) {
+        ensureChannel(context, CHANNEL_SYNC, "Background mail check",
+                "Keeps checking for new mail while the app is closed",
+                NotificationManager.IMPORTANCE_MIN);
+        return new NotificationCompat.Builder(context, CHANNEL_SYNC)
+                .setSmallIcon(R.drawable.ic_notification)
+                .setColor(androidx.core.content.ContextCompat.getColor(context, R.color.notification_accent))
+                .setContentTitle(title)
+                .setContentText(body)
+                .setContentIntent(openApp(context, null))
+                .setOngoing(true)
+                .setAutoCancel(false)
+                .setPriority(NotificationCompat.PRIORITY_MIN)
+                .build();
     }
 
     /**

@@ -1168,6 +1168,17 @@ function createWindow(): void {
        * uses it is `sandbox=""` with an opaque origin.
        */
       plugins: true,
+      /*
+       * Closing the window hides it to the tray rather than destroying it
+       * (see the `close` handler below) precisely so mail can keep arriving
+       * in the background — but Chromium's default timer throttling for
+       * hidden/occluded pages defeats that: `AppState`'s periodic mail-check
+       * timer, the fallback `imapIdle.ts` itself documents as "never the only
+       * way mail arrives", would get starved for as long as the window stays
+       * off-screen. `false` keeps the page's visibility state "visible" so
+       * that timer runs on schedule whether or not anyone can see the window.
+       */
+      backgroundThrottling: false,
     },
   })
 
