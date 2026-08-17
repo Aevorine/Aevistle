@@ -60,7 +60,7 @@ import {
   rearm,
   type QuietHours,
 } from '../core/schedule/schedule'
-import { announcementFor, newArrivals, previewLine, senderName } from '../core/mail/newMail'
+import { announcementFor, newArrivals, previewLine, restoredBaseline, senderName } from '../core/mail/newMail'
 import {
   applyWorkCalendarDetailed,
   calendarWarning,
@@ -1205,13 +1205,22 @@ export interface AppApi {
    * back — and nothing tells the page that happened.
    */
   permissions: PermissionSnapshot | null
-  /** Raise the notification dialog, or open the settings screen for it. */
+  /**
+   * Raise the notification dialog, or open the settings screen for it.
+   *
+   * The union is restated here rather than imported from
+   * `AndroidPermissionsApi`, which is how it drifted: adding
+   * `openAutoStartSettings` to the hook left this copy behind, and the only
+   * reason it was caught is that the call site is typed. Kept in step by hand
+   * — a mismatch is a compile error, not a silent no-op.
+   */
   fixPermission: (
     what:
       | 'requestNotifications'
       | 'openNotificationSettings'
       | 'openExactAlarmSettings'
-      | 'openBatteryOptimizationSettings',
+      | 'openBatteryOptimizationSettings'
+      | 'openAutoStartSettings',
   ) => Promise<void>
 
   addLog: (entry: Omit<LogEntry, 'id' | 'at'>) => void
@@ -1417,7 +1426,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
    * depends on the two booleans rather than on `state.settings`, which changes
    * on almost every keystroke somewhere in the app.
    */
-  const { minimiseToTray, launchAtLogin, notifyOnSuccess, notifyOnFailure } = state.settings
+  const { minimiseToTray, launchAtLogin, notifyOnSuccess, notifyOnFailure, keepReceivingWhenClosed } =
+    state.settings
   useEffect(() => {
     void bridge?.setDesktopPrefs?.({
       minimiseToTray,
@@ -1431,6 +1441,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // those two settings have to it.
       notifyOnSuccess,
       notifyOnFailure,
+      // `=== true` rather than `!== false`, unlike its neighbours: the default
+      // for this one is off, so an older saved document with the field absent
+      // must stay off rather than quietly acquiring a scheduled task.
+      keepReceivingWhenClosed: keepReceivingWhenClosed === true,
     })
   }, [bridge, minimiseToTray, launchAtLogin, notifyOnSuccess, notifyOnFailure])
 
@@ -2515,8 +2529,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
    * completed sync. Without it, opening the app announces the whole mailbox:
    * every message is new to a process that has just started. See
    * `core/newMail.ts`, which owns the rule and is where the other two live.
+   *
+   * Empty at startup, and deliberately: the baseline for an account's *first*
+   * sync of the session comes from the saved account row instead, via
+   * `restoredBaseline`. Seeding this map from disk up front would need an
+   * effect ordered ahead of the first sync, and getting that order wrong is
+   * silent in the direction that matters — the account looks unprimed, the
+   * arrivals are dropped, and nothing says so.
    */
-  const seenInboxIds = useRef(new Map<string, { ids: Set<string>; primed: boolean }>())
+  const seenInboxIds = useRef(new Map<string, { ids: Set<string>; primed: boolean; since?: number }>())
 
   /**
    * Tell the user that mail arrived, if it did and if they want to know.
@@ -2526,8 +2547,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
    * only settings that matter are the ones in force then.
    */
   const announceNewMail = useCallback(
-    (accountId: string, messages: readonly InboxMessage[]) => {
-      const previous = seenInboxIds.current.get(accountId)
+    (accountId: string, messages: readonly InboxMessage[], saved?: InboxAccountState) => {
+      // The in-memory entry wins whenever there is one: it is this session's
+      // own record and is always fresher than the saved row. `saved` only ever
+      // decides the very first sync of the session, which is the one the saved
+      // row is a correct baseline for.
+      const previous = seenInboxIds.current.get(accountId) ?? restoredBaseline(saved)
       const ids = new Set(messages.map((m) => m.id))
       seenInboxIds.current.set(accountId, { ids, primed: true })
 
@@ -2547,6 +2572,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         after: messages,
         now: Date.now(),
         primed: previous?.primed ?? false,
+        // Only ever set on a restored baseline, so this widens the recency
+        // window for the first sync after a restart and for no other sync.
+        since: previous?.since,
       })
       const announcement = announcementFor(arrivals)
       if (!announcement) return
@@ -2667,9 +2695,44 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [bridge],
   )
 
+  /**
+   * The accounts whose sync has been asked for and has not answered yet.
+   *
+   * This exists because of a mailbox that took longer to sync than the gap
+   * between syncs, and the failure that produces is not "a slow account" — it
+   * is a slow account that never succeeds again.
+   *
+   * Measured on the reporting user's install. One Gmail account needed 152 s
+   * for a full sync (the server itself is slow to authenticate: 36.7 s against
+   * 1-5 s for four other accounts on the same host). The sync timer was set to
+   * one minute. So a second sync started while the first was still connecting,
+   * then a third, each opening its own connections to the same mailbox — and a
+   * provider that is already slow answers a growing pile of simultaneous
+   * connections more slowly still. The account's own retries were what kept it
+   * failing: the app pushed the connect time past even the ninety-second
+   * patient budget that had just been added for it, and the recorded error
+   * changed from "within 10 seconds" to "within 90 seconds" while getting no
+   * closer to working.
+   *
+   * A ref, not state: nothing renders from it, and it must be readable and
+   * writable inside the same turn a sync starts in.
+   */
+  const syncInFlight = useRef(new Set<string>())
+
   const syncInboxAccount = useCallback(
     async (accountId: string, override?: InboxAccountState) => {
       if (!bridge?.syncInbox) return
+      /*
+       * Already asking. Say nothing and let the answer in flight be the
+       * answer — starting a second one cannot produce fresher mail than the
+       * first is already fetching, and on a slow mailbox it actively prevents
+       * the first from finishing.
+       *
+       * `override` is the exception, and the only one: it means the account's
+       * settings have just changed, so the sync already running is asking the
+       * wrong question with the wrong credentials. That one must go through.
+       */
+      if (!override && syncInFlight.current.has(accountId)) return
       /**
        * `override` wins over the lookup, and that is not an optimisation — it
        * is the whole reason this parameter exists.
@@ -2687,11 +2750,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
         override ??
         state.inboxAccounts.find((i) => i.accountId === accountId) ??
         defaultInboxAccountState(accountId)
-      // Drain what we still owe the server before asking it what it holds.
-      // Without this a push that failed once was never retried at all, and the
-      // server's answer stayed permanently one flag behind what the user saw.
-      await flushPendingSeen(accountId)
+      /*
+       * Marked before the first `await`, released in the `finally` at the far
+       * end of both branches. Anything less than that — marking after the
+       * flush, or releasing only on success — leaves the window this guard
+       * exists to close, or leaves an account permanently marked busy after
+       * one failure, which is the same outage wearing the opposite mask.
+       */
+      syncInFlight.current.add(accountId)
       try {
+        // Drain what we still owe the server before asking it what it holds.
+        // Without this a push that failed once was never retried at all, and
+        // the server's answer stayed permanently one flag behind what the user
+        // saw.
+        //
+        // Inside the `try`, and moved there with the guard above: outside it,
+        // a throw from the flush would skip the `finally` and leave the
+        // account marked as syncing for the life of the process — no more
+        // syncs, no more mail, no error anyone could see.
+        await flushPendingSeen(accountId)
         const result = await bridge.syncInbox(config)
         /*
          * `deleteAccount` can land while this `await` is still out — a full
@@ -2731,7 +2808,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
          * copies of the rule and four chances for a message to be announced
          * twice.
          */
-        if (!result.lastSyncError) announceNewMail(accountId, result.messages ?? [])
+        /*
+         * `config` goes with it, and that is not belt-and-braces: it is the
+         * account row as it stood when this sync *started*, which on the first
+         * sync of a session is the copy restored from disk. That copy is the
+         * only record of what the mailbox held while the app was closed, so it
+         * is the baseline that decides whether last night's mail is announced
+         * or silently absorbed. `announceNewMail` ignores it from the second
+         * sync onwards, where its own in-memory record is fresher.
+         */
+        if (!result.lastSyncError) announceNewMail(accountId, result.messages ?? [], config)
         /*
          * Handed back as well as dispatched. A caller that pressed a button and
          * is waiting to say what happened cannot read the answer out of `state`
@@ -2747,17 +2833,44 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // nothing left to attach `lastSyncError` to — see the success branch
         // above.
         if (liveRef.current.accounts.some((a) => a.id === accountId)) {
+          /*
+           * The *live* row, not the closed-over `config`, with only the error
+           * written onto it.
+           *
+           * This branch used to dispatch `{ ...config, lastSyncError }`, and
+           * that was a data-loss bug, observed rather than theorised. On the
+           * reporting user's install, one slow account synced successfully at
+           * 17:43:03 — 29 cached messages became 42, error cleared — and at
+           * 17:45:32 the row was back to 29 messages with `lastSyncAt` reset to
+           * three days earlier, because a sync that had started before that
+           * success finally failed and wrote its own stale snapshot over it.
+           *
+           * `config` is stale by construction here. The sync timer holds one
+           * `syncInboxAccount` closure across many ticks (see its effect's
+           * dependency list), so `state.inboxAccounts` inside it is whatever it
+           * was when that closure was built — which can be many minutes and
+           * several successful syncs ago. Writing it back is not "the staler of
+           * the two", it is throwing away mail that has already been fetched
+           * and, with it, any chance of the account looking healthy again.
+           *
+           * A failure knows exactly one new fact: that it failed. So that is
+           * the only field it is allowed to write.
+           */
+          const live =
+            liveRef.current.inboxAccounts.find((i) => i.accountId === accountId) ?? config
           dispatch({
             type: 'upsertInboxAccount',
-            inbox: { ...config, lastSyncError: error },
+            inbox: { ...live, lastSyncError: error },
             origin: 'sync',
-            // `config.messages` is the list this closure captured when the sync
-            // *started*, so this branch is the staler of the two — it needs the
-            // merge more than the success path does, not less.
             pendingSeen: pendingSeenFor(accountId),
           })
         }
         return { ok: false, error }
+      } finally {
+        // Both branches, always. A guard that is only released on success
+        // turns one failed sync into an account that never syncs again — a
+        // quieter version of exactly the outage it was written to prevent.
+        syncInFlight.current.delete(accountId)
       }
     },
     [bridge, state.inboxAccounts, flushPendingSeen, pendingSeenFor],

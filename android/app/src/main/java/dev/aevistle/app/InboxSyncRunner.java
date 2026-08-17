@@ -43,6 +43,19 @@ final class InboxSyncRunner {
      */
     private static final long WINDOW_MS = 30L * 60L * 1000L;
 
+    /**
+     * The furthest back {@link #recencyCutoff} may be widened by an account's
+     * last-sync time.
+     *
+     * Matches {@code MISSED_MAIL_MAX_AGE_MS} in {@code src/core/mail/newMail.ts}
+     * — {@code check-new-mail.mjs} holds the two files to the same number. It
+     * exists because {@code lastSyncAt} is only as trustworthy as the run that
+     * wrote it: a phone left off for a fortnight, an account paused since last
+     * month, a clock that jumped. Past this the ordinary window is the honest
+     * rule, because a fortnight of mail is not an arrival.
+     */
+    private static final long MISSED_MAX_AGE_MS = 7L * 24L * 60L * 60L * 1000L;
+
     /** @return true if any account failed to sync — callers use this to decide on a retry. */
     static boolean runOnce(Context context) {
         InboxCache cache = new InboxCache(context);
@@ -119,7 +132,7 @@ final class InboxSyncRunner {
         try {
             Set<String> known = idsOf(before);
             List<JSONObject> arrivals = new ArrayList<>();
-            long cutoff = System.currentTimeMillis() - WINDOW_MS;
+            long cutoff = recencyCutoff(System.currentTimeMillis(), before.optLong("lastSyncAt", 0L));
 
             JSONArray messages = after.optJSONArray("messages");
             if (messages == null) return;
@@ -163,6 +176,31 @@ final class InboxSyncRunner {
         } catch (Exception e) {
             Log.w(TAG, "announce: could not raise a new-mail notification", e);
         }
+    }
+
+    /**
+     * The oldest a message may be and still count as an arrival.
+     *
+     * Mirrors {@code recencyCutoff} in {@code src/core/mail/newMail.ts}, and
+     * matters more here than it does there. This runner is the one that has to
+     * cope with the process not having run: WorkManager's fifteen-minute floor
+     * is a floor and not a promise, Doze stretches it, and a manufacturer's
+     * background-app manager can freeze this app for hours at a stretch. Every
+     * one of those cases hands this method a gap wider than {@link #WINDOW_MS},
+     * and with a fixed window the mail that arrived inside the gap is exactly
+     * the mail that gets dropped — the phone wakes up, syncs, says nothing, and
+     * the user finds out by opening the app.
+     *
+     * {@code lastSyncAt} is when this account last completed a sync, so
+     * everything after it is by definition unlooked-at. It never narrows the
+     * window; {@link #MISSED_MAX_AGE_MS} bounds how far a stale value reaches.
+     * A zero or negative value means "never synced" and falls back to the
+     * ordinary window.
+     */
+    static long recencyCutoff(long now, long lastSyncAt) {
+        long ordinary = now - WINDOW_MS;
+        if (lastSyncAt <= 0L) return ordinary;
+        return Math.max(now - MISSED_MAX_AGE_MS, Math.min(ordinary, lastSyncAt));
     }
 
     private static Set<String> idsOf(JSONObject account) {

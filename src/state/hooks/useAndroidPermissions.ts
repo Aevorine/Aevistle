@@ -21,7 +21,8 @@ export interface AndroidPermissionsApi {
       | 'requestNotifications'
       | 'openNotificationSettings'
       | 'openExactAlarmSettings'
-      | 'openBatteryOptimizationSettings',
+      | 'openBatteryOptimizationSettings'
+      | 'openAutoStartSettings',
   ) => Promise<void>
 }
 
@@ -71,7 +72,8 @@ export function useAndroidPermissions(bridge: PlatformBridge | null): AndroidPer
         | 'requestNotifications'
         | 'openNotificationSettings'
         | 'openExactAlarmSettings'
-        | 'openBatteryOptimizationSettings',
+        | 'openBatteryOptimizationSettings'
+        | 'openAutoStartSettings',
     ) => {
       const android = bridge as Partial<AndroidPermissionApi> | null
       if (!android) return
@@ -85,6 +87,11 @@ export function useAndroidPermissions(bridge: PlatformBridge | null): AndroidPer
         // arrives via the visibility listener above, when the user comes back.
         if (what === 'openNotificationSettings') await android.openNotificationSettings?.()
         else if (what === 'openExactAlarmSettings') await android.openExactAlarmSettings?.()
+        // Named rather than left to the `else`, which now has two candidates:
+        // an unnamed fallback would have quietly sent the auto-start button to
+        // the battery dialog, which opens, looks like it worked, and changes
+        // nothing about the list that was actually stopping the service.
+        else if (what === 'openAutoStartSettings') await android.openAutoStartSettings?.()
         else await android.openBatteryOptimizationSettings?.()
       } catch {
         // Same reasoning as the read: an OEM build with no such screen is not

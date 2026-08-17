@@ -37,7 +37,13 @@ import type {
   SharePayload,
 } from '../types'
 import type { DownloadProgress, UpdateAsset, UpdateInfo } from './update'
-import type { BadgeCounts, DesktopPrefs, DownloadOutcome, TrayCommand } from './ipc-contract'
+import type {
+  BackgroundMailCheckState,
+  BadgeCounts,
+  DesktopPrefs,
+  DownloadOutcome,
+  TrayCommand,
+} from './ipc-contract'
 
 export interface AppInfo {
   version: string
@@ -281,6 +287,19 @@ export interface PlatformBridge {
    * login item exists — the settings screen hides both switches there.
    */
   setDesktopPrefs?(prefs: DesktopPrefs): Promise<void>
+
+  /**
+   * What the OS actually has registered for "keep receiving after I quit".
+   *
+   * Separate from `setDesktopPrefs` because this is the one desktop pref whose
+   * application can fail: it writes a scheduled task, and Windows may decline.
+   * A switch that reports what it *asked for* rather than what exists is the
+   * shape of every "I turned it on and nothing happened" report, so the
+   * settings screen reads this back instead of trusting its own state.
+   *
+   * Absent on Android and in the browser preview, like the setter above.
+   */
+  backgroundMailCheckState?(): Promise<BackgroundMailCheckState>
 
   /**
    * Unread mail and armed reminders, for a taskbar overlay badge.

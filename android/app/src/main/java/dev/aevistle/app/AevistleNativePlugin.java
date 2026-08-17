@@ -2572,6 +2572,17 @@ public class AevistleNativePlugin extends Plugin {
         result.put("notifications", notificationState());
         result.put("exactAlarms", Permissions.exactAlarms(getContext()));
         result.put("batteryOptimized", Permissions.batteryOptimized(getContext()));
+        /*
+         * The one row that is not a permission.
+         *
+         * Everything above answers "did the user allow X", and a phone can
+         * answer yes to all of it and still receive nothing, because a
+         * manufacturer's background-app manager killed the sync service. That
+         * manager is not a permission, has no API, and is invisible from
+         * inside the app — so the only honest signal is whether the service is
+         * alive at this moment. See {@link Permissions#backgroundService}.
+         */
+        result.put("backgroundService", Permissions.backgroundService(getContext()));
         result.put("canAskNotifications", canAskNotifications());
         return result;
     }
@@ -2672,6 +2683,22 @@ public class AevistleNativePlugin extends Plugin {
     public void openBatteryOptimizationSettings(PluginCall call) {
         JSObject result = new JSObject();
         result.put("opened", Permissions.openBatteryOptimizationSettings(getContext(), getActivity()));
+        call.resolve(result);
+    }
+
+    /**
+     * Open the manufacturer's own auto-start list.
+     *
+     * The last thing standing between a granted permission set and mail that
+     * never arrives on Huawei, Xiaomi, OPPO, vivo and Samsung. There is no
+     * platform API for it — see {@link Permissions#openAutoStartSettings} for
+     * the component list and why it ends at the app-details page rather than
+     * at a dead button.
+     */
+    @PluginMethod
+    public void openAutoStartSettings(PluginCall call) {
+        JSObject result = new JSObject();
+        result.put("opened", Permissions.openAutoStartSettings(getContext(), getActivity()));
         call.resolve(result);
     }
 

@@ -54,6 +54,15 @@ export interface PermissionSnapshot {
   exactAlarms: 'granted' | 'denied' | 'not-required'
   /** `'granted'` means *exempt* from battery optimization — see `bridge-android.ts`. */
   batteryOptimized: 'granted' | 'denied' | 'not-required'
+  /**
+   * Whether the background sync service is alive right now. Not a permission —
+   * see `BackgroundServiceState` in `bridge-android.ts` for why the three
+   * fields above can all read "granted" on a phone that receives nothing.
+   *
+   * Optional so that a renderer running against an older native layer, which
+   * does not report it, reads as "nothing to say" rather than as "stopped".
+   */
+  backgroundService?: 'granted' | 'denied' | 'not-required'
   canAskNotifications: boolean
 }
 

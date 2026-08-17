@@ -89,6 +89,7 @@ import {
 } from '../core/mail/greetings'
 import { HOLIDAY_PRESETS } from '../core/schedule/holidayPresets'
 import type { AppInfo, DataFolder, DataFolderChange } from '../core/platform/bridge'
+import type { BackgroundMailCheckState } from '../core/platform/ipc-contract'
 import { lastUpdateCheck, onUpdateCheck, runUpdateCheck } from '../core/platform/update'
 import type { DownloadProgress, UpdateInfo } from '../core/platform/update'
 
@@ -472,6 +473,46 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
 
   const s = state.settings
   const patch = (p: Partial<typeof s>) => dispatch({ type: 'patchSettings', patch: p })
+
+  /**
+   * What the OS actually has registered for "keep receiving after I quit".
+   *
+   * Re-read whenever the switch moves, and that is the point of reading it at
+   * all: `setDesktopPrefs` shells out to `schtasks`, which can fail, and a
+   * switch showing its own state would then sit there saying "on" over a
+   * machine where nothing had been registered. `null` until the first read
+   * lands, which is also what keeps the row hidden on every platform whose
+   * bridge has no such method.
+   *
+   * A settle delay rather than an immediate read: the pref reaches the main
+   * process through the push effect in `AppState.tsx` that this same toggle
+   * triggers, so reading in the same turn would answer about the state before
+   * the change. No retry loop on failure — the next toggle re-reads anyway,
+   * and a row that keeps its last answer beats one that flickers.
+   */
+  const [backgroundMailCheck, setBackgroundMailCheck] = useState<BackgroundMailCheckState | null>(
+    null,
+  )
+  const keepReceiving = s.keepReceivingWhenClosed === true
+  useEffect(() => {
+    const read = bridge?.backgroundMailCheckState
+    if (!read) return
+    let live = true
+    const timer = setTimeout(() => {
+      void read
+        .call(bridge)
+        .then((value) => {
+          if (live) setBackgroundMailCheck(value)
+        })
+        .catch(() => {
+          /* Leaving the previous answer in place beats flapping the row. */
+        })
+    }, 400)
+    return () => {
+      live = false
+      clearTimeout(timer)
+    }
+  }, [bridge, keepReceiving])
 
   // The daily digest and holiday greetings used to have their state and
   // handlers here too. They are now `DigestCard` and `GreetingsCard`, defined
@@ -1864,6 +1905,39 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
                     ) : null}
                   </div>
                 </div>
+                {/*
+                  The row that answers the question the three above cannot.
+                  All of them can read "granted" on a phone that receives
+                  nothing, because a manufacturer's own auto-start list is a
+                  separate thing from every Android permission and freezes the
+                  sync service regardless. This one reports whether the service
+                  is alive *now* — see `backgroundService` in
+                  `bridge-android.ts` — and the button goes to that vendor
+                  list, which is the only place the state can be changed.
+                */}
+                <div className="field">
+                  <div className="switch__text">
+                    <span className="switch__title">{t('settings.permBackgroundService')}</span>
+                    <span className="switch__desc">{t('settings.permBackgroundServiceHint')}</span>
+                  </div>
+                  <div className="btn-row">
+                    <StatusChip
+                      tone={permissions.backgroundService === 'denied' ? 'warning' : 'success'}
+                      label={t(
+                        permissions.backgroundService === 'granted'
+                          ? 'settings.permServiceRunning'
+                          : permissions.backgroundService === 'denied'
+                            ? 'settings.permServiceStopped'
+                            : 'settings.permServiceIdle',
+                      )}
+                    />
+                    {permissions.backgroundService === 'denied' ? (
+                      <Button variant="ghost" onClick={() => void fixPermission('openAutoStartSettings')}>
+                        {t('settings.permOpenAutoStart')}
+                      </Button>
+                    ) : null}
+                  </div>
+                </div>
               </>
             ) : null}
 
@@ -1880,6 +1954,32 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
               onChange={(v) => patch({ launchAtLogin: v })}
               title={t('settings.launchAtLogin')}
             />
+            {/*
+              Only where it can do something. `supported` is false on every
+              non-Windows build and on a development run, and a switch that is
+              visible but inert is the exact complaint this feature came from —
+              see `backgroundMailCheckState` in `bridge.ts`.
+            */}
+            {backgroundMailCheck?.supported ? (
+              <Switch
+                checked={s.keepReceivingWhenClosed === true}
+                onChange={(v) => patch({ keepReceivingWhenClosed: v })}
+                title={t('settings.keepReceivingWhenClosed')}
+                /*
+                  The description says what is created, not just what is
+                  gained. This is the only setting in the app that writes
+                  something outside it, so the user learns that here rather
+                  than by finding it in Task Scheduler later.
+                */
+                description={
+                  s.keepReceivingWhenClosed === true && !backgroundMailCheck.registered
+                    ? t('settings.keepReceivingFailed')
+                    : t('settings.keepReceivingWhenClosedHint', {
+                        command: backgroundMailCheck.removeHint,
+                      })
+                }
+              />
+            ) : null}
           </div>
         </Card>
 

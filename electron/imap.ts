@@ -36,6 +36,7 @@ import {
   renderTransportError,
   rungBudgetMs,
   summarizeTransportError,
+  TimeoutError,
   totalBudgetMs,
   withDeadline,
   type Endpoint,
@@ -300,12 +301,42 @@ async function hasCredential(config: InboxAccountState, secret: string | null): 
   return Boolean(secret) || (await hasOAuthGrant(config.accountId))
 }
 
+/**
+ * How long the configured endpoint gets on the one retry a fully timed-out
+ * ladder is allowed.
+ *
+ * Ninety seconds, and the number comes from a measurement rather than a
+ * feeling. One of the reporting user's five accounts — same provider, same
+ * host, same port as three that were fine — needed **36.7 s** to finish
+ * `connect()` where the others needed 1-5 s. The ladder's per-rung slice is
+ * `rungBudgetMs(30_000, 3)` = 10 s, so every rung timed out, every sync
+ * failed, and the account had not synced for three days. Nothing was broken:
+ * the server answered correctly, just slowly, and the app had no way to say
+ * "slow" rather than "unreachable". Ninety seconds clears that measurement
+ * with room for a worse day and is still bounded well under the sync interval.
+ *
+ * This is spent only by an account that has *already* failed every rung, so a
+ * healthy mailbox never waits on it, and an account that is genuinely
+ * unreachable pays it once per sync rather than per rung.
+ */
+const PATIENT_CONNECT_MS = 90_000
+
 async function withConnection<T>(
   config: InboxAccountState,
   secret: string | null,
   run: (client: ImapFlow) => Promise<T>,
   /** Filled in with the rung that actually worked, for the test report. */
   onEndpoint?: (endpoint: Endpoint, client: ImapFlow) => void,
+  /**
+   * Allow one patient retry of the configured endpoint when every rung timed
+   * out. See `PATIENT_CONNECT_MS`.
+   *
+   * Off by default so that adding this could not change any caller that had
+   * not thought about it: a path with a person watching a spinner wants the
+   * fast wrong answer far less than a background sync wants the slow right
+   * one, and only the caller knows which it is.
+   */
+  patient = false,
 ): Promise<T> {
   assertSafeConfig(config)
 
@@ -326,8 +357,22 @@ async function withConnection<T>(
   const perRung = rungBudgetMs(totalMs, ladder.length)
 
   let lastError: Error = new Error('No connection attempt was made')
+  /*
+   * Whether the endpoint the account was *configured* with ran out of time,
+   * as opposed to whatever the last rung of the ladder happened to say.
+   *
+   * Tracked separately because `lastError` is nearly always the wrong thing to
+   * ask. A 993/ssl account's ladder is [993 ssl, 143 starttls, 993 starttls];
+   * rung 1 is the one that stalls, and rungs 2 and 3 are guesses that a real
+   * provider refuses in milliseconds. So by the time the loop ends `lastError`
+   * is an ECONNREFUSED from a port nobody configured, and a patient retry
+   * gated on `lastError` being a timeout would never fire — on exactly the
+   * account it was written for. Found by writing the test, not by reading the
+   * code.
+   */
+  let configuredRungTimedOut = false
 
-  for (const endpoint of ladder) {
+  for (const [rung, endpoint] of ladder.entries()) {
     const client = buildClient(config, secret ?? '', resolvedHost, endpoint, perRung, accessToken)
     let connected = false
     try {
@@ -340,6 +385,7 @@ async function withConnection<T>(
     } catch (e) {
       const err = e instanceof Error ? e : new Error(String(e))
       lastError = err
+      if (rung === 0 && err instanceof TimeoutError) configuredRungTimedOut = true
       try {
         client.close()
       } catch {
@@ -364,6 +410,45 @@ async function withConnection<T>(
       // is worth discarding rather than re-offering until its stated expiry.
       if (refusedCredentials && accessToken) noteOAuthAuthFailure(config.accountId)
       if (refusedCredentials) throw err
+    }
+  }
+
+  /*
+   * Every rung ran out of time. Try the endpoint the user actually configured
+   * once more, patiently.
+   *
+   * Only on a timeout, and deliberately: a refused password, a wrong port, a
+   * host that does not resolve all failed for a reason more time cannot fix,
+   * and `refusedCredentials` above has already thrown for the first of them.
+   * A timeout is the one failure that is indistinguishable from "slower than
+   * we were willing to wait" — which is what it turned out to be.
+   *
+   * `ladder[0]` rather than the whole ladder: rungs 2 and 3 are guesses at a
+   * misconfiguration, and spending ninety seconds on each guess is how a sync
+   * turns into a four-minute stall. Rung 1 is the endpoint the account was set
+   * up with and the one that has worked before.
+   */
+  if (patient && configuredRungTimedOut) {
+    const endpoint = ladder[0]
+    const client = buildClient(config, secret ?? '', resolvedHost, endpoint, PATIENT_CONNECT_MS, accessToken)
+    try {
+      await withDeadline(() => client.connect(), PATIENT_CONNECT_MS, () => client.close())
+      console.warn(
+        `[aevistle] IMAP for ${config.imapHost} needed the patient path (>${Math.round(perRung / 1000)}s to connect) — the server is slow, not unreachable`,
+      )
+      onEndpoint?.(endpoint, client)
+      const result = await run(client)
+      await client.logout().catch(() => {})
+      return result
+    } catch (e) {
+      try {
+        client.close()
+      } catch {
+        /* already gone */
+      }
+      // The patient attempt's own failure is the more informative one: it is
+      // the answer from the longest look this code is willing to take.
+      lastError = e instanceof Error ? e : new Error(String(e))
     }
   }
 
@@ -802,8 +887,18 @@ export async function syncInbox(
     throw new Error('No IMAP password stored for this account')
   }
   const tailUids: number[] = []
-  const state = await withConnection(config, secret, (client) =>
-    runSync(client, config, tailUids),
+  /*
+   * `patient`, and this is the one call site that most needs it: a background
+   * sync has nobody watching, and the cost of giving up early is not a slow
+   * screen but an account that silently stops producing new-mail
+   * notifications altogether. See `PATIENT_CONNECT_MS`.
+   */
+  const state = await withConnection(
+    config,
+    secret,
+    (client) => runSync(client, config, tailUids),
+    undefined,
+    true,
   )
   schedulePrefetchTail(config, secret, tailUids)
   return state

@@ -893,6 +893,20 @@ export interface Settings {
    */
   notifyOnNewMail?: boolean
   /**
+   * Keep receiving mail after the app has been quit entirely.
+   *
+   * Off by default, and it has to be: an application that relaunches itself
+   * after you closed it is a thing people are right to resent, so this is a
+   * decision the user makes once, in words, rather than a default they
+   * discover. Windows only — see `electron/backgroundMailTask.ts`.
+   *
+   * Turning it on does not make notifications *better* while the app is open;
+   * it closes the one gap that no amount of work inside the process can, since
+   * every desktop notification is raised by the renderer and a quit app has no
+   * renderer.
+   */
+  keepReceivingWhenClosed?: boolean
+  /**
    * Put a freshly found code straight on the clipboard.
    *
    * Only ever fires while "waiting for a code" is switched on, and only for the
@@ -1215,6 +1229,7 @@ export const DEFAULT_SETTINGS: Settings = {
   inboxPrefetchFull: 'wifi',
   notifyOnCode: true,
   notifyOnNewMail: true,
+  keepReceivingWhenClosed: false,
   autoCopyCode: true,
   codeRules: [],
   codesBigDigits: false,

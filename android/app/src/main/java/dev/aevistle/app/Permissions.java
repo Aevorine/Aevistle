@@ -1,6 +1,8 @@
 package dev.aevistle.app;
 
+import android.app.ActivityManager;
 import android.app.AlarmManager;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -246,6 +248,94 @@ final class Permissions {
                 Uri.parse("package:" + context.getPackageName()));
         Intent fallback = new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS);
         return start(context, activity, intent, fallback);
+    }
+
+    /**
+     * Is the foreground sync loop actually alive right now?
+     *
+     * Every other reader in this file answers "did the user grant X", and none
+     * of them answers the question that decides whether mail arrives with the
+     * app closed. A phone can have notifications allowed, exact alarms allowed
+     * and battery optimisation waived, and still have {@link InboxIdleService}
+     * killed within minutes by a manufacturer's own background-app manager —
+     * which is not a permission, has no API, and is invisible from inside the
+     * app except by looking at whether the service is still there.
+     *
+     * That gap is why "I get no notifications" was previously unanswerable: the
+     * permission strip said everything was fine, because everything it knew
+     * about *was* fine. This is the one row that can say otherwise.
+     *
+     * {@code getRunningServices} is deprecated for inspecting *other* apps and
+     * has returned only the caller's own services since API 26 — which is
+     * exactly and only what is wanted here, so the deprecation does not apply
+     * to this use.
+     */
+    @SuppressWarnings("deprecation")
+    static String backgroundService(Context context) {
+        if (new InboxCache(context).enabledAccounts().isEmpty()) return NOT_REQUIRED;
+        ActivityManager manager = context.getSystemService(ActivityManager.class);
+        if (manager == null) return DENIED;
+        try {
+            for (ActivityManager.RunningServiceInfo info
+                    : manager.getRunningServices(Integer.MAX_VALUE)) {
+                if (InboxIdleService.class.getName().equals(info.service.getClassName())) {
+                    return GRANTED;
+                }
+            }
+        } catch (Exception e) {
+            // A refusal to enumerate is not evidence either way, and claiming
+            // the service is dead would send the user off to fix a setting
+            // that was never the problem.
+            return NOT_REQUIRED;
+        }
+        return DENIED;
+    }
+
+    /**
+     * Open the manufacturer's own auto-start / background-app manager.
+     *
+     * There is no platform API for this and no common Intent action: each
+     * vendor ships a private activity, they are renamed between OS versions,
+     * and several are not exported on some builds. So this is a list of known
+     * component names tried in order, ending at the app-details page — which
+     * always exists, and from which every one of these managers is reachable in
+     * two or three taps.
+     *
+     * Worth having despite the fragility, because on the vendors listed it is
+     * the difference between mail arriving and not: the standard notification
+     * permission and the standard battery-optimisation exemption can both be
+     * granted and the app still be frozen between syncs by this separate,
+     * vendor-only list. Huawei/Honor lead the list because that is where the
+     * behaviour was reported, not because the others are less strict.
+     *
+     * Failure here is not an error the user needs to see — {@code start}
+     * already falls back — so the caller reports only whether *something*
+     * opened.
+     */
+    static boolean openAutoStartSettings(Context context, android.app.Activity activity) {
+        String[][] candidates = {
+                // Huawei / Honor — "Startup manager" under Battery.
+                {"com.huawei.systemmanager", "com.huawei.systemmanager.startupmgr.ui.StartupNormalAppListActivity"},
+                {"com.huawei.systemmanager", "com.huawei.systemmanager.optimize.process.ProtectActivity"},
+                // Xiaomi / Redmi — Security app's autostart list.
+                {"com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity"},
+                // OPPO / realme.
+                {"com.coloros.safecenter", "com.coloros.safecenter.permission.startup.StartupAppListActivity"},
+                {"com.oppo.safe", "com.oppo.safe.permission.startup.StartupAppListActivity"},
+                // vivo.
+                {"com.vivo.permissionmanager", "com.vivo.permissionmanager.activity.BgStartUpManagerActivity"},
+                // Samsung — device care's battery list.
+                {"com.samsung.android.lool", "com.samsung.android.sm.ui.battery.BatteryActivity"},
+        };
+
+        for (String[] candidate : candidates) {
+            Intent intent = new Intent().setComponent(new ComponentName(candidate[0], candidate[1]));
+            if (start(context, activity, intent, null)) return true;
+        }
+        // Nothing vendor-specific matched — a Pixel, an emulator, or a build
+        // that renamed its manager again. The app's own settings page is the
+        // honest fallback rather than a dead button.
+        return start(context, activity, appDetails(context), null);
     }
 
     private static Intent appDetails(Context context) {

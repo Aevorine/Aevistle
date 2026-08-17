@@ -93,6 +93,30 @@ export interface DesktopPrefs {
    * says must not happen.
    */
   notifyOnFailure: boolean
+  /**
+   * Keep receiving mail even after the app has been fully quit.
+   *
+   * Windows only, and the only pref here that reaches outside the app's own
+   * process: it registers a scheduled task that relaunches Aevistle hidden
+   * every fifteen minutes. See `electron/backgroundMailTask.ts` for why that is
+   * the shape of the answer and what it deliberately does not do.
+   *
+   * Unlike its four neighbours this one can *fail* — writing a scheduled task
+   * is an operation the OS may refuse — so `setDesktopPrefs` alone would leave
+   * a switch claiming something untrue. `backgroundMailCheckState` is how the
+   * settings screen finds out what is actually registered.
+   */
+  keepReceivingWhenClosed: boolean
+}
+
+/** What the OS has registered for "keep receiving after I quit" — see `backgroundMailCheckState`. */
+export interface BackgroundMailCheckState {
+  /** False when this platform or build cannot register anything, so the switch must say so. */
+  supported: boolean
+  /** True when a task by the app's name currently exists. */
+  registered: boolean
+  /** The exact command that removes it, so what was created is never a mystery. */
+  removeHint: string
 }
 
 /** The two numbers a taskbar overlay badge is drawn from — see `setBadgeCounts`. */
@@ -162,6 +186,16 @@ export interface DesktopApi {
    * they are pushed across here whenever they change.
    */
   setDesktopPrefs(prefs: DesktopPrefs): Promise<void>
+  /**
+   * What the OS actually has registered for `keepReceivingWhenClosed`, so the
+   * settings screen can show the truth rather than the intent.
+   *
+   * `supported` is false on a platform or build where the switch cannot do
+   * anything — every non-Windows build, and any development run, where
+   * writing a scheduled task pointed at `node_modules/electron/dist` would be
+   * a trap left on the user's machine.
+   */
+  backgroundMailCheckState(): Promise<BackgroundMailCheckState>
   /**
    * Unread mail and armed reminders, so the taskbar icon can carry a badge
    * while the window is minimised or hidden in the tray — the one signal a
@@ -441,6 +475,7 @@ export const IPC = {
   prewarm: 'aevistle:prewarm',
   setUiLocale: 'aevistle:set-ui-locale',
   setDesktopPrefs: 'aevistle:set-desktop-prefs',
+  backgroundMailCheckState: 'aevistle:background-mail-check-state',
   setBadgeCounts: 'aevistle:set-badge-counts',
   trayCommand: 'aevistle:tray-command',
   downloadDone: 'aevistle:download-done',

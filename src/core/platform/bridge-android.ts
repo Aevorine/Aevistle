@@ -103,11 +103,33 @@ export type ExactAlarmPermission = 'granted' | 'denied' | 'not-required'
  */
 export type BatteryOptimizationPermission = 'granted' | 'denied' | 'not-required'
 
+/**
+ * Whether the background sync service is alive *right now*.
+ *
+ * `granted`      — `InboxIdleService` is running, so mail is being checked
+ *                  every ninety seconds whether or not the app is open.
+ * `denied`       — receiving is switched on for at least one account and the
+ *                  service is not there. On stock Android that should not
+ *                  happen; on Huawei, Xiaomi, OPPO, vivo and Samsung it is the
+ *                  normal outcome of the manufacturer's own background-app
+ *                  manager, which is a separate list from every permission
+ *                  above and the reason "everything is granted and I still get
+ *                  nothing" is a real and previously unanswerable report.
+ * `not-required` — no account has receiving switched on, so there is nothing
+ *                  for the service to do and its absence is correct.
+ *
+ * This is the only row here that is not a permission, and it exists because
+ * the permission rows can all say yes while no mail arrives.
+ */
+export type BackgroundServiceState = 'granted' | 'denied' | 'not-required'
+
 export interface AndroidPermissionState {
   notifications: NotificationPermission
   exactAlarms: ExactAlarmPermission
   /** `'granted'` here means *exempt* — see {@link BatteryOptimizationPermission}. */
   batteryOptimized: BatteryOptimizationPermission
+  /** Not a permission — see {@link BackgroundServiceState}. */
+  backgroundService: BackgroundServiceState
   /**
    * Whether `requestNotificationPermission` would actually raise a dialog.
    * False when blocked — offer `openNotificationSettings` instead of a button
@@ -155,6 +177,17 @@ export interface AndroidPermissionApi {
    * for a blocked notification permission.
    */
   openBatteryOptimizationSettings(): Promise<{ opened: boolean }>
+  /**
+   * Open the manufacturer's own auto-start / background-app list.
+   *
+   * The last screen standing between a fully granted permission set and mail
+   * that never arrives, on every vendor that ships one. There is no platform
+   * API and no common Intent — the native side tries a list of known component
+   * names and falls back to this app's own settings page, from which each of
+   * them is two or three taps away. `opened` is therefore "a screen appeared",
+   * not "the right screen appeared", and the UI wording has to match that.
+   */
+  openAutoStartSettings(): Promise<{ opened: boolean }>
 }
 
 interface AevistleNativePlugin extends AndroidPermissionApi {
@@ -1123,6 +1156,7 @@ export function createAndroidBridge(): PlatformBridge & AndroidPermissionApi {
     openNotificationSettings: () => Native.openNotificationSettings(),
     openExactAlarmSettings: () => Native.openExactAlarmSettings(),
     openBatteryOptimizationSettings: () => Native.openBatteryOptimizationSettings(),
+    openAutoStartSettings: () => Native.openAutoStartSettings(),
   }
 
   return bridge

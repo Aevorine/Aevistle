@@ -30,6 +30,17 @@
  *      old to the world, so the window is checked against the message's own
  *      date rather than against when we happened to hear about it.
  *
+ * Rules 1 and 3 share an assumption that quietly stopped holding the moment
+ * "notify me with the app closed" became the point: that the previous look at
+ * this mailbox was both *recent* and *in this process*. Neither is true after
+ * the app has been shut, and between them the two rules threw away exactly the
+ * mail the feature exists for — the first sync back only primed, and by the
+ * second sync a night's post was hours old and outside the window. So the
+ * baseline is now recovered from what was saved (`restoredBaseline`) and the
+ * window is widened to the account's own last sync (`recencyCutoff`). Both are
+ * bounded, and neither weakens rule 2: mail read on the phone still never
+ * rings here.
+ *
  * What comes back is a decision, not a sentence: the count, the newest arrival
  * and whether it stands alone. Wording is the view layer's job in six
  * languages, and the Android background worker — which cannot reach any of
@@ -51,6 +62,47 @@ import type { InboxMessage } from '../types'
 export const NEW_MAIL_WINDOW_MS = 30 * 60_000
 
 /**
+ * The furthest back the window may ever be widened by `since`.
+ *
+ * Seven days, and it exists because `since` is only as trustworthy as the last
+ * sync that wrote it. An account paused for a month, a laptop opened after a
+ * holiday, a clock that jumped — each hands `recencyCutoff` a `since` from the
+ * distant past, and without a floor the first sync back would treat a month of
+ * mail as having "arrived while you were away". The count in a collapsed
+ * announcement is meant to be a number someone can act on, not a mailbox
+ * total. Past this the ordinary rule is the honest one: it is not news.
+ */
+export const MISSED_MAIL_MAX_AGE_MS = 7 * 24 * 60 * 60_000
+
+/**
+ * The oldest a message may be and still count as an arrival.
+ *
+ * Ordinarily `NEW_MAIL_WINDOW_MS`, which assumes the previous look at this
+ * mailbox was recent — true while the app is running and syncing on a timer,
+ * and false in the one case this whole parameter exists for: the app was not
+ * running. Mail that landed while the app was closed is hours old by the time
+ * anything looks, so the plain window drops precisely the arrivals the user
+ * most wanted to hear about, and the app comes back silent about a night's
+ * post.
+ *
+ * `since` is when this account last completed a sync. Everything after that
+ * moment is, by definition, something we have not looked at yet — so it is the
+ * correct cutoff rather than a guess, and it never *narrows* the window: a
+ * sync a minute ago still leaves the ordinary thirty minutes in force, because
+ * a message can be older than the last sync and still be new to it (it was
+ * unseen and off the end of the fetched page, or the server delivered it late).
+ * `MISSED_MAIL_MAX_AGE_MS` bounds how far back a stale `since` can reach.
+ *
+ * Absent, zero or nonsense `since` means "no trustworthy last look" — an
+ * account that has never synced — and falls back to the ordinary window.
+ */
+export function recencyCutoff(now: number, since?: number): number {
+  const ordinary = now - NEW_MAIL_WINDOW_MS
+  if (typeof since !== 'number' || !Number.isFinite(since) || since <= 0) return ordinary
+  return Math.max(now - MISSED_MAIL_MAX_AGE_MS, Math.min(ordinary, since))
+}
+
+/**
  * How many arrivals are named individually before the announcement collapses
  * into a count.
  *
@@ -60,6 +112,59 @@ export const NEW_MAIL_WINDOW_MS = 30 * 60_000
  * and the subject, and anything more gets a number and the newest sender.
  */
 export const NEW_MAIL_NAMED_LIMIT = 1
+
+/**
+ * What an account was known to hold, and when that knowledge was last true.
+ *
+ * The shape `newArrivals` needs on the way in. Kept as a type rather than
+ * three loose parameters because `restoredBaseline` builds one and the caller
+ * passes it straight through.
+ */
+export interface MailBaseline {
+  /** Message ids known before the sync now landing. */
+  ids: Set<string>
+  /** Whether those ids are a trustworthy record rather than an empty start. */
+  primed: boolean
+  /** When this account last completed a sync, if it ever has. */
+  since?: number
+}
+
+/**
+ * The baseline recovered from a saved account row, for the first sync of a
+ * session.
+ *
+ * This is the whole of "the app was closed, mail came in, tell me about it".
+ * An account's message list and `lastSyncAt` are persisted, so the row loaded
+ * at startup is a real record of the mailbox as of the last time the app ran.
+ * Treating that as an empty start — which is what a fresh in-memory map amounts
+ * to — is what made a night's mail vanish: the first sync only "primed",
+ * announced nothing, and by the second sync those messages were no longer new
+ * to anyone. Nothing threw and nothing logged; the app simply came back quiet.
+ *
+ * `primed` turns on `lastSyncAt` rather than on the message list being
+ * non-empty, because an account that genuinely held nothing last night is
+ * still a trustworthy baseline, while an account that has never synced is not.
+ * That second case is the burst of notifications `primed` exists to prevent,
+ * and it is the only case that should reach the app as an empty start.
+ *
+ * Deliberately tolerant of a malformed row: this reads data that has been on
+ * disk across upgrades, and the failure that matters is announcing a whole
+ * mailbox, not throwing.
+ */
+export function restoredBaseline(saved: {
+  messages?: readonly { id: string }[]
+  lastSyncAt?: number
+} | undefined): MailBaseline {
+  const lastSyncAt = saved?.lastSyncAt
+  if (typeof lastSyncAt !== 'number' || !Number.isFinite(lastSyncAt) || lastSyncAt <= 0) {
+    return { ids: new Set<string>(), primed: false }
+  }
+  return {
+    ids: new Set((saved?.messages ?? []).map((m) => m.id)),
+    primed: true,
+    since: lastSyncAt,
+  }
+}
 
 export interface NewMailAnnouncement {
   /** How many arrivals this covers. Always at least one. */
@@ -76,15 +181,20 @@ export interface NewMailAnnouncement {
  * which is true for an account that genuinely had nothing — and is why
  * `primed` is a separate flag rather than being inferred from the set being
  * empty.
+ *
+ * `since` is when this account last completed a sync, and is what makes the
+ * first sync after a restart able to report mail that arrived while the app
+ * was closed. See `recencyCutoff`. Omitting it keeps the ordinary window.
  */
 export function newArrivals(opts: {
   before: ReadonlySet<string>
   after: readonly InboxMessage[]
   now: number
   primed: boolean
+  since?: number
 }): InboxMessage[] {
   if (!opts.primed) return []
-  const cutoff = opts.now - NEW_MAIL_WINDOW_MS
+  const cutoff = recencyCutoff(opts.now, opts.since)
   return opts.after
     .filter((m) => !opts.before.has(m.id) && !m.seen && m.date >= cutoff)
     .sort((a, b) => b.date - a.date)

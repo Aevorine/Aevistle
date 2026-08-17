@@ -31,6 +31,11 @@ import {
 import path from 'node:path'
 import { promises as fs, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { IPC, type BadgeCounts, type DesktopPrefs, type TrayCommand } from '../src/core/platform/ipc-contract'
+import {
+  applyBackgroundMailCheck,
+  backgroundMailCheckRegistered,
+  REMOVE_HINT,
+} from './backgroundMailTask'
 import type {
   Attachment,
   ControlScope,
@@ -178,6 +183,7 @@ let desktopPrefs: DesktopPrefs = {
   launchAtLogin: false,
   notifyOnSuccess: true,
   notifyOnFailure: true,
+  keepReceivingWhenClosed: false,
 }
 /**
  * The last counts `IPC.setBadgeCounts` reported, reapplied whenever
@@ -610,9 +616,17 @@ if (!app.requestSingleInstanceLock()) {
  * Reveal first, dispatch second: the parse can produce nothing (a plain
  * re-launch from the Start menu comes through here too), and in that case
  * raising the window is the whole of the correct behaviour.
+ *
+ * Unless the second copy said `--hidden`. That flag means "start, but do not
+ * ask for the screen", and the *only* things that pass it are the login item
+ * and the background mail-check task — neither of which is a person asking for
+ * the window. Revealing on it turns the keep-receiving option into an app that
+ * pops itself to the front every fifteen minutes, forever, which is worse than
+ * the missed notification it was turned on to fix. A person re-launching from
+ * the Start menu never carries the flag, so they are unaffected.
  */
 app.on('second-instance', (_event, argv) => {
-  revealWindow()
+  if (!argv.includes('--hidden')) revealWindow()
   deliverShare(shareFromArgv(argv))
 })
 
@@ -1855,7 +1869,7 @@ function registerIpc(): void {
     return prewarm(account, secret)
   })
 
-  ipcMain.handle(IPC.setDesktopPrefs, (_e, prefs: DesktopPrefs) => {
+  ipcMain.handle(IPC.setDesktopPrefs, async (_e, prefs: DesktopPrefs) => {
     // Coerced rather than trusted: `minimiseToTray` decides whether closing the
     // window quits the app, and `undefined` there would read as "quit".
     const next = {
@@ -1866,8 +1880,13 @@ function registerIpc(): void {
       // silently going quiet on every scheduled send.
       notifyOnSuccess: prefs?.notifyOnSuccess !== false,
       notifyOnFailure: prefs?.notifyOnFailure !== false,
+      // `=== true`: this one defaults off, so an absent field must not create
+      // a scheduled task. See the field's doc in `ipc-contract.ts`.
+      keepReceivingWhenClosed: prefs?.keepReceivingWhenClosed === true,
     }
     const loginChanged = next.launchAtLogin !== desktopPrefs.launchAtLogin
+    const backgroundChanged =
+      next.keepReceivingWhenClosed !== desktopPrefs.keepReceivingWhenClosed
     desktopPrefs = next
     // Only written when it actually changes: this touches the registry on
     // Windows, and the renderer pushes prefs on every settings edit.
@@ -1895,7 +1914,25 @@ function registerIpc(): void {
         console.error('[aevistle] could not update the login item:', error)
       }
     }
+
+    /*
+     * Only on change, for the same reason the login item is: this shells out
+     * to `schtasks`, and the renderer pushes prefs on every settings edit.
+     *
+     * Awaited so a failure is at least logged before the handler resolves.
+     * The switch's own truthfulness is `backgroundMailCheckState`'s job —
+     * see the note on `keepReceivingWhenClosed` in `ipc-contract.ts`.
+     */
+    if (backgroundChanged) {
+      await applyBackgroundMailCheck(next.keepReceivingWhenClosed)
+    }
   })
+
+  ipcMain.handle(IPC.backgroundMailCheckState, async () => ({
+    supported: process.platform === 'win32' && app.isPackaged,
+    registered: await backgroundMailCheckRegistered(),
+    removeHint: REMOVE_HINT,
+  }))
 
   ipcMain.handle(IPC.setBadgeCounts, (_e, counts: BadgeCounts) => {
     applyBadgeCounts({
