@@ -92,6 +92,123 @@ check(
   /'\/Create'[\s\S]{0,400}?'\/F'/.test(task),
 )
 
+// --- 4. registered is not the same as working -------------------------------
+//
+// The defect this section exists for shipped in 0.3.24 and 0.3.25 and was
+// invisible from inside the app: `schtasks /Create /SC MINUTE` cannot set task
+// *settings*, so the task inherited Task Scheduler's defaults — among them
+// "do not start on battery" and "stop when the machine goes on battery". On a
+// laptop that is the entire feature off, while `backgroundMailCheckRegistered`
+// answered true, the switch read on, and the task showed as Ready. Measured
+// with `Export-ScheduledTask` on a machine where it had been "working" for
+// days. Every check below is one way back to that state.
+
+check(
+  'the task is registered from XML, which is the only form that can set settings',
+  /'\/XML'/.test(task),
+  /\/SC['"]?,\s*\n?\s*['"]MINUTE/.test(task) && !/'\/XML'/.test(task)
+    ? 'only the switch form is present, so settings fall back to the defaults'
+    : '',
+)
+
+for (const [tag, value, why] of [
+  ['DisallowStartIfOnBatteries', 'false', 'the task would never start on an unplugged laptop'],
+  ['StopIfGoingOnBatteries', 'false', 'unplugging would terminate the running app'],
+  ['StartWhenAvailable', 'true', 'a trigger missed while asleep would never be made up'],
+  ['ExecutionTimeLimit', 'PT0S', 'the resident app would be killed after 72 hours'],
+]) {
+  // The XML emits this table, so the table is where the value lives — asserting
+  // on the rendered tag would only prove the template string exists.
+  check(
+    `the task asks for ${tag} = ${value}`,
+    new RegExp(`tag:\\s*'${tag}',\\s*\\n\\s*value:\\s*'${value}',`).test(task),
+    why,
+  )
+}
+check(
+  'the settings table is what the XML is built from',
+  /REQUIRED_TASK_SETTINGS\.map\([\s\S]{0,200}?<\$\{s\.tag\}>\$\{s\.value\}<\/\$\{s\.tag\}>/.test(task) &&
+    /<Settings>\s*\n\$\{settings\}/.test(task),
+  'a table nothing renders would pass every check above and set nothing',
+)
+check(
+  'the same table is what the registered task is checked against',
+  /REQUIRED_TASK_SETTINGS\.filter/.test(task),
+  'it must drive both the write and the read-back, or the two can drift apart',
+)
+
+check(
+  'the registered task is read back rather than trusted',
+  /backgroundMailCheckProblems/.test(task) && /'\/Query'[\s\S]{0,200}?'\/XML'/.test(task),
+  'an exit code of 0 means the XML parsed, not that the settings took',
+)
+check(
+  'what is wrong with the task reaches the settings screen',
+  /backgroundMailCheckProblems/.test(main) && /problems:/.test(main),
+)
+check(
+  'a task written by an older build is rewritten without the user touching the switch',
+  /backgroundMailApplied/.test(main) &&
+    /backgroundChanged\s*\|\|\s*!backgroundMailApplied/.test(main),
+  'applying only on change leaves every existing broken task in place forever',
+)
+check(
+  'the XML file is written as UTF-16, which is the only encoding schtasks accepts',
+  /utf16le/.test(task),
+)
+check(
+  'the document asks for nothing that needs elevation',
+  // The template's only trigger, checked by what follows it rather than by the
+  // absence of the word — this file's own comments name `<LogonTrigger>` to
+  // explain why it is not there, and a check that cannot tell an explanation
+  // from an implementation is a check that goes red for being documented.
+  /<\/TimeTrigger>\s*\n\s*<\/Triggers>/.test(task) &&
+    !/RunLevel>HighestAvailable/.test(task),
+  // Measured: the same document registers as an ordinary user without a logon
+  // trigger and is refused with "Access is denied" with one. Refused means the
+  // fallback path, and the fallback path is the battery-defaults bug.
+  'an element that needs admin sends every ordinary account down the fallback',
+)
+check(
+  'the answer schtasks gives is decoded by what it actually sent',
+  /0xff/.test(task) && /'utf16le'\s*:\s*'utf8'/.test(task),
+  // `/Query /XML` answers in UTF-8 with no BOM; `/Query` alone answers in
+  // UTF-16. Assuming either one decodes the other into mojibake, in which no
+  // tag name matches — and every setting would then read as "absent", i.e.
+  // wrong, i.e. the settings screen calls a healthy task broken.
+  'both encodings have to be handled, or the read-back reports nonsense',
+)
+check(
+  'the XML command element carries a bare path, not a quoted one',
+  /<Command>\$\{esc\(execPath\)\}<\/Command>/.test(task),
+  'quotes inside <Command> become part of the path and the task fails at run time',
+)
+
+// --- 5. the phone half: a swipe must not end background mail ----------------
+
+const idleService = await readFile(
+  'android/app/src/main/java/dev/aevistle/app/InboxIdleService.java',
+  'utf8',
+)
+check(
+  'swiping the app away arranges for the sync loop to come back',
+  /public void onTaskRemoved/.test(idleService),
+  'without it an OEM task-killer ends background mail until the app is next opened',
+)
+check(
+  'the restart is scheduled through an alarm rather than assumed from START_STICKY',
+  /getForegroundService/.test(idleService) && /AlarmManager/.test(idleService),
+)
+check(
+  'the worker is re-armed too, for the devices that refuse the alarm',
+  /onTaskRemoved[\s\S]{0,900}?InboxSyncScheduler\.rearm/.test(idleService),
+)
+check(
+  'nothing in the task-removal path can throw at the user as they close the app',
+  /onTaskRemoved[\s\S]{0,400}?try\s*\{/.test(idleService) &&
+    /catch\s*\(\s*SecurityException/.test(idleService),
+)
+
 // --- what it must not be ----------------------------------------------------
 
 check(

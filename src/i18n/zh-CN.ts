@@ -448,6 +448,7 @@ export const zhCN: Translations = {
   'settings.keepReceivingWhenClosed': '退出之后也继续收信',
   'settings.keepReceivingWhenClosedHint': '每 15 分钟在后台悄悄启动一次来查收新邮件；应用已经在运行时什么也不做。想手动取消，运行：{command}',
   'settings.keepReceivingFailed': 'Windows 拒绝创建后台任务，所以这个开关目前没有起作用。',
+  'settings.keepReceivingDegraded': '后台任务已经建好了，但 Windows 用的是它自己的默认设置——笔记本一拔电源它就不会运行。把这个开关关掉再打开，就会用正确的设置重建一次。',
   'settings.privacy': '隐私',
   'settings.logRetention': '记录保留',
   'settings.days': '天',

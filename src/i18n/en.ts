@@ -485,6 +485,7 @@ export const en = {
   'settings.keepReceivingWhenClosed': 'Keep receiving after I quit',
   'settings.keepReceivingWhenClosedHint': 'Starts Aevistle hidden every 15 minutes to check for mail, and does nothing while it is already running. To remove it by hand: {command}',
   'settings.keepReceivingFailed': 'Windows refused to create the background task, so this switch is not doing anything yet.',
+  'settings.keepReceivingDegraded': 'The background task exists but Windows registered it with its own defaults, so it will not run while this machine is on battery. Turn this switch off and on again to rewrite it.',
   'settings.privacy': 'Privacy',
   'settings.logRetention': 'Keep activity log for',
   'settings.days': 'days',

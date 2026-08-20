@@ -115,6 +115,21 @@ export interface BackgroundMailCheckState {
   supported: boolean
   /** True when a task by the app's name currently exists. */
   registered: boolean
+  /**
+   * What is wrong with the task that *is* registered, empty when nothing is.
+   *
+   * `registered` was the only answer until 0.3.26, and it is the answer that
+   * hid the bug: a task created with `schtasks`' plain switches inherits Task
+   * Scheduler's defaults, among them "do not start on battery" and "stop if
+   * the machine goes on battery". On a laptop that is the feature silently
+   * off — and `registered` said `true` throughout. Each entry names one such
+   * setting and why it matters, so the switch can say "on, but it will not
+   * run on battery" instead of just "on".
+   *
+   * Optional because a build older than the main process it is talking to
+   * would not send it; treat absent as "nothing known to be wrong".
+   */
+  problems?: string[]
   /** The exact command that removes it, so what was created is never a mystery. */
   removeHint: string
 }

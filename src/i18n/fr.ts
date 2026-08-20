@@ -454,6 +454,7 @@ export const fr: Translations = {
   'settings.keepReceivingWhenClosed': 'Continuer à recevoir après avoir quitté',
   'settings.keepReceivingWhenClosedHint': 'Lance Aevistle en arrière-plan toutes les 15 minutes pour relever le courrier, et ne fait rien quand l’application tourne déjà. Pour le retirer à la main : {command}',
   'settings.keepReceivingFailed': 'Windows a refusé de créer la tâche en arrière-plan ; cette option n’a donc aucun effet pour l’instant.',
+  'settings.keepReceivingDegraded': 'La tâche existe, mais Windows l’a enregistrée avec ses propres réglages : elle ne s’exécutera pas sur batterie. Désactivez puis réactivez cette option pour la réécrire.',
   'settings.privacy': 'Confidentialité',
   'settings.logRetention': 'Conserver le journal',
   'settings.days': 'jours',

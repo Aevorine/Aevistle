@@ -453,6 +453,7 @@ export const ru: Translations = {
   'settings.keepReceivingWhenClosed': 'Получать почту и после выхода',
   'settings.keepReceivingWhenClosedHint': 'Каждые 15 минут незаметно запускает Aevistle для проверки почты и ничего не делает, пока приложение уже работает. Убрать вручную: {command}',
   'settings.keepReceivingFailed': 'Windows отказалась создать фоновую задачу, поэтому переключатель пока ни на что не влияет.',
+  'settings.keepReceivingDegraded': 'Задача создана, но Windows записала её со своими настройками по умолчанию — от батареи она запускаться не будет. Выключите и снова включите переключатель, чтобы перезаписать её.',
   'settings.privacy': 'Приватность',
   'settings.logRetention': 'Хранить историю',
   'settings.days': 'дней',

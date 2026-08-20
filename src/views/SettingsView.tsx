@@ -1974,9 +1974,20 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
                 description={
                   s.keepReceivingWhenClosed === true && !backgroundMailCheck.registered
                     ? t('settings.keepReceivingFailed')
-                    : t('settings.keepReceivingWhenClosedHint', {
-                        command: backgroundMailCheck.removeHint,
-                      })
+                    : /*
+                        Registered and *wrong* is its own answer, and the one
+                        this row could not give until 0.3.26. A task carrying
+                        Task Scheduler's battery defaults exists, so the line
+                        above reads healthy, while on an unplugged laptop the
+                        feature does nothing at all. Saying which setting is
+                        wrong beats a switch that just says on.
+                      */
+                      s.keepReceivingWhenClosed === true &&
+                        (backgroundMailCheck.problems?.length ?? 0) > 0
+                      ? t('settings.keepReceivingDegraded')
+                      : t('settings.keepReceivingWhenClosedHint', {
+                          command: backgroundMailCheck.removeHint,
+                        })
                 }
               />
             ) : null}

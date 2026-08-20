@@ -1,9 +1,13 @@
 package dev.aevistle.app;
 
+import android.app.AlarmManager;
+import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
+import android.os.Build;
 import android.os.IBinder;
+import android.os.SystemClock;
 import android.util.Log;
 
 import androidx.annotation.Nullable;
@@ -142,6 +146,97 @@ public class InboxIdleService extends Service {
     @Override
     public void onTimeout(int startId, int fgsType) {
         stopSelf();
+    }
+
+    /**
+     * The user swiped the app out of Recents.
+     *
+     * This is what "关了" means on a phone, and it is the moment the promise on
+     * the settings screen is actually tested. On stock Android a foreground
+     * service keeps its process alive through a task removal and nothing more
+     * is needed — but that is not the phone this app is most often on. Huawei,
+     * Honor, Xiaomi and Samsung all ship a background-app manager that kills
+     * the whole process on swipe regardless of the foreground service, and
+     * {@code START_STICKY} is a promise the *platform* makes, which those
+     * managers are equally free to ignore. The symptom is exact: mail keeps
+     * arriving on the phone's own mail app and this one goes quiet until it is
+     * next opened, with nothing anywhere saying why.
+     *
+     * So two things happen here, deliberately belt-and-braces because each one
+     * fails on a different subset of devices:
+     *
+     *   1. An alarm to start the service again a few seconds later. This is
+     *      the only mechanism that can restore the 90-second loop. It is also
+     *      the one that can be refused — starting a foreground service from
+     *      the background is restricted on Android 12+, and the exemption this
+     *      relies on is the exact-alarm one, so a device where the user never
+     *      granted "Alarms &amp; reminders" falls through to (2).
+     *   2. A re-arm of {@link InboxSyncWorker}. WorkManager's schedule already
+     *      survives a task removal, so this is not usually load-bearing — but
+     *      it costs nothing and it is what still delivers mail, at the
+     *      fifteen-minute floor, when (1) is refused.
+     *
+     * Neither may throw: this runs on the main thread while the system is
+     * tearing the task down, and an exception here would be reported to the
+     * user as the app crashing *as they closed it*.
+     */
+    @Override
+    public void onTaskRemoved(Intent rootIntent) {
+        try {
+            if (!new InboxCache(this).enabledAccounts().isEmpty()) {
+                scheduleRestart(getApplicationContext());
+                InboxSyncScheduler.rearm(getApplicationContext());
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "onTaskRemoved: could not arrange a restart", e);
+        }
+        super.onTaskRemoved(rootIntent);
+    }
+
+    /**
+     * How long after a task removal to try starting again.
+     *
+     * Long enough that the system has finished tearing the task down — an
+     * immediate restart races that teardown and is simply killed with it — and
+     * short enough that the gap in coverage is shorter than one loop interval,
+     * so a swipe costs the user nothing they would notice.
+     */
+    private static final long RESTART_DELAY_MS = 5_000L;
+
+    private static void scheduleRestart(Context context) {
+        AlarmManager alarms = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
+        if (alarms == null) return;
+
+        Intent intent = new Intent(context, InboxIdleService.class);
+        int flags = PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE;
+        // `getForegroundService` is what tells the system this pending intent
+        // will call `startForeground`; `getService` on API 26+ would be the
+        // background-start that throws instead.
+        PendingIntent pending = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                ? PendingIntent.getForegroundService(context, 0, intent, flags)
+                : PendingIntent.getService(context, 0, intent, flags);
+
+        long at = SystemClock.elapsedRealtime() + RESTART_DELAY_MS;
+        /*
+         * Exact when the app is allowed exact alarms, inexact otherwise, and
+         * never a hard failure either way.
+         *
+         * Only the exact form carries the Android 12+ exemption that lets the
+         * resulting start call `startForeground` from the background. Asking
+         * for it without the permission throws `SecurityException` — which, in
+         * a method that runs while the app is being closed, would surface as a
+         * crash. `setAndAllowWhileIdle` is the honest fallback: the loop does
+         * not come back, and `InboxSyncWorker` carries the mail instead.
+         */
+        try {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || alarms.canScheduleExactAlarms()) {
+                alarms.setExactAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, at, pending);
+            } else {
+                alarms.setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, at, pending);
+            }
+        } catch (SecurityException e) {
+            Log.w(TAG, "scheduleRestart: the platform refused the alarm", e);
+        }
     }
 
     @Override

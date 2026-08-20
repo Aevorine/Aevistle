@@ -451,6 +451,7 @@ export const ar: Translations = {
   'settings.keepReceivingWhenClosed': 'استمر في استلام البريد بعد الخروج',
   'settings.keepReceivingWhenClosedHint': 'يشغّل Aevistle في الخلفية كل ١٥ دقيقة للبحث عن بريد جديد، ولا يفعل شيئًا أثناء عمل التطبيق أصلًا. للإزالة يدويًا: {command}',
   'settings.keepReceivingFailed': 'رفض ويندوز إنشاء المهمة الخلفية، لذا لا يفعل هذا المفتاح شيئًا حتى الآن.',
+  'settings.keepReceivingDegraded': 'المهمة الخلفية موجودة لكن ويندوز سجّلها بإعداداته الافتراضية، فلن تعمل أثناء تشغيل الجهاز على البطارية. أطفئ هذا المفتاح ثم أعده لإعادة كتابتها.',
   'settings.privacy': 'الخصوصية',
   'settings.logRetention': 'الاحتفاظ بالسجل',
   'settings.days': 'يوماً',

@@ -33,6 +33,7 @@ import { promises as fs, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { IPC, type BadgeCounts, type DesktopPrefs, type TrayCommand } from '../src/core/platform/ipc-contract'
 import {
   applyBackgroundMailCheck,
+  backgroundMailCheckProblems,
   backgroundMailCheckRegistered,
   REMOVE_HINT,
 } from './backgroundMailTask'
@@ -185,6 +186,18 @@ let desktopPrefs: DesktopPrefs = {
   notifyOnFailure: true,
   keepReceivingWhenClosed: false,
 }
+/**
+ * Whether this session has re-applied the scheduled task yet.
+ *
+ * The task is otherwise only written when the *value* changes, and a value that
+ * has been on for weeks never changes — so a task registered by an older build
+ * would keep its old definition forever. That is not hypothetical: every task
+ * 0.3.24 and 0.3.25 created carries Task Scheduler's battery defaults and does
+ * nothing on an unplugged laptop (see `backgroundMailTask.ts`), and no amount
+ * of using the app would have replaced it. Re-applying once per session is what
+ * repairs those installs, and it costs two `schtasks` calls at startup.
+ */
+let backgroundMailApplied = false
 /**
  * The last counts `IPC.setBadgeCounts` reported, reapplied whenever
  * `mainWindow` is (re)created.
@@ -1923,7 +1936,8 @@ function registerIpc(): void {
      * The switch's own truthfulness is `backgroundMailCheckState`'s job —
      * see the note on `keepReceivingWhenClosed` in `ipc-contract.ts`.
      */
-    if (backgroundChanged) {
+    if (backgroundChanged || !backgroundMailApplied) {
+      backgroundMailApplied = true
       await applyBackgroundMailCheck(next.keepReceivingWhenClosed)
     }
   })
@@ -1931,6 +1945,10 @@ function registerIpc(): void {
   ipcMain.handle(IPC.backgroundMailCheckState, async () => ({
     supported: process.platform === 'win32' && app.isPackaged,
     registered: await backgroundMailCheckRegistered(),
+    // Registered is not the same as working, and until 0.3.26 the app had no
+    // way to tell the two apart — see `backgroundMailTask.ts`. Empty means the
+    // task Task Scheduler actually holds carries the settings that make it run.
+    problems: await backgroundMailCheckProblems(),
     removeHint: REMOVE_HINT,
   }))
 

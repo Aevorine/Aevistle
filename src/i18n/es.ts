@@ -454,6 +454,7 @@ export const es: Translations = {
   'settings.keepReceivingWhenClosed': 'Seguir recibiendo tras salir',
   'settings.keepReceivingWhenClosedHint': 'Abre Aevistle en segundo plano cada 15 minutos para buscar correo, y no hace nada mientras ya está en marcha. Para quitarlo a mano: {command}',
   'settings.keepReceivingFailed': 'Windows se negó a crear la tarea en segundo plano, así que este interruptor todavía no hace nada.',
+  'settings.keepReceivingDegraded': 'La tarea existe, pero Windows la registró con sus valores predeterminados, así que no se ejecutará con la batería. Apaga y vuelve a encender este interruptor para reescribirla.',
   'settings.privacy': 'Privacidad',
   'settings.logRetention': 'Conservar el registro',
   'settings.days': 'días',
