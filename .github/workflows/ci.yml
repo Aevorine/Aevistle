@@ -105,7 +105,16 @@ jobs:
   # ---------------------------------------------------------------------------
   release-gate:
     name: Published release is signed
-    if: github.event_name == 'release'
+    # Also on `workflow_dispatch`, and that is not a convenience.
+    #
+    # A release event checks out the *tag*, so a gate that only runs that way
+    # can never verify a release whose tag predates a fix to the build itself —
+    # which is exactly the situation v0.3.29 was in, published from a commit
+    # whose lockfile could not install. `check:signing` asks about the latest
+    # *published* release over the API and reads nothing out of the working
+    # tree, so running it from `main` answers the same question about the same
+    # bytes a stranger would download.
+    if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
