@@ -7,9 +7,12 @@ import android.util.Log;
 
 import org.json.JSONObject;
 
+import java.util.Calendar;
+
 /**
- * Reads the two settings the app's own settings screen writes — display
- * theme and display language — from where {@code @capacitor/preferences}
+ * Reads the settings the app's own settings screen writes — display
+ * theme, display language, and the three that decide whether background mail
+ * says anything — from where {@code @capacitor/preferences}
  * actually keeps them, for the native code that has to know them before any
  * WebView exists to ask: {@link MainActivity}'s very first frame, and
  * {@link InboxSyncWorker}'s background notification, which runs on
@@ -33,6 +36,64 @@ final class AppSettingsSignal {
 
     private AppSettingsSignal() {
     }
+
+    /**
+     * One boolean out of the app's own settings, with the default it has on the
+     * other platform.
+     *
+     * Exists because the background notification path was reading none of them.
+     * {@code notifyOnNewMail} and the quiet window are honoured by the renderer
+     * and were ignored entirely by {@link InboxSyncRunner}, so turning the
+     * switch off silenced the app while it was open and changed nothing about
+     * the notifications that arrive when it is closed — which are the ones the
+     * setting is actually about. A switch that does nothing on the platform
+     * where it matters most is worse than an absent one: it is a promise.
+     *
+     * Absent reads as {@code fallback}, so a state file written before a
+     * setting existed behaves as the app's own default rather than as `false`.
+     */
+    static boolean flag(Context context, String key, boolean fallback) {
+        JSONObject settings = readSettings(context);
+        if (settings == null || settings.isNull(key)) return fallback;
+        return settings.optBoolean(key, fallback);
+    }
+
+    /**
+     * True when the moment falls inside the user's quiet window.
+     *
+     * Mirrors {@code isQuiet} in {@code src/core/schedule/schedule.ts},
+     * including the direction it fails in: an unparseable or zero-length window
+     * is *not* quiet. Holding mail back because a time string could not be read
+     * is the one outcome worse than announcing during the night.
+     */
+    static boolean isQuiet(Context context, long at) {
+        JSONObject settings = readSettings(context);
+        if (settings == null || !settings.optBoolean("quietHoursEnabled", false)) return false;
+        int start = minutesOfDay(settings.optString("quietStart", ""));
+        int end = minutesOfDay(settings.optString("quietEnd", ""));
+        if (start < 0 || end < 0 || start == end) return false;
+
+        Calendar cal = Calendar.getInstance();
+        cal.setTimeInMillis(at);
+        int now = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE);
+        // `start > end` is a window that wraps midnight — 22:00 to 07:00 — which
+        // is the shape almost every user actually picks.
+        return start < end ? now >= start && now < end : now >= start || now < end;
+    }
+
+    /** `HH:mm` as minutes past midnight, or -1 for anything that is not that. */
+    private static int minutesOfDay(String hhmm) {
+        if (hhmm == null) return -1;
+        java.util.regex.Matcher m = HHMM.matcher(hhmm.trim());
+        if (!m.matches()) return -1;
+        int h = Integer.parseInt(m.group(1));
+        int min = Integer.parseInt(m.group(2));
+        if (h > 23 || min > 59) return -1;
+        return h * 60 + min;
+    }
+
+    private static final java.util.regex.Pattern HHMM =
+            java.util.regex.Pattern.compile("^(\\d{1,2}):(\\d{2})$");
 
     /** The `settings` object out of the persisted app state, or null if there is none yet. */
     private static JSONObject readSettings(Context context) {

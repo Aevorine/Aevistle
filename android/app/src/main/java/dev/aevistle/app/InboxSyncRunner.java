@@ -121,7 +121,10 @@ final class InboxSyncRunner {
      * Three rules decide what qualifies, matching {@code core/newMail.ts} on
      * the other platform: unseen, inside {@link #WINDOW_MS}, and not in the
      * previous message list (read from {@code before} as it was *passed in*,
-     * ahead of this pass's own write to the cache).
+     * ahead of this pass's own write to the cache) — and, ahead of all three,
+     * the two switches that decide whether to speak at all. See
+     * {@link AppSettingsSignal#flag} for why those had to be added: they were
+     * read on one platform and not on this one.
      *
      * There is no "primed" rule here: unlike the renderer, this never starts
      * from an empty baseline, because it only ever runs against an account
@@ -130,9 +133,35 @@ final class InboxSyncRunner {
      */
     private static void announce(Context context, JSONObject before, JSONObject after) {
         try {
+            long now = System.currentTimeMillis();
+            /*
+             * The three settings this method used to ignore.
+             *
+             * Every one of them is honoured by the renderer and was honoured by
+             * nothing here, so all three were decoration on the platform where
+             * they matter most: a notification raised while the app is closed is
+             * exactly the notification these switches are about. Turning
+             * "announce new mail" off silenced the app while it was open and
+             * changed nothing at all when it was not.
+             */
+            if (!AppSettingsSignal.flag(context, "notifyOnNewMail", true)) return;
+            if (AppSettingsSignal.isQuiet(context, now)) return;
+            /*
+             * Rule 2, and the reason it can be switched off.
+             *
+             * A phone very often has a second mail app on the same account, and
+             * that app marks everything `\Seen` within seconds of delivery. By
+             * the time this runner looks, nothing is unread, and this one line
+             * therefore discards *every* arrival — permanently, on every device
+             * at once, while the mail itself syncs and lists perfectly.
+             * Measured on the reporting install: 187 cached messages, 187 of
+             * them already read, zero notifications for three days.
+             */
+            boolean includeRead = AppSettingsSignal.flag(context, "notifyReadElsewhere", false);
+
             Set<String> known = idsOf(before);
             List<JSONObject> arrivals = new ArrayList<>();
-            long cutoff = recencyCutoff(System.currentTimeMillis(), before.optLong("lastSyncAt", 0L));
+            long cutoff = recencyCutoff(now, before.optLong("lastSyncAt", 0L));
 
             JSONArray messages = after.optJSONArray("messages");
             if (messages == null) return;
@@ -141,7 +170,7 @@ final class InboxSyncRunner {
                 if (m == null) continue;
                 String id = m.optString("id", "");
                 if (id.isEmpty() || known.contains(id)) continue;
-                if (m.optBoolean("seen", false)) continue;
+                if (m.optBoolean("seen", false) && !includeRead) continue;
                 if (m.optLong("date", 0L) < cutoff) continue;
                 arrivals.add(m);
             }

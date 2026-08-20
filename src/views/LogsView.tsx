@@ -19,7 +19,7 @@ import { useApp } from '../state/AppState'
 import { useI18n } from '../i18n'
 import type { LogEntry } from '../core/types'
 
-type Filter = 'all' | 'send' | 'error' | 'security'
+type Filter = 'all' | 'send' | 'inbox' | 'error' | 'security'
 
 /**
  * A narrowing this screen can be *opened* with, rather than one the reader has
@@ -185,6 +185,7 @@ export function LogsView({
       if (filter === 'all') return true
       if (filter === 'error') return l.level === 'error'
       if (filter === 'security') return l.kind === 'security'
+      if (filter === 'inbox') return l.kind === 'inbox'
       return l.kind === 'send'
     })
   }, [state.logs, state.settings.logRetentionDays, filter, focused])
@@ -403,6 +404,10 @@ export function LogsView({
             options={[
               { value: 'all', label: t('logs.filterAll') },
               { value: 'send', label: t('logs.filterSend') },
+              // The receiving side, which had no row on this screen at all —
+              // every entry here was about mail going out. See `traceDelivery`
+              // in `state/AppState.tsx` for why the inbox now writes some.
+              { value: 'inbox', label: t('logs.filterInbox') },
               { value: 'error', label: t('logs.filterError') },
               { value: 'security', label: t('logs.filterSecurity') },
             ]}

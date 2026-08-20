@@ -516,7 +516,12 @@ export interface SendResult {
 export interface LogEntry {
   id: string
   at: number
-  kind: 'send' | 'schedule' | 'error' | 'system' | 'security'
+  /**
+   * `inbox` is the receiving side's trace: what a sync brought back and which
+   * rule decided whether to announce it. Counts only — see `ArrivalReport` in
+   * `core/mail/newMail` for why it carries no sender, subject or snippet.
+   */
+  kind: 'send' | 'schedule' | 'error' | 'system' | 'security' | 'inbox'
   level: 'info' | 'warn' | 'error'
   title: string
   detail?: string
@@ -892,6 +897,30 @@ export interface Settings {
    * exact thing a nightly window exists to hold back.
    */
   notifyOnNewMail?: boolean
+  /**
+   * Announce mail even when another device has already read it.
+   *
+   * Off by default, and it stays off because the rule it disables is right for
+   * a mailbox where "unread" means something: a message read on the phone two
+   * minutes ago is not news on the laptop.
+   *
+   * It exists because that assumption fails completely, and silently, for a
+   * common setup. A phone with a second mail app on the same account marks
+   * everything `\Seen` within seconds of delivery, so every message this app
+   * ever sees is already read and *every* new-mail notification is suppressed —
+   * on every device at once, forever, with the mail itself arriving and listing
+   * perfectly. Measured on the reporting user's own install: five accounts, 187
+   * cached messages, 187 of them `\Seen`, zero unread confirmed independently
+   * against the provider's own API, and forty notifications delivered by
+   * Windows in total with the most recent one predating three separate
+   * arrivals.
+   *
+   * The switch alone would only move the guessing somewhere else, so it ships
+   * with the trace: `kind: 'inbox'` log entries name the rule that suppressed
+   * each arrival, which is what makes this a decision rather than a dial to
+   * fiddle with.
+   */
+  notifyReadElsewhere?: boolean
   /**
    * Keep receiving mail after the app has been quit entirely.
    *

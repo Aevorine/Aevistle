@@ -60,7 +60,8 @@ import {
   rearm,
   type QuietHours,
 } from '../core/schedule/schedule'
-import { announcementFor, newArrivals, previewLine, restoredBaseline, senderName } from '../core/mail/newMail'
+import type { ArrivalReport } from '../core/mail/newMail'
+import { announcementFor, explainArrivals, previewLine, restoredBaseline, senderName } from '../core/mail/newMail'
 import {
   applyWorkCalendarDetailed,
   calendarWarning,
@@ -2572,6 +2573,66 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const seenInboxIds = useRef(new Map<string, { ids: Set<string>; primed: boolean; since?: number }>())
 
   /**
+   * Write down what a sync decided about announcing, and why.
+   *
+   * The receiving side had no record of its own decisions at all, and that is
+   * the reason "new mail raises nothing" survived four consecutive releases
+   * that each shipped a fix for it: every one of those fixes could only be
+   * checked by waiting for real mail and watching a corner of the screen. When
+   * nothing happened there was no way to tell which of six possible causes it
+   * was, so the next release guessed again.
+   *
+   * Deliberately quiet. A sync that found nothing new writes nothing — with a
+   * one-minute interval and five accounts, logging every tick would be seven
+   * thousand rows a day and would push the sends this log exists for off the
+   * end of the retention window. A row appears only when there was something to
+   * decide: an arrival announced, or an arrival a rule swallowed.
+   *
+   * Counts only, never subjects or senders. This log is exportable as CSV and
+   * the sync trace must not be the thing that turns that export into a copy of
+   * the mailbox.
+   */
+  const traceDelivery = useCallback(
+    (
+      accountId: string,
+      report: ArrivalReport,
+      withheld: 'off' | 'quiet' | null,
+      announced: number,
+    ) => {
+      const suppressed = report.readElsewhere + report.tooOld
+      const unprimed = !report.primed && report.fresh > 0
+      // Nothing decided, nothing to say. This is the overwhelming majority of
+      // syncs and it must stay free.
+      if (announced === 0 && suppressed === 0 && !unprimed) return
+
+      const label =
+        liveRef.current.accounts.find((a) => a.id === accountId)?.label ??
+        liveRef.current.inboxAccounts.find((i) => i.accountId === accountId)?.imapUsername ??
+        accountId
+
+      const parts: string[] = []
+      if (announced > 0) parts.push(i18n.t('inbox.trace.announced', { n: announced }))
+      if (report.readElsewhere > 0)
+        parts.push(i18n.t('inbox.trace.readElsewhere', { n: report.readElsewhere }))
+      if (report.tooOld > 0) parts.push(i18n.t('inbox.trace.tooOld', { n: report.tooOld }))
+      if (unprimed) parts.push(i18n.t('inbox.trace.notPrimed', { n: report.fresh }))
+      if (withheld === 'off') parts.push(i18n.t('inbox.trace.off'))
+      if (withheld === 'quiet') parts.push(i18n.t('inbox.trace.quiet'))
+
+      addLog({
+        kind: 'inbox',
+        // Not `warn` when something was suppressed: a rule doing its job is not
+        // a fault, and a log that cries wolf about every read newsletter is one
+        // nobody reads. The row itself is the signal.
+        level: 'info',
+        title: i18n.t('inbox.trace.title', { account: label }),
+        detail: parts.join(i18n.t('inbox.trace.join')),
+      })
+    },
+    [addLog, i18n],
+  )
+
+  /**
    * Tell the user that mail arrived, if it did and if they want to know.
    *
    * Reads `liveRef` rather than `state` for the settings, for the same reason
@@ -2589,17 +2650,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
       seenInboxIds.current.set(accountId, { ids, primed: true })
 
       const settings = liveRef.current.settings
-      if (settings.notifyOnNewMail === false) return
-      /*
-       * Quiet hours hold this back, unlike a verification code. Someone
-       * waiting for a code at 02:00 is waiting on purpose; a newsletter at
-       * 02:00 is precisely what a nightly window exists to keep off the
-       * screen. Both remain on the Inbox screen either way — nothing is lost,
-       * only deferred to when it is looked at.
-       */
-      if (isQuiet(Date.now(), quietFrom(settings))) return
 
-      const arrivals = newArrivals({
+      /*
+       * Computed before the two gates below, not after them.
+       *
+       * The gates used to return first, which cost nothing at the time and
+       * cost a great deal later: when someone reports "it never tells me about
+       * mail", there is no way to tell a mailbox with nothing new in it from a
+       * setting that is off, from a quiet window, from an arrival that every
+       * rule silently ate. Four releases were spent guessing between those.
+       * Deciding first and *then* gating means the trace below can name which
+       * one it was, and the cost is one filter over at most fifty rows.
+       */
+      const report = explainArrivals({
         before: previous?.ids ?? new Set<string>(),
         after: messages,
         now: Date.now(),
@@ -2607,8 +2670,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // Only ever set on a restored baseline, so this widens the recency
         // window for the first sync after a restart and for no other sync.
         since: previous?.since,
+        includeRead: settings.notifyReadElsewhere === true,
       })
-      const announcement = announcementFor(arrivals)
+
+      /*
+       * Quiet hours hold this back, unlike a verification code. Someone
+       * waiting for a code at 02:00 is waiting on purpose; a newsletter at
+       * 02:00 is precisely what a nightly window exists to keep off the
+       * screen. Both remain on the Inbox screen either way — nothing is lost,
+       * only deferred to when it is looked at.
+       */
+      const withheld: 'off' | 'quiet' | null =
+        settings.notifyOnNewMail === false
+          ? 'off'
+          : isQuiet(Date.now(), quietFrom(settings))
+            ? 'quiet'
+            : null
+
+      const announcement = withheld ? null : announcementFor(report.arrivals)
+      traceDelivery(accountId, report, withheld, announcement?.count ?? 0)
       if (!announcement) return
 
       const { count, newest } = announcement
@@ -2639,7 +2719,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           /* A refused notification must not take the sync down with it. */
         })
     },
-    [bridge, i18n],
+    [bridge, i18n, traceDelivery],
   )
 
   /**

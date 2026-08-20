@@ -594,7 +594,20 @@ async function runSync(
   config: InboxAccountState,
   tailUids: number[],
 ): Promise<InboxAccountState> {
-  const lock = await client.getMailboxLock(INBOX_PATH)
+  /*
+   * `readOnly`, like every other read path in this file — and unlike this line
+   * until now, which was the one place a plain sync selected the mailbox for
+   * writing.
+   *
+   * `SELECT` permits the server to set `\Seen` on a fetch; `EXAMINE` forbids
+   * it. Nothing here asks for a body without `BODY.PEEK[]`, so on a
+   * well-behaved server the two are identical — but "identical as long as
+   * nobody adds a fetch without PEEK" is a footgun with no upside, and the
+   * failure it produces is the worst kind: mail marked read on the server,
+   * across every device, by an app that was only supposed to be looking.
+   * `check-inbox-delivery.mjs` now holds every read path to this.
+   */
+  const lock = await client.getMailboxLock(INBOX_PATH, { readOnly: true })
   try {
     // `mailbox` is typed `MailboxObject | false` — `false` only outside an
     // open mailbox, which cannot happen here, but the type still has to be

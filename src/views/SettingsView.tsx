@@ -1828,6 +1828,19 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
               title={t('settings.notifyOnNewMail')}
             />
 
+            {/* Directly under it, and only meaningful while it is on: this is
+                the one rule inside "announce new mail" that can silence the
+                whole feature without anything looking wrong. Which rule
+                actually swallowed an arrival is on the activity log's
+                Receiving tab — see `traceDelivery`. */}
+            {s.notifyOnNewMail !== false ? (
+              <Switch
+                checked={s.notifyReadElsewhere === true}
+                onChange={(v) => patch({ notifyReadElsewhere: v })}
+                title={t('settings.notifyReadElsewhere')}
+              />
+            ) : null}
+
             {/*
               Not a notification setting, and here anyway — this card is where
               "what the mail does when it arrives" lives, and the alternative

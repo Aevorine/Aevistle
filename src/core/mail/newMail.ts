@@ -192,12 +192,100 @@ export function newArrivals(opts: {
   now: number
   primed: boolean
   since?: number
+  /**
+   * Announce mail another device has already read — rule 2, switched off.
+   *
+   * Off by default, because rule 2 is right for a mailbox where "unread" means
+   * something. It is wrong for a mailbox where nothing is ever unread, and that
+   * turns out not to be a corner case: a phone with a stock mail app polling
+   * the same account reads everything within seconds, so by the time any other
+   * device looks, every message is `\Seen` and this rule silently eats all of
+   * them. The result is an app that has fetched the mail, listed the mail, and
+   * says nothing about the mail — with nothing anywhere to say why.
+   *
+   * `explainArrivals` is the other half of the answer: the reason is now
+   * recorded whether or not this is on, so the choice can be made from evidence
+   * instead of from guessing.
+   */
+  includeRead?: boolean
 }): InboxMessage[] {
-  if (!opts.primed) return []
+  return explainArrivals(opts).arrivals
+}
+
+/** Why an arrival that the sync brought back was not worth announcing. */
+export type SuppressionReason = 'alreadyKnown' | 'readElsewhere' | 'tooOld'
+
+/**
+ * What a sync brought back, what was announced, and what ate the rest.
+ *
+ * The counts, not the messages: this is written to the activity log, which is
+ * exportable as CSV, so it carries no sender, no subject and no snippet.
+ *
+ * It exists because four releases in a row shipped a fix for "new mail raises
+ * nothing" against a decision that logged nothing and rendered nothing. Every
+ * one of those releases was verifiable only by waiting for mail to arrive and
+ * seeing whether anything happened — which is not a test, it is a vigil. A
+ * suppressed arrival now leaves a record naming the rule that suppressed it.
+ */
+export interface ArrivalReport {
+  /** Announced, newest first. */
+  arrivals: InboxMessage[]
+  /** How many messages this sync brought back at all. */
+  examined: number
+  /** Of those, how many were new to this device. */
+  fresh: number
+  /** Fresh, but already read somewhere else. */
+  readElsewhere: number
+  /** Fresh and unread, but older than the cutoff. */
+  tooOld: number
+  /** False when there was no trustworthy baseline, so nothing could be announced. */
+  primed: boolean
+  /** The moment before which an arrival stops counting as news. */
+  cutoff: number
+}
+
+/**
+ * `newArrivals`, with the reasons kept rather than thrown away.
+ *
+ * The rules are applied in the order they are documented at the top of this
+ * file and a message is attributed to the *first* one that drops it, so the
+ * counts partition the fresh messages exactly and cannot double-count.
+ */
+export function explainArrivals(opts: {
+  before: ReadonlySet<string>
+  after: readonly InboxMessage[]
+  now: number
+  primed: boolean
+  since?: number
+  includeRead?: boolean
+}): ArrivalReport {
   const cutoff = recencyCutoff(opts.now, opts.since)
-  return opts.after
-    .filter((m) => !opts.before.has(m.id) && !m.seen && m.date >= cutoff)
-    .sort((a, b) => b.date - a.date)
+  const report: ArrivalReport = {
+    arrivals: [],
+    examined: opts.after.length,
+    fresh: 0,
+    readElsewhere: 0,
+    tooOld: 0,
+    primed: opts.primed,
+    cutoff,
+  }
+  // Counted even when unprimed, so the first sync of a session can still say
+  // "37 messages, no baseline yet" rather than looking like an empty mailbox.
+  for (const m of opts.after) {
+    if (opts.before.has(m.id)) continue
+    report.fresh++
+    if (m.seen && !opts.includeRead) {
+      report.readElsewhere++
+      continue
+    }
+    if (m.date < cutoff) {
+      report.tooOld++
+      continue
+    }
+    if (opts.primed) report.arrivals.push(m)
+  }
+  report.arrivals.sort((a, b) => b.date - a.date)
+  return report
 }
 
 /**
