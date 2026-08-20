@@ -1,4 +1,4 @@
-# 独立安全审计 — 2026-08-20（0.3.27）
+# 独立安全审计 — 2026-08-20（0.3.27，当日增补至 0.3.29）
 
 上一次是 [2026-08-06](security-audit-2026-08-06.md)。这一次重点看四样：
 **签名密钥、依赖供应链、平台安全姿态、GitHub 仓库配置。**
@@ -15,7 +15,8 @@
 | 依赖有没有已知高危漏洞 | **本次修掉一个**（CVE-2026-40345），现在为零 |
 | 桌面端进程隔离 | **到位**，且 CSP 是收紧过的 |
 | 安卓端导出面 | **到位**，三个 `exported=true` 都是必须的 |
-| GitHub 仓库配置 | **有一个真缺口：`main` 没有任何分支保护** |
+| GitHub 仓库配置 | 当时：**`main` 没有任何分支保护**。**已在 0.3.29 关闭**，见第五节 |
+| CI 门禁本身 | **0.3.29 才发现：CI 已经连续红了 12 次、跨越 4 个版本**，见第五节 |
 
 ---
 
@@ -220,3 +221,185 @@ JSON
 - **没有做二进制加固评估**（反调试、字符串混淆、完整性自检）。这类手段对一个开源应用
   收益有限，且与"可复现构建"的目标冲突，属于要不要做的取舍，不是遗漏。
 - **本机之外的行为未验证**：所有实测都在一台 Windows 11 笔记本上完成。
+
+---
+
+# 五、当日增补（0.3.29）
+
+上面四节写完之后，同一天发了 0.3.29。发布过程中查出**一个比原报告里任何一条都严重的问题**，
+以及关闭了原报告点名的那个缺口。这一节按同样的规矩写：每条都给验的方法和原样输出。
+
+## 5.1 最严重的一条：CI 已经死了一周，没有任何人知道
+
+原报告第四节说"CI 工作流权限最小、不持有 secret"——这是真的，但漏问了一个更基本的问题：
+**它到底跑没跑起来过。**
+
+```
+$ gh run list --limit 12 --json createdAt,event,conclusion
+2026-08-20T11:44:19Z  release  failure
+2026-08-20T11:42:57Z  push     failure
+2026-08-20T10:46:54Z  push     failure
+2026-08-20T10:00:59Z  push     failure
+2026-08-20T09:04:20Z  push     failure
+2026-08-17T14:52:07Z  dynamic  failure
+2026-08-17T10:35:16Z  push     failure
+2026-08-15T07:13:41Z  push     failure
+2026-08-15T02:04:30Z  push     failure
+2026-08-14T14:21:42Z  push     failure
+2026-08-14T13:47:06Z  push     failure
+2026-08-14T13:30:07Z  push     failure
+```
+
+**12 次全红**，最早追到 2026-08-14，横跨 0.3.24 到 0.3.28 五个版本。原因不是某个检查失败，
+是 `npm ci` 这一步本身装不上：
+
+```
+npm error ERESOLVE could not resolve
+npm error peer typescript@">=4.8.4 <6.1.0" from @typescript-eslint/eslint-plugin@8.67.0
+npm error Found: typescript@7.0.2
+```
+
+`@typescript-eslint` **没有任何一个已发布版本支持 TypeScript 7**
+（8.67.0 是 latest，8.67.1 只有 alpha，peer 范围一律 `<6.1.0`）。
+这个项目升到 TS 7 之后，四个 devDependency 就装不上了，于是整个工作流在跑第一条检查之前就死了。
+
+### 为什么一周都没人发现
+
+因为它的症状和"没有 CI"完全一样：本地 `npm run check` 是绿的，推上去以后**没有任何东西会挡你**——
+`main` 没有分支保护（就是原报告点名的那条），所以红不红都能合。
+两个缺口互相掩护：门禁失效没人看见，是因为没有任何东西强制去看它。
+
+**0.3.24 是门禁红着发出去的**（记在 0.3.25 的更新说明里）。现在能补充一句：
+那次不可能被发现，因为当时根本不存在一次绿的运行可以"由绿转红"。
+
+### 处置
+
+移除了 `eslint` / `@typescript-eslint/*` / `eslint-plugin-react-hooks` 四个包、
+`check:lint` 脚本和 `eslint.config.js`。**不是绕过，是没得绕**——这个工具不支持这个项目在用的编译器。
+
+```
+$ npm ci --dry-run
+added 13 packages, and removed 106 packages in 2s
+```
+
+顺带把依赖树砍掉 106 个包，这本身是供应链面的收缩。
+等 `@typescript-eslint` 支持 TS 7 之后，恢复它是一条 `npm i -D` 加一个配置文件，两样都在 git 历史里。
+
+### 修完之后又露出两条
+
+`npm ci` 通了以后，工作流第一次真正跑到检查，立刻又红两条：
+
+1. **`Checks (Node 20)` 这条腿根本不可能绿。** `check:layout` 等浏览器探针用 CDP 驱动 Chrome，
+   需要全局 `WebSocket`（Node 22 才有），探针自己会打印
+   `This needs Node 22+ for a global WebSocket` 然后退出 1。矩阵改成 `['22','24']`，
+   README（6 种语言）和 CONTRIBUTING 里写的 "Node.js 20+" 一并改正。
+   同时发现它们写的 "JDK 17+" 也是错的——`build-android.mjs` 要求 21 并且低于 21 直接拒绝。
+
+2. **`check:layout` 的省略号断言量的是运行机的字体，不是 CSS。**
+   它的合成主题是 20 个汉字，在写这条断言的那台机器上刚好溢出 326px 的列几个像素，
+   在 ubuntu runner 上就刚好不溢出。改成 43 个字——任何能渲染出字形的字体下都必然溢出，
+   于是答案回到"这条 CSS 规则对不对"，而不是"这台机器装了什么字体"。
+
+### 现在的状态（原样）
+
+```
+$ gh run list --limit 1
+32366869196  workflow_dispatch  completed  success
+
+$ gh run view 32366869196 --json jobs
+Checks (Node 22) :: success
+Checks (Node 24) :: success
+Published release is signed :: success
+```
+
+**2026-08-14 以来第一次绿。**
+
+（中间有一次 `Checks (Node 24)` 报 `Chrome did not open its CDP port in time`，
+重跑即过——浏览器探针在 runner 上会偶发启动超时。这是可靠性问题不是正确性问题，
+写在这里而不是抹掉。）
+
+## 5.2 `main` 分支保护：已开
+
+原报告写了两个方案没有代做，理由是"会挡住当前发版用的直接 push"。
+这次按用户明确要求打开了**推荐的那一条**：
+
+```
+$ gh api -X PUT repos/Aevorine/Aevistle/branches/main/protection --input -
+{"required_status_checks":{"strict":false,"contexts":["Checks (Node 22)","Checks (Node 24)"]},
+ "enforce_admins":false,"required_pull_request_reviews":null,"restrictions":null,
+ "allow_force_pushes":false,"allow_deletions":false}
+
+读回：
+required checks: ['Checks (Node 22)', 'Checks (Node 24)']
+strict:          False
+enforce_admins:  False
+force pushes:    禁止
+deletions:       禁止
+```
+
+**这对你日常发版的影响：没有。** `enforce_admins: false` 意思是仓库管理员（也就是你）
+仍然可以直接 push 到 main，不需要开 PR、不需要等门禁绿。
+挡住的是**强推**和**删除分支**——也就是"改写已发布版本对应的提交历史"这条路。
+
+`contexts` 用的是矩阵改完之后的真实名字（22 / 24）。写成已经不存在的 `Node 20`
+会变成一条永远不会汇报的必需检查，那就是又造一个"看着有、其实没用"的门禁。
+
+`strict: false` 是刻意的：`strict: true` 要求分支必须先与 main 同步，对一个单人直接 push
+的仓库只会平添一次多余的 rebase。
+
+**不满意想撤销**：
+
+```bash
+gh api -X DELETE repos/Aevorine/Aevistle/branches/main/protection
+```
+
+## 5.3 发版校验进了 CI
+
+`check:signing` 验的是"**已经发出去**的那个签名，用**已经发出去**的那个公钥能不能验过"——
+陌生人下载安装包时唯一能做的那件事。它写好几个月了，一直只在维护者自己机器上手动跑，
+而且总是和它要检查的那次发布在同一次操作里，那恰恰是最不可能发现"这步被跳过了"的时刻。
+
+现在 `ci.yml` 里多一个 `release-gate` job，`release: published` 触发，跑
+`check:signing` + `check:update-signing`。不需要任何 secret——验签用的是随发布一起公开的公钥。
+
+它同时也接受 `workflow_dispatch`，理由写在 yml 里：`release` 事件检出的是**tag**，
+而 v0.3.29 的 tag 指向的那个提交，lockfile 正是装不上的那一版。
+`check:signing` 走 API 问"最新已发布版本"，不读工作区，所以从 main 上手动跑，
+问的是同一批字节。上面 5.1 结尾那次 `success` 就是这么来的。
+
+## 5.4 这次新代码引入的攻击面，逐条
+
+0.3.29 新增了一条"只提醒名单里的发件人"的规则。**白名单匹配是安全相关代码**，
+写错了就是"我以为只有公司的信会响"而实际上攻击者注册一个域名就能响。
+
+| 风险 | 处理 | 门禁 |
+| --- | --- | --- |
+| 域名白名单被相似域名绕过 | `example.com` 右锚定且必须有点分隔，**不匹配** `example.com.attacker.net` | `check:notify-policy` |
+| 域名条目被"结尾相同"的域名绕过 | **不匹配** `notexample.com` | 同上 |
+| 邮箱条目被子串绕过 | `a@b.com` 必须全等，**不匹配** `evil-a@b.com` | 同上 |
+| 空白名单被当成"谁都不许" | 空 = 所有人，且这是门禁里第一条断言，`--selftest` 专门把它反过来验证门禁真会红 | 同上 |
+| 24 小时统计泄露信箱内容 | 只存计数；断言 `from` / `subject` / `snippet` / `id` **一个都不在结构里** | 同上 |
+| 关键词绕过静音账户 | 静音优先级最高，关键词穿不过去 | 同上 |
+
+同一套规则在安卓后台用 Java 又实现了一遍（后台进程里没有 WebView）。
+两份实现会各自漂移，所以门禁直接读 Java 源码，验它有没有同样的右锚定和全等匹配。
+
+## 5.5 这一节没做的
+
+- **`secret_scanning_non_provider_patterns` 没能打开。** API 返回 200 但读回来仍是 `disabled`：
+
+  ```
+  $ gh api -X PATCH repos/Aevorine/Aevistle -f ...non_provider_patterns.status=enabled
+  （HTTP 200，无报错）
+  $ gh api repos/Aevorine/Aevistle --jq '.security_and_analysis.secret_scanning_non_provider_patterns.status'
+  disabled
+  ```
+
+  当前 gh token 的 scope 是 `gist, read:org, repo, workflow`，够不到这一项。
+  **要开只能走网页**：仓库 Settings → Code security → Secret scanning →
+  "Scan for non-provider patterns"。**不写成"已开"。**
+
+- `secret_scanning_validity_checks` 仍然**没有**打开，理由和原报告一样：
+  它会把疑似令牌发给对应服务商去验活，那是一次对外发送，属于你自己拍板的事。
+
+- 新代码**没有做动态测试**。`check:notify-policy` 是单元级的，不是拿真实钓鱼域名跑的实测。
