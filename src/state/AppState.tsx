@@ -63,6 +63,20 @@ import {
 import type { ArrivalReport } from '../core/mail/newMail'
 import { announcementFor, explainArrivals, previewLine, restoredBaseline, senderName } from '../core/mail/newMail'
 import {
+  applyPolicy,
+  keywordHit,
+  type NotifyPolicy,
+  type PolicyOutcome,
+} from '../core/mail/notifyPolicy'
+import { appendLedger, type NotifyLedgerEntry } from '../core/ops/notifyLedger'
+import {
+  markAlerted,
+  recordSync,
+  shouldAlert,
+  type FailureRun,
+} from '../core/ops/syncHealth'
+import { runLimited } from '../core/mail/syncLimit'
+import {
   applyWorkCalendarDetailed,
   calendarWarning,
   DEFAULT_WORK_CALENDAR,
@@ -545,6 +559,7 @@ function initialState(): AppState {
     pairedDevices: [],
     syncConflicts: [],
     deletedJobs: [],
+    notifyLedger: [],
     schemaVersion: SCHEMA_VERSION,
   }
 }
@@ -594,6 +609,16 @@ type Action =
   | { type: 'upsertTemplate'; template: Template }
   | { type: 'removeTemplate'; id: string }
   | { type: 'log'; entry: LogEntry }
+  /**
+   * One sync's worth of new-mail decisions, counts only.
+   *
+   * Separate from `log` rather than folded into it because the two are read by
+   * different people for different reasons: the activity log is a human-
+   * readable record someone scrolls, and this is arithmetic a screen adds up.
+   * Putting the counts in prose would mean the Settings summary had to parse
+   * its own log messages back out of six languages.
+   */
+  | { type: 'recordNotifyDecision'; entry: NotifyLedgerEntry }
   | { type: 'clearLogs' }
   /**
    * One row off the activity log.
@@ -878,6 +903,18 @@ export function reducer(state: AppState, action: Action): AppState {
     case 'clearLogs':
     case 'removeLog':
       return applyLogAction(state, action)
+
+    /*
+     * Counts only, pruned to a day on the way in — see `ops/notifyLedger.ts`.
+     * `appendLedger` returns the same array when nothing expired, but a new
+     * entry always means a new array, so there is no identity shortcut to take
+     * here the way `removeLog` takes one.
+     */
+    case 'recordNotifyDecision':
+      return {
+        ...state,
+        notifyLedger: appendLedger(state.notifyLedger ?? [], action.entry),
+      }
 
     // Data-folder-move path repair — see `services/attachmentsReducer.ts`
     // for the logic, moved there unchanged.
@@ -2598,8 +2635,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
       report: ArrivalReport,
       withheld: 'off' | 'quiet' | null,
       announced: number,
+      /**
+       * What the user's own three rules did to the survivors.
+       *
+       * Optional so a caller that has no policy — there is none today, and the
+       * parameter exists so that adding one later is not a signature change —
+       * still produces the trace it always did.
+       */
+      policy?: PolicyOutcome,
     ) => {
-      const suppressed = report.readElsewhere + report.tooOld
+      const suppressed =
+        report.readElsewhere +
+        report.tooOld +
+        (policy?.accountMuted ?? 0) +
+        (policy?.senderNotListed ?? 0)
       const unprimed = !report.primed && report.fresh > 0
       // Nothing decided, nothing to say. This is the overwhelming majority of
       // syncs and it must stay free.
@@ -2615,6 +2664,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (report.readElsewhere > 0)
         parts.push(i18n.t('inbox.trace.readElsewhere', { n: report.readElsewhere }))
       if (report.tooOld > 0) parts.push(i18n.t('inbox.trace.tooOld', { n: report.tooOld }))
+      if (policy && policy.accountMuted > 0)
+        parts.push(i18n.t('inbox.trace.accountMuted', { n: policy.accountMuted }))
+      if (policy && policy.senderNotListed > 0)
+        parts.push(i18n.t('inbox.trace.senderNotListed', { n: policy.senderNotListed }))
+      if (announced > 0 && policy && policy.forced > 0)
+        parts.push(i18n.t('inbox.trace.forced', { n: policy.forced }))
       if (unprimed) parts.push(i18n.t('inbox.trace.notPrimed', { n: report.fresh }))
       if (withheld === 'off') parts.push(i18n.t('inbox.trace.off'))
       if (withheld === 'quiet') parts.push(i18n.t('inbox.trace.quiet'))
@@ -2662,16 +2717,41 @@ export function AppProvider({ children }: { children: ReactNode }) {
        * Deciding first and *then* gating means the trace below can name which
        * one it was, and the cost is one filter over at most fifty rows.
        */
+      /*
+       * The user's own three rules, read once for this sync — see
+       * `core/mail/notifyPolicy.ts`. All three are absent on an install that
+       * has never opened the control, and an absent rule is not a rule, so
+       * everything below reduces to what shipped before them.
+       */
+      const policy: NotifyPolicy = {
+        accounts: settings.notifyAccounts,
+        senders: settings.notifySenders,
+        keywords: settings.notifyKeywords,
+      }
+      const now = Date.now()
+
       const report = explainArrivals({
         before: previous?.ids ?? new Set<string>(),
         after: messages,
-        now: Date.now(),
+        now,
         primed: previous?.primed ?? false,
         // Only ever set on a restored baseline, so this widens the recency
         // window for the first sync after a restart and for no other sync.
         since: previous?.since,
         includeRead: settings.notifyReadElsewhere === true,
+        /*
+         * The keyword rule, reaching back into the two rules above it.
+         *
+         * A subject with 验证码 in it has to survive "already read on the
+         * phone" and "older than half an hour", because both of those are
+         * routine for exactly the mail someone is sitting there waiting for.
+         * Only the keyword rule forces; a muted account or an unlisted sender
+         * is handled below, where it can be counted separately.
+         */
+        force: (m) => keywordHit(m, policy.keywords ?? []),
       })
+
+      const outcome = applyPolicy(report.arrivals, accountId, policy)
 
       /*
        * Quiet hours hold this back, unlike a verification code. Someone
@@ -2679,16 +2759,50 @@ export function AppProvider({ children }: { children: ReactNode }) {
        * 02:00 is precisely what a nightly window exists to keep off the
        * screen. Both remain on the Inbox screen either way — nothing is lost,
        * only deferred to when it is looked at.
+       *
+       * `outcome.urgent` is the one thing that reaches through it, and it is
+       * the user's own word doing the reaching: a keyword they typed is them
+       * saying in advance which mail is worth the exception. Without this the
+       * keyword rule would be silently void for nine hours a night — which is
+       * when the mail it exists for tends to arrive.
        */
       const withheld: 'off' | 'quiet' | null =
         settings.notifyOnNewMail === false
           ? 'off'
-          : isQuiet(Date.now(), quietFrom(settings))
+          : !outcome.urgent && isQuiet(now, quietFrom(settings))
             ? 'quiet'
             : null
 
-      const announcement = withheld ? null : announcementFor(report.arrivals)
-      traceDelivery(accountId, report, withheld, announcement?.count ?? 0)
+      const announcement = withheld ? null : announcementFor(outcome.keep)
+      traceDelivery(accountId, report, withheld, announcement?.count ?? 0, outcome)
+
+      /*
+       * Written whatever the outcome, including "nothing arrived".
+       *
+       * A ledger that only records the interesting syncs cannot answer the
+       * question it exists for: "it has told me nothing all day — is it
+       * broken?" is answered by *twelve quiet syncs* just as much as by a
+       * suppression count, and an empty ledger is indistinguishable from an
+       * app that never ran.
+       */
+      dispatch({
+        type: 'recordNotifyDecision',
+        entry: {
+          at: now,
+          accountId,
+          examined: report.examined,
+          fresh: report.fresh,
+          announced: announcement?.count ?? 0,
+          readElsewhere: report.readElsewhere,
+          tooOld: report.tooOld,
+          accountMuted: outcome.accountMuted,
+          senderNotListed: outcome.senderNotListed,
+          forced: announcement ? outcome.forced : 0,
+          quiet: withheld === 'quiet' ? outcome.keep.length : 0,
+          switchedOff: withheld === 'off' ? outcome.keep.length : 0,
+        },
+      })
+
       if (!announcement) return
 
       const { count, newest } = announcement
@@ -2719,7 +2833,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           /* A refused notification must not take the sync down with it. */
         })
     },
-    [bridge, i18n, traceDelivery],
+    [bridge, i18n, traceDelivery, dispatch],
   )
 
   /**
@@ -2831,6 +2945,68 @@ export function AppProvider({ children }: { children: ReactNode }) {
    */
   const syncInFlight = useRef(new Set<string>())
 
+  /**
+   * How many syncs in a row each account has failed, and when it last said so.
+   *
+   * A ref rather than state for the reason `seenInboxIds` is one: it changes on
+   * every sync of every account, nothing on screen renders from it, and putting
+   * it through the reducer would re-render the tree for bookkeeping. Losing it
+   * on restart is correct too — a fresh process has no evidence of a *run*, and
+   * inventing one from `lastSyncError` would fire the alert on the first failed
+   * sync after every launch.
+   */
+  const failureRuns = useRef(new Map<string, FailureRun>())
+
+  /**
+   * Fold one sync's outcome into that account's run, and say something if the
+   * run has gone on long enough.
+   *
+   * The red line on the Inbox screen is the right amount of noise for a failure
+   * you are watching happen. It is the wrong amount for the failure that
+   * actually costs mail: an account whose app password was revoked three weeks
+   * ago, failing every five minutes, on a screen nobody has opened. See
+   * `core/ops/syncHealth.ts` for the threshold and the cooldown, and why both
+   * are needed rather than either alone.
+   *
+   * `notifyOnFailure` governs it — the same switch that governs a failed
+   * *send*, deliberately, because "tell me when something I asked for did not
+   * happen" is one preference and not two.
+   */
+  const noteSyncOutcome = useCallback(
+    (accountId: string, ok: boolean, error?: string) => {
+      const run = recordSync(failureRuns.current.get(accountId), ok)
+      failureRuns.current.set(accountId, run)
+      if (ok) return
+      const now = Date.now()
+      if (!liveRef.current.settings.notifyOnFailure) return
+      if (!shouldAlert(run, now)) return
+      failureRuns.current.set(accountId, markAlerted(run, now))
+
+      const label =
+        liveRef.current.accounts.find((a) => a.id === accountId)?.label ??
+        liveRef.current.inboxAccounts.find((i) => i.accountId === accountId)?.imapUsername ??
+        accountId
+      addLog({
+        kind: 'inbox',
+        // `warn`, unlike the delivery trace: a rule suppressing a newsletter is
+        // the app working, and a mailbox unreachable for a quarter of an hour
+        // is not.
+        level: 'warn',
+        title: i18n.t('inbox.failRun.title', { account: label, n: run.count }),
+        detail: error ?? '',
+      })
+      void bridge
+        ?.notify(
+          i18n.t('inbox.failRun.title', { account: label, n: run.count }),
+          i18n.t('inbox.failRun.body'),
+        )
+        .catch(() => {
+          /* A refused notification must not take the sync down with it. */
+        })
+    },
+    [addLog, bridge, i18n],
+  )
+
   const syncInboxAccount = useCallback(
     async (accountId: string, override?: InboxAccountState) => {
       if (!bridge?.syncInbox) return
@@ -2902,6 +3078,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (!liveRef.current.accounts.some((a) => a.id === accountId)) {
           return { ok: !result.lastSyncError, error: result.lastSyncError, inbox: result }
         }
+        noteSyncOutcome(accountId, !result.lastSyncError, result.lastSyncError)
         // The queue is snapshotted here, not when the sync started: what
         // matters is what is still unconfirmed at the moment the reply lands.
         dispatch({
@@ -2977,6 +3154,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
             pendingSeen: pendingSeenFor(accountId),
           })
         }
+        // Outside the "account still exists" guard on purpose: a run of
+        // failures is a fact about the account whether or not there is still a
+        // row to write a red line onto, and `recordSync` is the only thing
+        // that ever clears the counter.
+        noteSyncOutcome(accountId, false, error)
         return { ok: false, error }
       } finally {
         // Both branches, always. A guard that is only released on success
@@ -2985,7 +3167,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         syncInFlight.current.delete(accountId)
       }
     },
-    [bridge, state.inboxAccounts, flushPendingSeen, pendingSeenFor],
+    [bridge, state.inboxAccounts, flushPendingSeen, pendingSeenFor, noteSyncOutcome],
   )
 
   const saveInboxAccount = useCallback(
@@ -3253,10 +3435,29 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const ids = inboxSignature.split('|').map((s) => s.split(':')[0])
     let stopped = false
 
+    /*
+     * At most three mailboxes at a time — see `core/mail/syncLimit.ts`.
+     *
+     * This used to start every account in the same tick. With one or two that
+     * is right and the limiter changes nothing; with five it is why "check
+     * now" took as long as the worst mailbox and the interface stuttered while
+     * it did. Five TLS handshakes, five IMAP logins and five mailbox scans
+     * beginning together are not five times faster than three at a time — they
+     * queue inside the runtime's own socket limits anyway, and the healthy
+     * accounts finish late for no reason but having been started alongside the
+     * slow one. Measured case: a 36.7-second connect against a 10-second
+     * budget, with four fine accounts stuck behind it.
+     *
+     * `stopped` is re-checked inside each task rather than only before the
+     * batch: a queued account must not sync after the effect has torn down.
+     */
     const runAll = () => {
-      for (const id of ids) {
-        if (!stopped) void syncInboxAccount(id)
-      }
+      void runLimited(
+        ids.map((id) => async () => {
+          if (stopped) return
+          await syncInboxAccount(id)
+        }),
+      )
     }
 
     // One immediate pass so a just-launched app shows today's mail, then the

@@ -32,6 +32,7 @@ import {
 import { useApp } from './AppState'
 import { getCachedBody, putCachedBody } from '../core/mail/bodyMemo'
 import { copyText } from '../core/platform/clipboard'
+import { runLimited } from '../core/mail/syncLimit'
 import { extractFromMessage, learnRule, linksFromSanitizedHtml } from '../core/ops/codeExtract'
 import type { Extracted } from '../core/ops/codeExtract'
 import type { NewHit } from '../core/ops/codeHistory'
@@ -324,9 +325,22 @@ export function CodeCheckProvider({ children }: { children: ReactNode }) {
         state.inboxAccounts.flatMap((i) => i.messages.map((m) => m.id)),
       )
 
-      const results = await Promise.all(
-        enabled.map((account) => syncInboxAccount(account.accountId)),
+      /*
+       * Three at a time, and one bad account no longer voids the check.
+       *
+       * `Promise.all` was wrong here twice over. It started every mailbox in
+       * the same tick — the stutter and the wait-for-the-worst that
+       * `core/mail/syncLimit.ts` exists to fix — and it rejects on the first
+       * throw, so a single unreachable account discarded the results of every
+       * account that had answered, including the one the code was actually in.
+       * `runLimited` never rejects; a task that threw is `{ ok: false }` in
+       * its own slot and reads as "no result from that account", which is what
+       * the `r?.` guards below already handle.
+       */
+      const settled = await runLimited(
+        enabled.map((account) => () => syncInboxAccount(account.accountId)),
       )
+      const results = settled.map((r) => (r.ok ? r.value : undefined))
 
       /* One account failing while another succeeds is not a failed check — the
          code may well have arrived in the one that worked. The failure is only

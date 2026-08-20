@@ -258,6 +258,24 @@ export function explainArrivals(opts: {
   primed: boolean
   since?: number
   includeRead?: boolean
+  /**
+   * A message this must not drop, whatever rules 2 and 3 say about it.
+   *
+   * The escape hatch for `core/mail/notifyPolicy.ts`'s keyword rule: a subject
+   * carrying 验证码 or "invoice" is the mail someone is actively waiting for,
+   * and both of the rules above it are calibrated for mail nobody is waiting
+   * for. Read elsewhere ten seconds ago on a phone, or landed an hour before
+   * the laptop woke — either is ordinary for a code, and either silently ate
+   * it before this existed.
+   *
+   * Rule 1 is deliberately *not* overridable. An unprimed baseline is not a
+   * preference; it is the app admitting it does not know what was already in
+   * the mailbox, and forcing past it would announce the whole inbox.
+   *
+   * Absent means nothing is forced, which is the behaviour that shipped
+   * before it: the caller that has no policy passes no predicate.
+   */
+  force?: (message: InboxMessage) => boolean
 }): ArrivalReport {
   const cutoff = recencyCutoff(opts.now, opts.since)
   const report: ArrivalReport = {
@@ -274,11 +292,15 @@ export function explainArrivals(opts: {
   for (const m of opts.after) {
     if (opts.before.has(m.id)) continue
     report.fresh++
-    if (m.seen && !opts.includeRead) {
+    // Evaluated once and before either rule, so a forced message is never
+    // attributed to a rule that did not in fact drop it — the counts still
+    // partition the fresh messages exactly.
+    const forced = opts.force?.(m) === true
+    if (!forced && m.seen && !opts.includeRead) {
       report.readElsewhere++
       continue
     }
-    if (m.date < cutoff) {
+    if (!forced && m.date < cutoff) {
       report.tooOld++
       continue
     }

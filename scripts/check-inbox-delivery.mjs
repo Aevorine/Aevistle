@@ -323,7 +323,19 @@ console.log('\n  The decision is written down\n')
   )
   check(
     'the trace is in the announce callback’s dependencies',
-    /\[bridge, i18n, traceDelivery\]/.test(app),
+    (app.match(/\[[^[\]]*\]/g) ?? []).some(
+      (deps) => /\btraceDelivery\b/.test(deps) && /\bi18n\b/.test(deps),
+    ),
+    /*
+     * The dependency *list*, not the exact text of it.
+     *
+     * This used to match the literal `[bridge, i18n, traceDelivery]`, which
+     * made it a gate on a string rather than on a property: adding a fourth
+     * legitimate dependency turned it red, and — far worse — reordering the
+     * three while dropping one would have kept it green in some spellings.
+     * What matters is that `traceDelivery` is in there at all; a stale closure
+     * would log against the wrong account label.
+     */
     'a stale closure here would log against the wrong account label',
   )
 }

@@ -15,6 +15,7 @@ import type { DraftSnapshot } from './sync/snapshots'
 import type { CalendarWarning, WorkCalendar, WorkdayPolicy } from './schedule/workCalendar'
 import type { PairedDevice } from './sync/pairedDevices'
 import type { ConflictSnapshot } from './sync/syncConflict'
+import type { NotifyLedgerEntry } from './ops/notifyLedger'
 
 export type Platform = 'desktop' | 'android' | 'web'
 
@@ -922,6 +923,42 @@ export interface Settings {
    */
   notifyReadElsewhere?: boolean
   /**
+   * Which accounts may raise new-mail notifications, keyed by `accountId`.
+   *
+   * Absent key means "follow `notifyOnNewMail`", so an install that never
+   * opens this control behaves exactly as it did before it existed. `false`
+   * means this mailbox never rings — the recruitment-spam account, the one
+   * that receives forty newsletters a day — while the others still do.
+   *
+   * The coarse control, and for most people the only one of the three they
+   * ever touch. See `core/mail/notifyPolicy.ts` for how it composes with the
+   * two below.
+   */
+  notifyAccounts?: Record<string, boolean>
+  /**
+   * Addresses or domains whose mail may ring. Empty means everyone's may.
+   *
+   * The strictest of the three rules and opt-in for that reason: once there is
+   * one entry, everybody else is silent. An empty list therefore has to mean
+   * "no opinion" rather than "nobody", since the two are indistinguishable on
+   * screen and one of them is the bug this feature exists to fix.
+   */
+  notifySenders?: string[]
+  /**
+   * Words that force a notification through, whatever else would have stopped
+   * it.
+   *
+   * A subject carrying 验证码 or "invoice" or "interview" rings even when the
+   * message was already read on another device, even when the sender is not on
+   * the list above, and even inside quiet hours — the rules exist for ordinary
+   * mail, and the point of "ordinary" is that some mail is not.
+   *
+   * Empty by default and deliberately not seeded: a keyword outranks quiet
+   * hours, so shipping with three of them would be shipping permission to wake
+   * someone at 03:00 for a word they never chose.
+   */
+  notifyKeywords?: string[]
+  /**
    * Keep receiving mail after the app has been quit entirely.
    *
    * Off by default, and it has to be: an application that relaunches itself
@@ -1283,6 +1320,13 @@ export const DEFAULT_SETTINGS: Settings = {
   inboxPrefetchFull: 'wifi',
   notifyOnCode: true,
   notifyOnNewMail: true,
+  /* All three empty/absent, which is the behaviour that shipped before them:
+     every account rings, every sender may, no word forces anything. Seeding
+     any of the three would be inventing a preference the user never stated —
+     and in the keyword case, inventing permission to override quiet hours. */
+  notifyAccounts: {},
+  notifySenders: [],
+  notifyKeywords: [],
   keepReceivingWhenClosed: false,
   autoCopyCode: true,
   codeRules: [],
@@ -1828,6 +1872,18 @@ export interface AppState {
    * confirmation that every peer has caught up: see `JOB_TOMBSTONE_MAX_AGE_MS`.
    */
   deletedJobs: JobTombstone[]
+  /**
+   * What the new-mail notification path decided, per sync, for the last day.
+   *
+   * Counts only — see `core/ops/notifyLedger.ts`, which owns the shape, the
+   * pruning and the arithmetic. It is here rather than in a module-level ref
+   * because the question it answers ("why did nothing ring last night?")
+   * outlives the process that could have answered it.
+   *
+   * Optional: an install written before this existed has none, and an empty
+   * ledger reads as "nothing has synced yet", which is the truth in both cases.
+   */
+  notifyLedger?: NotifyLedgerEntry[]
   schemaVersion: number
 }
 

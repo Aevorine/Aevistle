@@ -76,6 +76,7 @@ import {
   IconX,
 } from '../components/icons'
 import { VirtualList } from '../components/VirtualList'
+import { flattenByDay, type DayLabel } from '../core/mail/dayGroups'
 import { useSwipe } from '../components/useSwipe'
 import { useTwoPane } from '../components/useNarrow'
 import { MessageBodyFrame, textAsHtml, type FrameImages } from '../components/MessageBodyFrame'
@@ -875,6 +876,45 @@ export function InboxView({
     return [...list].sort((a, b) => b.date - a.date)
   }, [accountMessages, chips, codeByMessage, deferredQuery, scope])
   const searchPending = deferredQuery !== query
+
+  /**
+   * The list with a "Today" / "Yesterday" / weekday bar in front of each run.
+   *
+   * Forty rows of `09:42, 09:31, 09:07` say nothing about which of them are
+   * from this morning and which are from a Tuesday three weeks ago, and the
+   * timestamp column cannot say it without repeating the date on every row.
+   *
+   * Safe to hand straight to `VirtualList`: it measures real row heights from
+   * the DOM rather than assuming a uniform pitch, so a separator being half a
+   * message tall costs nothing but one measuring pass. See `core/mail/dayGroups.ts`
+   * for why the day boundary is computed from local midnight and not from
+   * dividing the epoch.
+   *
+   * `filteredMessages` is always sorted newest-first, so every run is
+   * contiguous and this never produces two groups for one day.
+   */
+  const dayRows = useMemo(
+    () => flattenByDay(filteredMessages, (m) => m.date, Date.now()),
+    [filteredMessages],
+  )
+
+  /**
+   * A separator's text, in the reading language.
+   *
+   * "Today" and "Yesterday" are words and are translated; a weekday and a date
+   * are formatted by `Intl` against the same locale the rest of the screen
+   * uses, because a hand-written weekday table is six more lists to keep in
+   * step and `Intl` already has them.
+   */
+  const dayLabelText = useCallback(
+    (label: DayLabel): string => {
+      if (label.kind === 'today') return t('inbox.day.today')
+      if (label.kind === 'yesterday') return t('inbox.day.yesterday')
+      if (label.kind === 'weekday') return formatDateTime(label.at, { weekday: 'long' })
+      return formatDateTime(label.at, { dateStyle: 'medium' })
+    },
+    [t, formatDateTime],
+  )
 
   const unreadTotal = useMemo(() => allMessages.filter((m) => !m.seen).length, [allMessages])
 
@@ -2329,7 +2369,22 @@ export function InboxView({
         */}
         <div className="inboxbar">
           <div className="inboxbar__text">
-            <h1 className="inboxbar__title">{t('inbox.title')}</h1>
+            {/*
+              Present for a screen reader, gone from the eye — `.sr-only`, the
+              same treatment `PageHead`'s `hideTitle` gives every other screen.
+
+              The name of the screen you are on is already said by the
+              highlighted tab you tapped to get here, so printing it again in
+              the top-left corner spends a line of a phone's screen restating
+              what the user just did. What that line is actually for is the
+              status underneath it — unread count and last check — which is the
+              thing this band exists to show and which moves up into the space.
+
+              The heading element itself stays rather than becoming a `div`:
+              it is the document's `h1`, and a screen without one is a screen
+              a screen reader cannot summarise.
+            */}
+            <h1 className="inboxbar__title sr-only">{t('inbox.title')}</h1>
             <p className="inboxbar__status" aria-live="polite">
               {headStatus}
             </p>
@@ -2869,8 +2924,15 @@ export function InboxView({
               {pull.armed ? t('inboxbar.pullRelease') : t('inboxbar.pull')}
             </div>
             <VirtualList
-              items={filteredMessages}
-              keyOf={(m) => m.id}
+              items={dayRows}
+              /*
+               * A separator's key is its local midnight, prefixed so it can
+               * never collide with a message id. `VirtualList` caches measured
+               * heights under this key, and a separator is roughly half a
+               * message row tall — a shared key would mean each caching the
+               * other's height and the scrollbar never settling.
+               */
+              keyOf={(row) => (row.type === 'separator' ? `day:${row.key}` : row.item.id)}
               /* Measured, not guessed. At 360x800 with forty messages seeded,
                  every row is 65.9px — the same whatever the subject length,
                  which is what the one-line clamp buys — and `.joblist` adds a
@@ -2885,7 +2947,16 @@ export function InboxView({
               scrollerClassName="list-pane"
               rowsClassName="joblist"
             >
-              {(m) => {
+              {(row) => {
+                if (row.type === 'separator') {
+                  return (
+                    <div className="daysep" role="presentation">
+                      <span className="daysep__label">{dayLabelText(row.label)}</span>
+                      <span className="daysep__count">{row.count}</span>
+                    </div>
+                  )
+                }
+                const m = row.item
                 /* Looked up once per row, not per element inside it — see
                    `codeByMessage`. `undefined` on the overwhelming majority of
                    rows, which is the case this must cost nothing on. */

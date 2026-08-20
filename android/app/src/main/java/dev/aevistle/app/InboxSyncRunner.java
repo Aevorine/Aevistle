@@ -145,7 +145,34 @@ final class InboxSyncRunner {
              * changed nothing at all when it was not.
              */
             if (!AppSettingsSignal.flag(context, "notifyOnNewMail", true)) return;
-            if (AppSettingsSignal.isQuiet(context, now)) return;
+            /*
+             * Rule 1 of `core/mail/notifyPolicy.ts`, and the one thing a keyword
+             * never talks its way past: muting an account is the user saying
+             * "never, from here" in as many words.
+             *
+             * Read before anything else is computed, because it makes the rest
+             * of this method pointless.
+             */
+            String accountId = after.optString("accountId", "");
+            if (!AppSettingsSignal.accountNotifies(context, accountId)) return;
+
+            /*
+             * Rules 2 and 3. Read once for the whole batch rather than per
+             * message: both are SharedPreferences reads behind a JSON parse,
+             * and a fifty-message sync would otherwise do a hundred of them.
+             */
+            List<String> allow = AppSettingsSignal.strings(context, "notifySenders");
+            List<String> keywords = AppSettingsSignal.strings(context, "notifyKeywords");
+
+            /*
+             * Quiet hours moved down past the loop, and that is the whole of
+             * what makes the keyword rule mean anything: a check here returns
+             * before any message has been looked at, so a subject carrying
+             * 验证码 at 02:00 — which is when such mail actually arrives — was
+             * silently discarded by a window meant for newsletters. Now the
+             * batch is built first and the window only applies if nothing in it
+             * was urgent.
+             */
             /*
              * Rule 2, and the reason it can be switched off.
              *
@@ -165,16 +192,35 @@ final class InboxSyncRunner {
 
             JSONArray messages = after.optJSONArray("messages");
             if (messages == null) return;
+            boolean anyUrgent = false;
             for (int i = 0; i < messages.length(); i++) {
                 JSONObject m = messages.optJSONObject(i);
                 if (m == null) continue;
                 String id = m.optString("id", "");
                 if (id.isEmpty() || known.contains(id)) continue;
-                if (m.optBoolean("seen", false) && !includeRead) continue;
-                if (m.optLong("date", 0L) < cutoff) continue;
+                /*
+                 * Evaluated before the three rules below so it can reach past
+                 * all of them — the same order, and the same reasoning, as the
+                 * `force` predicate in `core/mail/newMail.ts`. Read elsewhere
+                 * ten seconds ago on a second mail app, or landed an hour before
+                 * the phone woke: both are routine for a verification code, and
+                 * both silently ate it before this existed.
+                 */
+                boolean urgent = AppSettingsSignal.keywordHit(
+                        m.optString("subject", ""), m.optString("from", ""), keywords);
+                if (!urgent) {
+                    if (m.optBoolean("seen", false) && !includeRead) continue;
+                    if (m.optLong("date", 0L) < cutoff) continue;
+                    if (!AppSettingsSignal.senderAllowed(m.optString("from", ""), allow)) continue;
+                }
+                if (urgent) anyUrgent = true;
                 arrivals.add(m);
             }
             if (arrivals.isEmpty()) return;
+            // See the comment above `allow`: the window applies to ordinary
+            // mail, and a keyword is the user having said in advance which mail
+            // is not ordinary.
+            if (!anyUrgent && AppSettingsSignal.isQuiet(context, now)) return;
 
             JSONObject newest = arrivals.get(0);
             for (JSONObject m : arrivals) {
@@ -186,7 +232,6 @@ final class InboxSyncRunner {
             if (subject.isEmpty()) subject = context.getString(R.string.notify_no_subject);
             String snippet = newest.optString("snippet", "").replaceAll("\\s+", " ").trim();
             String body = snippet.isEmpty() ? subject : subject + " — " + snippet;
-            String accountId = after.optString("accountId", "");
             String markReadLabel = context.getString(R.string.notify_mark_read);
 
             if (arrivals.size() == 1) {

@@ -940,3 +940,52 @@
 .imageblock__why > li + li {
   margin-top: var(--sp-1);
 }
+
+/* --------------------------------------------------------------------------
+   The day separator
+
+   One bar in front of each run of messages from the same day — "Today",
+   "Yesterday", a weekday inside the current week, a date past that. Forty rows
+   of `09:42, 09:31, 09:07` say nothing about which of them are from this
+   morning and which are from three weeks ago, and the timestamp column cannot
+   answer that without printing the date on every row.
+
+   Sticky rather than scrolled away with its group. The question it answers is
+   "what am I looking at right now", which is a question you have while
+   scrolling, not one you had when the bar went past. `top: 0` inside
+   `.list-pane`, which is the scroller.
+
+   Deliberately short. `VirtualList` measures real heights rather than assuming
+   a pitch, so this costs one measuring pass and no rows — but a separator as
+   tall as a message would halve how much mailbox fits on a phone screen.
+   -------------------------------------------------------------------------- */
+.daysep {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-1) var(--sp-1);
+  /* Opaque, not translucent: the rows scroll *under* this, and a see-through
+     bar with a subject sliding beneath it is unreadable at exactly the moment
+     it is being read. */
+  background: var(--bg);
+  border-block-end: 1px solid var(--border-subtle);
+  font-size: var(--text-sm);
+  line-height: var(--leading-tight);
+  letter-spacing: var(--tracking-tight);
+}
+
+.daysep__label {
+  color: var(--text-2);
+  font-weight: 600;
+}
+
+/* How many messages are in this day. A number, so it takes the tabular
+   figures every other count in the app uses. */
+.daysep__count {
+  color: var(--text-3);
+  font-variant-numeric: var(--numeric);
+}

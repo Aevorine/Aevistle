@@ -5,9 +5,13 @@ import android.content.SharedPreferences;
 import android.content.res.Configuration;
 import android.util.Log;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.util.ArrayList;
 import java.util.Calendar;
+import java.util.List;
+import java.util.Locale;
 
 /**
  * Reads the settings the app's own settings screen writes — display
@@ -56,6 +60,94 @@ final class AppSettingsSignal {
         JSONObject settings = readSettings(context);
         if (settings == null || settings.isNull(key)) return fallback;
         return settings.optBoolean(key, fallback);
+    }
+
+    /**
+     * One list-of-strings setting, lower-cased, blanks dropped.
+     *
+     * The Java half of {@code core/mail/notifyPolicy.ts}'s sender allowlist and
+     * keyword list. Both have to be readable here for the same reason
+     * {@link #flag} does: the notification that arrives while the app is closed
+     * is raised by {@link InboxSyncRunner} with no WebView in the process, so a
+     * rule the renderer honours and this does not is a rule that works only
+     * while you are looking at the screen.
+     *
+     * Absent, malformed, or not an array all read as an empty list — which is
+     * "no opinion" in both rules, never "nothing gets through".
+     */
+    static List<String> strings(Context context, String key) {
+        List<String> out = new ArrayList<>();
+        JSONObject settings = readSettings(context);
+        if (settings == null) return out;
+        JSONArray raw = settings.optJSONArray(key);
+        if (raw == null) return out;
+        for (int i = 0; i < raw.length(); i++) {
+            String v = raw.optString(i, "").trim().toLowerCase(Locale.ROOT);
+            if (!v.isEmpty()) out.add(v);
+        }
+        return out;
+    }
+
+    /**
+     * Whether this account is allowed to raise new-mail notifications.
+     *
+     * Mirrors {@code accountNotifies} in {@code core/mail/notifyPolicy.ts}: an
+     * account with no entry follows the global switch, and only an explicit
+     * {@code false} mutes it. An absent {@code notifyAccounts} object therefore
+     * behaves exactly as the build before it did.
+     */
+    static boolean accountNotifies(Context context, String accountId) {
+        if (accountId == null || accountId.isEmpty()) return true;
+        JSONObject settings = readSettings(context);
+        if (settings == null) return true;
+        JSONObject accounts = settings.optJSONObject("notifyAccounts");
+        if (accounts == null || accounts.isNull(accountId)) return true;
+        return accounts.optBoolean(accountId, true);
+    }
+
+    /**
+     * True when the sender is on the allowlist, or when there is no allowlist.
+     *
+     * Mirrors {@code senderAllowed} in {@code core/mail/notifyPolicy.ts},
+     * including the distinction that makes it safe: an entry containing
+     * {@code @} is an address and must match in full, while an entry without
+     * one is a domain and matches only that domain or a subdomain of it. A
+     * plain substring test would let {@code a@b.com} match
+     * {@code evil-a@b.com.attacker.net}.
+     */
+    static boolean senderAllowed(String from, List<String> allow) {
+        if (allow.isEmpty()) return true;
+        String address = from == null ? "" : from.trim().toLowerCase(Locale.ROOT);
+        int open = address.indexOf('<');
+        int close = address.indexOf('>');
+        if (open >= 0 && close > open) address = address.substring(open + 1, close).trim();
+        String domain = address.substring(address.lastIndexOf('@') + 1);
+        for (String entry : allow) {
+            if (entry.indexOf('@') >= 0) {
+                if (entry.equals(address)) return true;
+                continue;
+            }
+            if (domain.equals(entry) || domain.endsWith("." + entry)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * True when the subject or the sender carries one of the keywords.
+     *
+     * Mirrors {@code keywordHit}, substring matching included — the list is
+     * written by a person for their own mailbox in their own language, and a
+     * word-boundary test would fail every language that does not put spaces
+     * between words.
+     */
+    static boolean keywordHit(String subject, String from, List<String> keywords) {
+        if (keywords.isEmpty()) return false;
+        String haystack = ((subject == null ? "" : subject) + " " + (from == null ? "" : from))
+                .toLowerCase(Locale.ROOT);
+        for (String k : keywords) {
+            if (haystack.contains(k)) return true;
+        }
+        return false;
     }
 
     /**

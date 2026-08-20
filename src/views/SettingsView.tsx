@@ -11,9 +11,12 @@ import {
   StatusChip,
   Switch,
   useConfirm,
+  useFieldId,
   useToast,
   PageHead,
 } from '../components/ui'
+import { KEYWORD_SUGGESTION_KEYS } from '../core/mail/notifyPolicy'
+import { reasons, summarise } from '../core/ops/notifyLedger'
 import {
   IconAlert,
   IconCalendar,
@@ -1842,6 +1845,48 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
             ) : null}
 
             {/*
+              The one control on this card that touches nothing else.
+
+              Every switch above is a promise about mail that has not arrived
+              yet, which is why "it doesn't notify me" took four releases to
+              pin down: there was no way to separate a wrong setting from a
+              blocked channel from a mailbox with nothing new in it. This
+              raises one now, through the same call real mail uses, and fetches
+              nothing — so a silent screen after pressing it is a system-level
+              answer rather than another guess.
+            */}
+            <Field label={t('settings.notifyTest')} hint={t('settings.notifyTestHint')}>
+              <div className="btn-row">
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    void bridge
+                      ?.notify(t('settings.notifyTestTitle'), t('settings.notifyTestBody'))
+                      .then(() =>
+                        toast.push({ tone: 'success', title: t('settings.notifyTestSent') }),
+                      )
+                      .catch((e: unknown) =>
+                        toast.push({
+                          tone: 'error',
+                          title: t('settings.notifyTestFailed', {
+                            error: e instanceof Error ? e.message : String(e),
+                          }),
+                        }),
+                      )
+                  }}
+                >
+                  {t('settings.notifyTest')}
+                </Button>
+              </div>
+            </Field>
+
+            {/* The counts, and why. See `NotifyStats` for what it refuses to
+                render and why an empty ledger is not an error. */}
+            <NotifyStats />
+
+            {s.notifyOnNewMail !== false ? <NotifyPolicyFields /> : null}
+
+            {/*
               Not a notification setting, and here anyway — this card is where
               "what the mail does when it arrives" lives, and the alternative
               was a card of one switch. See `core/mail/math.ts` for why the
@@ -2456,6 +2501,209 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
  * the chunk backing this tile has typically already loaded by the time either
  * caller asks for it.
  */
+/**
+ * What the notification path did over the last day, and what stopped the rest.
+ *
+ * The one screen in the app that can distinguish "your settings are wrong"
+ * from "the feature is broken" from "no mail arrived". Every input it needs
+ * was already being computed on every sync and thrown away — see
+ * `core/ops/notifyLedger.ts` for the record and `AppState.tsx` for where it is
+ * written.
+ *
+ * Renders a sentence rather than a table because the answer is one sentence:
+ * twelve arrived, three rang, nine did not, and here is the rule that ate the
+ * nine. A table would be the same numbers with the reading left to the user.
+ */
+function NotifyStats() {
+  const { state } = useApp()
+  const { t } = useI18n()
+
+  /*
+   * `Date.now()` is read once per render rather than per row, so every line
+   * below is summarised against the same instant. Not memoised on a timer: the
+   * numbers move when a sync lands, and a sync landing re-renders this anyway
+   * through `state`.
+   */
+  const now = Date.now()
+  const summary = useMemo(() => summarise(state.notifyLedger ?? [], now), [state.notifyLedger, now])
+  const breakdown = useMemo(() => reasons(summary), [summary])
+
+  return (
+    <Field label={t('settings.notifyStats')}>
+      {summary.syncs === 0 ? (
+        <p className="hint">{t('settings.notifyStatsNone')}</p>
+      ) : (
+        <>
+          <p className="hint">
+            {t('settings.notifyStatsLine', {
+              examined: summary.fresh,
+              announced: summary.announced,
+              held: summary.heldBack,
+            })}{' '}
+            · {t('settings.notifyStatsSyncs', { n: summary.syncs })}
+          </p>
+          {summary.forced > 0 ? (
+            <p className="hint">{t('settings.notifyStatsForced', { n: summary.forced })}</p>
+          ) : null}
+          {breakdown.length > 0 ? (
+            <ul className="hint">
+              {breakdown.map((r) => (
+                <li key={r.id}>{t(`settings.notifyReason.${r.id}`, { n: r.count })}</li>
+              ))}
+            </ul>
+          ) : null}
+        </>
+      )}
+    </Field>
+  )
+}
+
+/**
+ * A line-per-entry list, edited as text.
+ *
+ * Chips were the obvious alternative and are wrong for this: both lists are
+ * things a person pastes — five addresses out of a mail client, three words in
+ * their own language — and a chip field turns a paste into five separate
+ * gestures. Committed on blur rather than per keystroke, because stripping
+ * blank lines while someone is still typing eats the newline they just pressed
+ * and moves the caret out from under them.
+ */
+function LineListField({
+  label,
+  hint,
+  placeholder,
+  values,
+  onCommit,
+  suggestions,
+}: {
+  label: string
+  hint: string
+  placeholder: string
+  values: string[]
+  onCommit: (next: string[]) => void
+  suggestions?: string[]
+}) {
+  const id = useFieldId('linelist')
+  const [text, setText] = useState(() => values.join('\n'))
+
+  /*
+   * Re-seeded when the stored list changes *and* this field is not the reason
+   * it changed — a suggestion chip below writes straight to settings, and
+   * without this the textarea would keep showing what it held before the tap.
+   */
+  useEffect(() => {
+    setText(values.join('\n'))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [values.join('\n')])
+
+  const commit = (raw: string) => {
+    const next: string[] = []
+    for (const line of raw.split('\n')) {
+      const v = line.trim()
+      // De-duplicated case-insensitively: the same address typed twice is one
+      // rule, and a list that shows it twice looks like a bug in the list.
+      if (v && !next.some((x) => x.toLowerCase() === v.toLowerCase())) next.push(v)
+    }
+    onCommit(next)
+  }
+
+  return (
+    <Field label={label} hint={hint} htmlFor={id}>
+      <textarea
+        id={id}
+        className="textarea"
+        rows={3}
+        value={text}
+        placeholder={placeholder}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={(e) => commit(e.target.value)}
+      />
+      {suggestions && suggestions.length > 0 ? (
+        <div className="btn-row">
+          {suggestions
+            .filter((sug) => !values.some((v) => v.toLowerCase() === sug.toLowerCase()))
+            .map((sug) => (
+              <Button key={sug} variant="ghost" onClick={() => onCommit([...values, sug])}>
+                + {sug}
+              </Button>
+            ))}
+        </div>
+      ) : null}
+    </Field>
+  )
+}
+
+/**
+ * The three rules that decide which mail is worth interrupting for.
+ *
+ * Rendered only while "announce new mail" is on, for the same reason the
+ * read-elsewhere switch above it is: they are all refinements of one promise,
+ * and refinements of a promise nobody made are noise.
+ *
+ * See `core/mail/notifyPolicy.ts` for what each one does and, more usefully,
+ * for what an *empty* one does — all three read as "no opinion", which is what
+ * keeps this screen safe to ship to an install that never opens it.
+ */
+function NotifyPolicyFields() {
+  const { state, dispatch } = useApp()
+  const { t } = useI18n()
+  const s = state.settings
+  const patch = (p: Partial<typeof s>) => dispatch({ type: 'patchSettings', patch: p })
+
+  /*
+   * Only accounts that actually receive. An account configured for sending
+   * only has no mailbox to be notified about, and a switch for it would be a
+   * control with nothing behind it — which is the class of bug this whole
+   * round is about.
+   */
+  const receiving = state.inboxAccounts.filter((i) => i.enabled)
+
+  return (
+    <>
+      <div className="section-label" style={{ marginTop: 'var(--sp-2)' }}>
+        {t('settings.notifyWho')}
+      </div>
+      <p className="hint">{t('settings.notifyWhoHint')}</p>
+
+      {receiving.length > 1
+        ? receiving.map((inbox) => {
+            const label =
+              state.accounts.find((a) => a.id === inbox.accountId)?.label ||
+              inbox.imapUsername ||
+              inbox.accountId
+            return (
+              <Switch
+                key={inbox.accountId}
+                checked={s.notifyAccounts?.[inbox.accountId] !== false}
+                onChange={(v) =>
+                  patch({ notifyAccounts: { ...(s.notifyAccounts ?? {}), [inbox.accountId]: v } })
+                }
+                title={`${t('settings.notifyPerAccount')} — ${label}`}
+              />
+            )
+          })
+        : null}
+
+      <LineListField
+        label={t('settings.notifySenders')}
+        hint={t('settings.notifySendersHint')}
+        placeholder={t('settings.notifySendersPlaceholder')}
+        values={s.notifySenders ?? []}
+        onCommit={(next) => patch({ notifySenders: next })}
+      />
+
+      <LineListField
+        label={t('settings.notifyKeywords')}
+        hint={t('settings.notifyKeywordsHint')}
+        placeholder={t('settings.notifyKeywordsPlaceholder')}
+        values={s.notifyKeywords ?? []}
+        onCommit={(next) => patch({ notifyKeywords: next })}
+        suggestions={KEYWORD_SUGGESTION_KEYS.map((k) => t(k as Parameters<typeof t>[0]))}
+      />
+    </>
+  )
+}
+
 export function DigestCard() {
   const { state, dispatch } = useApp()
   const { t, formatDateTime } = useI18n()
