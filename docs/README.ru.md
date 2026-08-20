@@ -178,7 +178,7 @@ iframe без какого-либо выполнения скриптов при
 
 ## Сборка из исходников
 
-**Требуется** — Node.js 20+, а для Android: JDK 17+ и Android SDK
+**Требуется** — Node.js 22+, а для Android: JDK 21+ и Android SDK
 (platform 36, build-tools 35+). `npm run build:android` находит установленные
 JDK и SDK, даже если их нет в `PATH`, так что `JAVA_HOME` необязателен.
 

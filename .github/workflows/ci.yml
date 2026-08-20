@@ -43,8 +43,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 20 is the documented floor; 22 is what a new contributor installs today.
-        node: ['20', '22']
+        # 22 is the floor and 24 is what a new contributor installs today.
+        #
+        # 20 was here, and could never have passed: `check:layout` and the other
+        # browser probes drive Chrome over CDP and need a global `WebSocket`,
+        # which arrived in Node 22 — the probe says so itself and exits 1. That
+        # went unnoticed because `npm ci` was failing before any check ran (see
+        # the eslint/TS-7 removal), so this leg had never got far enough to
+        # report the real reason it was red.
+        #
+        # Both entries are evidence-backed rather than aspirational: the whole
+        # chain is run on 24 locally before every release, and 22 is what the
+        # green runs on this workflow use.
+        node: ['22', '24']
 
     steps:
       - uses: actions/checkout@v4

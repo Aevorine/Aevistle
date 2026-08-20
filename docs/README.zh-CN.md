@@ -175,7 +175,7 @@ TLS 证书默认强制校验，除非你自己在某个账号上明确关掉；
 
 ## 从源码构建
 
-**环境要求**——Node.js 20+；要打安卓包还需要 JDK 17+ 和 Android SDK
+**环境要求**——Node.js 22+；要打安卓包还需要 JDK 21+ 和 Android SDK
 （platform 36、build-tools 35 以上）。`npm run build:android` 会自动找出
 已安装但没进 PATH 的 JDK 和 SDK，所以不设 `JAVA_HOME` 也行。
 

@@ -4,7 +4,7 @@ Thanks for looking. Issues, feature requests and pull requests are all welcome.
 
 ## Getting set up
 
-Node.js 20+ is enough for everything except the Android build.
+Node.js 22+ is enough for everything except the Android build.
 
 ```bash
 npm install

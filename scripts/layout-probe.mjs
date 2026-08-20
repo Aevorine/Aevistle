@@ -592,6 +592,18 @@ const SYNTHETIC_CODECARD = `(() => {
  * it, because that is what tells an inbox row apart from a Scheduled row, and a
  * probe that left it out would measure the rules for the wrong screen.
  */
+/*
+ * The long subject is deliberately far longer than it needs to be.
+ *
+ * It used to be twenty characters, which overflowed a 326px column by a few
+ * pixels on the machine it was written on and — measured on an ubuntu CI
+ * runner the first time this check ever actually ran there — did not overflow
+ * at all. Same stylesheet, same column width, different font metrics: the
+ * assertion was reading the runner's fonts rather than the clamp rule it was
+ * written to prove. Forty-three characters overflow a phone column under any
+ * font that renders anything at all, which is what makes the answer a property
+ * of the CSS instead of a property of the host.
+ */
 const SYNTHETIC_MAILROW = `(() => {
   const host = document.createElement('div')
   host.id = 'probe-synthetic-row'
@@ -611,7 +623,7 @@ const SYNTHETIC_MAILROW = `(() => {
           <span class="job__pulse" data-unread="true"></span>
           <span class="avatar job__avatar" aria-hidden="true">Z</span>
           <div class="job__body">
-            <div class="job__name">\${selecting === 'short' ? '会议通知' : '下周三上午十点的项目进度评审会议安排通知'}</div>
+            <div class="job__name">\${selecting === 'short' ? '会议通知' : '下周三上午十点的项目进度评审会议安排通知，请各组负责人提前把本周的进展材料发到共享目录'}</div>
             <div class="job__meta">
               <span class="chip"><span class="chip__text">work@example.com</span></span>
               <span class="job__from">Zhang Wei &lt;zhang.wei@example.com&gt;</span>
@@ -1024,7 +1036,7 @@ for (const band of [NARROW, TABLET]) {
     if (i.inbox.rows === 0) {
       console.log(`  no mail rows on screen — measuring the stylesheet against synthetic markup instead`)
       const r = JSON.parse(await evaluate(SYNTHETIC_MAILROW))
-      console.log(`  synthetic row, 22-character Chinese subject, in the real ${r.colW}px column:`)
+      console.log(`  synthetic row, 42-character Chinese subject, in the real ${r.colW}px column:`)
       console.log(`    row height     ${r.idle.rowH}px  + ${r.listGap}px list gap`)
       console.log(`    furniture      ${r.idle.furniture}px  (checkbox shown: ${r.idle.checkboxShown}, ` +
         `row actions shown: ${r.idle.actionsShown})`)
@@ -1056,8 +1068,8 @@ for (const band of [NARROW, TABLET]) {
           fail(`inbox @ 360px: the one-line subject clamp renders on ${r.idle.subjectLines} line(s), not 1`)
         else ok(`inbox @ 360px: the subject clamps to 1 line`)
         if (!r.idle.subjectClipped)
-          fail(`inbox @ 360px: a 22-character subject does not overflow — the ellipsis rule has nothing to prove`)
-        else ok(`inbox @ 360px: a 22-character subject is clipped with an ellipsis`)
+          fail(`inbox @ 360px: a 42-character subject does not overflow — the ellipsis rule has nothing to prove`)
+        else ok(`inbox @ 360px: a 42-character subject is clipped with an ellipsis`)
         if (!r.selecting.checkboxShown)
           fail(`inbox @ 360px: the checkbox does not come back while a selection is live`)
         else ok(`inbox @ 360px: the checkbox is hidden when idle and shown while selecting`)

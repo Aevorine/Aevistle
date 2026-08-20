@@ -181,7 +181,7 @@ sortie en langage clair, code de sortie 1 si quelque chose cloche.
 
 ## Compiler depuis les sources
 
-**Prérequis** — Node.js 20+, et pour Android : JDK 17+, Android SDK
+**Prérequis** — Node.js 22+, et pour Android : JDK 21+, Android SDK
 (plateforme 36, build-tools 35+). `npm run build:android` détecte un JDK et un
 SDK installés mais absents du `PATH`, donc `JAVA_HOME` est facultatif.
 

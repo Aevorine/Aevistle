@@ -178,7 +178,7 @@ salida en lenguaje llano, código de salida 1 si algo requiere atención.
 
 ## Compilar desde el código
 
-**Requisitos** — Node.js 20+, y para Android: JDK 17+, Android SDK
+**Requisitos** — Node.js 22+, y para Android: JDK 21+, Android SDK
 (plataforma 36, build-tools 35+). `npm run build:android` encuentra un JDK y un
 SDK instalados aunque no estén en el `PATH`, así que `JAVA_HOME` es opcional.
 

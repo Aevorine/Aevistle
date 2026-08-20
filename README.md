@@ -193,7 +193,7 @@ plain-language output, exit code 1 if anything needs attention.
 
 ## Build from source
 
-**Requirements** — Node.js 20+, and for Android: JDK 17+, Android SDK
+**Requirements** — Node.js 22+, and for Android: JDK 21+, Android SDK
 (platform 36, build-tools 35+). `npm run build:android` finds a JDK and an SDK
 that are installed but not on `PATH`, so setting `JAVA_HOME` is optional.
 
