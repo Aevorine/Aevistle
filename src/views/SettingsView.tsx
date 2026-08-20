@@ -89,7 +89,7 @@ import {
 } from '../core/mail/greetings'
 import { HOLIDAY_PRESETS } from '../core/schedule/holidayPresets'
 import type { AppInfo, DataFolder, DataFolderChange } from '../core/platform/bridge'
-import type { BackgroundMailCheckState } from '../core/platform/ipc-contract'
+import type { BackgroundMailCheckState, ToggleShortcutState } from '../core/platform/ipc-contract'
 import { lastUpdateCheck, onUpdateCheck, runUpdateCheck } from '../core/platform/update'
 import type { DownloadProgress, UpdateInfo } from '../core/platform/update'
 
@@ -513,6 +513,37 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
       clearTimeout(timer)
     }
   }, [bridge, keepReceiving])
+
+  /**
+   * What the OS actually granted for the show/hide shortcut.
+   *
+   * Same shape and same settle delay as the read above, for the same reason:
+   * `globalShortcut.register` can be refused by a combination another
+   * application already holds, silently, and a row drawn from `s.toggleShortcut`
+   * would then print a key that does nothing. Re-read whenever the stored value
+   * moves, because that is the only moment the answer can change from here.
+   */
+  const [shortcutState, setShortcutState] = useState<ToggleShortcutState | null>(null)
+  const storedShortcut = s.toggleShortcut
+  useEffect(() => {
+    const read = bridge?.toggleShortcutState
+    if (!read) return
+    let live = true
+    const timer = setTimeout(() => {
+      void read
+        .call(bridge)
+        .then((value) => {
+          if (live) setShortcutState(value)
+        })
+        .catch(() => {
+          /* Keep the last answer rather than flapping the row. */
+        })
+    }, 400)
+    return () => {
+      live = false
+      clearTimeout(timer)
+    }
+  }, [bridge, storedShortcut])
 
   // The daily digest and holiday greetings used to have their state and
   // handlers here too. They are now `DigestCard` and `GreetingsCard`, defined
@@ -1798,6 +1829,19 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
             />
 
             {/*
+              Not a notification setting, and here anyway — this card is where
+              "what the mail does when it arrives" lives, and the alternative
+              was a card of one switch. See `core/mail/math.ts` for why the
+              formulas render as MathML rather than as KaTeX's usual HTML.
+            */}
+            <Switch
+              checked={s.renderMath !== false}
+              onChange={(v) => patch({ renderMath: v })}
+              title={t('settings.renderMath')}
+              description={t('settings.renderMathHint')}
+            />
+
+            {/*
               Android only, and only worth showing at all because both of these
               can be off while the app looks completely healthy. The switches
               above promise notifications; if the system permission behind them
@@ -1990,6 +2034,81 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
                         })
                 }
               />
+            ) : null}
+
+            {/*
+              The one control in the app that works when the app is not on
+              screen — so it is the one whose failure is least visible, and the
+              row reports what the OS granted rather than what was asked for.
+
+              A text field rather than a key-capture box: capturing a
+              combination means grabbing the keyboard inside a settings screen,
+              and the combinations most worth setting are the ones the browser
+              or the window manager eats before this page ever sees them. Typing
+              `Ctrl+Alt+A` always works, and the row says immediately whether it
+              took.
+            */}
+            {shortcutState?.supported ? (
+              <Field
+                label={t('settings.toggleShortcut')}
+                hint={
+                  shortcutState.failure === 'taken'
+                    ? t('settings.toggleShortcutTaken')
+                    : shortcutState.failure === 'invalid'
+                      ? t('settings.toggleShortcutInvalid')
+                      : shortcutState.registered
+                        ? t('settings.toggleShortcutHint', { key: shortcutState.registered })
+                        : t('settings.toggleShortcutOff')
+                }
+                action={
+                  <div className="btn-row">
+                    <Button
+                      variant="ghost"
+                      onClick={() => patch({ toggleShortcut: shortcutState.fallback })}
+                      title={t('settings.toggleShortcutReset')}
+                    >
+                      {t('settings.toggleShortcutReset')}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      onClick={() => patch({ toggleShortcut: null })}
+                      title={t('settings.toggleShortcutDisable')}
+                    >
+                      {t('settings.toggleShortcutDisable')}
+                    </Button>
+                  </div>
+                }
+              >
+                <input
+                  /*
+                    Uncontrolled, and committed on blur rather than on change.
+                    Every keystroke of "Ctrl+Alt+A" passes through "C", "Ct",
+                    "Ctr" — each of which would reach the main process, be
+                    rejected as malformed, and unregister the working shortcut
+                    on the way. So the field holds its own text while it is
+                    being typed and hands over one finished string.
+
+                    `key` is the stored value, which is what re-seeds the field
+                    when the value changes from outside it — pressing Default,
+                    pressing Turn off, or a sync from another device. Without it
+                    an uncontrolled input would keep showing the old text over a
+                    setting that had already moved.
+                  */
+                  key={String(s.toggleShortcut ?? shortcutState.fallback)}
+                  className="input"
+                  type="text"
+                  spellCheck={false}
+                  autoComplete="off"
+                  defaultValue={s.toggleShortcut ?? shortcutState.fallback}
+                  placeholder={shortcutState.fallback}
+                  aria-label={t('settings.toggleShortcut')}
+                  onBlur={(e) => {
+                    const next = e.target.value.trim()
+                    if (next === (s.toggleShortcut ?? shortcutState.fallback)) return
+                    patch({ toggleShortcut: next || null })
+                  }}
+                />
+              </Field>
             ) : null}
           </div>
         </Card>

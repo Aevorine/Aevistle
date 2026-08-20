@@ -103,6 +103,7 @@ import {
 import { resolveWithCache } from '../core/mail/imageCache'
 import { BLOCKED_IMAGE, blockReasonKey, type ImageBlockReason } from '../core/mail/imageProxy'
 import { getCachedBody, putCachedBody } from '../core/mail/bodyMemo'
+import { hasMath, renderMath } from '../core/mail/math'
 import { CHAIN_STAGES, buildChain, leadLabelKey } from '../core/schedule/chain'
 import { extractDates, type DateHit } from '../core/schedule/dateExtract'
 import { copyText } from '../core/platform/clipboard'
@@ -1685,6 +1686,44 @@ export function InboxView({
     if (next === base) return
     setResolvedHtml(next)
   }, [openBody?.sanitizedHtml, resolvedImages, inlineState])
+
+  /**
+   * The body with its TeX turned into mathematics.
+   *
+   * Layered on top of everything else the body goes through rather than folded
+   * into it, and last: images resolve into `resolvedHtml` first, and running
+   * before that would have every image rebuild throw this work away and redo
+   * it. `null` means "nothing to add" — no maths in this message, the setting
+   * is off, or KaTeX failed to load — and the frame falls back to the string it
+   * would have shown anyway.
+   *
+   * Asynchronous because the library is only fetched when a message actually
+   * contains a delimiter (see `core/mail/math.ts`), so the reader paints the
+   * message immediately and the formulas replace their own source a moment
+   * later. `stale` guards the case that matters: opening a second message
+   * before the first one's render resolves must not paste the first message's
+   * body over the second.
+   */
+  const mathSource = resolvedHtml ?? openBody?.sanitizedHtml ?? ''
+  const mathOn = state.settings.renderMath !== false
+  const [mathHtml, setMathHtml] = useState<string | null>(null)
+  useEffect(() => {
+    if (!mathOn || !mathSource || !hasMath(mathSource)) {
+      setMathHtml(null)
+      return
+    }
+    let stale = false
+    void renderMath(mathSource)
+      .then((html) => {
+        if (!stale) setMathHtml(html === mathSource ? null : html)
+      })
+      .catch(() => {
+        if (!stale) setMathHtml(null)
+      })
+    return () => {
+      stale = true
+    }
+  }, [mathSource, mathOn])
 
   /**
    * "Always show pictures from this sender."
@@ -3556,7 +3595,12 @@ export function InboxView({
                 ) : null}
 
                 <MessageBodyFrame
-                  html={resolvedHtml ?? openBody.sanitizedHtml ?? textAsHtml(openBody.text ?? t('inbox.noBody'))}
+                  html={
+                    mathHtml ??
+                    resolvedHtml ??
+                    openBody.sanitizedHtml ??
+                    textAsHtml(openBody.text ?? t('inbox.noBody'))
+                  }
                   find={findOpen ? deferredFind : ''}
                   onLinkClick={openLinkSafely}
                   nightFilter={nightOn}

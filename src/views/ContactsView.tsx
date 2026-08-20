@@ -219,6 +219,7 @@ export function ContactsView() {
       <div className="view__inner">
         <PageHead
           title={t('contacts.title')}
+          hideTitle
           action={
             <div className="btn-row">
               {/* Android: no file system to browse for a CSV, but the system

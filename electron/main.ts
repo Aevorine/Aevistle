@@ -37,6 +37,12 @@ import {
   backgroundMailCheckRegistered,
   REMOVE_HINT,
 } from './backgroundMailTask'
+import {
+  applyToggleShortcut,
+  DEFAULT_TOGGLE_SHORTCUT,
+  releaseToggleShortcut,
+  toggleShortcutState,
+} from './toggleShortcut'
 import type {
   Attachment,
   ControlScope,
@@ -185,6 +191,7 @@ let desktopPrefs: DesktopPrefs = {
   notifyOnSuccess: true,
   notifyOnFailure: true,
   keepReceivingWhenClosed: false,
+  toggleShortcut: DEFAULT_TOGGLE_SHORTCUT,
 }
 /**
  * Whether this session has re-applied the scheduled task yet.
@@ -1896,6 +1903,21 @@ function registerIpc(): void {
       // `=== true`: this one defaults off, so an absent field must not create
       // a scheduled task. See the field's doc in `ipc-contract.ts`.
       keepReceivingWhenClosed: prefs?.keepReceivingWhenClosed === true,
+      /*
+       * Three states, not two, and `undefined` is not one of them.
+       *
+       * A string is the combination the user chose; `null` is the user turning
+       * the shortcut off; absent means a renderer that predates the field, and
+       * must land on the default rather than on "off" — a build mismatch is not
+       * a preference, and silently removing a working shortcut during an update
+       * is exactly the kind of change nobody would connect to the update.
+       */
+      toggleShortcut:
+        prefs?.toggleShortcut === null
+          ? null
+          : typeof prefs?.toggleShortcut === 'string'
+            ? prefs.toggleShortcut
+            : DEFAULT_TOGGLE_SHORTCUT,
     }
     const loginChanged = next.launchAtLogin !== desktopPrefs.launchAtLogin
     const backgroundChanged =
@@ -1940,7 +1962,35 @@ function registerIpc(): void {
       backgroundMailApplied = true
       await applyBackgroundMailCheck(next.keepReceivingWhenClosed)
     }
+
+    /*
+     * Unconditionally, unlike the two above.
+     *
+     * Registering a global accelerator is a call into this process, not a write
+     * to the registry or a shell-out — it costs nothing to repeat, and there is
+     * a reason to: the combination can be *lost* without the value changing,
+     * when another application starts up and grabs it. Applying only on change
+     * would leave the shortcut dead until the next settings edit, with the
+     * settings screen still showing it as set. `applyToggleShortcut` is
+     * idempotent for exactly this call site.
+     */
+    applyToggleShortcut(next.toggleShortcut, toggleWindowFromTray)
   })
+
+  /**
+   * What the OS has actually granted for the show/hide shortcut.
+   *
+   * The same separation `backgroundMailCheckState` makes, for the same reason:
+   * `setDesktopPrefs` says what was asked for, and asking is not getting.
+   * `globalShortcut.register` returns false against a combination another
+   * application already holds, and there is no event when that happens — so a
+   * switch drawn from the stored preference would show a key that does nothing.
+   */
+  ipcMain.handle(IPC.toggleShortcutState, () => ({
+    supported: process.platform !== 'linux',
+    fallback: DEFAULT_TOGGLE_SHORTCUT,
+    ...toggleShortcutState(),
+  }))
 
   ipcMain.handle(IPC.backgroundMailCheckState, async () => ({
     supported: process.platform === 'win32' && app.isPackaged,
@@ -2741,6 +2791,18 @@ void app.whenReady().then(async () => {
   createTray()
   createWindow()
 
+  /*
+   * Before the renderer has loaded, and again when it pushes prefs.
+   *
+   * The stored value lives in renderer state, so the first `setDesktopPrefs`
+   * is what applies the user's actual choice — but that arrives seconds after
+   * launch, and on a `--hidden` start there may be no visible window for much
+   * longer. Registering the default now means the one key that reveals the
+   * window works from the moment the process is up, which is the whole point
+   * of a shortcut for an app that starts invisible.
+   */
+  applyToggleShortcut(desktopPrefs.toggleShortcut ?? DEFAULT_TOGGLE_SHORTCUT, toggleWindowFromTray)
+
   scheduler.on('jobEvent', (payload) => {
     mainWindow?.webContents.send(IPC.jobEvent, payload)
     /*
@@ -2825,6 +2887,10 @@ app.on('before-quit', (event) => {
     // Held-open IDLE sockets would otherwise keep the process from exiting
     // cleanly, and leave the provider counting a connection that is gone.
     stopAllInboxWatchers()
+    // Released before the process ends rather than left to Electron, so a
+    // relaunch that briefly overlaps this one can still take the combination —
+    // see `releaseToggleShortcut`.
+    releaseToggleShortcut()
   }
 
   /*

@@ -907,6 +907,31 @@ export interface Settings {
    */
   keepReceivingWhenClosed?: boolean
   /**
+   * The key combination that shows this window, and hides it again.
+   *
+   * An Electron accelerator string; `null` switches it off; absent means "never
+   * chosen", which the main process resolves to the built-in default. Desktop
+   * only — Android has no global keyboard to grab and the browser preview
+   * cannot grab one.
+   *
+   * Stored here rather than only in the main process because settings are the
+   * document the user backs up and syncs between devices, and a shortcut people
+   * have retrained their hands on is exactly the kind of thing that should
+   * survive a reinstall.
+   */
+  toggleShortcut?: string | null
+  /**
+   * Turn `$E = mc^2$` in a message into mathematics instead of leaving it as
+   * punctuation.
+   *
+   * Default on. Off is worth having for one specific reader: someone whose mail
+   * is full of shell and currency, for whom `$PATH` and `$40–$50` are prose. The
+   * renderer already skips `<pre>` and `<code>`, so that case is narrower than
+   * it sounds, but "my mail looks wrong now" needs a switch and not an
+   * explanation. See `core/mail/math.ts`.
+   */
+  renderMath?: boolean
+  /**
    * Put a freshly found code straight on the clipboard.
    *
    * Only ever fires while "waiting for a code" is switched on, and only for the

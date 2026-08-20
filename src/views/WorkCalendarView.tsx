@@ -1219,6 +1219,7 @@ export function WorkCalendarView({ onCompose }: { onCompose?: () => void } = {})
       <div className="view__inner">
         <PageHead
           title={t('workcal.title')}
+          hideTitle
           action={
             <StatusChip
               tone={todayWorking ? 'success' : 'neutral'}

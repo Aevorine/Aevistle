@@ -62,6 +62,7 @@ export function TemplatesView({ onApplied }: { onApplied: () => void }) {
       <div className="view__inner">
         <PageHead
           title={t('templates.title')}
+          hideTitle
           action={
             <Button variant="primary" icon={<IconPlus size={16} />} onClick={startNew}>
               {t('templates.add')}

@@ -723,6 +723,7 @@ export function CodesView({ onGoToInbox }: { onGoToInbox?: () => void }) {
           */
           <PageHead
             title={t('codes.title')}
+            hideTitle
             subtitle={headNote}
             action={
               <>

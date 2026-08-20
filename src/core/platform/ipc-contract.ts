@@ -107,6 +107,21 @@ export interface DesktopPrefs {
    * settings screen finds out what is actually registered.
    */
   keepReceivingWhenClosed: boolean
+  /**
+   * The key combination that shows the window, and hides it again.
+   *
+   * `null` is the user switching it off; a string is an Electron accelerator
+   * (`CommandOrControl+Alt+A`). The field is optional so a renderer that
+   * predates it lands on the built-in default rather than on "off" — see the
+   * coercion in `main.ts`, which treats absent and null as different answers on
+   * purpose.
+   *
+   * Global rather than a menu accelerator, because the state it exists to leave
+   * is "there is no window": an in-window shortcut cannot be pressed at a window
+   * that is hidden in the tray. `toggleShortcutState` reports whether the OS
+   * actually gave it to us.
+   */
+  toggleShortcut?: string | null
 }
 
 /** What the OS has registered for "keep receiving after I quit" — see `backgroundMailCheckState`. */
@@ -132,6 +147,25 @@ export interface BackgroundMailCheckState {
   problems?: string[]
   /** The exact command that removes it, so what was created is never a mystery. */
   removeHint: string
+}
+
+/** What the OS has actually granted for the show/hide shortcut — see `toggleShortcutState`. */
+export interface ToggleShortcutState {
+  /** False where no global accelerator is dependable, so the row can say so instead of lying. */
+  supported: boolean
+  /** The combination currently held, or null when none is — off, taken, or malformed. */
+  registered: string | null
+  /**
+   * Why nothing is registered, when the user asked for something.
+   *
+   * `taken` is another application already holding the combination — the common
+   * case, and the one with no error anywhere: `globalShortcut.register` returns
+   * `false` and the app carries on. `invalid` is a combination Electron will not
+   * accept at all. Null while healthy or while deliberately off.
+   */
+  failure: 'taken' | 'invalid' | null
+  /** The built-in default, so the settings screen can offer "put it back". */
+  fallback: string
 }
 
 /** The two numbers a taskbar overlay badge is drawn from — see `setBadgeCounts`. */
@@ -211,6 +245,15 @@ export interface DesktopApi {
    * a trap left on the user's machine.
    */
   backgroundMailCheckState(): Promise<BackgroundMailCheckState>
+  /**
+   * What the OS granted for the show/hide accelerator.
+   *
+   * Separate from `setDesktopPrefs` for the reason its neighbour above is: a
+   * global shortcut is a request the system can decline, silently, because
+   * another application asked first. A settings row drawn from the stored
+   * preference would then display a key combination that does nothing at all.
+   */
+  toggleShortcutState(): Promise<ToggleShortcutState>
   /**
    * Unread mail and armed reminders, so the taskbar icon can carry a badge
    * while the window is minimised or hidden in the tray — the one signal a
@@ -491,6 +534,7 @@ export const IPC = {
   setUiLocale: 'aevistle:set-ui-locale',
   setDesktopPrefs: 'aevistle:set-desktop-prefs',
   backgroundMailCheckState: 'aevistle:background-mail-check-state',
+  toggleShortcutState: 'aevistle:toggle-shortcut-state',
   setBadgeCounts: 'aevistle:set-badge-counts',
   trayCommand: 'aevistle:tray-command',
   downloadDone: 'aevistle:download-done',

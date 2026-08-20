@@ -449,6 +449,27 @@ Two separate actions, because they are two separate requests: remove it from
 Aevistle (reversible from a recycle bin that keeps it for seven days) or delete
 it from the mailbox on the server (not reversible, and it says so).
 
+### Mathematics, as mathematics
+
+`$E = mc^2$` in a message becomes E = mc², and `\[ \int_0^\infty e^{-x}dx = 1 \]`
+becomes the integral. Physics and maths reach a mailbox as TeX far more often
+than as an image — a supervisor's reply, a journal alert, an assignment — and
+every other client shows it as a row of backslashes.
+
+Rendered as MathML rather than as KaTeX's usual positioned HTML, which is what
+makes it possible at all here: the message body lives in an iframe that fetches
+nothing, so the 1.2 MB of KaTeX web fonts would have no way to load and no
+business being in the bundle for a feature most mail never triggers. MathML is
+laid out by the browser with fonts already on the machine. KaTeX itself is only
+fetched when a message actually contains a delimiter.
+
+Prices are not formulas. `Lunch is $12, dinner is $20.` stays a sentence: the
+delimiters have to hug their contents, and a fragment starting with a digit has
+to carry a TeX signal before it counts. `<pre>` and `<code>` are skipped whole,
+so a quoted shell script keeps its `$PATH`.
+
+Off in **Settings → Notifications** for anyone whose mail is mostly currency.
+
 ---
 
 ## Appearance and language
@@ -508,6 +529,24 @@ tells you exactly which strings are missing.
 ---
 
 ## Living with it
+
+### One key brings the window here
+
+`Ctrl+Alt+A` anywhere on the desktop shows the window; the same key puts it
+away again. Changeable, and switchable off, in **Settings → System**.
+
+It has to be a *global* accelerator rather than a menu one, because the state
+worth summoning out of is "there is no window on screen" — an in-window
+shortcut cannot be pressed at a window hidden in the tray.
+
+The row says what the system granted, not what you asked for. Another
+application holding the combination makes `register` return false with no error
+anywhere, so a switch drawn from the stored preference would show a key that
+does nothing; this one says "another application already holds that
+combination" instead.
+
+The tray icon does the same job for a mouse: one click shows the window, one
+click puts it away (and off the taskbar), right-click for the menu.
 
 ### You can see that it sent
 

@@ -339,14 +339,49 @@
   height: 1px;
   background: var(--border-subtle);
 }
-/* `PageHead`'s `hideTitle` — Inbox and Codes, whose tab already names the
-   screen. The row keeps its sticky position, its dividing rule and its
-   `action` children; only the `h1`/subtitle block goes, the same way
-   `.modal__body--screen` already drops it for a view reused inside a
-   dialog. Settings and Home have no `action` to keep, so those two views
-   do not render `PageHead` at all rather than reach for this. */
+/* `PageHead`'s `hideTitle` — every screen reached from the navigation, which
+   is all of them: the tab you just pressed is lit and carries the same word,
+   so printing it again at the top of the content says nothing and costs a
+   band of vertical space on every screen in the app.
+
+   Only the `h1` goes. The subtitle stays, and that distinction is the whole
+   reason this rule is not on `.page-head__text`: Codes puts a *live* line
+   there ("checking…", "last checked at…"), and a rule that hid the block
+   would take a working status readout with it while looking like a pure
+   de-duplication. The row keeps its sticky position, its dividing rule and
+   its `action` children either way. */
+/* Hidden from the eye, not from the document — the `.sr-only` recipe rather
+   than `display: none`, and the difference is load-bearing in two directions.
+
+   Accessibility: `display: none` takes the element out of the accessibility
+   tree too, so a screen reader would land on a screen with no heading at all.
+   The name is still wanted, it just does not need to be *drawn* a second time
+   next to a lit navigation tab that already says it.
+
+   And measurement: `ui-consistency.mjs` samples `.page-title`'s computed
+   font size across a tour of every screen, and `layout-probe.mjs` holds it to
+   the 16px body floor. `display: none` left both with zero elements to look
+   at — `ui-consistency` correctly refused to call that a pass ("Nothing was
+   measured, so nothing was checked"), which is how this was caught within the
+   same change. Clipped, the element is still laid out and still measured, so
+   both gates keep working on a heading nobody sees. */
+.page-head[data-hide-title] .page-title {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+/* The heading is out of flow now, so the text column reserves 200px for a
+   subtitle that most of these screens do not have — which on a phone pushes
+   the actions off the trailing edge for no content at all. It still takes the
+   remaining width when there *is* a subtitle (Codes' live status line). */
 .page-head[data-hide-title] .page-head__text {
-  display: none;
+  min-width: 0;
 }
 /* On a list screen the heading is a label, not a band. `--pagehead-h` sizes
    the head on the form screens, where it holds a title, a subtitle and a row

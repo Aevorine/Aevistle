@@ -39,6 +39,7 @@ import type {
 import type { DownloadProgress, UpdateAsset, UpdateInfo } from './update'
 import type {
   BackgroundMailCheckState,
+  ToggleShortcutState,
   BadgeCounts,
   DesktopPrefs,
   DownloadOutcome,
@@ -300,6 +301,18 @@ export interface PlatformBridge {
    * Absent on Android and in the browser preview, like the setter above.
    */
   backgroundMailCheckState?(): Promise<BackgroundMailCheckState>
+
+  /**
+   * What the OS granted for the show/hide accelerator.
+   *
+   * Same reason as the method above, one layer out: the shortcut is a request
+   * the system can refuse without telling anyone, so the settings row asks what
+   * is registered rather than drawing the stored preference.
+   *
+   * Absent on Android and in the browser preview, where there is no window to
+   * summon and no global keyboard to summon it from.
+   */
+  toggleShortcutState?(): Promise<ToggleShortcutState>
 
   /**
    * Unread mail and armed reminders, for a taskbar overlay badge.

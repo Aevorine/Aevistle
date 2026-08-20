@@ -1426,8 +1426,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
    * depends on the two booleans rather than on `state.settings`, which changes
    * on almost every keystroke somewhere in the app.
    */
-  const { minimiseToTray, launchAtLogin, notifyOnSuccess, notifyOnFailure, keepReceivingWhenClosed } =
-    state.settings
+  const {
+    minimiseToTray,
+    launchAtLogin,
+    notifyOnSuccess,
+    notifyOnFailure,
+    keepReceivingWhenClosed,
+    toggleShortcut,
+  } = state.settings
   useEffect(() => {
     void bridge?.setDesktopPrefs?.({
       minimiseToTray,
@@ -1445,8 +1451,34 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // for this one is off, so an older saved document with the field absent
       // must stay off rather than quietly acquiring a scheduled task.
       keepReceivingWhenClosed: keepReceivingWhenClosed === true,
+      // `undefined` means "this document predates the field", and the main
+      // process turns that into the built-in default rather than into "off".
+      // Passing `null` here would be the user saying no; the two are not the
+      // same answer and must not collapse into one on the way out.
+      toggleShortcut,
     })
-  }, [bridge, minimiseToTray, launchAtLogin, notifyOnSuccess, notifyOnFailure])
+    /*
+     * Every value this effect sends is in the dependency list, and that is a
+     * fix rather than housekeeping.
+     *
+     * `keepReceivingWhenClosed` was read above and left out of the list below,
+     * so React never re-ran this when it changed: turning "keep receiving after
+     * I quit" on pushed nothing to the main process and registered no scheduled
+     * task. It appeared to work only because the effect also runs on mount —
+     * so the switch took effect at the *next launch*, and flipping it and
+     * watching for something to happen showed nothing at all. A second,
+     * completely independent reason that feature did not work, found while
+     * adding the shortcut beside it.
+     */
+  }, [
+    bridge,
+    minimiseToTray,
+    launchAtLogin,
+    notifyOnSuccess,
+    notifyOnFailure,
+    keepReceivingWhenClosed,
+    toggleShortcut,
+  ])
 
   // --- boot ---------------------------------------------------------------
   useEffect(() => {

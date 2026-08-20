@@ -102,6 +102,7 @@ const api: DesktopApi = {
   setUiLocale: (locale) => ipcRenderer.invoke(IPC.setUiLocale, locale),
   setDesktopPrefs: (prefs) => ipcRenderer.invoke(IPC.setDesktopPrefs, prefs),
   backgroundMailCheckState: () => ipcRenderer.invoke(IPC.backgroundMailCheckState),
+  toggleShortcutState: () => ipcRenderer.invoke(IPC.toggleShortcutState),
   setBadgeCounts: (counts) => ipcRenderer.invoke(IPC.setBadgeCounts, counts),
 
   pickFiles: () => ipcRenderer.invoke(IPC.pickFiles),

@@ -412,6 +412,7 @@ export function ScheduleView({
       <div className="view__inner">
         <PageHead
           title={t('schedule.title')}
+          hideTitle
           action={
             <Button variant="primary" icon={<IconClock size={16} />} onClick={onCompose}>
               {t('schedule.new')}

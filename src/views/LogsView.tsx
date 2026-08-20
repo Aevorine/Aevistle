@@ -297,6 +297,7 @@ export function LogsView({
       <div className="view__inner">
         <PageHead
           title={t('logs.title')}
+          hideTitle
           action={
             state.logs.length > 0 ? (
               <div className="btn-row">
