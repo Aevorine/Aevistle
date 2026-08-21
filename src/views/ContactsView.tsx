@@ -1,5 +1,7 @@
 import { useDeferredValue, useMemo, useRef, useState } from 'react'
 import { VirtualList } from '../components/VirtualList'
+import { DetailShell } from '../components/DetailShell'
+import { useTwoPane } from '../components/useNarrow'
 import {
   Banner,
   Button,
@@ -39,6 +41,10 @@ export function ContactsView() {
 
   const [query, setQuery] = useState('')
   const [editing, setEditing] = useState<Contact | null>(null)
+  /* The tablet band, decided once in `useNarrow.ts`. The CSV import summary
+     below stays a dialog either way: it is a yes/no about a file, not a thing
+     you sit and edit beside the list. */
+  const twoPane = useTwoPane()
 
   // --- bulk import ----------------------------------------------------------
   //
@@ -215,8 +221,8 @@ export function ContactsView() {
     setEditing({ id: newId('c'), name: '', address: '', tags: [], createdAt: Date.now() })
 
   return (
-    <div className="view view--list">
-      <div className="view__inner">
+    <div className={`view view--list view--contacts${twoPane ? ' view--twopane' : ''}`}>
+      <div className={`view__inner${twoPane ? ' twopane__list' : ''}`}>
         <PageHead
           title={t('contacts.title')}
           hideTitle
@@ -328,9 +334,12 @@ export function ContactsView() {
         )}
       </div>
 
-      <Modal
+      <DetailShell
+        twoPane={twoPane}
         open={editing !== null}
         title={t('contacts.add')}
+        paneLabel={t('contacts.title')}
+        emptyHint={t('twopane.pickContact')}
         onClose={() => setEditing(null)}
         closeLabel={t('common.close')}
         footer={
@@ -411,7 +420,7 @@ export function ContactsView() {
             />
           </>
         ) : null}
-      </Modal>
+      </DetailShell>
 
       {/* CSV import summary — shown before anything is written, same reasoning
           as `BackupCard`'s restore preview: "would add N, skip M" is what

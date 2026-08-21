@@ -54,6 +54,33 @@ export function lockAxis(dx: number, dy: number): Axis {
   return 'undecided'
 }
 
+/**
+ * How wide the strip along the leading edge is, inside which a drag means
+ * "go back" rather than whatever the content under the finger does.
+ *
+ * 24px is the platform figure — Android's own back gesture uses the same order
+ * of magnitude — and the number matters in both directions. Wider and a thumb
+ * resting near the edge of a list starts dismissing the screen instead of
+ * scrolling it; narrower and the gesture becomes a game of accuracy, which is
+ * the opposite of what an edge gesture is for. It is a strip, not a point,
+ * because a thumb arriving from off-screen lands a few pixels in.
+ */
+export const EDGE_ZONE_PX = 24
+
+/**
+ * Did this drag begin in the strip along the leading edge?
+ *
+ * `x` is measured from the element's own left border, and `width` is the
+ * element's width, so the caller passes what a `getBoundingClientRect` already
+ * gave it. In Arabic the leading edge is the right one, which is the whole
+ * reason this takes `rtl` rather than testing `x < 24` at the call site: an
+ * edge gesture hard-coded to the left is a gesture that does not exist for a
+ * reader of a right-to-left script.
+ */
+export function startedAtLeadingEdge(x: number, width: number, rtl = false): boolean {
+  return rtl ? x >= width - EDGE_ZONE_PX : x <= EDGE_ZONE_PX
+}
+
 export type SwipeResult = 'leading' | 'trailing' | null
 
 /**

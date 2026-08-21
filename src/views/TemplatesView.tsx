@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import { VirtualList } from '../components/VirtualList'
+import { DetailShell } from '../components/DetailShell'
+import { useTwoPane } from '../components/useNarrow'
 import {
   Button,
   EmptyState,
   Field,
   IconButton,
-  Modal,
   PageHead,
   useConfirm,
   useToast,
@@ -21,6 +22,9 @@ export function TemplatesView({ onApplied }: { onApplied: () => void }) {
   const toast = useToast()
   const { confirm, confirmElement } = useConfirm()
   const [editing, setEditing] = useState<Template | null>(null)
+  /* One question, asked once, in `useNarrow.ts` — see `DetailShell` for what
+     changes when the answer is yes. */
+  const twoPane = useTwoPane()
 
   const startNew = () => {
     const now = Date.now()
@@ -58,8 +62,8 @@ export function TemplatesView({ onApplied }: { onApplied: () => void }) {
   }
 
   return (
-    <div className="view view--list">
-      <div className="view__inner">
+    <div className={`view view--list view--templates${twoPane ? ' view--twopane' : ''}`}>
+      <div className={`view__inner${twoPane ? ' twopane__list' : ''}`}>
         <PageHead
           title={t('templates.title')}
           hideTitle
@@ -108,10 +112,13 @@ export function TemplatesView({ onApplied }: { onApplied: () => void }) {
         )}
       </div>
 
-      <Modal
+      <DetailShell
+        twoPane={twoPane}
         open={editing !== null}
         wide
         title={t('templates.add')}
+        paneLabel={t('templates.title')}
+        emptyHint={t('twopane.pickTemplate')}
         onClose={() => setEditing(null)}
         closeLabel={t('common.close')}
         footer={
@@ -162,7 +169,7 @@ export function TemplatesView({ onApplied }: { onApplied: () => void }) {
             </Field>
           </>
         ) : null}
-      </Modal>
+      </DetailShell>
 
       {confirmElement}
     </div>

@@ -143,6 +143,18 @@ export interface HomeFeatureItem {
 }
 
 /**
+ * Anything a Home tile can open — a real screen or one of the features that
+ * only has a door here.
+ *
+ * Declared beside the two halves it unions rather than inside `HomeView`,
+ * where it lived until `core/home/tilePreview.ts` needed the same type. A
+ * `core` module cannot import a view, and the alternative — a second,
+ * structurally identical alias in core — is two names for one idea that stay
+ * in step only for as long as someone remembers they are the same.
+ */
+export type DestId = ViewId | HomeFeatureId
+
+/**
  * Each tile borrows the label its Settings section already carries —
  * `settings.digest`, `settings.greetings`, `cal.subscribe.toggle`,
  * `devices.title` — rather than a Home-specific label minted to match it. A

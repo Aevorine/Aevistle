@@ -124,6 +124,8 @@ import {
 } from 'react'
 import { Button, IconButton, Modal } from '../components/ui'
 import { Skeleton } from '../components/Skeleton'
+import { TilePreviewSheet } from '../components/TilePreviewSheet'
+import { buildTilePreview } from '../core/home/tilePreview'
 import { useReorder } from '../components/useReorder'
 import { useI18n, type TranslationKey } from '../i18n'
 import { useApp } from '../state/AppState'
@@ -222,7 +224,8 @@ const ReliabilityView = lazy(() =>
   import('./ReliabilityView').then((m) => ({ default: m.ReliabilityView })),
 )
 
-type DestId = ViewId | HomeFeatureId
+/* Moved to `core/nav.ts` so `core/home/tilePreview.ts` can name the same type — see the note there. */
+import type { DestId } from '../core/nav'
 
 /**
  * What a destination can be opened *already narrowed to*.
@@ -448,6 +451,15 @@ export function HomeView({
   const [focus, setFocus] = useState<DestFocus | null>(null)
   const [moreOpen, setMoreOpen] = useState(false)
   const [arranging, setArranging] = useState(false)
+  /**
+   * Which cell is being previewed, if any — see `holdPropsFor`.
+   *
+   * A `DestId` rather than a boolean plus a separate "which one", for the same
+   * reason `open` is: two pieces of state that must agree are two pieces of
+   * state that can disagree, and the disagreement here would be a sheet
+   * showing one screen's figures under another screen's name.
+   */
+  const [previewing, setPreviewing] = useState<DestId | null>(null)
   /**
    * Which arrange row has its rename/icon editor open. At most one.
    *
@@ -711,17 +723,24 @@ export function HomeView({
   )
 
   /**
-   * Hold a cell to arrange the grid.
+   * Hold a cell to see what is inside it without opening it.
    *
-   * A shortcut, never the only way in — the 更多 sheet carries the same command
-   * as an ordinary row, because a gesture nothing on screen mentions is a
-   * feature only the person who wrote it has. What the hold buys is that the
-   * cell you want to move is the cell you are already touching.
+   * The hold used to go straight to "arrange the grid". Both are worth having
+   * and they are not equally frequent: "is there anything in there" is asked
+   * many times a day and "where should this tile sit" about once, so the
+   * gesture lands on the common one and the sheet it opens carries the rare one
+   * as a named button. 更多 still has its own row for arranging, unchanged — a
+   * gesture nothing on screen mentions is a feature only its author has, and
+   * that was true of arranging before this and is true of previewing now.
+   *
+   * 更多 itself gets no preview panel: `buildTilePreview` has no case for it,
+   * because the honest preview of a menu is the menu. Holding it falls through
+   * to arranging, which is what holding it did before.
    *
    * One press at a time, so one ref for the whole grid rather than one per
    * cell. `held` outlives the timer deliberately: `click` fires after
    * `pointerup`, so without it every hold would also open the destination it
-   * was held on and the arrange dialog would appear behind a full-screen one.
+   * was held on and the sheet would appear behind a full-screen one.
    */
   const holdRef = useRef<{ timer: number; x: number; y: number } | null>(null)
   const heldRef = useRef(false)
@@ -733,7 +752,7 @@ export function HomeView({
      unmounted component every time somebody taps a cell and switches tabs. */
   useEffect(() => endHold, [endHold])
 
-  const holdProps = {
+  const holdPropsFor = (id: DestId | null) => ({
     onPointerDown: (event: ReactPointerEvent<HTMLElement>) => {
       heldRef.current = false
       endHold()
@@ -743,7 +762,8 @@ export function HomeView({
         timer: window.setTimeout(() => {
           holdRef.current = null
           heldRef.current = true
-          setArranging(true)
+          if (id === null) setArranging(true)
+          else setPreviewing(id)
         }, ARRANGE_HOLD_MS),
       }
     },
@@ -762,7 +782,7 @@ export function HomeView({
        dialog the same press is opening. The CSS half of this is already on
        `.reorder-handle`; a grid cell is a button, so this half is enough. */
     onContextMenu: (event: { preventDefault: () => void }) => event.preventDefault(),
-  }
+  })
 
   /** The tap that a hold has already answered is not also a tap. */
   const unlessHeld = (run: () => void) => () => {
@@ -1068,7 +1088,7 @@ export function HomeView({
                     className="homegrid__cell"
                     data-view={id}
                     onClick={unlessHeld(() => openDest(id))}
-                    {...holdProps}
+                    {...holdPropsFor(id)}
                   >
                     <span className="homegrid__plate">
                       {Icon ? <Icon size={21} /> : null}
@@ -1091,7 +1111,7 @@ export function HomeView({
                 className="homegrid__cell homegrid__cell--more"
                 data-view="more"
                 onClick={unlessHeld(() => setMoreOpen(true))}
-                {...holdProps}
+                {...holdPropsFor(null)}
               >
                 <span className="homegrid__plate">
                   <IconMore size={21} />
@@ -1153,6 +1173,36 @@ export function HomeView({
         )}
       </div>
 
+      {/*
+        What is inside a cell, without opening it — see `holdPropsFor`.
+
+        Not a `Modal`: this is a peek, and a `Modal` is the thing being peeked
+        at. Giving it the full dialog treatment would mean a scrim over the
+        grid, a header, a back-stack entry and a focus trap, all to show three
+        numbers over the cell you are still touching. It gets its own light
+        surface in `21-home-grid.css` and closes on any press outside itself.
+
+        `state` and `Date.now()` are read here rather than memoised: the sheet
+        exists only while it is open, the arithmetic is three array scans, and a
+        memo keyed on `state` would recompute on every one of them anyway.
+      */}
+      {previewing ? (
+        <TilePreviewSheet
+          label={labelOf(previewing)}
+          preview={buildTilePreview(previewing, state, Date.now())}
+          onOpen={() => {
+            const id = previewing
+            setPreviewing(null)
+            openDest(id)
+          }}
+          onArrange={() => {
+            setPreviewing(null)
+            setArranging(true)
+          }}
+          onClose={() => setPreviewing(null)}
+        />
+      ) : null}
+
       {/* Everything the grid had no room for. Deliberately the row shape rather
           than a second grid: a grid says "these are the important ones", and by
           construction these are the ones that are not. */}
@@ -1164,6 +1214,7 @@ export function HomeView({
              grid, and 更多功能 in the corner is that cell's own label read
              back. The list underneath is what the user came for. */
           hideTitle
+          edgeBack
           onClose={() => setMoreOpen(false)}
           closeLabel={t('common.close')}
           fullscreen
@@ -1426,6 +1477,7 @@ export function HomeView({
              same reason on the desktop, and this is where the phone's copy of
              it was still coming from. */
           hideTitle
+          edgeBack
           onClose={close}
           closeLabel={t('common.close')}
           fullscreen

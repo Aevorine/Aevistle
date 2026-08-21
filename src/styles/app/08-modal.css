@@ -57,6 +57,26 @@
 .modal--fullscreen .modal__body {
   flex: 1;
 }
+/* The back gesture — see `components/useEdgeBack.ts`.
+   While a finger is on the panel it follows the finger with no transition, or
+   the panel would lag behind by the duration of the ease. Let go and the
+   transform is removed outright (not set to identity), so this transition is
+   what carries it home — and what makes a gesture abandoned halfway read as
+   "that did not take" rather than as a jump. */
+.modal[data-dragging] {
+  transition: none;
+  /* A dismissal in progress must not also be a scroll in progress. */
+  touch-action: pan-y;
+  user-select: none;
+}
+.modal {
+  transition: transform 180ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .modal {
+    transition: none;
+  }
+}
 .modal__header {
   flex: none;
   display: flex;

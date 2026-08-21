@@ -342,4 +342,55 @@
     align-items: center;
     justify-content: center;
   }
+  /* --- 联系人 / 模板 -------------------------------------------------------
+   *
+   * The same split the Inbox gets, on the two screens that are a list and a
+   * form. Before this, editing a contact on an 800px tablet threw a dialog
+   * over a list that was perfectly readable underneath it, and editing three
+   * contacts was three dialogs.
+   *
+   * 1:1 rather than the Inbox's 4:5. A contact row is a name and an address
+   * and reaches its usable width almost immediately; the form beside it is
+   * four short fields and a delivery-window editor, which has a floor but no
+   * appetite. Neither side wants the other's spare width, so neither gets it.
+   * ---------------------------------------------------------------------- */
+
+  .view--list.view--twopane.view--contacts > .twopane__list,
+  .view--list.view--twopane.view--contacts > .twopane__detail,
+  .view--list.view--twopane.view--templates > .twopane__list,
+  .view--list.view--twopane.view--templates > .twopane__detail {
+    flex: 1 1 0;
+  }
+
+  /* A stack of fields needs the gutter a dialog body already had. The reader
+     does not, which is why this is a modifier and not a change to the base. */
+  .detailpane__body--form {
+    gap: var(--sp-4);
+    padding: var(--sp-4);
+  }
+
+  /*
+   * The confirm row, pinned to the bottom of the column.
+   *
+   * `flex: none` and outside the scroller on purpose: Save and Cancel that
+   * scroll away with a long form are Save and Cancel nobody can find without
+   * scrolling back, and on a 600px-tall tablet in landscape the delivery
+   * window editor is already taller than the pane.
+   */
+  .detailpane__footer {
+    flex: none;
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--sp-2);
+    padding: var(--sp-3) var(--sp-4);
+    border-top: 1px solid var(--border-subtle);
+  }
+
+  .detailpane__hint {
+    margin: 0;
+    max-width: 28ch;
+    text-align: center;
+    color: var(--text-3);
+    line-height: 1.6;
+  }
 }

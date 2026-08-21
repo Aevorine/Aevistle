@@ -16,6 +16,7 @@ import { IconAlert, IconCheckCircle, IconInfo, IconSearch, IconX } from './icons
 import { useI18n } from '../i18n'
 import { pushBackHandler } from '../core/backStack'
 import { newId } from '../core/types'
+import { useEdgeBack } from './useEdgeBack'
 
 /**
  * How a `PageHead` opens the command palette, without every screen having to
@@ -595,6 +596,7 @@ export function Modal({
   bodyClassName = '',
   variant,
   hideTitle,
+  edgeBack,
   // No English default: every caller passes a translated label, and a
   // hard-coded fallback would silently ship 'Close' into five other locales.
   closeLabel,
@@ -658,10 +660,24 @@ export function Modal({
    * carry the word.
    */
   hideTitle?: boolean
+  /**
+   * Drag in from the leading edge to dismiss — the phone's back gesture, for a
+   * sheet that is standing in for a screen.
+   *
+   * Opt-in rather than automatic on `fullscreen`, because a full-screen dialog
+   * is not always a screen. The message reader is full-screen and already owns
+   * horizontal drags (swipe closes it, from anywhere, by design) and a
+   * two-stage Escape; giving it a second, overlapping gesture would make which
+   * one fired depend on where the finger happened to land. A sheet that *is* a
+   * screen — one opened by pressing a tile, with a Home behind it — is what
+   * this is for, and adding it to a future one is one word at the call site.
+   */
+  edgeBack?: boolean
   closeLabel: string
 }) {
   const panelRef = useRef<HTMLDivElement>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
+  const { dir } = useI18n()
 
   /**
    * `onClose` is an inline arrow at nearly every call site, so its identity
@@ -682,6 +698,20 @@ export function Modal({
   onCloseRef.current = onClose
   const onEscapeRef = useRef(onEscape)
   onEscapeRef.current = onEscape
+
+  /* The gesture goes to the same exit the system back button reaches (see
+     `pushBackHandler` below) — two ways of saying one thing, and wiring them
+     to different exits is how a screen ends up dismissing one way and
+     stepping back the other. */
+  const { offset: edgeOffset, dragging, handlers: edgeHandlers } = useEdgeBack({
+    onBack: () => {
+      const escape = onEscapeRef.current
+      if (escape) escape()
+      else onCloseRef.current()
+    },
+    rtl: dir === 'rtl',
+    enabled: Boolean(edgeBack) && open,
+  })
 
   useEffect(() => {
     if (!open) return
@@ -783,10 +813,24 @@ export function Modal({
       <div
         className={`modal ${wide ? 'modal--wide' : ''} ${fullscreen ? 'modal--fullscreen' : ''}`}
         data-variant={variant}
+        data-dragging={dragging || undefined}
+        /*
+         * No transform at rest — not even `translateX(0)`.
+         *
+         * A transform of any kind, identity included, makes the element a
+         * containing block for every `position: fixed` descendant. That is not
+         * a hypothetical here: it is exactly why phone dialogs once failed to
+         * cover the screen, and the cause was an animation that *finished* at
+         * the identity transform and left it in place. So this property exists
+         * only while a finger is actually on the panel, and `undefined`
+         * removes it rather than setting it to a no-op value.
+         */
+        style={edgeOffset === 0 ? undefined : { transform: `translateX(${edgeOffset}px)` }}
         role="dialog"
         aria-modal="true"
         aria-label={title}
         ref={panelRef}
+        {...(edgeBack ? edgeHandlers : null)}
       >
         <div className="modal__header" data-hide-title={hideTitle || undefined}>
           <div className="modal__title">{title}</div>

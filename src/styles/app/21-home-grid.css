@@ -932,3 +932,124 @@
   min-width: 0;
   font-size: var(--text-base);
 }
+
+/* ==========================================================================
+   The preview sheet — hold a cell to see what is in it
+   ========================================================================== */
+
+/*
+ * Not a `.modal-scrim`. That one darkens the window because a dialog owns the
+ * screen; this one exists only to catch the press that dismisses the sheet,
+ * and darkening the grid would hide the very cell the numbers are about. The
+ * cell you held stays lit and readable behind it, which is what makes this a
+ * peek rather than a screen.
+ */
+.tilesheet-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+.tilesheet {
+  width: min(560px, 100%);
+  /* Clear of the bottom tab bar: a sheet that covers the tabs makes the way
+     out of the screen the one thing the peek hides. */
+  margin-bottom: calc(var(--nav-h) + env(safe-area-inset-bottom, 0px) + var(--sp-2));
+  margin-inline: var(--sp-2);
+  padding: var(--sp-2) var(--sp-4) var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface-1);
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .tilesheet {
+    animation: tilesheet-rise 160ms ease-out;
+  }
+}
+/*
+ * The animation ends on `translateY(0)` and would leave an identity transform
+ * behind — which is the exact shape of the bug that once stopped phone dialogs
+ * covering the screen, because any transform makes the element a containing
+ * block for `position: fixed` descendants. Nothing inside this sheet is fixed
+ * today; `animation-fill-mode` is left at its default `none` so that stays true
+ * by construction rather than by nobody adding one.
+ */
+@keyframes tilesheet-rise {
+  from { transform: translateY(12px); opacity: 0; }
+}
+.tilesheet__grip {
+  align-self: center;
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border);
+}
+.tilesheet__head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.tilesheet__title {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--text-lg);
+  font-weight: 700;
+  letter-spacing: var(--tracking-tight);
+  color: var(--text-1);
+}
+.tilesheet__x {
+  flex: none;
+  /* 44px, like every other target on a touch shell — `check:tap` measures it. */
+  width: 44px;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.tilesheet__x:hover { background: var(--surface-2); }
+.tilesheet__lines {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+/* Every figure is zero. Still worth reading — "nothing scheduled" is an
+   answer — but not worth the weight a real number gets. */
+.tilesheet__lines[data-quiet] { opacity: 0.72; }
+.tilesheet__line {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  padding-inline-start: var(--sp-3);
+  border-inline-start: 3px solid var(--border);
+}
+.tilesheet__line[data-tone='success'] { border-inline-start-color: var(--success); }
+.tilesheet__line[data-tone='warning'] { border-inline-start-color: var(--warning); }
+.tilesheet__line[data-tone='danger'] { border-inline-start-color: var(--danger); }
+.tilesheet__value {
+  margin: 0;
+  font-size: var(--text-base);
+  color: var(--text-1);
+}
+.tilesheet__empty {
+  margin: 0;
+  padding-inline-start: var(--sp-3);
+  font-size: var(--text-base);
+  color: var(--text-3);
+}
+.tilesheet__actions {
+  display: flex;
+  gap: var(--sp-2);
+}
+.tilesheet__actions > * { flex: 1; }
