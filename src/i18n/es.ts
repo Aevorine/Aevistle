@@ -858,6 +858,11 @@ export const es: Translations = {
   'inbox.tagFlagged': 'Marcado',
   'inbox.tagImportant': 'Importante',
   'inbox.loadFailed': 'No se pudo cargar este mensaje',
+  "inbox.bodyFailedTitle": "No se pudo obtener el contenido de este mensaje",
+  "inbox.bodyMissingTitle": "El contenido aún no ha llegado",
+  "inbox.bodyFailedHint": "El mensaje sigue en el servidor y no se ha borrado nada. Lo habitual es que falte la contraseña guardada, que el buzón no responda, o que el mensaje se haya eliminado desde la última sincronización.",
+  "inbox.bodyRetry": "Reintentar",
+  "inbox.bodySnippetLabel": "Vista previa guardada en la última sincronización — no es el mensaje completo",
   'inbox.copyFailed': 'No se pudo copiar',
   'inbox.loadImages': 'Cargar {n} imagen(es)',
 

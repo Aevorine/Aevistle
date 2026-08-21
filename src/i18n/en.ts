@@ -863,6 +863,11 @@ export const en = {
   'inbox.tagFlagged': 'Flagged',
   'inbox.tagImportant': 'Important',
   'inbox.loadFailed': 'Could not load this message',
+  "inbox.bodyFailedTitle": "This message’s content could not be fetched",
+  "inbox.bodyMissingTitle": "The content has not arrived yet",
+  "inbox.bodyFailedHint": "The message is still on the server and nothing has been deleted. This is usually a stored password that has gone, a mailbox that will not answer, or a message removed since the last sync.",
+  "inbox.bodyRetry": "Try again",
+  "inbox.bodySnippetLabel": "Stored preview, from the last sync — not the full message",
   'inbox.copyFailed': 'Could not copy',
   'inbox.loadImages': 'Load images: {n}',
 

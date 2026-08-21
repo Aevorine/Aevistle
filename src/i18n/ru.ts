@@ -856,6 +856,11 @@ export const ru: Translations = {
   'inbox.tagFlagged': 'Отмечено',
   'inbox.tagImportant': 'Важное',
   'inbox.loadFailed': 'Не удалось загрузить это письмо',
+  "inbox.bodyFailedTitle": "Не удалось получить содержимое этого письма",
+  "inbox.bodyMissingTitle": "Содержимое ещё не получено",
+  "inbox.bodyFailedHint": "Письмо по-прежнему на сервере, ничего не удалено. Обычные причины: пропал сохранённый пароль, почтовый сервер не отвечает или письмо удалили после последней синхронизации.",
+  "inbox.bodyRetry": "Повторить",
+  "inbox.bodySnippetLabel": "Фрагмент, сохранённый при последней синхронизации, — это не всё письмо",
   'inbox.copyFailed': 'Не удалось скопировать',
   'inbox.loadImages': 'Загрузить изображений: {n}',
 

@@ -851,6 +851,11 @@ export const ar: Translations = {
   'inbox.tagFlagged': 'مُعلَّم',
   'inbox.tagImportant': 'مهم',
   'inbox.loadFailed': 'تعذّر تحميل هذه الرسالة',
+  "inbox.bodyFailedTitle": "تعذّر جلب محتوى هذه الرسالة",
+  "inbox.bodyMissingTitle": "لم يصل المحتوى بعد",
+  "inbox.bodyFailedHint": "الرسالة ما زالت على الخادم ولم يُحذف شيء. الأسباب المعتادة: كلمة مرور محفوظة اختفت، أو خادم بريد لا يستجيب، أو رسالة حُذفت بعد آخر مزامنة.",
+  "inbox.bodyRetry": "إعادة المحاولة",
+  "inbox.bodySnippetLabel": "مقتطف محفوظ من آخر مزامنة — وليس الرسالة كاملة",
   'inbox.copyFailed': 'تعذّر النسخ',
   'inbox.loadImages': 'تحميل {n} صورة',
 

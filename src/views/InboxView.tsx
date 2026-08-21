@@ -80,6 +80,7 @@ import { flattenByDay, type DayLabel } from '../core/mail/dayGroups'
 import { useSwipe } from '../components/useSwipe'
 import { useTwoPane } from '../components/useNarrow'
 import { MessageBodyFrame, textAsHtml, type FrameImages } from '../components/MessageBodyFrame'
+import { ReaderBodyFailure } from '../components/ReaderBodyFailure'
 import { useApp } from '../state/AppState'
 import { PULL_THRESHOLD_PX, resolvePull, type PullState } from '../core/platform/gestures'
 import { pushBackHandler } from '../core/backStack'
@@ -429,6 +430,15 @@ export function InboxView({
   const [openMessage, setOpenMessage] = useState<InboxMessage | null>(null)
   const [openBody, setOpenBody] = useState<InboxMessageBody | null>(null)
   const [loadingBody, setLoadingBody] = useState(false)
+  /**
+   * Why the body is not on screen, when it is not.
+   *
+   * A toast is a moment; this is a state. See `loadBody` for the whole story —
+   * the short version is that the reader used to render nothing at all when a
+   * body failed to arrive, and a blank panel is indistinguishable from an
+   * empty message.
+   */
+  const [bodyError, setBodyError] = useState<string | null>(null)
   const [syncingIds, setSyncingIds] = useState<Set<string>>(new Set())
   /**
    * The whole body, rebuilt with its pictures spliced in — the *fallback*, not
@@ -1804,6 +1814,79 @@ export function InboxView({
 
   // --- reading ---
 
+  /**
+   * Fetch the open message's body, and make failure a state rather than a
+   * moment.
+   *
+   * ## What this was, and why it was the worst kind of bug
+   *
+   * The fetch lived inline at the bottom of `openDetail`, and its `catch`
+   * raised a toast and nothing else. `openBody` stayed `null`, and the
+   * reader's body region was written `loadingBody ? skeleton : openBody ? body
+   * : null` — so the third state drew *nothing at all*.
+   *
+   * Four seconds later the toast was gone, and what was left was a message
+   * with a subject, a sender, a date and an empty white panel underneath, with
+   * no error, no explanation and no way to try again. Nothing was thrown,
+   * nothing was logged, and every automated check in this repository passed:
+   * the screen rendered, it was the right size, its contrast was fine, its
+   * buttons all worked. It is exactly 运行正常，不报错，但是内容为空.
+   *
+   * And it hits every platform for its own reason — no stored IMAP password,
+   * a server that will not answer, a message deleted from the mailbox since
+   * the last sync, or the browser sandbox, which has no `getMessageBody` at
+   * all and therefore *always* lands here.
+   *
+   * ## The rule now
+   *
+   * The body region is never empty. Loading draws a skeleton, a body draws the
+   * body, and everything else draws `ReaderBodyFailure` — the reason, in the
+   * engine's own words, and a button that tries again. `bodyError` is what
+   * makes the failure outlive the toast.
+   *
+   * `run` is passed in rather than taken here so `openDetail` can claim the
+   * run number *before* its dozen synchronous resets, keeping the guarantee
+   * its own comment makes. A retry has no resets to do and passes nothing, so
+   * it claims one itself.
+   */
+  const loadBody = useCallback(
+    async (m: InboxMessage, priorRun?: number, opts?: { skipCache?: boolean }) => {
+      const run = priorRun ?? ++bodyRun.current
+      setBodyError(null)
+      /* A retry ignores the memo. The cache holds bodies that arrived, so a
+         hit here means the previous attempt succeeded and there is nothing to
+         retry — but a caller pressing 重试 is telling us the copy on screen is
+         not the one they want, and silently handing back the same one would
+         look like the button does nothing. */
+      const cached = opts?.skipCache ? null : getCachedBody(m.id)
+      if (cached) {
+        setOpenBody(cached)
+        setLoadingBody(false)
+        return
+      }
+      setOpenBody(null)
+      setLoadingBody(true)
+      try {
+        const body = await getInboxMessageBody(m)
+        if (run !== bodyRun.current) return
+        putCachedBody(m.id, body)
+        setOpenBody(body)
+      } catch (e) {
+        if (run !== bodyRun.current) return
+        const detail = e instanceof Error ? e.message : String(e)
+        /* Both, and they are not redundant. The toast is what tells someone
+           looking at the *list* that the message they just tapped failed; the
+           panel is what is still there a minute later when they wonder why the
+           message is blank. Only one of them used to exist. */
+        setBodyError(detail)
+        toast.push({ tone: 'error', title: t('inbox.loadFailed'), detail })
+      } finally {
+        if (run === bodyRun.current) setLoadingBody(false)
+      }
+    },
+    [getInboxMessageBody, t, toast],
+  )
+
   const openDetail = useCallback(
     async (m: InboxMessage) => {
       setOpenMessage(m)
@@ -1850,33 +1933,12 @@ export function InboxView({
 
       // No `run !== bodyRun.current` guard needed here: everything above this
       // point since `run` was assigned is synchronous, so `bodyRun.current`
-      // cannot have moved on yet.
-      const cached = getCachedBody(m.id)
-      if (cached) {
-        setOpenBody(cached)
-        setLoadingBody(false)
-        return
-      }
-      setOpenBody(null)
-      setLoadingBody(true)
-      try {
-        const body = await getInboxMessageBody(m)
-        if (run !== bodyRun.current) return
-        putCachedBody(m.id, body)
-        setOpenBody(body)
-      } catch (e) {
-        if (run !== bodyRun.current) return
-        toast.push({
-          tone: 'error',
-          title: t('inbox.loadFailed'),
-          detail: e instanceof Error ? e.message : String(e),
-        })
-      } finally {
-        if (run === bodyRun.current) setLoadingBody(false)
-      }
+      // cannot have moved on yet — and `loadBody` takes it from here, having
+      // been handed the run it must finish under.
+      await loadBody(m, run)
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [getInboxMessageBody, markInboxMessagesRead, t],
+    [loadBody, markInboxMessagesRead],
   )
 
   /**
@@ -3826,7 +3888,27 @@ export function InboxView({
                   </div>
                 ) : null}
               </>
-            ) : null}
+            ) : (
+              /*
+                The third state, which used to be `null`.
+
+                Reached whenever there is an open message and no body: the
+                fetch threw, or there is no fetch to make (the browser sandbox
+                has no `getMessageBody`). Either way the reader now says so, in
+                the same place the message would have been, and offers the one
+                action that can change the answer.
+              */
+              <ReaderBodyFailure
+                detail={bodyError}
+                /* Already on this device — it is what the row in the list is
+                   drawn from — so the reader can show the first line of the
+                   message even with the server unreachable. */
+                snippet={openMessage?.snippet}
+                onRetry={() => {
+                  if (openMessage) void loadBody(openMessage, undefined, { skipCache: true })
+                }}
+              />
+            )}
           </>
         ) : null}
       </ReaderShell>

@@ -845,6 +845,11 @@ export const zhCN: Translations = {
   'inbox.tagFlagged': '关注',
   'inbox.tagImportant': '重要',
   'inbox.loadFailed': '这封邮件加载失败',
+  "inbox.bodyFailedTitle": "这封邮件的内容没能取回来",
+  "inbox.bodyMissingTitle": "内容还没有取回来",
+  "inbox.bodyFailedHint": "邮件还在服务器上，什么都没有被删掉。常见原因是保存的密码没了、邮箱服务器连不上，或者这封信在上次同步之后被删了。",
+  "inbox.bodyRetry": "重试",
+  "inbox.bodySnippetLabel": "上次同步时存下的摘要，不是完整正文",
   'inbox.copyFailed': '复制失败',
   'inbox.loadImages': '加载 {n} 张图片',
 

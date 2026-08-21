@@ -858,6 +858,11 @@ export const fr: Translations = {
   'inbox.tagFlagged': 'Signalé',
   'inbox.tagImportant': 'Important',
   'inbox.loadFailed': 'Impossible de charger ce message',
+  "inbox.bodyFailedTitle": "Le contenu de ce message n’a pas pu être récupéré",
+  "inbox.bodyMissingTitle": "Le contenu n’est pas encore arrivé",
+  "inbox.bodyFailedHint": "Le message est toujours sur le serveur et rien n’a été supprimé. Le plus souvent : un mot de passe enregistré disparu, une boîte qui ne répond pas, ou un message effacé depuis la dernière synchronisation.",
+  "inbox.bodyRetry": "Réessayer",
+  "inbox.bodySnippetLabel": "Aperçu enregistré lors de la dernière synchronisation — pas le message complet",
   'inbox.copyFailed': 'Impossible de copier',
   'inbox.loadImages': 'Charger {n} image(s)',
 

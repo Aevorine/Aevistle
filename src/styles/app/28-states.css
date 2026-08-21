@@ -160,3 +160,90 @@
     animation: none;
   }
 }
+
+/* ==========================================================================
+   The reader, when the body did not arrive
+   --------------------------------------------------------------------------
+   Sits exactly where the message would have been, and takes the same vertical
+   room `.reader__loading` does, so a failed load does not make the reader jump
+   to a different shape than the one it had a second earlier while loading.
+
+   Centred in the space rather than pinned to the top: a single line of text at
+   the top edge of an otherwise empty panel is what a screen that failed to
+   load looks like, and this is a screen that is telling you something.
+   ========================================================================== */
+
+.readerfail {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-3);
+  padding: var(--sp-6) var(--sp-4);
+  text-align: center;
+}
+.readerfail__mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--surface-2);
+  color: var(--warning);
+}
+.readerfail__title {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: 700;
+  letter-spacing: var(--tracking-tight);
+  color: var(--text-1);
+}
+.readerfail__hint {
+  margin: 0;
+  max-width: 46ch;
+  font-size: var(--text-base);
+  color: var(--text-2);
+  line-height: 1.6;
+}
+/* The engine's own words. Untranslated, selectable, and wrapped anywhere —
+   a Windows path or a stack frame is one unbreakable word wider than the
+   panel. Same treatment and same reasoning as `.bootfail__tech`. */
+.readerfail__tech {
+  margin: 0;
+  max-width: 46ch;
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  font-size: var(--text-sm);
+  color: var(--text-3);
+  line-height: 1.5;
+  text-align: start;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+/* The line the last sync stored, offered while the full message is out of
+   reach. Quoted rather than rendered as body text, and labelled, because a
+   snippet shown like a body is the app overstating how much of the message it
+   actually has. */
+.readerfail__snippet {
+  margin: 0;
+  max-width: 46ch;
+  text-align: start;
+}
+.readerfail__snippetLabel {
+  margin-bottom: var(--sp-1);
+  font-size: var(--text-sm);
+  color: var(--text-3);
+}
+.readerfail__snippetText {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border-inline-start: 3px solid var(--border);
+  font-size: var(--text-base);
+  color: var(--text-2);
+  line-height: 1.6;
+  user-select: text;
+}
