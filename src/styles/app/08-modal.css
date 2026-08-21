@@ -80,6 +80,30 @@
   font-weight: 700;
   letter-spacing: var(--tracking-tight);
 }
+/* `Modal`'s `hideTitle` — the twin of `.page-head[data-hide-title]` in
+   `02-shell.css`, written out there in full. Short version: the sheet was
+   opened by pressing a tile that carries this exact word, so drawing it again
+   in the corner says nothing; and it is clipped rather than `display: none`
+   so the accessibility tree and the `ui-consistency` sampler both still see
+   a heading. The close button keeps the row, and takes the width the title
+   is no longer using. */
+.modal__header[data-hide-title] .modal__title {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+/* The heading is out of flow now, so nothing in the row claims the free
+   space — without this the close button slides to the leading edge and the
+   header reads as a stray icon rather than as a bar. */
+.modal__header[data-hide-title] {
+  justify-content: flex-end;
+}
 .modal__body {
   flex: 1;
   min-height: 0;

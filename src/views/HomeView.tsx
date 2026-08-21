@@ -1160,6 +1160,10 @@ export function HomeView({
         <Modal
           open
           title={t('home.moreTitle')}
+          /* Same argument as the sheet below: 更多 is the eighth cell of the
+             grid, and 更多功能 in the corner is that cell's own label read
+             back. The list underneath is what the user came for. */
+          hideTitle
           onClose={() => setMoreOpen(false)}
           closeLabel={t('common.close')}
           fullscreen
@@ -1414,6 +1418,14 @@ export function HomeView({
         <Modal
           open
           title={labelOf(open)}
+          /* `labelOf(open)` is, by construction, the text printed on the tile
+             that opened this sheet — so the heading was a copy of the control
+             the user had just pressed, in the corner, on every one of these
+             eleven screens. That is the one case `hideTitle` exists for; the
+             screens themselves already drop their own `PageHead` title for the
+             same reason on the desktop, and this is where the phone's copy of
+             it was still coming from. */
+          hideTitle
           onClose={close}
           closeLabel={t('common.close')}
           fullscreen

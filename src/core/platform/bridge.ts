@@ -879,6 +879,21 @@ export function isDesktopShellWithoutBridge(): boolean {
   return / Electron\//.test(navigator.userAgent ?? '')
 }
 
+/**
+ * The one boot failure the UI can say something specific about.
+ *
+ * A class rather than a string match on the message: the message is what the
+ * user reads, so it belongs in the translation files, and a caller that has to
+ * recognise a failure by the English text of it cannot survive the day that
+ * text is translated. See `AppState`'s `bootError`.
+ */
+export class DesktopBridgeMissingError extends Error {
+  constructor() {
+    super('The desktop bridge did not load — Aevistle cannot reach the data folder or the scheduler.')
+    this.name = 'DesktopBridgeMissingError'
+  }
+}
+
 let cached: PlatformBridge | null = null
 
 /**
@@ -893,10 +908,7 @@ export async function getBridge(): Promise<PlatformBridge> {
   // `isDesktopShellWithoutBridge` — falling back here loses the user's data
   // folder and their entire schedule while looking completely normal.
   if (isDesktopShellWithoutBridge()) {
-    throw new Error(
-      'The desktop bridge did not load, so Aevistle cannot reach your data folder or the ' +
-        'scheduler. Reinstalling usually fixes this. Your existing data has not been touched.',
-    )
+    throw new DesktopBridgeMissingError()
   }
 
   const platform = detectPlatform()

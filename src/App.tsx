@@ -641,7 +641,12 @@ function Shell() {
       <div className="shell shell--boot-error">
         <div className="bootfail" role="alert">
           <h1 className="bootfail__title">{t('boot.failedTitle')}</h1>
-          <p className="bootfail__detail">{bootError}</p>
+          <p className="bootfail__detail">{t(bootError.key)}</p>
+          {/* The engine's own words, kept apart from the sentence written for
+              the reader and deliberately not translated: this is the line that
+              gets pasted into a bug report, and a translated stack trace helps
+              nobody. Absent when there was nothing technical to say. */}
+          {bootError.detail ? <p className="bootfail__tech">{bootError.detail}</p> : null}
           <p className="bootfail__hint">{t('boot.failedHint')}</p>
         </div>
       </div>

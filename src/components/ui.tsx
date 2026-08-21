@@ -594,6 +594,7 @@ export function Modal({
   headerExtra,
   bodyClassName = '',
   variant,
+  hideTitle,
   // No English default: every caller passes a translated label, and a
   // hard-coded fallback would silently ship 'Close' into five other locales.
   closeLabel,
@@ -638,6 +639,25 @@ export function Modal({
    * have to ask the body what it is.
    */
   variant?: 'reader'
+  /**
+   * Drops the visible heading, exactly as `PageHead`'s `hideTitle` does, and
+   * for exactly the same reason: a full-screen sheet opened by pressing a tile
+   * that says 定时任务 does not need to print 定时任务 in its top-left corner
+   * a fifth of a second later. The word is the label of the control the user
+   * just pressed; repeating it spends the first line of a phone's screen
+   * restating what they did.
+   *
+   * Only the drawn text goes. `aria-modal`'s `aria-label` below is `title`
+   * either way, so a screen reader still announces which sheet opened, and the
+   * node stays in the layout (clipped, not `display: none`) so the measuring
+   * gates still have an element to sample — the same two reasons written out
+   * at length over `.page-head[data-hide-title]` in `02-shell.css`.
+   *
+   * Not for a dialog whose title is the only thing naming it — a confirm, an
+   * account editor, anything reached from a control that does not already
+   * carry the word.
+   */
+  hideTitle?: boolean
   closeLabel: string
 }) {
   const panelRef = useRef<HTMLDivElement>(null)
@@ -768,7 +788,7 @@ export function Modal({
         aria-label={title}
         ref={panelRef}
       >
-        <div className="modal__header">
+        <div className="modal__header" data-hide-title={hideTitle || undefined}>
           <div className="modal__title">{title}</div>
           {headerExtra}
           <IconButton label={closeLabel} onClick={onClose}>

@@ -43,6 +43,7 @@ import {
   type Template,
 } from '../core/types'
 import {
+  DesktopBridgeMissingError,
   getBridge,
   type DataFolderChange,
   type InboxMessageBody,
@@ -1207,8 +1208,16 @@ export interface AppApi {
   /**
    * Why start-up stopped, when it did. `ready` stays false in that case, so
    * without this the UI has no way to tell "still loading" from "gave up".
+   *
+   * A key and a detail rather than a finished sentence. The three messages
+   * this used to hold were written in English at the point they were thrown,
+   * so the one screen a user sees when the app will not open — the screen
+   * where being able to read it matters most — printed a Chinese title, an
+   * English paragraph and a Chinese hint, in that order, in every locale but
+   * one. `detail` is the engine's own words and stays untranslated, because
+   * it is the part that gets pasted into a bug report.
    */
-  bootError: string | null
+  bootError: { key: TranslationKey; detail?: string } | null
 
   /**
    * Ids of jobs boot had to disable because their stored record could not be
@@ -1389,7 +1398,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
    * the only trace was a line in a console with no window.
    */
   const [saveFailing, setSaveFailing] = useState(false)
-  const [bootError, setBootError] = useState<string | null>(null)
+  const [bootError, setBootError] = useState<AppApi['bootError']>(null)
   /**
    * Jobs that boot could not rebuild and therefore disabled.
    *
@@ -1531,7 +1540,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       try {
         b = await getBridge()
       } catch (err) {
-        if (!cancelled) setBootError(err instanceof Error ? err.message : String(err))
+        if (!cancelled) {
+          setBootError({
+            key: err instanceof DesktopBridgeMissingError ? 'boot.failedBridge' : 'boot.failedGeneric',
+            detail: err instanceof Error ? err.message : String(err),
+          })
+        }
         return
       }
       if (cancelled) return
@@ -1542,11 +1556,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         stored = await b.loadState()
       } catch (err) {
         if (!cancelled) {
-          setBootError(
-            `Your saved data could not be read (${
-              err instanceof Error ? err.message : String(err)
-            }).`,
-          )
+          setBootError({
+            key: 'boot.failedRead',
+            detail: err instanceof Error ? err.message : String(err),
+          })
         }
         return
       }
@@ -1731,11 +1744,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // row in it — and an explicit failure the user can read and report
         // beats the indefinite skeleton this replaced.
         if (!cancelled) {
-          setBootError(
-            `Your saved data could not be prepared (${
-              err instanceof Error ? err.message : String(err)
-            }).`,
-          )
+          setBootError({
+            key: 'boot.failedPrepare',
+            detail: err instanceof Error ? err.message : String(err),
+          })
         }
         return
       }

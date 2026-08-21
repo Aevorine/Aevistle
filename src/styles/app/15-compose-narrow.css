@@ -570,6 +570,21 @@
   color: var(--text-2);
   line-height: 1.6;
 }
+/* The engine's own message. Set apart from the sentence above it because it
+   is a different kind of thing — untranslated, technical, and there to be
+   copied rather than read. `overflow-wrap` because a stack frame or a Windows
+   path is one unbreakable word wider than this card. */
+.bootfail__tech {
+  margin: 0 0 var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  font-size: var(--text-sm);
+  color: var(--text-3);
+  line-height: 1.5;
+  text-align: start;
+  overflow-wrap: anywhere;
+}
 .bootfail__hint {
   margin: 0;
   font-size: var(--text-base);
