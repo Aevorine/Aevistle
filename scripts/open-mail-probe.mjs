@@ -185,7 +185,16 @@ function seedSource({ messageCount, fetchMs, bigBodyBytes }) {
     from: 'Zhang Wei <zhang.wei@example.com>',
     to: 'me@example.com',
     subject: '下周三上午十点的项目进度评审会议安排通知 #' + i,
-    date: now - i * 600000,
+    /* A day and a half apart, not ten minutes.
+     *
+     * Ten minutes fit twelve messages inside two hours, so every row landed in
+     * the "Today" group and `dayLabel`'s other three branches were never
+     * reached by any probe in this repository. One of them — `weekday`, which a
+     * real mailbox hits within 48 hours — threw out of `Intl` and took the
+     * whole inbox screen down with it for four releases, with this gate green
+     * the entire time. The spread costs nothing here and puts today, yesterday,
+     * a weekday and a plain date on the screen every run. */
+    date: now - i * 129_600_000,
     snippet: '各位同事，下周三上午十点在三号会议室召开项目进度评审会议，请提前准备材料。',
     sizeBytes: 24000,
     hasAttachments: false,

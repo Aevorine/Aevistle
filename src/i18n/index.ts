@@ -206,6 +206,66 @@ function formatterKey(locale: string, opts: Record<string, unknown>): string {
   return key
 }
 
+/**
+ * The individual date-time components, as ECMA-402 names them.
+ *
+ * `Intl` treats these and `dateStyle`/`timeStyle` as two mutually exclusive
+ * ways of asking for the same thing, and combining them is not a fallback or a
+ * rounding — it is a `TypeError` thrown out of the `Intl.DateTimeFormat`
+ * constructor, in every locale, on every engine.
+ */
+const COMPONENT_FIELDS = [
+  'weekday',
+  'era',
+  'year',
+  'month',
+  'day',
+  'dayPeriod',
+  'hour',
+  'minute',
+  'second',
+  'fractionalSecondDigits',
+  'timeZoneName',
+] as const
+
+/**
+ * The options `formatDateTime` may actually hand to `Intl`, defaults included.
+ *
+ * ## The bug this exists to make unrepresentable
+ *
+ * `formatDateTime` spread the caller's options over `{dateStyle: 'medium',
+ * timeStyle: 'short'}`. That is correct for every caller that asks for a
+ * *style* and wrong for every caller that asks for a *component*: the merge
+ * silently produced `{dateStyle, timeStyle, weekday}`, which `Intl` refuses
+ * with `TypeError: Invalid option : option`.
+ *
+ * It threw inside a React render. `InboxView`'s day separators call
+ * `formatDateTime(at, {weekday: 'long'})` for any message between two and six
+ * days old (`dayGroups.ts`'s `weekday` label), so one such message anywhere in
+ * the mailbox threw during the list's render, `ErrorBoundary` caught it, and
+ * the *entire inbox screen* went blank — desktop, phone and tablet alike,
+ * because this is shared renderer code. Landed in 0.3.29 and survived three
+ * releases, because every fixture in this repository seeds messages minutes
+ * apart and therefore never reaches the branch. A real mailbox reaches it
+ * within a week of being opened.
+ *
+ * ## The rule now
+ *
+ * A caller that names any component gets *only* what it named. The styles are
+ * not merged in underneath, and a style the caller passed alongside a
+ * component is dropped rather than forwarded into the constructor that would
+ * reject it — the component is the more specific request, and a formatter that
+ * throws is not an alternative worth preserving. Callers wanting a style pass
+ * no components and are untouched, which is all of them but one.
+ */
+function withoutStyleConflict(opts?: Intl.DateTimeFormatOptions): Intl.DateTimeFormatOptions {
+  if (opts && COMPONENT_FIELDS.some((field) => opts[field] !== undefined)) {
+    const { dateStyle: _dateStyle, timeStyle: _timeStyle, ...rest } = opts
+    return rest
+  }
+  return { dateStyle: 'medium', timeStyle: 'short', ...opts }
+}
+
 function dateTimeFormatter(locale: string, opts: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
   const key = formatterKey(locale, opts as Record<string, unknown>)
   let formatter = dateTimeFormatters.get(key)
@@ -256,11 +316,7 @@ export function createI18n(locale: LocaleId): I18n {
   const t = (key: TranslationKey, values?: Interpolations) => translate(locale, key, values)
 
   const formatDateTime = (ms: number, opts?: Intl.DateTimeFormatOptions) =>
-    dateTimeFormatter(meta.intlTag, {
-      dateStyle: 'medium',
-      timeStyle: 'short',
-      ...opts,
-    }).format(new Date(ms))
+    dateTimeFormatter(meta.intlTag, withoutStyleConflict(opts)).format(new Date(ms))
 
   const formatRelative = (ms: number, now = Date.now()) => {
     const diff = ms - now

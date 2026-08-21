@@ -183,7 +183,12 @@ const state = {
         from: `Fixture Sender ${i} <s${i}@example.com>`,
         to: 'me@example.com',
         subject: `Fixture subject ${i}`,
-        date: NOW - i * 3_600_000,
+        /* Days apart rather than hours — see the same change in
+         * `open-mail-probe.mjs`. An hourly stride keeps every seeded message
+         * inside "Today", which is the one `dayLabel` branch that needs no
+         * date formatting and therefore the one that hid a crash in all three
+         * of the others. */
+        date: NOW - i * 129_600_000,
         snippet: `Fixture preview text ${i}`,
         sizeBytes: 2048,
         hasAttachments: false,
