@@ -63,6 +63,13 @@ import {
 } from '../core/mail/accounts'
 import { useReorder } from '../components/useReorder'
 import { useApp } from '../state/AppState'
+import {
+  hashPin,
+  isValidPin,
+  makeSalt,
+  PIN_LOCK_ITERATIONS,
+  timingSafeEqualHex,
+} from '../core/security/pinHash'
 import { LOCALES, useI18n, type TranslationKey } from '../i18n'
 import {
   DEFAULT_RETRY,
@@ -1419,7 +1426,7 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
                     type="button"
                     className="stylecard"
                     data-style-preview={style.id}
-                    aria-pressed={(s.visualStyle ?? 'aurora') === style.id}
+                    aria-pressed={(s.visualStyle ?? 'paper') === style.id}
                     onClick={() => patch({ visualStyle: style.id })}
                   >
                     {/* A page, a card on it, an accent and two lines of text —
@@ -1439,7 +1446,7 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
               </div>
             </Field>
 
-            {(s.visualStyle ?? 'aurora') === 'runecircuit' ? (
+            {(s.visualStyle ?? 'paper') === 'runecircuit' ? (
               <>
                 <Field label={t('settings.accentBase')}>
                   <div className="accent-swatches">
@@ -1601,6 +1608,20 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
                 title={t('settings.composeAdvisories')}
                 description={t('settings.composeAdvisoriesHint')}
               />
+
+              <Field label={t('settings.undoSend')}>
+                <Segmented
+                  value={String(s.undoSendSeconds ?? 5)}
+                  onChange={(v: string) => patch({ undoSendSeconds: Number(v) })}
+                  options={[
+                    { value: '0', label: t('settings.undoSendOff') },
+                    { value: '5', label: '5 s' },
+                    { value: '10', label: '10 s' },
+                    { value: '30', label: '30 s' },
+                  ]}
+                />
+                <div className="field__hint">{t('settings.undoSendHint')}</div>
+              </Field>
 
               <Field label={t('settings.language')}>
                 <select
@@ -2227,6 +2248,8 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
               onChange={(v) => patch({ redactLogs: v })}
               title={t('settings.redactLogs')}
             />
+
+            <AppLockField />
             {/*
               Two switches that existed in the settings type, were read on every
               run, and could not be reached from anywhere.
@@ -3541,5 +3564,141 @@ function DataFolderCard() {
       </div>
       {confirmElement}
     </Card>
+  )
+}
+
+/**
+ * The app lock's Settings row — the PIN gate over the whole UI. See
+ * `components/LockScreen.tsx` for the screen it buys and
+ * `core/security/pinHash.ts` for what is actually stored: an iterated hash
+ * and its salt, never the PIN itself.
+ *
+ * The honesty is in the copy, not in a footnote: the hint under the heading
+ * says *before* anyone turns this on that it locks the screen and not the
+ * disk, and that a forgotten PIN means resetting the app's data. A security
+ * switch that oversells is worse than no switch.
+ *
+ * Turning it off keeps the record with `enabled: false` rather than deleting
+ * it — same shape either way, nothing downstream has to handle "was on once,
+ * now absent" as a third state, and the stale hash of a retired PIN proves
+ * nothing to anyone (see the threat model in pinHash.ts).
+ */
+function AppLockField() {
+  const { state, dispatch } = useApp()
+  const toast = useToast()
+  const { t } = useI18n()
+  const lock = state.settings.appLock
+  const [pin, setPin] = useState('')
+  const [pin2, setPin2] = useState('')
+  const [error, setError] = useState<string | null>(null)
+
+  const enable = () => {
+    if (!isValidPin(pin)) {
+      setError(t('applock.badPin'))
+      return
+    }
+    if (pin !== pin2) {
+      setError(t('applock.mismatch'))
+      return
+    }
+    const salt = makeSalt()
+    dispatch({
+      type: 'patchSettings',
+      patch: {
+        appLock: {
+          enabled: true,
+          salt,
+          iterations: PIN_LOCK_ITERATIONS,
+          hash: hashPin(pin, salt, PIN_LOCK_ITERATIONS),
+        },
+      },
+    })
+    setPin('')
+    setPin2('')
+    setError(null)
+    toast.push({ tone: 'success', title: t('applock.enabled') })
+  }
+
+  const disable = () => {
+    if (!lock) return
+    // The current PIN, required: "walk up to an unlocked machine and switch
+    // the lock off" is precisely the move the lock exists to stop.
+    if (!timingSafeEqualHex(hashPin(pin, lock.salt, lock.iterations), lock.hash)) {
+      setError(t('applock.wrongPin'))
+      return
+    }
+    dispatch({ type: 'patchSettings', patch: { appLock: { ...lock, enabled: false } } })
+    setPin('')
+    setPin2('')
+    setError(null)
+  }
+
+  return (
+    <Field label={t('applock.title')}>
+      <div className="applock-setup">
+        {lock?.enabled ? (
+          <>
+            <div className="field__hint">{t('applock.enabled')}</div>
+            <input
+              className="input"
+              type="password"
+              inputMode="numeric"
+              autoComplete="off"
+              placeholder={t('applock.currentPin')}
+              aria-label={t('applock.currentPin')}
+              value={pin}
+              onChange={(e) => {
+                setPin(e.target.value)
+                setError(null)
+              }}
+            />
+            <div className="btn-row">
+              <Button variant="ghost" onClick={disable}>
+                {t('applock.disable')}
+              </Button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="field__hint">{t('applock.enabledHint')}</div>
+            <input
+              className="input"
+              type="password"
+              inputMode="numeric"
+              autoComplete="off"
+              placeholder={t('applock.newPin')}
+              aria-label={t('applock.newPin')}
+              value={pin}
+              onChange={(e) => {
+                setPin(e.target.value)
+                setError(null)
+              }}
+            />
+            <input
+              className="input"
+              type="password"
+              inputMode="numeric"
+              autoComplete="off"
+              placeholder={t('applock.confirmPin')}
+              aria-label={t('applock.confirmPin')}
+              value={pin2}
+              onChange={(e) => {
+                setPin2(e.target.value)
+                setError(null)
+              }}
+            />
+            <div className="btn-row">
+              <Button variant="primary" onClick={enable}>
+                {t('applock.enable')}
+              </Button>
+            </div>
+          </>
+        )}
+        {/* Reserved height — see `.applock__error`: the rows must not jump. */}
+        <div className="applock__error" role="alert">
+          {error ?? ''}
+        </div>
+      </div>
+    </Field>
   )
 }

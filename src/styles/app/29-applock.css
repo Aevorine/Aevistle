@@ -1,0 +1,61 @@
+/* ==========================================================================
+   The app lock screen — rendered *instead of* the shell (see LockScreen.tsx),
+   so this is a whole-viewport surface and not an overlay: no scrim, no
+   z-index contest, nothing behind it to leak through. Tokens only, and the
+   ground is `--bg` rather than a surface, because it stands in for the page
+   itself under every visual style.
+   ========================================================================== */
+
+.applock {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: var(--bg);
+}
+
+.applock__card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-3);
+  width: min(300px, calc(100vw - 48px));
+  text-align: center;
+}
+
+.applock__mark {
+  width: 44px;
+  height: 44px;
+  margin-bottom: var(--sp-2);
+}
+
+.applock__title {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+.applock__input {
+  width: 100%;
+  text-align: center;
+  /* Wide tracking: obscured digits read as a code being entered, and the
+     dots stop touching. */
+  letter-spacing: 0.35em;
+}
+
+/* Reserved space — see the component: the card must not jump on a miss. */
+.applock__error {
+  min-height: 18px;
+  font-size: 12.5px;
+  color: var(--danger);
+}
+
+/* The Settings side of the same feature (`AppLockField` in SettingsView):
+   the PIN inputs and their button, stacked with the form rhythm the rest of
+   that screen already keeps. */
+.applock-setup {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--sp-2);
+}

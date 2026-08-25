@@ -490,3 +490,13 @@ export const IconMore = (p: IconProps) => (
     <circle cx="19" cy="12" r="1.4" fill="currentColor" stroke="none" />
   </Svg>
 )
+
+/** An open spread, spine in the middle — the reader's magazine-layout toggle.
+    A book and not a page icon, because the press changes how the page *reads*
+    (measure, margins, headline), not which page is open. */
+export const IconBookOpen = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M12 6.6C10.5 5.2 8.3 4.6 6 4.6c-1 0-2 .1-3 .35V18.4c1-.25 2-.35 3-.35 2.3 0 4.5.6 6 2 1.5-1.4 3.7-2 6-2 1 0 2 .1 3 .35V4.95c-1-.25-2-.35-3-.35-2.3 0-4.5.6-6 2Z" />
+    <path d="M12 6.6v13.4" />
+  </Svg>
+)

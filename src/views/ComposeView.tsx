@@ -286,6 +286,34 @@ export function ComposeView({
 
   const [showCcBcc, setShowCcBcc] = useState(false)
   const [sending, setSending] = useState(false)
+  /**
+   * The undo-send window. `pendingSend` is what renders (seconds left);
+   * `pendingSendRef` is what the timer and the unmount cleanup act on —
+   * state read inside a `setInterval` callback is a stale snapshot, a ref
+   * is not.
+   */
+  const [pendingSend, setPendingSend] = useState<{ left: number; draft: MessageDraft } | null>(
+    null,
+  )
+  const pendingSendRef = useRef<{ timer: number; draft: MessageDraft } | null>(null)
+  const sendDraftNowRef = useRef(sendDraftNow)
+  sendDraftNowRef.current = sendDraftNow
+  /**
+   * Leaving the compose screen mid-countdown sends immediately. The timer
+   * dies with this component, and a pressed Send that silently never happens
+   * is the one outcome this screen must never produce — early is honest,
+   * dropped is not. Straight to `sendDraftNow` through the ref: the state
+   * setters in `performSend` would be writes to an unmounted component.
+   */
+  useEffect(() => {
+    return () => {
+      const pending = pendingSendRef.current
+      if (!pending) return
+      window.clearInterval(pending.timer)
+      pendingSendRef.current = null
+      void sendDraftNowRef.current(pending.draft)
+    }
+  }, [])
   const [preflightOpen, setPreflightOpen] = useState(false)
   const [detailsOpen, setDetailsOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
@@ -921,6 +949,109 @@ export function ComposeView({
   const preflight = usePreflight(draft)
   const attachmentPresence = useFilePresence(draft.attachments.map((a) => a.path))
 
+  /**
+   * The half that actually talks to the server, over a draft passed in rather
+   * than the live one: by the time an undo window closes, the form may
+   * already be holding the next message. `cleared` says the form was already
+   * reset (the undo path clears it the moment the countdown starts, exactly
+   * as a finished send would), which changes two things — success must not
+   * reset again, and a hard failure has to put the captured draft *back*,
+   * because "the send failed" over an empty form reads as "the mail is gone".
+   */
+  const performSend = async (d: MessageDraft, cleared: boolean) => {
+    setSending(true)
+    setOutcome(null)
+    setDetailsOpen(false)
+    try {
+      const result = await sendDraftNow(d)
+      setOutcome(result)
+      if (result.ok) {
+        toast.push({
+          tone: 'success',
+          title: t('toast.sent'),
+          detail: t('toast.sentDetail', { n: result.accepted.length, ms: result.durationMs }),
+        })
+        // A toast disappears. Someone who looked away during a slow send needs
+        // the confirmation to still be there when they look back, which is the
+        // whole complaint behind "did it send or not?".
+        if (state.settings.notifyOnSuccess) {
+          void bridge?.notify(t('result.sentTitle'), d.subject || account?.fromAddress || '')
+        }
+        if (!cleared) {
+          dispatch({ type: 'resetDraft', accountId: d.accountId })
+          clearSchedule()
+        }
+      } else if (state.settings.offlineQueueEnabled !== false && isQueueable(result)) {
+        // It is in the outbox, not lost. Saying "failed" here would be true of
+        // the attempt and false of the message, and the message is what the
+        // person cares about.
+        toast.push({ tone: 'info', title: t('outbox.queued'), detail: result.error })
+        if (!cleared) {
+          dispatch({ type: 'resetDraft', accountId: d.accountId })
+          clearSchedule()
+        }
+      } else {
+        toast.push({
+          tone: 'error',
+          title: t(errorTitleKey(result)),
+          detail: result.error,
+        })
+        // The undo path emptied the form on faith; a send that will not be
+        // retried gives the words back to be fixed and sent again.
+        if (cleared) dispatch({ type: 'setDraft', patch: { ...d } })
+      }
+    } finally {
+      setSending(false)
+    }
+  }
+
+  /** Flush a running countdown early — that send leaves *now*. */
+  const flushPendingSend = () => {
+    const pending = pendingSendRef.current
+    if (!pending) return
+    window.clearInterval(pending.timer)
+    pendingSendRef.current = null
+    setPendingSend(null)
+    void performSend(pending.draft, true)
+  }
+
+  const cancelPendingSend = () => {
+    const pending = pendingSendRef.current
+    if (!pending) return
+    window.clearInterval(pending.timer)
+    pendingSendRef.current = null
+    setPendingSend(null)
+    dispatch({ type: 'setDraft', patch: { ...pending.draft } })
+    toast.push({ tone: 'info', title: t('undoSend.cancelled') })
+  }
+
+  /**
+   * `settings.undoSendSeconds` (default 5): the message waits on this machine
+   * with one visible way back. The form clears immediately — the same moment
+   * a real send would clear it — so the countdown never races the next
+   * draft; cancel puts the captured draft back verbatim. A second Send
+   * during a countdown flushes the first rather than stacking timers.
+   */
+  const startUndoWindow = (d: MessageDraft, seconds: number) => {
+    flushPendingSend()
+    dispatch({ type: 'resetDraft', accountId: d.accountId })
+    clearSchedule()
+    let left = seconds
+    setPendingSend({ left, draft: d })
+    const timer = window.setInterval(() => {
+      left -= 1
+      if (left > 0) {
+        setPendingSend({ left, draft: d })
+        return
+      }
+      window.clearInterval(timer)
+      pendingSendRef.current = null
+      setPendingSend(null)
+      void performSend(d, true)
+    }, 1000)
+    pendingSendRef.current = { timer, draft: d }
+  }
+
   const doSend = async () => {
     // Snapshot before the form is cleared. A successful send is the commonest
     // way to lose a draft you wanted to reuse — see `core/snapshots`.
@@ -936,43 +1067,12 @@ export function ComposeView({
       if (!ok) return
     }
 
-    setSending(true)
-    setOutcome(null)
-    setDetailsOpen(false)
-    try {
-      const result = await sendDraftNow(draft)
-      setOutcome(result)
-      if (result.ok) {
-        toast.push({
-          tone: 'success',
-          title: t('toast.sent'),
-          detail: t('toast.sentDetail', { n: result.accepted.length, ms: result.durationMs }),
-        })
-        // A toast disappears. Someone who looked away during a slow send needs
-        // the confirmation to still be there when they look back, which is the
-        // whole complaint behind "did it send or not?".
-        if (state.settings.notifyOnSuccess) {
-          void bridge?.notify(t('result.sentTitle'), draft.subject || account?.fromAddress || '')
-        }
-        dispatch({ type: 'resetDraft', accountId: draft.accountId })
-        clearSchedule()
-      } else if (state.settings.offlineQueueEnabled !== false && isQueueable(result)) {
-        // It is in the outbox, not lost. Saying "failed" here would be true of
-        // the attempt and false of the message, and the message is what the
-        // person cares about.
-        toast.push({ tone: 'info', title: t('outbox.queued'), detail: result.error })
-        dispatch({ type: 'resetDraft', accountId: draft.accountId })
-        clearSchedule()
-      } else {
-        toast.push({
-          tone: 'error',
-          title: t(errorTitleKey(result)),
-          detail: result.error,
-        })
-      }
-    } finally {
-      setSending(false)
+    const undoSeconds = Math.max(0, Math.round(state.settings.undoSendSeconds ?? 5))
+    if (undoSeconds > 0) {
+      startUndoWindow(draft, undoSeconds)
+      return
     }
+    await performSend(draft, false)
   }
 
   /**
@@ -2459,6 +2559,24 @@ export function ComposeView({
           ) : null}
         </div>
       </div>
+
+      {/* The undo window: the send is armed, not gone. Same shelf as the
+          outcome banner below, because it answers the same question — "what
+          just happened to my message?" — one tense earlier. */}
+      {pendingSend ? (
+        <div className="sendresult" data-narrow={narrow || undefined}>
+          <Banner
+            tone="info"
+            keep
+            title={t('undoSend.pending', { s: pendingSend.left })}
+            action={
+              <Button variant="ghost" onClick={cancelPendingSend}>
+                {t('undoSend.cancel')}
+              </Button>
+            }
+          />
+        </div>
+      ) : null}
 
       {/* The answer to "did it actually send?", kept until dismissed.
 

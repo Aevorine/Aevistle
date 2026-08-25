@@ -7,6 +7,7 @@ import { ShortcutsDialog, matchShortcut } from './components/Shortcuts'
 import { HOME_SECTIONS, MOBILE_NAV, NAV, type ViewId } from './core/nav'
 import { useMobileShell, useNarrow, useSizeClass } from './components/useNarrow'
 import { DataFolderSetup } from './components/DataFolderSetup'
+import { LockScreen } from './components/LockScreen'
 import {
   IconActivity,
   IconCalendar,
@@ -209,6 +210,21 @@ function Shell() {
    */
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
+  /**
+   * The app lock. Armed once per launch, after hydration — `appLock` sits in
+   * stored settings, so reading it any earlier would read the defaults and
+   * never lock. Deliberately *not* re-armed when the setting changes: turning
+   * the lock on in Settings should not slam the door mid-session, it should
+   * hold from the next launch (and from Ctrl+L, handled in the key layer
+   * below, which is also how "lock it right now" is expressed on purpose).
+   */
+  const [locked, setLocked] = useState(false)
+  const lockArmedRef = useRef(false)
+  useEffect(() => {
+    if (!ready || lockArmedRef.current) return
+    lockArmedRef.current = true
+    if (state.settings.appLock?.enabled) setLocked(true)
+  }, [ready, state.settings.appLock])
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const action = matchShortcut(event)
@@ -222,6 +238,15 @@ function Shell() {
       if (action === 'help') {
         event.preventDefault()
         setShortcutsOpen(true)
+        return
+      }
+      // Ctrl+L. A no-op until a PIN exists — the row in the shortcuts panel
+      // is listed unconditionally (see `SHORTCUTS`), the action is not.
+      if (action === 'lock') {
+        if (state.settings.appLock?.enabled) {
+          event.preventDefault()
+          setLocked(true)
+        }
         return
       }
       if (action === 'undo') {
@@ -247,7 +272,7 @@ function Shell() {
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [undo, toast, t, view])
+  }, [undo, toast, t, view, state.settings.appLock])
 
   // "New reminder" in the tray menu. The main process has already raised the
   // window by the time this arrives; all that is left is landing on the right
@@ -688,6 +713,14 @@ function Shell() {
         </main>
       </div>
     )
+  }
+
+  /* Instead of the shell, not over it: nothing behind this exists in the DOM
+     to be read, tabbed into, or screenshotted while locked. All hooks above
+     have already run, so unlocking is one state flip away from exactly the
+     tree that would have rendered. */
+  if (locked && state.settings.appLock?.enabled) {
+    return <LockScreen lock={state.settings.appLock} onUnlock={() => setLocked(false)} />
   }
 
   return (

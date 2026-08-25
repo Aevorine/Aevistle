@@ -67,6 +67,7 @@ import {
   IconMaximize,
   IconMinimize,
   IconMoon,
+  IconBookOpen,
   IconMore,
   IconPaperclip,
   IconRefresh,
@@ -2011,6 +2012,31 @@ export function InboxView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openMessage, step])
 
+  /**
+   * The list's own keyboard: with no message open, j / ↓ / Enter opens the
+   * newest message on screen — the same key that then walks the list inside
+   * the reader (above), so "press j until everything is read" works from a
+   * cold start. Guarded like the reader layer, plus one rule of its own:
+   * Enter on a focused control still means that control, not this.
+   */
+  useEffect(() => {
+    if (openMessage) return
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null
+      const typing =
+        el?.tagName === 'INPUT' || el?.tagName === 'TEXTAREA' || el?.isContentEditable === true
+      if (typing || e.ctrlKey || e.metaKey || e.altKey) return
+      if (el?.closest?.('button, a, [role="menuitem"], select')) return
+      if (e.key === 'j' || e.key === 'ArrowDown' || e.key === 'Enter') {
+        if (filteredMessages.length === 0) return
+        e.preventDefault()
+        void openDetail(filteredMessages[0])
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [openMessage, filteredMessages, openDetail])
+
   /** The list's own overflow menu, closed by the same two events as the
       reader's below — Escape, or a pointer that lands outside the anchor. */
   useEffect(() => {
@@ -2063,6 +2089,9 @@ export function InboxView({
    * recently opened, most transient layer — the same reason `preview` (the
    * image lightbox) still comes before it here.
    */
+  /** `Settings.magazineReader`, defaulted off — toggled from the reader header. */
+  const magazineOn = state.settings.magazineReader === true
+
   const handleEscape = () => {
     if (preview) setPreview(null)
     else if (moreOpen) setMoreOpen(false)
@@ -3218,6 +3247,7 @@ export function InboxView({
         twoPane={twoPane}
         open={openMessage !== null}
         immersive={immersive}
+        magazine={magazineOn}
         title={openMessage?.subject || t('inbox.noSubject')}
         onClose={() => setOpenMessage(null)}
         onEscape={handleEscape}
@@ -3298,6 +3328,19 @@ export function InboxView({
                   {nightOn ? <IconSun size={16} /> : <IconMoon size={16} />}
                 </IconButton>
               ) : null}
+              {/* Reads like a magazine or reads like a client. A display
+                  choice, so it lives in settings and follows the user to
+                  every screen size; the label names what the press *will
+                  do*, same rule as the night toggle above. */}
+              <IconButton
+                label={magazineOn ? t('inbox.magazineOff') : t('inbox.magazineOn')}
+                aria-pressed={magazineOn}
+                onClick={() =>
+                  dispatch({ type: 'patchSettings', patch: { magazineReader: !magazineOn } })
+                }
+              >
+                <IconBookOpen size={16} />
+              </IconButton>
               <IconButton label={t('inbox.find')} onClick={() => setFindOpen((v) => !v)}>
                 <IconSearch size={16} />
               </IconButton>
@@ -3341,6 +3384,18 @@ export function InboxView({
                       <span>{nightOn ? t('inbox.viewOriginalColors') : t('inbox.viewNightColors')}</span>
                     </button>
                   ) : null}
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="reader__moreItem"
+                    onClick={() => {
+                      dispatch({ type: 'patchSettings', patch: { magazineReader: !magazineOn } })
+                      setMoreOpen(false)
+                    }}
+                  >
+                    <IconBookOpen size={16} />
+                    <span>{magazineOn ? t('inbox.magazineOff') : t('inbox.magazineOn')}</span>
+                  </button>
                   <button
                     type="button"
                     role="menuitem"
@@ -3995,6 +4050,7 @@ function ReaderShell({
   twoPane,
   open,
   immersive,
+  magazine,
   title,
   actions,
   onClose,
@@ -4006,6 +4062,8 @@ function ReaderShell({
   open: boolean
   /** Dialog only: the reader opens full screen and Escape steps out of it first. */
   immersive: boolean
+  /** `Settings.magazineReader` — appended to the body class in both branches. */
+  magazine: boolean
   title: string
   actions: React.ReactNode
   onClose: () => void
@@ -4050,7 +4108,7 @@ function ReaderShell({
         fullscreen={immersive}
         wide
         variant="reader"
-        bodyClassName="modal__body--reader"
+        bodyClassName={magazine ? 'modal__body--reader modal__body--magazine' : 'modal__body--reader'}
         title={title}
         onClose={onClose}
         onEscape={onEscape}
@@ -4080,7 +4138,15 @@ function ReaderShell({
             adds only what a column needs that a dialog body already had: a
             scroller of its own.
           */}
-          <div className="modal__body--reader detailpane__body">{children}</div>
+          <div
+            className={
+              magazine
+                ? 'modal__body--reader modal__body--magazine detailpane__body'
+                : 'modal__body--reader detailpane__body'
+            }
+          >
+            {children}
+          </div>
         </>
       ) : (
         <div className="detailpane__body detailpane__body--empty">

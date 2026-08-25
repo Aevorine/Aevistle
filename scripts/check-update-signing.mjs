@@ -51,9 +51,13 @@ const names = new Set((release.assets ?? []).map((a) => a.name))
 const tag = release.tagName
 
 if (!names.has('SHA256SUMS.txt.ed25519')) {
-  console.log(`  ⚠ ${tag} does not publish SHA256SUMS.txt.ed25519 yet.`)
-  console.log('    Not a failure — run `npm run release:sign-update` when publishing this release.\n')
-  process.exit(0)
+  // Hard since 2026-08-25 (audit P1-1): the in-app updater now refuses to
+  // install a release without a signature, so a release missing this asset
+  // is a release nobody can auto-update to — that has to be red here, not a
+  // shrug. The soft pass existed for the rollout window, which is over.
+  console.log(`  ✗ ${tag} does not publish SHA256SUMS.txt.ed25519.`)
+  console.log('    The updater refuses unsigned releases. Run `npm run release:sign-update` and re-upload.\n')
+  process.exit(1)
 }
 if (!names.has('SHA256SUMS.txt')) {
   console.log(`  ✗ ${tag} has a signature but no SHA256SUMS.txt for it to cover.\n`)

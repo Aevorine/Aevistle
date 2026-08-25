@@ -83,7 +83,19 @@ function isDisallowedAddress(ip: string): boolean {
     const lower = ip.toLowerCase()
     if (lower === '::1' || lower === '::') return true
     if (lower.startsWith('fc') || lower.startsWith('fd')) return true // unique local, fc00::/7
-    if (lower.startsWith('fe80')) return true // link-local
+    /* Link-local is fe80::/10 — the first hextet runs fe80 through febf, not
+       only the literal `fe80` every real OS assignment happens to start with.
+       Exactly four hex characters before the colon: a bare `fe8:` would be
+       0x0fe8, an entirely different (global) address. 2026-08-25 audit P2-4. */
+    if (/^fe[89ab][0-9a-f]:/.test(lower)) return true
+    /* NAT64 (64:ff9b::/96) embeds an IPv4 address in its low 32 bits, and on
+       a v6-only network *every* v4 destination arrives looking like this — so
+       the prefix itself cannot be refused without breaking every image for
+       those readers. The embedded address is held to the same rules the bare
+       one would be; an embedding this cannot read fails closed. */
+    const nat64 = embeddedNat64V4(lower)
+    if (nat64 !== null) return isDisallowedAddress(nat64)
+    if (lower.startsWith('64:ff9b:')) return true
     if (lower.startsWith('::ffff:')) {
       const mapped = lower.slice('::ffff:'.length)
       return net.isIPv4(mapped) ? isDisallowedAddress(mapped) : true
@@ -91,6 +103,25 @@ function isDisallowedAddress(ip: string): boolean {
     return false
   }
   return true // not a recognisable IP shape — fail closed
+}
+
+/**
+ * The IPv4 address embedded in a NAT64 (64:ff9b::/96) answer, or null when
+ * the string is not one this can read. Node hands back either the dotted
+ * form (`64:ff9b::192.0.2.1`) or plain hextets (`64:ff9b::c000:201`); the
+ * fully written-out zero groups are rare enough that they fall to the
+ * caller's fail-closed branch rather than earning a full v6 expander here.
+ */
+function embeddedNat64V4(lower: string): string | null {
+  if (!lower.startsWith('64:ff9b:')) return null
+  const tail = lower.slice('64:ff9b:'.length).replace(/^:+/, '')
+  if (net.isIPv4(tail)) return tail
+  const groups = tail.split(':').filter(Boolean)
+  if (groups.length === 0 || groups.length > 2) return null
+  const hextets = groups.map((g) => (/^[0-9a-f]{1,4}$/.test(g) ? parseInt(g, 16) : NaN))
+  if (hextets.some((h) => Number.isNaN(h))) return null
+  const [hi, lo] = hextets.length === 2 ? hextets : [0, hextets[0]]
+  return `${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`
 }
 
 type LookupEntry = { address: string; family: number }

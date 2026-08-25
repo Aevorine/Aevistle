@@ -33,6 +33,7 @@ export type ShortcutAction =
   | 'help'
   | 'focus'
   | 'search'
+  | 'lock'
   | `nav${number}`
 
 export interface ShortcutSpec {
@@ -69,6 +70,10 @@ const NAV_SHORTCUTS: ShortcutSpec[] = NAV.slice(0, MAX_NAV_SHORTCUT).map((item, 
 export const SHORTCUTS: ShortcutSpec[] = [
   { action: 'palette', keys: 'Ctrl+K', labelKey: 'palette.open', worksInFields: true, group: 'general' },
   { action: 'undo', keys: 'Ctrl+Z', labelKey: 'undo.action', worksInFields: false, group: 'general' },
+  /* Only does anything once a PIN exists — the Shell ignores it otherwise —
+     but it is listed unconditionally: a help panel whose rows appear and
+     vanish with settings is a panel that cannot be learned. */
+  { action: 'lock', keys: 'Ctrl+L', labelKey: 'applock.lockNow', worksInFields: true, group: 'general' },
   { action: 'help', keys: '?', labelKey: 'shortcuts.title', worksInFields: false, group: 'general' },
   { action: 'send', keys: 'Ctrl+Enter', labelKey: 'compose.sendNow', worksInFields: true, group: 'compose' },
   { action: 'schedule', keys: 'Ctrl+Shift+Enter', labelKey: 'compose.schedule', worksInFields: true, group: 'compose' },
@@ -132,6 +137,7 @@ export function matchShortcut(event: KeyboardEvent): ShortcutAction | null {
   const inField = inTextField(event.target)
 
   if (mod && !event.shiftKey && key.toLowerCase() === 'k') return 'palette'
+  if (mod && !event.shiftKey && key.toLowerCase() === 'l') return 'lock'
   if (mod && key === 'Enter') return event.shiftKey ? 'schedule' : 'send'
   if (mod && event.shiftKey && key.toLowerCase() === 'p') return 'preview'
   if (mod && event.shiftKey && key.toLowerCase() === 'h') return 'history'

@@ -2063,7 +2063,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     } = state.settings
     if (themeMode === 'system') root.removeAttribute('data-theme')
     else root.setAttribute('data-theme', themeMode)
-    root.setAttribute('data-style', visualStyle ?? 'aurora')
+    root.setAttribute('data-style', visualStyle ?? 'paper')
     root.setAttribute('data-accent', accent)
     // runecircuit's own two-axis accent (A10) — set unconditionally, same as
     // `data-accent` above; theme.css's selectors are what actually gate these

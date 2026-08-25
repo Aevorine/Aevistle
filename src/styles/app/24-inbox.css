@@ -989,3 +989,28 @@
   color: var(--text-3);
   font-variant-numeric: var(--numeric);
 }
+
+/* --- magazine layout -------------------------------------------------------
+   `Settings.magazineReader`, toggled from the reader's own header. A reading
+   *measure*, not a theme: the meta row and the message frame narrow to a
+   centred column and everything around them stays whatever the visual style
+   says it is. `ReaderShell` adds `.modal__body--magazine` beside
+   `.modal__body--reader` in both of its branches — a plain second class and
+   never `:has()`, which the oldest supported WebViews drop in silence.
+
+   68ch rather than a pixel width, because the point of a magazine column is
+   a line the eye can carry back to its start without hunting, and `ch`
+   tracks the reader's own type size. The frame is addressed by its stable
+   `title` (see MessageBodyFrame) — its class carries runtime modifiers.
+   Auto inline margins centre both in a stretch-aligned flex column once
+   `max-width` caps them, which is exactly the case here. */
+.modal__body--magazine .reader__meta,
+.modal__body--magazine iframe[title='message-body'] {
+  width: 100%;
+  max-width: 68ch;
+  margin-inline: auto;
+}
+
+.modal__body--magazine iframe[title='message-body'] {
+  display: block;
+}

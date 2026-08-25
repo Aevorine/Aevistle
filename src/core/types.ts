@@ -661,12 +661,30 @@ export const ALL_CONTROL_SCOPES: readonly ControlScope[] = [
   'send.immediate',
 ]
 
+/**
+ * What the app lock stores. Never the PIN itself: `hash` is the result of
+ * `hashPin` in `core/security/pinHash.ts` — an iterated SHA-256 over
+ * `salt:pin` — and `salt`/`iterations` are the other two inputs, kept beside
+ * it so the parameters can change later without invalidating every lock
+ * created under the old ones.
+ */
+export interface AppLockSettings {
+  enabled: boolean
+  hash: string
+  salt: string
+  iterations: number
+}
+
 export interface Settings {
   themeMode: ThemeMode
   /**
    * Required, not optional, because `DEFAULT_SETTINGS` is merged under every
-   * stored settings object at boot — an install written before this existed
-   * reads as `'aurora'`, which is the look it already had.
+   * stored settings object at boot. The default is `'paper'` as of 0.4.0 —
+   * the style drawn for the 宋体/Times reading pairing — and only a stored
+   * settings object *without* the field ever sees the default: every install
+   * that has opened the appearance card carries its own value and keeps the
+   * look it chose. A pre-`visualStyle` install does change from aurora to
+   * paper on update; that is the new default doing its job, not an accident.
    */
   visualStyle: VisualStyle
   accent: AccentId
@@ -711,6 +729,27 @@ export interface Settings {
   logMaxEntries: number
   /** Redact recipient addresses in the on-disk log. */
   redactLogs: boolean
+  /**
+   * Seconds between pressing Send and the message actually leaving, during
+   * which the same spot on screen takes it back. 0 turns the window off.
+   * The countdown lives on the compose screen; leaving that screen
+   * mid-countdown sends immediately rather than silently dropping the send —
+   * see the pending-send block in `ComposeView`.
+   */
+  undoSendSeconds?: number
+  /**
+   * The reader's magazine layout: a centred measure, wider margins, the
+   * subject set as a headline. Display only — nothing about the message
+   * itself changes. Toggled from the reader's own header, stored here so a
+   * choice made on one screen size is the same choice on every other.
+   */
+  magazineReader?: boolean
+  /**
+   * PIN gate over the whole UI. Absent until someone sets it up. This locks
+   * the *screen*, not the data — `state.json` is as readable on disk as it
+   * ever was, and the Settings card that enables it says exactly that.
+   */
+  appLock?: AppLockSettings
 
   // --- delivery limits ----------------------------------------------------
   /**
@@ -1276,7 +1315,7 @@ export const ATMOSPHERE_MOTION_MIN = 15
 
 export const DEFAULT_SETTINGS: Settings = {
   themeMode: 'system',
-  visualStyle: 'aurora',
+  visualStyle: 'paper',
   accent: 'azure',
   accentBase: 'ink',
   accentCyber: 'cyan',
@@ -1294,6 +1333,8 @@ export const DEFAULT_SETTINGS: Settings = {
   logRetentionDays: 30,
   logMaxEntries: 500,
   redactLogs: false,
+  undoSendSeconds: 5,
+  magazineReader: false,
   quietHoursEnabled: false,
   quietStart: '22:00',
   quietEnd: '07:00',
@@ -1360,7 +1401,10 @@ export const DEFAULT_SETTINGS: Settings = {
   // now surfaced only in `PreflightDialog` at Send. An error that actually
   // blocks Send is a different set (`ComposeView`'s `issues`/`blocked`) and
   // still shows — and still blocks — regardless of this flag.
-  composeAdvisoriesEnabled: false,
+  /* Back on by default as of 0.4.0 — the user picked "发送前小检查" off the
+     enhancement menu, and this switch is that feature. `composeAdvisoriesChosen`
+     still outranks it: anyone who turned advisories off by hand stays off. */
+  composeAdvisoriesEnabled: true,
   composeAdvisoriesChosen: false,
   readerDarkInvert: true,
   readerFoldQuotes: true,

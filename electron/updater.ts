@@ -142,15 +142,15 @@ type SignatureCheck =
  * Verify `manifestText` (the exact bytes `fetchManifestText` returned)
  * against the update-signing key baked into this build.
  *
- * Only `missing` (HTTP 404 — this release genuinely has no signature yet) is
- * soft: a manifest that fetched and hashed fine is still installable without
- * one, exactly like a release with no SHA256SUMS.txt at all always has been.
- * That is a deliberate rollout choice, since older releases will never
- * retroactively grow a signature — not an oversight. `invalid` and
- * `unreachable` are both hard failures at the call site: by the time this
- * runs, the installer and the manifest have both already been fetched
- * successfully, so a failure that selectively hits only the signature
- * request is not an ordinary outage.
+ * All three failure shapes are hard at the call site now — `missing`
+ * included. It was the one soft outcome while releases without a signature
+ * were still the latest thing to update to; every release since 0.3.29 has
+ * published `SHA256SUMS.txt.ed25519`, so today a 404 is not "an old release"
+ * — it is one deleted file away from quietly downgrading this whole check to
+ * hash-only, where a stolen release credential recomputes the hashes itself
+ * and everything matches. The transition window is closed (2026-08-25 audit,
+ * P1-1); `check-update-signing.mjs` went hard on the same day so a release
+ * that forgets to sign goes red in CI before anyone's updater meets it.
  */
 async function verifyManifestSignature(manifestText: string): Promise<SignatureCheck> {
   let response: Response
@@ -526,15 +526,21 @@ export async function downloadUpdate(
     )
   }
   /*
-   * `missing` (HTTP 404 — this release genuinely has no signature published,
-   * expected for a while after this feature ships) is the only soft outcome.
-   * `unreachable` is refused for the same reason the manifest fetch above
-   * is: by this point the installer and SHA256SUMS.txt have both already
-   * been fetched successfully, so a network condition that selectively
-   * blocks only the signature request is not an ordinary outage — it is
-   * exactly the shape blocking it to force a downgrade to hash-only
-   * verification would take.
+   * `missing` is refused too, as of 2026-08-25 (audit P1-1). While unsigned
+   * releases were still current it was the one soft outcome; now that every
+   * release ships a signature, a 404 here is exactly what deleting the
+   * signature asset to force hash-only verification looks like — and the
+   * hashes are the attacker's own arithmetic. `unreachable` is refused for
+   * the same reason the manifest fetch above is: the installer and
+   * SHA256SUMS.txt both already fetched fine, so a network condition that
+   * selectively blocks only the signature request is not an ordinary outage.
    */
+  if (signature.status === 'missing') {
+    await fs.rm(partPath, { force: true })
+    throw new Error(
+      'This release publishes no update signature — refusing to install it automatically',
+    )
+  }
   if (signature.status === 'unreachable') {
     await fs.rm(partPath, { force: true })
     throw new Error(
@@ -553,8 +559,9 @@ export async function downloadUpdate(
     // `expectedHash === null` means this release simply did not publish a
     // checksum for this file, which is installable but unverified.
     checksumVerified: expectedHash !== null,
-    // Only `verified` and `missing` (this release has no signature yet) ever
-    // reach here — `invalid` and `unreachable` both throw above.
+    // Only `verified` reaches here — `invalid`, `unreachable` and `missing`
+    // all throw above, so a download that completes is a download that was
+    // signed by the key baked into this build.
     signatureVerified: signature.status === 'verified',
   }
   onProgress(result)

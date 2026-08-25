@@ -113,3 +113,6 @@
 @import './app/26-tablet.css';
 @import './app/27-ring.css';
 @import './app/28-states.css';
+/* After the shared shapes on purpose: the lock screen replaces the shell
+   outright (see LockScreen.tsx), so nothing here contests anything above. */
+@import './app/29-applock.css';

@@ -109,22 +109,32 @@ if (!existsSync(SUMS)) die(`${SUMS} not found.`, 'Build the release first.')
 console.log(`\n  Signing ${SUMS}`)
 console.log(`  key ${fingerprint}`)
 
-const signed = run(GPG, [
-  ...homeArgs,
-  '--batch',
-  '--yes',
-  '--pinentry-mode',
-  'loopback',
-  '--passphrase',
-  passphrase,
-  '--local-user',
-  fingerprint,
-  '--armor',
-  '--detach-sign',
-  '--output',
-  toGpgPath(SIG, GPG),
-  toGpgPath(SUMS, GPG),
-])
+/*
+ * The passphrase goes in on stdin (`--passphrase-fd 0`), never as an argv
+ * element: command lines are world-readable on this machine for the seconds
+ * gpg runs — `wmic process` / any process explorer — and a passphrase is the
+ * one string in this script that must not appear there. 2026-08-25 audit P2-1.
+ */
+const signed = run(
+  GPG,
+  [
+    ...homeArgs,
+    '--batch',
+    '--yes',
+    '--pinentry-mode',
+    'loopback',
+    '--passphrase-fd',
+    '0',
+    '--local-user',
+    fingerprint,
+    '--armor',
+    '--detach-sign',
+    '--output',
+    toGpgPath(SIG, GPG),
+    toGpgPath(SUMS, GPG),
+  ],
+  { input: `${passphrase}\n` },
+)
 if (signed.status !== 0) die('gpg refused to sign.', (signed.stderr || '').trim().split('\n').pop())
 
 // --- verify what was just produced -----------------------------------------
