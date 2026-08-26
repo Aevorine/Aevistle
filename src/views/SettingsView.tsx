@@ -1841,6 +1841,14 @@ export function SettingsView({ openAccountOnMount }: { openAccountOnMount?: bool
               onChange={(v) => patch({ notifyOnCode: v })}
               title={t('settings.notifyOnCode')}
             />
+            {/* Default off — see `codeAutoCopyAlways` in core/types.ts for why
+                a clipboard-replacing convenience has to be asked for. */}
+            <Switch
+              checked={s.codeAutoCopyAlways === true}
+              onChange={(v) => patch({ codeAutoCopyAlways: v })}
+              title={t('settings.codeAutoCopyAlways')}
+              description={t('settings.codeAutoCopyAlwaysDesc')}
+            />
             {/* Also default on, and the switch that was missing entirely: until
                 it existed, ordinary mail arriving in a watched mailbox raised
                 nothing at all on either platform. Directly under the code

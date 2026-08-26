@@ -88,6 +88,7 @@ export function TemplatesView({ onApplied }: { onApplied: () => void }) {
             estimate={68}
             scrollerClassName="list-pane"
             surfaceClassName="card card--flush"
+            persistKey="templates"
           >
             {(tpl) => (
               <div className="log" style={{ alignItems: 'center' }}>

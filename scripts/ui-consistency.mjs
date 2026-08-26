@@ -271,10 +271,13 @@ const collect = `(() => {
   return JSON.stringify(out)
 })()`
 
-const totals = {}
-const whereSeen = {}
+let totals = {}
+let whereSeen = {}
 const failures = []
 const fail = (m) => {
+  // Idempotent, because the tour below may run more than once: a screen that
+  // is genuinely unreachable should be one failure, not one per attempt.
+  if (failures.includes(m)) return
   failures.push(m)
   console.log(`  FAIL  ${m}`)
 }
@@ -289,7 +292,10 @@ if (unknown.length) {
   fail(`the sidebar has view(s) this check does not tour: ${unknown.join(', ')} — add them to VIEWS`)
 }
 
-for (const view of VIEWS) {
+async function tour() {
+  totals = {}
+  whereSeen = {}
+  for (const view of VIEWS) {
   // The shell listens for this on the nav buttons; clicking by label would
   // depend on the current locale.
   const went = await evaluate(
@@ -361,6 +367,37 @@ for (const view of VIEWS) {
       ;(whereSeen[label][value] ??= new Set()).add(view)
     }
   }
+  }
+}
+
+/*
+ * Tour, and re-tour when coverage came up short.
+ *
+ * The chip-radius probe failed once on CI with `4px×1` while the same commit
+ * measured `4px×3` locally and on the previous day's CI — elements that render
+ * after an asynchronous load (calendar data, feeds) are on screen a beat later
+ * on a loaded runner, and a tour that walks past at the wrong moment reports
+ * "nothing was measured" about a screen that was merely slow. One element
+ * missing is not a uniformity defect, so the tour is given time and another
+ * walk before the coverage rule is allowed to conclude anything.
+ *
+ * Each re-tour *replaces* the sample rather than merging into it: two walks
+ * both counting the same chip would report ×2 for one element, and coverage
+ * minimums padded by double-counting would pass without the elements they
+ * exist to require. Navigation failures are not retried — `fail` is
+ * idempotent and a screen that cannot be reached is broken, not slow.
+ */
+const underMin = () =>
+  PROBES.filter(([label, , , rule]) => {
+    const seen = totals[label] ?? {}
+    return Object.values(seen).reduce((n, c) => n + c, 0) < rule.min
+  }).map(([label]) => label)
+
+await tour()
+for (let retry = 1; retry <= 2 && underMin().length > 0; retry += 1) {
+  console.log(`  note  under coverage minimum: ${underMin().join(', ')} — waiting and re-touring (${retry}/2)`)
+  await sleep(2500)
+  await tour()
 }
 
 /* ---- the rules ---- */

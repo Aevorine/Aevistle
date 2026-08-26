@@ -293,6 +293,7 @@ export function ContactsView() {
             estimate={68}
             scrollerClassName="list-pane"
             surfaceClassName="card card--flush"
+            persistKey="contacts"
           >
             {(row) =>
               row.kind === 'heading' ? (

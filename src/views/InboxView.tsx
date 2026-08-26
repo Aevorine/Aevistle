@@ -1131,6 +1131,35 @@ export function InboxView({
     })
   }
 
+  /**
+   * Everything from the top of the list down to the selected row, read.
+   *
+   * The gesture behind it: a mailbox is read newest-first, and "I have dealt
+   * with everything above this point" is a *position*, not a set — selecting
+   * forty rows one by one to say it is the workaround this replaces. The
+   * boundary is the oldest selected message, so selecting one row means "this
+   * one and everything newer", and selecting several means the same thing
+   * measured from the lowest of them.
+   *
+   * Scoped to `filteredMessages` — the rows actually on screen — not the whole
+   * store: with an account tab or a filter active, marking mail the user
+   * cannot currently see would be action at a distance.
+   */
+  const markReadUpToHere = async () => {
+    const chosen = filteredMessages.filter((m) => selected.has(m.id))
+    if (chosen.length === 0) return
+    const boundary = Math.min(...chosen.map((m) => m.date))
+    const ids = filteredMessages.filter((m) => m.date >= boundary && !m.seen).map((m) => m.id)
+    clearSelection()
+    if (ids.length === 0) return
+    await markSet(new Set(ids), true)
+    toast.push({
+      tone: 'success',
+      title: t('inbox.markAllReadDone'),
+      detail: t('inbox.markAllReadCount', { n: ids.length }),
+    })
+  }
+
   const deleteIdSet = async (ids: Set<string>) => {
     const groups = groupByAccount(ids)
     await Promise.all(
@@ -2571,6 +2600,11 @@ export function InboxView({
                     type="button"
                     role="menuitem"
                     className="inboxmenu__item"
+                    /* A probe hook, same precedent as `data-screen`: the menu
+                       items carry translated labels a check must not match on,
+                       and 编辑 is the door `check:inbox-scale` walks through to
+                       reach the bulk actions. */
+                    data-action="edit"
                     onClick={() => {
                       setMenuOpen(false)
                       setEditMode(true)
@@ -2763,6 +2797,9 @@ export function InboxView({
                       </Button>
                       <Button variant="ghost" onClick={() => markSet(selected, false)}>
                         {t('inbox.markUnread')}
+                      </Button>
+                      <Button variant="ghost" data-action="read-to-here" onClick={() => void markReadUpToHere()}>
+                        {t('inbox.markReadToHere')}
                       </Button>
                       {/* Batch tagging: the third thing anyone does to a handful
                           of selected messages, after reading and deleting them. */}
@@ -3041,6 +3078,7 @@ export function InboxView({
               estimate={70}
               scrollerClassName="list-pane"
               rowsClassName="joblist"
+              persistKey="inbox"
               /* The current day's sticky bar must have an element to be even
                  when its own row is far above the window — see `anchor` in
                  `VirtualList`. Without this a long day's bar vanishes partway

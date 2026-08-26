@@ -1046,6 +1046,17 @@ export interface Settings {
    */
   autoCopyCode?: boolean
   /**
+   * Copy every arriving verification code to the clipboard, not only the one
+   * a waiting session asked for.
+   *
+   * Default off, and that is a decision rather than an oversight: replacing
+   * the clipboard is destructive — whatever was on it is gone — and
+   * `CodeCheck`'s waiting mode already covers the case where the user has
+   * said the next code is what they want. This switch is for the person who
+   * has weighed that and wants every code ready to paste anyway.
+   */
+  codeAutoCopyAlways?: boolean
+  /**
    * Corrections the user has made to code extraction, per sender domain.
    *
    * Stored rather than inferred each time, because the whole value of a
@@ -1370,6 +1381,7 @@ export const DEFAULT_SETTINGS: Settings = {
   notifyKeywords: [],
   keepReceivingWhenClosed: false,
   autoCopyCode: true,
+  codeAutoCopyAlways: false,
   codeRules: [],
   codesBigDigits: false,
   listDensity: 'standard',

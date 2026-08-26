@@ -276,11 +276,20 @@ export function CodeCheckProvider({ children }: { children: ReactNode }) {
             /* A refused notification must not take the watcher down. */
           })
       }
+      /* The standing opt-in, distinct from waiting mode's one-shot auto-copy
+         in `checkNow`: that one fires only inside a window the user opened by
+         hand, this one fires for every announced arrival because the setting
+         says so. `primed` gates it for the same reason it gates the
+         notification — opening the app must not replay yesterday's codes into
+         today's clipboard. */
+      if (primed.current && state.settings.codeAutoCopyAlways === true) {
+        void copyText(newest.value)
+      }
       return newest
     },
     // `i18n` is stable for the lifetime of the provider.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [bridge, state.settings.notifyOnCode],
+    [bridge, state.settings.notifyOnCode, state.settings.codeAutoCopyAlways],
   )
 
   // --- the timed / push-driven pass -----------------------------------------

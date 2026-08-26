@@ -516,6 +516,7 @@ export function ScheduleView({
             estimate={104}
             scrollerClassName="list-pane"
             rowsClassName="joblist"
+            persistKey="schedule"
           >
             {(job) => {
               const next = job.occurrences[0]

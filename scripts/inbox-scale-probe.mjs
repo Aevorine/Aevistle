@@ -387,7 +387,101 @@ for (const [label, width, height] of WIDTHS) {
     if (s.rowOverlaps) fail(`${label}/flick: ${s.rowOverlaps} row(s) painted over each other after a fast flick.`)
     if (s.sepOverRow) fail(`${label}/flick: ${s.sepOverRow} separator(s) painted on top of rows after a fast flick.`)
   }
+  // Leaving and returning must not cost the reader their place. The views
+  // unmount on switch, so without an explicit memory the list restarts at the
+  // top — the assertion is against "forgot", not against pixel identity,
+  // because a remount re-measures row heights from estimates and may land a
+  // handful of pixels away from where it left.
+  step = `${label}/return`
+  await evaluate(
+    `(() => { const p = document.querySelector('.view--list .list-pane'); if (p) p.scrollTop = (p.scrollHeight - p.clientHeight) / 2 })(), true`,
+  )
+  await sleep(500)
+  const savedTop = await evaluate(
+    `(() => { const p = document.querySelector('.view--list .list-pane'); return p ? Math.round(p.scrollTop) : -1 })()`,
+  )
+  await evaluate(`(() => { const b = document.querySelector('.nav__item[data-view="settings"]'); if (b) b.click() })(), true`)
+  await sleep(700)
+  await evaluate(`(() => { const b = document.querySelector('.nav__item[data-view="inbox"]'); if (b) b.click() })(), true`)
+  await sleep(900)
+  const backTop = await evaluate(
+    `(() => { const p = document.querySelector('.view--list .list-pane'); return p ? Math.round(p.scrollTop) : -1 })()`,
+  )
+  if (savedTop > 500 && backTop < savedTop / 2) {
+    fail(`${label}/return: left the mailbox at ${savedTop}px and came back at ${backTop}px — the list forgot where you were.`)
+  } else {
+    inspected++
+  }
   notes.push(`${label}: ${inspected} scroll state(s) inspected, ${s.pane ? s.jobCount : 0} rows mounted at rest`)
+}
+
+// --- 已读到此为止 -----------------------------------------------------------
+//
+// The bulk action's claim is positional: everything *newer* than the selected
+// row becomes read, everything older is untouched. Walked as a user walks it —
+// overflow menu, 编辑, a checkbox, the button — via `data-action` hooks, since
+// the labels are translated copy no check may match on. Every step that can
+// come up empty reports itself; the assertion cannot pass vacuously.
+step = 'read-to-here'
+await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false })
+await send('Page.reload', { ignoreCache: false })
+{
+  let mounted = false
+  for (let i = 0; i < 60; i += 1) {
+    await sleep(250)
+    if (await evaluate(`Boolean(document.querySelector('.shell .view'))`)) {
+      mounted = true
+      break
+    }
+  }
+  if (!mounted) {
+    fail('read-to-here: the app never mounted.')
+  } else {
+    await sleep(700)
+    await evaluate(
+      `(() => { const b = document.querySelector('.nav__item[data-view="inbox"]'); if (b) b.click(); })(), true`,
+    )
+    await sleep(1000)
+    const r2h = await evaluate(`(async () => {
+      const menuBtn = document.querySelector('.inboxmenu > button')
+      if (!menuBtn) return { failed: 'no overflow menu trigger' }
+      menuBtn.click()
+      await new Promise((r) => setTimeout(r, 300))
+      const editItem = document.querySelector('[data-action="edit"]')
+      if (!editItem) return { failed: 'no edit item in the menu' }
+      editItem.click()
+      await new Promise((r) => setTimeout(r, 300))
+      const boxes = [...document.querySelectorAll('.job__select')]
+      if (boxes.length < 8) return { failed: 'fewer than 8 selectable rows on screen' }
+      const unreadBefore = document.querySelectorAll('.job[data-unread="true"]').length
+      const row = boxes[6].closest('.job')
+      const rowTop = row.getBoundingClientRect().top
+      boxes[6].click()
+      await new Promise((r) => setTimeout(r, 200))
+      const btn = document.querySelector('[data-action="read-to-here"]')
+      if (!btn) return { failed: 'no read-to-here control in the edit bar' }
+      btn.click()
+      await new Promise((r) => setTimeout(r, 700))
+      const jobs = [...document.querySelectorAll('.job')]
+      const unreadAbove = jobs.filter(
+        (j) => j.getBoundingClientRect().top < rowTop - 2 && j.dataset.unread === 'true',
+      ).length
+      const unreadAfter = document.querySelectorAll('.job[data-unread="true"]').length
+      return { unreadBefore, unreadAfter, unreadAbove }
+    })()`)
+    if (r2h.failed) {
+      fail(`read-to-here: ${r2h.failed}.`)
+    } else {
+      if (r2h.unreadAbove > 0)
+        fail(`read-to-here: ${r2h.unreadAbove} row(s) above the selected one are still unread.`)
+      if (r2h.unreadAfter >= r2h.unreadBefore)
+        fail(`read-to-here: the unread count did not fall (${r2h.unreadBefore} -> ${r2h.unreadAfter}).`)
+      if (r2h.unreadAfter === 0)
+        fail(`read-to-here: every message went read — the boundary was ignored, this is mark-all-read.`)
+      if (failures.every((f) => !f.startsWith('read-to-here')))
+        notes.push(`read-to-here: unread ${r2h.unreadBefore} -> ${r2h.unreadAfter}, none above the boundary`)
+    }
+  }
 }
 
 if (consoleHits.length) {

@@ -68,6 +68,16 @@ export interface VirtualListProps<T> {
    */
   threshold?: number
   /**
+   * Name under which this list's scroll position survives unmounting.
+   *
+   * Every view is unmounted when the sidebar switches away from it, so
+   * without this a mailbox read to Tuesday restarts at the top on every
+   * return — the reader pays a re-scroll for glancing at Settings. Module
+   * state rather than the store: where a list was left is ephemeral reading
+   * position, not data, and it should die with the process, not sync to disk.
+   */
+  persistKey?: string
+  /**
    * Rows that must stay mounted while anything after them is on screen — the
    * inbox's sticky day separators. A `position: sticky` header can only pin
    * itself to the top of the scrollport while it is in the DOM, and plain
@@ -90,6 +100,7 @@ export function VirtualList<T>({
   overscan = 8,
   threshold = 60,
   anchor,
+  persistKey,
 }: VirtualListProps<T>) {
   const scrollerRef = useRef<HTMLDivElement>(null)
   const rowsRef = useRef<HTMLDivElement>(null)
@@ -104,6 +115,31 @@ export function VirtualList<T>({
   const settling = useRef(0)
 
   const windowed = items.length >= threshold
+
+  /**
+   * Put the list back where it was left, and remember where it is being left.
+   *
+   * Declared before the windowing effects so the restore runs first: the
+   * range subscription computes its first window from the live `scrollTop`,
+   * and restoring *after* it would window the top of the list, paint it, and
+   * then jump. Restoring in a layout effect means the jump never paints.
+   *
+   * The saved offset is applied as-is and left to the browser to clamp; after
+   * a remount the row heights are estimates again, so the restored position
+   * can be a handful of pixels from where it was — "where you were", not
+   * "the exact pixel", is the promise (`check:inbox-scale` asserts exactly
+   * that). Nothing is saved for a list with no name.
+   */
+  useLayoutEffect(() => {
+    if (!persistKey) return
+    const scroller = scrollerRef.current
+    if (!scroller) return
+    const saved = scrollMemory.get(persistKey)
+    if (saved) scroller.scrollTop = saved
+    return () => {
+      scrollMemory.set(persistKey, scroller.scrollTop)
+    }
+  }, [persistKey])
 
   /**
    * `keyOf` is an inline arrow at all six call sites, so it is a new function
@@ -376,3 +412,6 @@ export function VirtualList<T>({
 function Fragmentish({ children }: { children: ReactNode }) {
   return <>{children}</>
 }
+
+/** Where each named list was left, by `persistKey` — survives unmounts, dies with the tab. */
+const scrollMemory = new Map<string, number>()

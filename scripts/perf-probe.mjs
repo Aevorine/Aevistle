@@ -109,6 +109,36 @@ if (boot.jsChunksOnBoot > 0) {
   results.push({ name: 'JS decoded on boot', value: 'n/a (file:// has no resource timing)', unit: '', target: null, pass: null })
 }
 
+// --- first-run chrome, out of the way -------------------------------------
+//
+// A packaged build on a scratch profile is always a first run, and
+// `DataFolderSetup` opens its "where should the data live?" dialog over
+// whatever screen is behind it. Its body text sat at the head of
+// `.main.textContent`, so the previous change detector — first 400 characters
+// of `.main` — read the *dialog* on every screen and reported all nine as
+// stalled, for as long as the dialog has existed. Dismissing it is also what
+// a user does before any of the numbers below happen to them.
+//
+// Escape is the dialog's own "take the default" path (`onClose={dismiss}` —
+// it writes the seen-flag and touches no data). The fallback clicks the
+// header close button, which is the first button in the dialog and reaches
+// the same `dismiss`; nothing here may click the *primary* footer button,
+// which opens a native folder picker no probe can drive.
+for (let attempt = 0; attempt < 3; attempt += 1) {
+  const open = await evaluate(`Boolean(document.querySelector('.modal'))`)
+  if (!open) break
+  if (attempt < 2) {
+    await send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
+    await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
+  } else {
+    await evaluate(`(() => { const b = document.querySelector('.modal button'); if (b) b.click() })()`)
+  }
+  await new Promise((r) => setTimeout(r, 300))
+}
+if (await evaluate(`Boolean(document.querySelector('.modal'))`)) {
+  console.error('A dialog is still open over the app; the numbers below are measured through it.')
+}
+
 // --- view switching -------------------------------------------------------
 // Each screen is a separate lazily-loaded chunk, so the first switch includes
 // its fetch and parse. That is the number a user actually experiences.
@@ -123,6 +153,14 @@ if (boot.jsChunksOnBoot > 0) {
  * were then *filtered out*, leaving `Math.max()` of an empty array —
  * `-Infinity`, which passed a `≤ 400 ms` target. A probe reporting PASS for a
  * measurement that never happened is worse than no probe.
+ *
+ * What "the screen changed" means now: the `.view` element's class plus its
+ * text with digits stripped. `.main`'s text was dominated by whatever chrome
+ * sat on top of it (see the first-run dialog above), several screens share
+ * the class `view view--list` so the class alone cannot tell them apart, and
+ * the compose screen repaints a live clock every minute — which is exactly
+ * the kind of change this must not count as a switch. Words change between
+ * screens; digits change between minutes.
  */
 const navLabels = JSON.parse(
   await evaluate(
@@ -148,15 +186,16 @@ for (const label of navLabels) {
     const target = [...document.querySelectorAll('.nav__item')]
       .find(e => e.textContent.trim() === ${JSON.stringify(label)})
     if (!target) return -1
-    // The whole main region, not one heading: the screen this starts from has
-    // no title element, so a title-only check can never see a change.
-    const main = document.querySelector('.main') || document.body
-    const before = main.textContent.slice(0, 400)
+    const sig = () => {
+      const v = document.querySelector('.view')
+      return v ? v.className + '|' + v.textContent.replace(/\\d+/g, '').slice(0, 300) : ''
+    }
+    const before = sig()
     const t0 = performance.now()
     target.click()
     const deadline = performance.now() + 5000
     while (performance.now() < deadline) {
-      if (main.textContent.slice(0, 400) !== before) {
+      if (sig() !== before) {
         return Math.round((performance.now() - t0) * 10) / 10
       }
       await new Promise(r => setTimeout(r, 2))
@@ -185,15 +224,18 @@ const revisit = await evaluate(`(async () => {
   const items = [...document.querySelectorAll('.nav__item')]
   if (items.length < 2) return -1
   const first = items[0], second = items[items.length - 1]
-  const main = document.querySelector('.main') || document.body
+  const sig = () => {
+    const v = document.querySelector('.view')
+    return v ? v.className + '|' + v.textContent.replace(/\\d+/g, '').slice(0, 300) : ''
+  }
   first.click()
   await new Promise(r => setTimeout(r, 250))
-  const before = main.textContent.slice(0, 400)
+  const before = sig()
   const t0 = performance.now()
   second.click()
   const deadline = performance.now() + 2000
   while (performance.now() < deadline) {
-    if (main.textContent.slice(0, 400) !== before) {
+    if (sig() !== before) {
       return Math.round((performance.now() - t0) * 10) / 10
     }
     await new Promise(r => setTimeout(r, 2))

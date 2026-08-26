@@ -1111,6 +1111,7 @@ export function CodesView({ onGoToInbox }: { onGoToInbox?: () => void }) {
             estimate={118}
             scrollerClassName="list-pane"
             rowsClassName="codelist"
+            persistKey="codes"
           >
             {(hit) => {
               const { name, address } = splitFrom(hit.from)

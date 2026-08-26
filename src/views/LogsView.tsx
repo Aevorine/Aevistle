@@ -436,6 +436,7 @@ export function LogsView({
             estimate={76}
             scrollerClassName="list-pane"
             surfaceClassName="card card--flush"
+            persistKey="logs"
           >
             {(entry) => {
               const receipt = receipts.get(entry.id)

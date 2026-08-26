@@ -169,6 +169,8 @@ function tr(locale: LocaleId, key: keyof typeof en): string {
 
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
+/** The undecorated tray image, kept so the unread badge can be drawn onto — and cleared from — a clean copy without re-reading the file. */
+let trayBaseIcon: Electron.NativeImage | null = null
 /**
  * The language the tray menu is drawn in.
  *
@@ -1407,6 +1409,7 @@ function createTray(): void {
     }
   }
   if (icon.isEmpty()) icon = fallbackTrayIcon()
+  trayBaseIcon = icon
 
   try {
     tray = new Tray(icon)
@@ -1417,6 +1420,9 @@ function createTray(): void {
 
   tray.setToolTip('Aevistle')
   refreshTrayMenu()
+  // Counts that arrived before the tray existed — the renderer pushes only on
+  // change, so a tray created after that push would sit unbadged all day.
+  applyBadgeCounts(lastBadgeCounts)
 
   // Windows delivers a single left click as `click`, and a double click as
   // `click` *followed by* `double-click`. Handling both with different
@@ -1626,20 +1632,63 @@ function badgeIcon(count: number): Electron.NativeImage {
  */
 function applyBadgeCounts(counts: BadgeCounts): void {
   lastBadgeCounts = counts
-  if (!mainWindow) return
   const total = Math.max(0, counts.unread) + Math.max(0, counts.armed)
-  try {
-    if (total <= 0) {
-      mainWindow.setOverlayIcon(null, '')
-      return
+  const description =
+    `${tr(uiLocale, 'nav.inbox')}: ${counts.unread} · ${tr(uiLocale, 'nav.schedule')}: ${counts.armed}`
+  if (mainWindow) {
+    try {
+      if (total <= 0) mainWindow.setOverlayIcon(null, '')
+      else mainWindow.setOverlayIcon(badgeIcon(total), description)
+    } catch {
+      // Platform does not support it, or the window was mid-teardown — either
+      // way there is nothing actionable to do about it.
     }
-    const description =
-      `${tr(uiLocale, 'nav.inbox')}: ${counts.unread} · ${tr(uiLocale, 'nav.schedule')}: ${counts.armed}`
-    mainWindow.setOverlayIcon(badgeIcon(total), description)
-  } catch {
-    // Platform does not support it, or the window was mid-teardown — either
-    // way there is nothing actionable to do about it.
   }
+  // The tray outlives the window — with the window closed it is the only place
+  // an unread count can appear at all, so it must not sit behind the
+  // `mainWindow` guard above.
+  if (tray && trayBaseIcon) {
+    try {
+      if (total <= 0) {
+        tray.setImage(trayBaseIcon)
+        tray.setToolTip('Aevistle')
+      } else {
+        tray.setImage(trayBadgedIcon(trayBaseIcon, total))
+        tray.setToolTip(`Aevistle — ${description}`)
+      }
+    } catch {
+      // Same contract as the overlay: a badge is never worth a crash.
+    }
+  }
+}
+
+/**
+ * The tray icon with the unread badge drawn over its bottom-right quarter.
+ *
+ * Composited by hand in a pixel buffer because the main process has no canvas:
+ * `badgeIcon` above already rasterises the circle and the digits at 32px, and
+ * this scales that to 10px and alpha-blends it onto a 16px copy of the base —
+ * the same corner, proportion and brand colour as the taskbar overlay, so the
+ * two badges read as one feature. Rebuilt on every change rather than cached:
+ * it is a 16×16 buffer and the count changes at most once per sync.
+ */
+function trayBadgedIcon(base: Electron.NativeImage, count: number): Electron.NativeImage {
+  const size = 16
+  const badgeSize = 10
+  const out = Buffer.from(base.resize({ width: size, height: size }).toBitmap())
+  const badge = badgeIcon(count).resize({ width: badgeSize, height: badgeSize }).toBitmap()
+  const off = size - badgeSize
+  for (let y = 0; y < badgeSize; y++) {
+    for (let x = 0; x < badgeSize; x++) {
+      const si = (y * badgeSize + x) * 4
+      const a = badge[si + 3] / 255
+      if (a <= 0.05) continue
+      const di = ((off + y) * size + (off + x)) * 4
+      for (let c = 0; c < 3; c++) out[di + c] = Math.round(badge[si + c] * a + out[di + c] * (1 - a))
+      out[di + 3] = Math.max(out[di + 3], badge[si + 3])
+    }
+  }
+  return nativeImage.createFromBuffer(out, { width: size, height: size })
 }
 
 /**
