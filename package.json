@@ -138,7 +138,8 @@
     "check:tile-preview": "node scripts/check-tile-preview.mjs",
     "check:inbox-reader": "node scripts/check-inbox-reader.mjs",
     "check:date-labels": "node scripts/check-date-labels.mjs",
-    "check:inbox-scale": "node scripts/check-inbox-scale.mjs"
+    "check:inbox-scale": "node scripts/check-inbox-scale.mjs",
+    "check:soak": "node scripts/check-soak.mjs"
   },
   "dependencies": {
     "@capacitor/status-bar": "^8.0.3",

@@ -43,8 +43,15 @@ await build({
   outfile: bundle,
   logLevel: 'error',
 })
-const { rememberRemoved, withoutRemoved, restoreRemoved, pruneRemoved, mergeRemoved, removalKey } =
-  await import(pathToFileURL(bundle).href)
+const {
+  rememberRemoved,
+  withoutRemoved,
+  restoreRemoved,
+  pruneRemoved,
+  mergeRemoved,
+  removalKey,
+  carryArchivedKeys,
+} = await import(pathToFileURL(bundle).href)
 await rm(dir, { recursive: true, force: true })
 
 const failures = []
@@ -218,6 +225,28 @@ check(
 check(
   'the carried-forward fields must actually override the sync result',
   /\.\.\.action\.inbox,\s*\n\s*\.\.\.preferences,/.test(appState),
+)
+
+// The archive is a tombstone list wearing different clothes: a sync reply
+// never carries `archivedKeys`, so an upsert that does not inherit the prior
+// list un-archives everything on the very next poll — silently, and only on
+// a platform that actually syncs, which is why no rendered-UI gate can see it.
+check(
+  'a sync reply without archive keys inherits the prior archive',
+  JSON.stringify(carryArchivedKeys(undefined, ['INBOX 7', 'INBOX 9'])) ===
+    JSON.stringify(['INBOX 7', 'INBOX 9']),
+)
+check(
+  'an upsert that does carry archive keys keeps its own',
+  JSON.stringify(carryArchivedKeys(['INBOX 1'], ['INBOX 7'])) === JSON.stringify(['INBOX 1']),
+)
+check(
+  'no archive anywhere is an empty list, not undefined',
+  JSON.stringify(carryArchivedKeys(undefined, undefined)) === JSON.stringify([]),
+)
+check(
+  'the reducer actually routes archivedKeys through the carry-forward',
+  /archivedKeys: carryArchivedKeys\(action\.inbox\.archivedKeys, prior\?\.archivedKeys\)/.test(appState),
 )
 
 // ---------------------------------------------------------------------------

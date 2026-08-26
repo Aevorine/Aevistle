@@ -163,6 +163,11 @@ final class InboxSyncRunner {
              */
             List<String> allow = AppSettingsSignal.strings(context, "notifySenders");
             List<String> keywords = AppSettingsSignal.strings(context, "notifyKeywords");
+            // Rule 1½ of `core/mail/notifyPolicy.ts`: a sender muted by name.
+            // Same matcher as the allowlist, and — like the account mute — it
+            // is checked before the keyword rule can force anything, because a
+            // mute a keyword can talk past is not a mute.
+            List<String> muted = AppSettingsSignal.strings(context, "mutedSenders");
 
             /*
              * Quiet hours moved down past the loop, and that is the whole of
@@ -198,6 +203,11 @@ final class InboxSyncRunner {
                 if (m == null) continue;
                 String id = m.optString("id", "");
                 if (id.isEmpty() || known.contains(id)) continue;
+                // `senderAllowed` answers true for an empty list — "everyone
+                // may" — which on a blocklist would read as "everyone is
+                // muted", so the emptiness guard is load-bearing.
+                if (!muted.isEmpty()
+                        && AppSettingsSignal.senderAllowed(m.optString("from", ""), muted)) continue;
                 /*
                  * Evaluated before the three rules below so it can reach past
                  * all of them — the same order, and the same reasoning, as the

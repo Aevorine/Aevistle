@@ -42,6 +42,8 @@ export interface NotifyLedgerEntry {
   tooOld: number
   /** Dropped because the account is muted — `notifyPolicy` rule 1. */
   accountMuted: number
+  /** Dropped because the sender is on the muted list — rule 1½. */
+  senderMuted: number
   /** Dropped because the sender is not on the allowlist — rule 2. */
   senderNotListed: number
   /** Announced only because a keyword forced them past something — rule 3. */
@@ -114,6 +116,7 @@ export interface NotifySummary {
   readElsewhere: number
   tooOld: number
   accountMuted: number
+  senderMuted: number
   senderNotListed: number
   quiet: number
   switchedOff: number
@@ -146,6 +149,7 @@ export function summarise(
     readElsewhere: 0,
     tooOld: 0,
     accountMuted: 0,
+    senderMuted: 0,
     senderNotListed: 0,
     quiet: 0,
     switchedOff: 0,
@@ -160,6 +164,7 @@ export function summarise(
     out.readElsewhere += e.readElsewhere
     out.tooOld += e.tooOld
     out.accountMuted += e.accountMuted
+    out.senderMuted += e.senderMuted ?? 0
     out.senderNotListed += e.senderNotListed
     out.quiet += e.quiet
     out.switchedOff += e.switchedOff
@@ -170,6 +175,7 @@ export function summarise(
     out.readElsewhere +
     out.tooOld +
     out.accountMuted +
+    out.senderMuted +
     out.senderNotListed +
     out.quiet +
     out.switchedOff
@@ -179,7 +185,7 @@ export function summarise(
 /** One line of the "why not" breakdown. */
 export interface NotifyReason {
   /** Which rule. Doubles as the i18n key suffix. */
-  id: 'readElsewhere' | 'tooOld' | 'accountMuted' | 'senderNotListed' | 'quiet' | 'switchedOff'
+  id: 'readElsewhere' | 'tooOld' | 'accountMuted' | 'senderMuted' | 'senderNotListed' | 'quiet' | 'switchedOff'
   count: number
   /**
    * Where the switch that changes this behaviour lives, when there is one.
@@ -189,7 +195,7 @@ export interface NotifyReason {
    * design: the window is not a preference, it is what stops a week offline
    * from arriving as a week of notifications.
    */
-  fix?: 'notifyReadElsewhere' | 'notifyAccounts' | 'notifySenders' | 'quietHours' | 'notifyOnNewMail'
+  fix?: 'notifyReadElsewhere' | 'notifyAccounts' | 'notifySenders' | 'mutedSenders' | 'quietHours' | 'notifyOnNewMail'
 }
 
 /**
@@ -204,6 +210,7 @@ export function reasons(summary: NotifySummary): NotifyReason[] {
     { id: 'readElsewhere', count: summary.readElsewhere, fix: 'notifyReadElsewhere' },
     { id: 'tooOld', count: summary.tooOld },
     { id: 'accountMuted', count: summary.accountMuted, fix: 'notifyAccounts' },
+    { id: 'senderMuted', count: summary.senderMuted, fix: 'mutedSenders' },
     { id: 'senderNotListed', count: summary.senderNotListed, fix: 'notifySenders' },
     { id: 'quiet', count: summary.quiet, fix: 'quietHours' },
     { id: 'switchedOff', count: summary.switchedOff, fix: 'notifyOnNewMail' },

@@ -2731,6 +2731,33 @@ function NotifyPolicyFields() {
         onCommit={(next) => patch({ notifyKeywords: next })}
         suggestions={KEYWORD_SUGGESTION_KEYS.map((k) => t(k as Parameters<typeof t>[0]))}
       />
+
+      {/* The allowlist's opposite number, one field down from it so the pair
+          reads as one decision. Mute outranks the keyword rule — see
+          `decideNotification` — which is exactly what its hint says. */}
+      <LineListField
+        label={t('settings.mutedSenders')}
+        hint={t('settings.mutedSendersHint')}
+        placeholder={t('settings.mutedSendersPlaceholder')}
+        values={s.mutedSenders ?? []}
+        onCommit={(next) => patch({ mutedSenders: next })}
+      />
+
+      <LineListField
+        label={t('settings.autoFlagSenders')}
+        hint={t('settings.autoFlagSendersHint')}
+        placeholder={t('settings.autoFlagSendersPlaceholder')}
+        values={s.autoFlagSenders ?? []}
+        onCommit={(next) => patch({ autoFlagSenders: next })}
+      />
+
+      <LineListField
+        label={t('settings.autoImportantSenders')}
+        hint={t('settings.autoImportantSendersHint')}
+        placeholder={t('settings.autoImportantSendersPlaceholder')}
+        values={s.autoImportantSenders ?? []}
+        onCommit={(next) => patch({ autoImportantSenders: next })}
+      />
     </>
   )
 }

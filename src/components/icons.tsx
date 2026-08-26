@@ -255,6 +255,15 @@ export const IconFolder = (p: IconProps) => (
   </Svg>
 )
 
+/** A storage box with its lid — archive: set aside, not thrown away. */
+export const IconArchive = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M3 5h18v4H3Z" />
+    <path d="M5 9v9a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9" />
+    <path d="M10 13h4" />
+  </Svg>
+)
+
 /* The phone-only Home tab. A roof and a door rather than the more common
    roof-only outline: at 17px the plain house silhouette is hard to tell from
    the folder above it, and these two sit four tabs apart on the same bar. */

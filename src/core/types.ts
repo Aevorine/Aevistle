@@ -1057,6 +1057,24 @@ export interface Settings {
    */
   codeAutoCopyAlways?: boolean
   /**
+   * Senders that may never raise a new-mail notification — the blocklist to
+   * `notifySenders`' allowlist, same matching rules, honoured by the renderer
+   * and by the Android background worker alike. The mail still arrives and
+   * still lists; only the interruption is refused.
+   */
+  mutedSenders?: string[]
+  /** Senders whose fresh arrivals are tagged 关注 automatically. */
+  autoFlagSenders?: string[]
+  /** Senders whose fresh arrivals are tagged 重要 automatically — outranks the flag list. */
+  autoImportantSenders?: string[]
+  /**
+   * How the inbox groups its rows: by day (the default) or by sender.
+   *
+   * A setting rather than screen state so the choice survives a restart — a
+   * grouping that resets is a grouping nobody trusts enough to lean on.
+   */
+  inboxGrouping?: 'day' | 'sender'
+  /**
    * Corrections the user has made to code extraction, per sender domain.
    *
    * Stored rather than inferred each time, because the whole value of a
@@ -1382,6 +1400,10 @@ export const DEFAULT_SETTINGS: Settings = {
   keepReceivingWhenClosed: false,
   autoCopyCode: true,
   codeAutoCopyAlways: false,
+  mutedSenders: [],
+  autoFlagSenders: [],
+  autoImportantSenders: [],
+  inboxGrouping: 'day',
   codeRules: [],
   codesBigDigits: false,
   listDensity: 'standard',
@@ -1756,6 +1778,15 @@ export interface InboxAccountState {
    * separate structure holding the same thing twice.
    */
   removed?: RemovedMessage[]
+  /**
+   * Messages set aside without being removed — `"<folderPath> <uid>"` keys,
+   * the same identity `removalKey` builds for the recycle bin. A key rather
+   * than a copy: the message stays in `messages` (and on the server) and every
+   * sync merges it exactly as before; the inbox merely declines to show it.
+   * Capped in the reducer at 5000 so archiving for years cannot grow the
+   * state file without bound.
+   */
+  archivedKeys?: string[]
 }
 
 export interface RemovedMessage {

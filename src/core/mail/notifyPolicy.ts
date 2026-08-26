@@ -48,6 +48,8 @@ import type { InboxMessage } from '../types'
 export type PolicySuppression =
   /** The user turned this account's notifications off. Rule 1. */
   | 'accountMuted'
+  /** The sender is on the muted list. Rule 1½ — the account mute said smaller. */
+  | 'senderMuted'
   /** A sender list exists and this sender is not on it. Rule 2. */
   | 'senderNotListed'
 
@@ -97,6 +99,14 @@ export interface NotifyPolicy {
    * company without thirty rows.
    */
   senders?: string[]
+  /**
+   * Senders that may never ring — the blocklist to `senders`' allowlist, with
+   * the same matching (`@` means an address, bare means a domain suffix).
+   * Empty or absent = nobody is muted. Like the account mute, it outranks a
+   * keyword: silencing a sender by name is "never, from here" in as many
+   * words, and a mute a keyword can talk past is not a mute.
+   */
+  muted?: string[]
   /**
    * Words that force a notification. Matched case-insensitively against the
    * subject and against the sender's display name.
@@ -210,6 +220,14 @@ export function decideNotification(
     return { notify: false, suppressed: 'accountMuted', urgent: false }
   }
 
+  // Rule 1½ — the same sentence as an account mute, said about one sender, so
+  // it sits on the same side of the keyword override. `senderAllowed` is the
+  // matcher, deliberately: whatever a row means on the allowlist it means on
+  // the blocklist, and two matching dialects would be a support question.
+  if ((policy?.muted?.length ?? 0) > 0 && senderAllowed(message.from ?? '', policy?.muted ?? [])) {
+    return { notify: false, suppressed: 'senderMuted', urgent: false }
+  }
+
   // Rule 2, unless rule 3 says otherwise.
   if (!senderAllowed(message.from ?? '', policy?.senders ?? [])) {
     return urgent
@@ -226,6 +244,8 @@ export interface PolicyOutcome {
   keep: InboxMessage[]
   /** How many were dropped because their account is muted. */
   accountMuted: number
+  /** How many were dropped because their sender is on the muted list. */
+  senderMuted: number
   /** How many were dropped because their sender is not on the list. */
   senderNotListed: number
   /** How many rang only because a keyword forced them. */
@@ -254,6 +274,7 @@ export function applyPolicy(
   const out: PolicyOutcome = {
     keep: [],
     accountMuted: 0,
+    senderMuted: 0,
     senderNotListed: 0,
     forced: 0,
     urgent: false,
@@ -267,9 +288,31 @@ export function applyPolicy(
       continue
     }
     if (d.suppressed === 'accountMuted') out.accountMuted++
+    else if (d.suppressed === 'senderMuted') out.senderMuted++
     else if (d.suppressed === 'senderNotListed') out.senderNotListed++
   }
   return out
+}
+
+/**
+ * Which tag a fresh arrival earns from the sender rules, if any.
+ *
+ * `important` outranks `flagged` — a sender on both lists got there because
+ * the stronger opinion came later, and answering with the weaker one would
+ * make the second setting look ignored. The matcher is `senderAllowed`, for
+ * the reason the mute rule gives: one dialect of "this sender" everywhere.
+ * `null` for no opinion, so the caller can tell "no rule" from "rule says
+ * leave it", and callers only ever apply this to messages still tagged
+ * `none` — a tag the user set by hand is not a suggestion to overrule.
+ */
+export function autoTagFor(
+  from: string,
+  flag: readonly string[],
+  important: readonly string[],
+): 'flagged' | 'important' | null {
+  if (important.length > 0 && senderAllowed(from, important)) return 'important'
+  if (flag.length > 0 && senderAllowed(from, flag)) return 'flagged'
+  return null
 }
 
 /**

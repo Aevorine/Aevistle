@@ -65,6 +65,7 @@ import type { ArrivalReport } from '../core/mail/newMail'
 import { announcementFor, explainArrivals, previewLine, restoredBaseline, senderName } from '../core/mail/newMail'
 import {
   applyPolicy,
+  autoTagFor,
   keywordHit,
   type NotifyPolicy,
   type PolicyOutcome,
@@ -105,7 +106,7 @@ import {
 import { evaluateConditions, inboundKey, latestInboundIndex } from '../core/schedule/conditions'
 import { applyRun } from '../core/schedule/jobRun'
 import { forTransport } from '../core/mail/markdown'
-import { mergeRemoved, rememberRemoved, restoreRemoved, withoutRemoved } from '../core/mail/inboxRemoval'
+import { carryArchivedKeys, mergeRemoved, rememberRemoved, restoreRemoved, withoutRemoved } from '../core/mail/inboxRemoval'
 import { applyCodeHistoryAction } from './services/codeHistoryReducer'
 import { applyOutboxAction } from './services/outboxReducer'
 import { applyJobAction } from './services/jobReducer'
@@ -646,6 +647,8 @@ type Action =
   | { type: 'removeInboxMessages'; accountId: string; ids: string[]; purge?: boolean }
   | { type: 'restoreInboxMessages'; accountId: string; keys: string[] }
   | { type: 'clearRemovedMessages'; accountId?: string }
+  | { type: 'archiveInboxMessages'; accountId: string; keys: string[] }
+  | { type: 'unarchiveInboxMessages'; accountId: string; keys: string[] }
   | { type: 'snapshotDraft'; reason: SnapshotReason }
   | { type: 'restoreSnapshot'; id: string }
   | { type: 'clearSnapshots' }
@@ -958,6 +961,9 @@ export function reducer(state: AppState, action: Action): AppState {
         ...action.inbox,
         ...preferences,
         removed,
+        // Like `removed`: the archive belongs to the app, not to the sync
+        // reply, and a reply that carries no keys must not clear it.
+        archivedKeys: carryArchivedKeys(action.inbox.archivedKeys, prior?.archivedKeys),
         messages: withoutRemoved(mergeSeenFlags(action, prior), removed)
           .sort((a, b) => b.date - a.date)
           .slice(0, INBOX_MESSAGE_CAP),
@@ -1053,6 +1059,42 @@ export function reducer(state: AppState, action: Action): AppState {
           action.accountId && i.accountId !== action.accountId ? i : { ...i, removed: [] },
         ),
       }
+
+    /**
+     * Set messages aside without removing them anywhere.
+     *
+     * Keys, not copies: the message stays in `messages` and on the server, and
+     * every sync merges it exactly as before — the inbox merely declines to
+     * show a key that is on this list. That is what makes archive immune to
+     * the resurrection bug the recycle bin had to fight (`mergeRemoved`):
+     * there is nothing to resurrect because nothing left.
+     *
+     * Capped so a decade of archiving cannot grow the state file without
+     * bound; the oldest keys go first, and a message whose key was dropped is
+     * by then far past the fetch ceiling and cannot re-enter the list anyway.
+     */
+    case 'archiveInboxMessages': {
+      return {
+        ...state,
+        inboxAccounts: state.inboxAccounts.map((i) => {
+          if (i.accountId !== action.accountId) return i
+          const keys = [...new Set([...(i.archivedKeys ?? []), ...action.keys])]
+          return { ...i, archivedKeys: keys.slice(Math.max(0, keys.length - 5000)) }
+        }),
+      }
+    }
+
+    case 'unarchiveInboxMessages': {
+      const going = new Set(action.keys)
+      return {
+        ...state,
+        inboxAccounts: state.inboxAccounts.map((i) =>
+          i.accountId !== action.accountId
+            ? i
+            : { ...i, archivedKeys: (i.archivedKeys ?? []).filter((k) => !going.has(k)) },
+        ),
+      }
+    }
 
     // The draft autosave history — see `services/draftReducer.ts` for the
     // case-by-case logic, moved there unchanged (same domain as `setDraft`/
@@ -1324,6 +1366,9 @@ export interface AppApi {
   purgeInboxMessages: (accountId: string, ids: string[]) => Promise<{ ok: boolean; error?: string }>
   restoreInboxMessages: (accountId: string, keys: string[]) => void
   clearRemovedMessages: (accountId?: string) => void
+  /** Set aside without removing — local only, nothing changes on the server. */
+  archiveInboxMessages: (accountId: string, keys: string[]) => void
+  unarchiveInboxMessages: (accountId: string, keys: string[]) => void
 
   /** Record the current draft in the history strip. */
   snapshotDraft: (reason?: SnapshotReason) => void
@@ -2680,6 +2725,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         parts.push(i18n.t('inbox.trace.accountMuted', { n: policy.accountMuted }))
       if (policy && policy.senderNotListed > 0)
         parts.push(i18n.t('inbox.trace.senderNotListed', { n: policy.senderNotListed }))
+      if (policy && policy.senderMuted > 0)
+        parts.push(i18n.t('inbox.trace.senderMuted', { n: policy.senderMuted }))
       if (announced > 0 && policy && policy.forced > 0)
         parts.push(i18n.t('inbox.trace.forced', { n: policy.forced }))
       if (unprimed) parts.push(i18n.t('inbox.trace.notPrimed', { n: report.fresh }))
@@ -2738,6 +2785,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const policy: NotifyPolicy = {
         accounts: settings.notifyAccounts,
         senders: settings.notifySenders,
+        muted: settings.mutedSenders,
         keywords: settings.notifyKeywords,
       }
       const now = Date.now()
@@ -2764,6 +2812,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
       })
 
       const outcome = applyPolicy(report.arrivals, accountId, policy)
+
+      /*
+       * The sender rules' other half: tags, applied to what is new to the
+       * cache rather than to what is announceable — a rule tagging a bank's
+       * mail must tag the statement that arrived read off the phone, which
+       * `report.arrivals` has already dropped. `patchInboxMessages` is the
+       * same action the row's own tag button dispatches, so an automatic tag
+       * lives and persists exactly as a hand-set one does; `tag !== 'none'`
+       * keeps a hand-set one from being overruled, and `previous` gates the
+       * first-ever sync — importing a decade of mailbox must not repaint it.
+       */
+      const flagRules = settings.autoFlagSenders ?? []
+      const importantRules = settings.autoImportantSenders ?? []
+      if ((flagRules.length > 0 || importantRules.length > 0) && previous) {
+        const toTag = new Map<'flagged' | 'important', string[]>()
+        for (const m of messages) {
+          if (m.tag !== 'none' || previous.ids.has(m.id)) continue
+          const tag = autoTagFor(m.from ?? '', flagRules, importantRules)
+          if (tag) (toTag.get(tag) ?? toTag.set(tag, []).get(tag))!.push(m.id)
+        }
+        for (const [tag, ids] of toTag) {
+          dispatch({ type: 'patchInboxMessages', accountId, ids, patch: { tag } })
+        }
+      }
 
       /*
        * Quiet hours hold this back, unlike a verification code. Someone
@@ -2808,6 +2880,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           readElsewhere: report.readElsewhere,
           tooOld: report.tooOld,
           accountMuted: outcome.accountMuted,
+          senderMuted: outcome.senderMuted,
           senderNotListed: outcome.senderNotListed,
           forced: announcement ? outcome.forced : 0,
           quiet: withheld === 'quiet' ? outcome.keep.length : 0,
@@ -3397,6 +3470,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     dispatch({ type: 'clearRemovedMessages', accountId })
   }, [])
 
+  const archiveInboxMessages = useCallback((accountId: string, keys: string[]) => {
+    dispatch({ type: 'archiveInboxMessages', accountId, keys })
+  }, [])
+
+  const unarchiveInboxMessages = useCallback((accountId: string, keys: string[]) => {
+    dispatch({ type: 'unarchiveInboxMessages', accountId, keys })
+  }, [])
+
   /**
    * Periodic receive.
    *
@@ -3915,6 +3996,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       purgeInboxMessages,
       restoreInboxMessages,
       clearRemovedMessages,
+      archiveInboxMessages,
+      unarchiveInboxMessages,
       snapshotDraft,
       restoreSnapshot,
       queueDraft,
@@ -3958,6 +4041,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       purgeInboxMessages,
       restoreInboxMessages,
       clearRemovedMessages,
+      archiveInboxMessages,
+      unarchiveInboxMessages,
       snapshotDraft,
       restoreSnapshot,
       queueDraft,

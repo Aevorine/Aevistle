@@ -52,6 +52,7 @@ import {
   useToast,
 } from '../components/ui'
 import {
+  IconArchive,
   IconCalendar,
   IconCheck,
   IconCheckCircle,
@@ -77,7 +78,7 @@ import {
   IconX,
 } from '../components/icons'
 import { VirtualList } from '../components/VirtualList'
-import { flattenByDay, type DayLabel } from '../core/mail/dayGroups'
+import { flattenByDay, type DayLabel, type DayRow } from '../core/mail/dayGroups'
 import { useSwipe } from '../components/useSwipe'
 import { useTwoPane } from '../components/useNarrow'
 import { MessageBodyFrame, textAsHtml, type FrameImages } from '../components/MessageBodyFrame'
@@ -95,6 +96,7 @@ import {
 } from '../components/ImageLightbox'
 import { useI18n, type TranslationKey } from '../i18n'
 import { accountGroupKey, orderedAccounts } from '../core/mail/accounts'
+import { removalKey } from '../core/mail/inboxRemoval'
 import { useReorder } from '../components/useReorder'
 import {
   BROKEN_IMAGE,
@@ -128,6 +130,12 @@ import {
 } from '../core/types'
 
 type AccountFilter = 'all' | string
+
+/** A sender-group fence in the list — deliberately the same shape and chrome as a day separator. */
+type SenderRow =
+  | { type: 'sender'; key: string; label: string; count: number }
+  | { type: 'item'; key: number; item: InboxMessage }
+type ListRow = DayRow<InboxMessage> | SenderRow
 
 type SearchScope = 'all' | 'from' | 'subject' | 'body'
 
@@ -375,6 +383,8 @@ export function InboxView({
     purgeInboxMessages,
     restoreInboxMessages,
     clearRemovedMessages,
+    archiveInboxMessages,
+    unarchiveInboxMessages,
     scheduleDraft,
   } = useApp()
   const { t, formatAgo, formatDateTime, dir } = useI18n()
@@ -696,7 +706,18 @@ export function InboxView({
   const canSyncInbox = Boolean(bridge?.syncInbox)
   const canUseInbox = canSyncInbox || enabledInboxes.length > 0
 
-  const allMessages = useMemo(() => enabledInboxes.flatMap((i) => i.messages), [enabledInboxes])
+  /* Archived keys filtered out here, at the single door every list, count and
+     bulk action reads through — one filter, or "archived" would mean different
+     things to the rows and to the unread number above them. */
+  const allMessages = useMemo(
+    () =>
+      enabledInboxes.flatMap((i) => {
+        if (!i.archivedKeys?.length) return i.messages
+        const set = new Set(i.archivedKeys)
+        return i.messages.filter((m) => !set.has(removalKey(m)))
+      }),
+    [enabledInboxes],
+  )
 
   /* The "showing the most recent 50 of N" banner and the `inboxServerTotal`
      memo that fed it were removed on request (2026-08-12). A sync now lists
@@ -910,6 +931,36 @@ export function InboxView({
   )
 
   /**
+   * The other grouping — by sender, the question "what has this one sent me"
+   * asked of the whole mailbox at once instead of chip by chip.
+   *
+   * Group order is arrival order of each sender's newest message, which falls
+   * straight out of walking a newest-first list: the first time a label is
+   * seen *is* its newest. Within a group the same order holds, so the rows
+   * read exactly as the day view does — newest first — just fenced
+   * differently. The separator reuses the day bar's row type and chrome; two
+   * kinds of fence that look different would be two things to learn.
+   */
+  const grouping = state.settings.inboxGrouping === 'sender' ? 'sender' : 'day'
+  const senderRows = useMemo(() => {
+    if (grouping !== 'sender') return null
+    const groups = new Map<string, InboxMessage[]>()
+    for (const m of filteredMessages) {
+      const label = senderLabel(m.from)
+      const arr = groups.get(label)
+      if (arr) arr.push(m)
+      else groups.set(label, [m])
+    }
+    const rows: SenderRow[] = []
+    for (const [label, items] of groups) {
+      rows.push({ type: 'sender', key: label, label, count: items.length })
+      for (const item of items) rows.push({ type: 'item', key: 0, item })
+    }
+    return rows
+  }, [filteredMessages, grouping])
+  const listRows: ListRow[] = senderRows ?? dayRows
+
+  /**
    * A separator's text, in the reading language.
    *
    * "Today" and "Yesterday" are words and are translated; a weekday and a date
@@ -1062,6 +1113,46 @@ export function InboxView({
         .sort((a, b) => b.entry.at - a.entry.at),
     [state.inboxAccounts],
   )
+
+  /** The archive, flattened across accounts and newest first — same shape as the bin, for the same reason. */
+  const [showArchived, setShowArchived] = useState(false)
+  const archivedAll = useMemo(
+    () =>
+      state.inboxAccounts
+        .flatMap((i) => {
+          if (!i.archivedKeys?.length) return []
+          const set = new Set(i.archivedKeys)
+          return i.messages
+            .filter((m) => set.has(removalKey(m)))
+            .map((message) => ({ accountId: i.accountId, message }))
+        })
+        .sort((a, b) => b.message.date - a.message.date),
+    [state.inboxAccounts],
+  )
+
+  /** Archive by message id, grouped into the per-account keys the store wants. */
+  const archiveSet = (ids: Set<string>) => {
+    const byAccount = new Map<string, string[]>()
+    for (const m of allMessages) {
+      if (!ids.has(m.id)) continue
+      const arr = byAccount.get(m.accountId) ?? []
+      arr.push(removalKey(m))
+      byAccount.set(m.accountId, arr)
+    }
+    let n = 0
+    for (const [accountId, keys] of byAccount) {
+      archiveInboxMessages(accountId, keys)
+      n += keys.length
+    }
+    clearSelection()
+    if (n > 0) toast.push({ tone: 'success', title: t('toast.archived', { n }) })
+  }
+
+  const unarchiveAll = () => {
+    for (const i of state.inboxAccounts) {
+      if (i.archivedKeys?.length) unarchiveInboxMessages(i.accountId, i.archivedKeys)
+    }
+  }
 
   const restoreAllRemoved = () => {
     const byAccount = new Map<string, string[]>()
@@ -2613,6 +2704,27 @@ export function InboxView({
                     <IconCheck size={16} />
                     <span>{t('inboxbar.edit')}</span>
                   </button>
+                  {/* The other way to fence the list. A checkbox item rather
+                      than two exclusive entries: it is one question with two
+                      answers, and the list itself shows which is in force the
+                      moment it is pressed. */}
+                  <button
+                    type="button"
+                    role="menuitemcheckbox"
+                    aria-checked={grouping === 'sender'}
+                    className="inboxmenu__item"
+                    data-action="group-sender"
+                    onClick={() => {
+                      setMenuOpen(false)
+                      dispatch({
+                        type: 'patchSettings',
+                        patch: { inboxGrouping: grouping === 'sender' ? 'day' : 'sender' },
+                      })
+                    }}
+                  >
+                    <IconGrip size={16} />
+                    <span>{t('inbox.groupBySender')}</span>
+                  </button>
                   {/* Only once there is something in it. A bin that is always
                       there and always empty is a control people stop seeing.
                       It lives here rather than on the list so that emptying the
@@ -2630,6 +2742,23 @@ export function InboxView({
                     >
                       <IconTrash size={16} />
                       <span>{t('inbox.binToggle', { n: removedAll.length })}</span>
+                    </button>
+                  ) : null}
+                  {/* Same rule as the bin above it: only once there is
+                      something in it, because the way in is on every row. */}
+                  {archivedAll.length > 0 ? (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="inboxmenu__item"
+                      data-action="archived"
+                      onClick={() => {
+                        setMenuOpen(false)
+                        setShowArchived((v) => !v)
+                      }}
+                    >
+                      <IconArchive size={16} />
+                      <span>{t('inbox.archivedToggle', { n: archivedAll.length })}</span>
                     </button>
                   ) : null}
                   {openPalette ? (
@@ -2801,6 +2930,14 @@ export function InboxView({
                       <Button variant="ghost" data-action="read-to-here" onClick={() => void markReadUpToHere()}>
                         {t('inbox.markReadToHere')}
                       </Button>
+                      <Button
+                        variant="ghost"
+                        data-action="archive"
+                        icon={<IconArchive size={15} />}
+                        onClick={() => archiveSet(selected)}
+                      >
+                        {t('inbox.archive')}
+                      </Button>
                       {/* Batch tagging: the third thing anyone does to a handful
                           of selected messages, after reading and deleting them. */}
                       <Button variant="ghost" onClick={() => tagSet(selected, 'flagged')}>
@@ -2912,6 +3049,57 @@ export function InboxView({
                   {removedAll.length > 100 ? (
                     <div className="field__hint">
                       {t('inbox.binMore', { n: removedAll.length - 100 })}
+                    </div>
+                  ) : null}
+                </div>
+              </Card>
+            ) : null}
+            {/* The archive, mirrored on the bin above it: same card, same row
+                shape, same reachable-only-when-non-empty rule — two set-aside
+                piles that behave differently would be a puzzle, and the one
+                real difference (nothing here ever expires) is the hint's
+                whole text. */}
+            {showArchived && archivedAll.length > 0 ? (
+              <Card className="inbox-bin">
+                <CardHeader
+                  title={t('inbox.archivedTitle')}
+                  hint={t('inbox.archivedHint')}
+                  action={
+                    <div className="btn-row">
+                      <Button variant="ghost" onClick={unarchiveAll}>
+                        {t('inbox.unarchiveAll')}
+                      </Button>
+                      <Button variant="ghost" onClick={() => setShowArchived(false)}>
+                        {t('common.close')}
+                      </Button>
+                    </div>
+                  }
+                />
+                <div className="card__body">
+                  <div className="bin-list">
+                    {archivedAll.slice(0, 100).map(({ accountId, message }) => (
+                      <div className="bin-row" key={`${accountId} ${removalKey(message)}`}>
+                        <div className="bin-row__text">
+                          <div className="bin-row__subject">
+                            {message.subject || t('inbox.noSubject')}
+                          </div>
+                          <div className="bin-row__meta">
+                            {senderLabel(message.from)} · {formatAgo(message.date)}
+                          </div>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          data-action="unarchive"
+                          onClick={() => unarchiveInboxMessages(accountId, [removalKey(message)])}
+                        >
+                          {t('inbox.unarchive')}
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                  {archivedAll.length > 100 ? (
+                    <div className="field__hint">
+                      {t('inbox.binMore', { n: archivedAll.length - 100 })}
                     </div>
                   ) : null}
                 </div>
@@ -3056,15 +3244,18 @@ export function InboxView({
               {pull.armed ? t('inboxbar.pullRelease') : t('inboxbar.pull')}
             </div>
             <VirtualList
-              items={dayRows}
+              items={listRows}
               /*
-               * A separator's key is its local midnight, prefixed so it can
-               * never collide with a message id. `VirtualList` caches measured
-               * heights under this key, and a separator is roughly half a
-               * message row tall — a shared key would mean each caching the
-               * other's height and the scrollbar never settling.
+               * A separator's key is its local midnight (or the sender's
+               * label), prefixed so it can never collide with a message id.
+               * `VirtualList` caches measured heights under this key, and a
+               * separator is roughly half a message row tall — a shared key
+               * would mean each caching the other's height and the scrollbar
+               * never settling.
                */
-              keyOf={(row) => (row.type === 'separator' ? `day:${row.key}` : row.item.id)}
+              keyOf={(row) =>
+                row.type === 'separator' ? `day:${row.key}` : row.type === 'sender' ? `sender:${row.key}` : row.item.id
+              }
               /* Measured, not guessed. At 360x800 with forty messages seeded,
                  every row is 65.9px — the same whatever the subject length,
                  which is what the one-line clamp buys — and `.joblist` adds a
@@ -3083,9 +3274,17 @@ export function InboxView({
                  when its own row is far above the window — see `anchor` in
                  `VirtualList`. Without this a long day's bar vanishes partway
                  through the day it is naming. */
-              anchor={(row) => row.type === 'separator'}
+              anchor={(row) => row.type !== 'item'}
             >
               {(row) => {
+                if (row.type === 'sender') {
+                  return (
+                    <div className="daysep" role="presentation">
+                      <span className="daysep__label">{row.label}</span>
+                      <span className="daysep__count">{row.count}</span>
+                    </div>
+                  )
+                }
                 if (row.type === 'separator') {
                   return (
                     <div className="daysep" role="presentation">
@@ -3244,6 +3443,9 @@ export function InboxView({
                     <div className="job__actions" onClick={(e) => e.stopPropagation()}>
                       <IconButton label={t('inbox.tagAs')} onClick={() => cycleTag(m)}>
                         <IconFlag size={16} />
+                      </IconButton>
+                      <IconButton label={t('inbox.archive')} onClick={() => archiveSet(new Set([m.id]))}>
+                        <IconArchive size={16} />
                       </IconButton>
                     </div>
 

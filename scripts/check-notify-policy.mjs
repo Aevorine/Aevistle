@@ -69,7 +69,7 @@ try {
   process.exit(1)
 }
 
-const { applyPolicy, decideNotification, fromAddress, keywordHit, senderAllowed } = await import(
+const { applyPolicy, autoTagFor, decideNotification, fromAddress, keywordHit, senderAllowed } = await import(
   pathToFileURL(join(out, 'policy.mjs')).href
 )
 const { appendLedger, pruneLedger, reasons, summarise, LEDGER_MAX_ENTRIES } = await import(
@@ -400,6 +400,57 @@ check(
 )
 
 // ---------------------------------------------------------------------------
+
+// --- rule 1½: the muted-sender blocklist, and the tag half of the rules ------
+//
+// The one property that makes a mute a mute: it sits on the account-mute side
+// of the keyword override. A keyword talks its way past the allowlist by
+// design; if it could also talk past a mute, silencing a newsletter that says
+// 验证码 in every subject would be impossible.
+{
+  const msg = (from, subject) => ({
+    id: 'x',
+    accountId: 'a1',
+    folderPath: 'INBOX',
+    uid: 1,
+    uidValidity: 1,
+    messageId: '<x>',
+    from,
+    to: 'me@x.com',
+    subject,
+    date: Date.now(),
+    snippet: '',
+    sizeBytes: 1,
+    hasAttachments: false,
+    seen: false,
+    tag: 'none',
+    bodyCached: false,
+  })
+  const muted = decideNotification(msg('Noise <noise@spam.example.com>', 'code 123'), 'a1', {
+    muted: ['noise@spam.example.com'],
+    keywords: ['code'],
+  })
+  check('a muted sender stays silent even when a keyword hits', muted.notify === false)
+  check('the mute names itself in the trace', muted.suppressed === 'senderMuted')
+  check(
+    'an empty muted list mutes nobody',
+    decideNotification(msg('a@b.com', 'hi'), 'a1', { muted: [] }).notify === true,
+  )
+  check(
+    'a bare domain mutes the whole domain, like the allowlist it mirrors',
+    decideNotification(msg('x <a@mail.spam.example.com>', 'hi'), 'a1', { muted: ['spam.example.com'] })
+      .suppressed === 'senderMuted',
+  )
+  check(
+    'applyPolicy counts the muted separately from the unlisted',
+    applyPolicy([msg('a@spam.com', 'hi')], 'a1', { muted: ['spam.com'] }).senderMuted === 1,
+  )
+
+  check('autoTagFor: important outranks flagged', autoTagFor('a@bank.com', ['bank.com'], ['bank.com']) === 'important')
+  check('autoTagFor: a flag-list match flags', autoTagFor('a@bank.com', ['bank.com'], []) === 'flagged')
+  check('autoTagFor: no rule, no opinion', autoTagFor('a@bank.com', [], []) === null)
+  check('autoTagFor: empty lists tag nobody', autoTagFor('a@bank.com', [], ['other.com']) === null)
+}
 
 rmSync(out, { recursive: true, force: true })
 

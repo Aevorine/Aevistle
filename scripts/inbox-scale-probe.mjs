@@ -484,6 +484,115 @@ await send('Page.reload', { ignoreCache: false })
   }
 }
 
+// --- archive ---------------------------------------------------------------
+//
+// Archiving one message must take exactly one row out of the list, the
+// archived panel must offer it back, and putting it back must restore the
+// count — walked in one continuous session right after the read-to-here
+// check, which left the app in edit mode's aftermath at desktop width.
+step = 'archive'
+{
+  await evaluate(`(() => { const b = document.querySelector('.nav__item[data-view="inbox"]'); if (b) b.click(); })(), true`)
+  await sleep(600)
+  // Identity, not row counts: a windowed list refills its slice from below,
+  // so archiving one of 140 messages leaves the number of *mounted* rows
+  // exactly where it was — the first draft of this check asserted the count
+  // and failed against a working feature. What archiving actually promises
+  // is that *this* message leaves the list, is offered in the panel, and
+  // comes back — so the subject (fixture text, the one kind of string a
+  // check may match) is followed through all three places.
+  const arc = await evaluate(`(async () => {
+    const holds = (sel, text) => [...document.querySelectorAll(sel)].some((el) => el.textContent.includes(text))
+    const menu = () => document.querySelector('.inboxmenu > button')
+    if (!menu()) return { failed: 'no overflow menu trigger' }
+    menu().click()
+    await new Promise((r) => setTimeout(r, 300))
+    const editItem = document.querySelector('[data-action="edit"]')
+    if (!editItem) return { failed: 'no edit item' }
+    editItem.click()
+    await new Promise((r) => setTimeout(r, 300))
+    const box = document.querySelectorAll('.job__select')[2]
+    if (!box) return { failed: 'no selectable row' }
+    const subject = ((box.closest('.job') ?? {}).querySelector?.('.job__subject') ?? {}).textContent ?? ''
+    if (!subject.startsWith('Fixture subject')) return { failed: 'could not read the fixture subject off the row' }
+    box.click()
+    await new Promise((r) => setTimeout(r, 200))
+    const btn = document.querySelector('[data-action="archive"]')
+    if (!btn) return { failed: 'no archive control in the edit bar' }
+    btn.click()
+    await new Promise((r) => setTimeout(r, 600))
+    const goneFromList = !holds('.job', subject)
+    menu().click()
+    await new Promise((r) => setTimeout(r, 300))
+    const archivedItem = document.querySelector('[data-action="archived"]')
+    if (!archivedItem) return { failed: 'no archived entry in the menu' }
+    archivedItem.click()
+    await new Promise((r) => setTimeout(r, 400))
+    const inPanel = holds('.inbox-bin .bin-row', subject)
+    const un = document.querySelector('[data-action="unarchive"]')
+    if (!un) return { failed: 'no unarchive control in the panel' }
+    un.click()
+    await new Promise((r) => setTimeout(r, 600))
+    const p = document.querySelector('.view--list .list-pane')
+    if (p) p.scrollTop = 0
+    await new Promise((r) => setTimeout(r, 400))
+    const backInList = holds('.job', subject)
+    return { subject, goneFromList, inPanel, backInList }
+  })()`)
+  if (arc.failed) {
+    fail(`archive: ${arc.failed}.`)
+  } else {
+    if (!arc.goneFromList) fail(`archive: "${arc.subject}" was archived and is still in the list.`)
+    if (!arc.inPanel) fail(`archive: "${arc.subject}" is not offered in the archived panel.`)
+    if (!arc.backInList) fail(`archive: "${arc.subject}" was put back and did not return to the list.`)
+    if (arc.goneFromList && arc.inPanel && arc.backInList)
+      notes.push(`archive: "${arc.subject}" left the list, sat in the panel, and came back`)
+  }
+}
+
+// --- group by sender ---------------------------------------------------------
+//
+// Toggling the grouping must fence the same rows differently: sender labels
+// on the separators while it is on, and none of them left once it is off
+// again. Counts are cross-checked so a fence with the wrong rows inside it
+// cannot pass on labels alone.
+step = 'group-by-sender'
+{
+  const grp = await evaluate(`(async () => {
+    const menu = () => document.querySelector('.inboxmenu > button')
+    const toggle = async () => {
+      if (!menu()) return 'no menu trigger'
+      menu().click()
+      await new Promise((r) => setTimeout(r, 300))
+      const item = document.querySelector('[data-action="group-sender"]')
+      if (!item) return 'no group-sender item'
+      item.click()
+      await new Promise((r) => setTimeout(r, 600))
+      return 'ok'
+    }
+    const senderSeps = () =>
+      [...document.querySelectorAll('.daysep__label')].filter((s) => s.textContent.startsWith('Fixture Sender')).length
+    let r = await toggle()
+    if (r !== 'ok') return { failed: r }
+    const on = senderSeps()
+    const firstSep = document.querySelector('.daysep')
+    const count = firstSep ? Number(firstSep.querySelector('.daysep__count')?.textContent ?? '0') : 0
+    r = await toggle()
+    if (r !== 'ok') return { failed: r + ' (second toggle)' }
+    const off = senderSeps()
+    return { on, off, count }
+  })()`)
+  if (grp.failed) {
+    fail(`group-by-sender: ${grp.failed}.`)
+  } else {
+    if (grp.on === 0) fail('group-by-sender: no sender-labelled separators appeared after toggling on.')
+    if (grp.count < 2) fail(`group-by-sender: the first group claims ${grp.count} message(s) — grouping did not gather.`)
+    if (grp.off !== 0) fail(`group-by-sender: ${grp.off} sender separator(s) survived toggling back to days.`)
+    if (grp.on > 0 && grp.off === 0)
+      notes.push(`group-by-sender: ${grp.on} sender fence(s) on, first holds ${grp.count}, clean off`)
+  }
+}
+
 if (consoleHits.length) {
   fail(`the page logged ${consoleHits.length} error(s): ${consoleHits.slice(0, 3).join(' | ')}`)
 }
