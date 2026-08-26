@@ -750,6 +750,7 @@ export const ru: Translations = {
   'inbox.scope.from': 'Отправитель',
   'inbox.scope.subject': 'Тема',
   'inbox.scope.body': 'Превью',
+  'inbox.scope.bodyFull': 'Текст письма',
   'inbox.searchIn.all': 'Искать отправителя, тему и превью…',
   'inbox.searchIn.from': 'Искать отправителя…',
   'inbox.searchIn.subject': 'Искать по темам…',

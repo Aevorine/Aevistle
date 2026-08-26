@@ -757,6 +757,7 @@ export const en = {
   'inbox.scope.from': 'Sender',
   'inbox.scope.subject': 'Subject',
   'inbox.scope.body': 'Preview text',
+  'inbox.scope.bodyFull': 'Body',
   'inbox.searchIn.all': 'Search sender, subject and preview…',
   'inbox.searchIn.from': 'Search the sender…',
   'inbox.searchIn.subject': 'Search subjects…',

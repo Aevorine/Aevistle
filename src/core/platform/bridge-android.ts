@@ -375,6 +375,11 @@ interface AevistleNativePlugin extends AndroidPermissionApi {
     folderPath: string
     uid: number
   }): Promise<InboxMessageBody>
+  searchInboxBodies(opts: {
+    accountId: string
+    folderPath: string
+    query: string
+  }): Promise<{ uids: number[] }>
   setMessageFlags(opts: {
     config: InboxAccountState
     folderPath: string
@@ -824,6 +829,8 @@ export function createAndroidBridge(): PlatformBridge & AndroidPermissionApi {
       }
     },
     getMessageBody: (config, folderPath, uid) => Native.getMessageBody({ config, folderPath, uid }),
+    searchInboxBodies: (accountId, folderPath, query) =>
+      Native.searchInboxBodies({ accountId, folderPath, query }).then((r) => r?.uids ?? []),
     setMessageFlags: (config, folderPath, uid, patch) =>
       Native.setMessageFlags({ config, folderPath, uid, patch }),
     deleteInboxMessages: (accountId, items) => Native.deleteInboxMessages({ accountId, items }),

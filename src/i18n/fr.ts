@@ -752,6 +752,7 @@ export const fr: Translations = {
   'inbox.scope.from': 'Expéditeur',
   'inbox.scope.subject': 'Objet',
   'inbox.scope.body': 'Aperçu',
+  'inbox.scope.bodyFull': 'Corps du message',
   'inbox.searchIn.all': 'Chercher expéditeur, objet et aperçu…',
   'inbox.searchIn.from': 'Chercher l’expéditeur…',
   'inbox.searchIn.subject': 'Chercher dans les objets…',

@@ -98,6 +98,7 @@ import {
 import { useI18n, type TranslationKey } from '../i18n'
 import { accountGroupKey, orderedAccounts } from '../core/mail/accounts'
 import { removalKey } from '../core/mail/inboxRemoval'
+import { canPreviewOffice, officeHtml, officeKind } from '../core/files/officePreview'
 import { useReorder } from '../components/useReorder'
 import {
   BROKEN_IMAGE,
@@ -891,6 +892,48 @@ export function InboxView({
    * results are, which is the right way round.
    */
   const deferredQuery = useDeferredValue(query)
+
+  /**
+   * The body scope's second gear: uids whose *cached full text* carries the
+   * query, asked of the platform's body cache off the UI thread.
+   *
+   * `null` while the scope is elsewhere, the box is empty, or the platform
+   * keeps no cache to ask (the browser preview) — in all three the filter
+   * below falls back to what it always did, the snippet. The snippet match
+   * stays OR-ed in even when the cache answers, because a message that was
+   * never opened or prefetched has no body on disk, and "found by its
+   * preview" must not become *un*-findable the day full-text arrives.
+   */
+  const [bodyHits, setBodyHits] = useState<Set<string> | null>(null)
+  const canSearchBodies = Boolean(bridge?.searchInboxBodies)
+  useEffect(() => {
+    const q = deferredQuery.trim()
+    const search = bridge?.searchInboxBodies
+    if (scope !== 'body' || !q || !search) {
+      setBodyHits(null)
+      return
+    }
+    let cancelled = false
+    void (async () => {
+      const hits = new Set<string>()
+      for (const inbox of enabledInboxes) {
+        const folders = [...new Set(inbox.messages.map((m) => m.folderPath))]
+        for (const folder of folders.length > 0 ? folders : ['INBOX']) {
+          try {
+            const uids = await search(inbox.accountId, folder, q)
+            for (const uid of uids) hits.add(`${inbox.accountId} ${folder} ${uid}`)
+          } catch {
+            /* an unreachable cache contributes nothing, same as an empty one */
+          }
+          if (cancelled) return
+        }
+      }
+      if (!cancelled) setBodyHits(hits)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [deferredQuery, scope, bridge, enabledInboxes])
   /**
    * The quick filters over the list — item 20.
    *
@@ -987,16 +1030,19 @@ export function InboxView({
           m.snippet.toLowerCase().includes(q),
         from: (m: InboxMessage) => m.from.toLowerCase().includes(q),
         subject: (m: InboxMessage) => m.subject.toLowerCase().includes(q),
-        // The snippet, not the whole body: bodies live in an on-disk cache and
-        // are fetched on demand, so scanning them would mean reading up to a
-        // thousand files between two keystrokes. Saying "preview text" rather
-        // than "body" is the honest label for what is actually searched.
-        body: (m: InboxMessage) => m.snippet.toLowerCase().includes(q),
+        // The snippet always, and — where the platform keeps a body cache —
+        // the uids `searchInboxBodies` answered with. The thousand-file scan
+        // this comment used to rule out happens now, but on the native side,
+        // asynchronously, debounced behind `useDeferredValue`; the label
+        // switches from "preview text" to "body" only where that is true.
+        body: (m: InboxMessage) =>
+          m.snippet.toLowerCase().includes(q) ||
+          (bodyHits?.has(`${m.accountId} ${m.folderPath} ${m.uid}`) ?? false),
       }[scope]
       list = list.filter(inField)
     }
     return [...list].sort((a, b) => b.date - a.date)
-  }, [accountMessages, chips, codeByMessage, deferredQuery, scope])
+  }, [accountMessages, chips, codeByMessage, deferredQuery, scope, bodyHits])
   const searchPending = deferredQuery !== query
 
   /**
@@ -1566,6 +1612,27 @@ export function InboxView({
   const previewAttachment = async (raw: Attachment) => {
     const a = await withBytes(raw)
     if (!a) return
+    // Word/Excel first: their preview is built here from the words in the
+    // file (`core/files/officePreview`), inside the same inert frame text
+    // gets. A file it cannot read — too old an engine, a zip it mistrusts, a
+    // too-large read — falls through to the OS handler exactly as before.
+    if (officeKind(a.name) && bridge?.readAttachment && canPreviewOffice()) {
+      try {
+        const result = await bridge.readAttachment(a.path)
+        if (result) {
+          const bin = atob(result.dataUrl.slice(result.dataUrl.indexOf(',') + 1))
+          const bytes = new Uint8Array(bin.length)
+          for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+          const html = await officeHtml(a.name, bytes)
+          if (html) {
+            setPreview({ attachment: a, mime: 'text/html', dataUrl: `data:text/html;base64,${b64utf8(html)}` })
+            return
+          }
+        }
+      } catch {
+        /* fall through to the OS handler */
+      }
+    }
     if (bridge?.readAttachment && PREVIEWABLE.test(a.name)) {
       try {
         const result = await bridge.readAttachment(a.path)
@@ -3019,7 +3086,14 @@ export function InboxView({
                       {/* Every chip's text stays wrapped: `text-overflow` does
                           not apply to the anonymous text of a flex container,
                           so a bare-text chip is cut with no ellipsis at all. */}
-                      <span className="chip__text">{t(`inbox.scope.${s}` as 'inbox.scope.all')}</span>
+                      <span className="chip__text">
+                        {/* "Body" only where the platform genuinely searches
+                            bodies; the browser preview keeps the honest
+                            "preview text" it has always had. */}
+                        {s === 'body' && canSearchBodies
+                          ? t('inbox.scope.bodyFull')
+                          : t(`inbox.scope.${s}` as 'inbox.scope.all')}
+                      </span>
                     </button>
                   ))}
                 </div>

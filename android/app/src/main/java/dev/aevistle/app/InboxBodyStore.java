@@ -37,6 +37,41 @@ final class InboxBodyStore {
         return file(context, accountId, folderPath, uid).isFile();
     }
 
+    /**
+     * Uids in this folder whose cached body carries the query — the Java half
+     * of {@code electron/bodySearch.ts}, same haystack: the plain text plus
+     * the sanitized HTML with its tags struck out, both sides case-folded. An
+     * unreadable file is not a match; a missing cache is an empty answer.
+     */
+    static java.util.List<Long> search(Context context, String accountId, String folderPath, String query) {
+        java.util.List<Long> hits = new java.util.ArrayList<>();
+        String q = query == null ? "" : query.trim().toLowerCase(java.util.Locale.ROOT);
+        if (q.isEmpty()) return hits;
+        File[] files = dir(context, accountId, folderPath).listFiles();
+        if (files == null) return hits;
+        for (File f : files) {
+            String name = f.getName();
+            if (!name.endsWith(".json")) continue;
+            long uid;
+            try {
+                uid = Long.parseLong(name.substring(0, name.length() - 5));
+            } catch (NumberFormatException e) {
+                continue;
+            }
+            JSONObject body = readBody(context, accountId, folderPath, uid);
+            if (body == null) continue;
+            String html = body.optString("sanitizedHtml", "")
+                    .replaceAll("(?is)<(script|style)[\\s\\S]*?</\\1>", " ")
+                    .replaceAll("<[^>]+>", " ");
+            // Whitespace folded like the desktop engine, or `</td><td>`
+            // leaves two spaces where the query has one.
+            String hay = (body.optString("text", "") + "\n" + html)
+                    .toLowerCase(java.util.Locale.ROOT).replaceAll("\\s+", " ");
+            if (hay.contains(q)) hits.add(uid);
+        }
+        return hits;
+    }
+
     static JSONObject readBody(Context context, String accountId, String folderPath, long uid) {
         File file = file(context, accountId, folderPath, uid);
         if (!file.isFile()) return null;

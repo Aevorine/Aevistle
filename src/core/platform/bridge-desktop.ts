@@ -61,6 +61,7 @@ export function createDesktopBridge(): PlatformBridge {
     saveAttachmentsTo: (paths) => api.saveAttachmentsTo(paths),
     saveTextAs: (name, content) => api.saveTextAs(name, content),
     exportMessagePdf: (name, html) => api.exportMessagePdf(name, html),
+    searchInboxBodies: (accountId, folderPath, query) => api.searchInboxBodies(accountId, folderPath, query),
     checkFiles: (paths) => api.checkFiles(paths),
     attachPaths: (paths) => api.attachPaths(paths),
     pathForFile: (file) => api.pathForFile(file),

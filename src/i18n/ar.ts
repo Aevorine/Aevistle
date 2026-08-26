@@ -747,6 +747,7 @@ export const ar: Translations = {
   'inbox.scope.from': 'المُرسِل',
   'inbox.scope.subject': 'الموضوع',
   'inbox.scope.body': 'المعاينة',
+  'inbox.scope.bodyFull': 'نص الرسالة',
   'inbox.searchIn.all': 'ابحث في المُرسِل والموضوع والمعاينة…',
   'inbox.searchIn.from': 'ابحث في المُرسِل…',
   'inbox.searchIn.subject': 'ابحث في المواضيع…',

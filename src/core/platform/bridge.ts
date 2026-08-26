@@ -506,6 +506,13 @@ export interface PlatformBridge {
   saveTextAs?(name: string, content: string): Promise<string | null>
   /** Print sanitized message markup to a PDF. Absent = the platform cannot offer it. */
   exportMessagePdf?(name: string, html: string): Promise<string | null>
+  /**
+   * Full-text search over the folder's *cached* bodies — the uids that match.
+   * Absent = the platform keeps no body cache to search (the browser
+   * preview), and the search box's body scope stays what it was: a snippet
+   * match with the honest label.
+   */
+  searchInboxBodies?(accountId: string, folderPath: string, query: string): Promise<number[]>
   /** Save every listed attachment into one chosen folder. */
   saveAttachmentsTo?(paths: string[]): Promise<{ folder: string; saved: number } | null>
   /**

@@ -147,6 +147,7 @@ import {
   deleteAccountInboxCache,
   deleteMessageCache,
   pruneInboxCache,
+  searchBodies,
 } from './inboxStore'
 import { clearImageCache, downloadRemoteImage } from './remoteImage'
 import { resumeImagePrefetch, stopImagePrefetch } from './imagePrefetch'
@@ -2508,6 +2509,11 @@ function registerIpc(): void {
    * allowlist. See `CalendarDayPanel.tsx`.
    */
   ipcMain.handle(IPC.sanitizeHtml, async (_e, html: string) => sanitizeMessageHtml(html).html)
+
+  // Read-only over the body cache; an account with no cache answers [].
+  ipcMain.handle(IPC.searchInboxBodies, (_e, accountId: string, folderPath: string, query: string) =>
+    searchBodies(String(accountId ?? ''), String(folderPath ?? 'INBOX'), String(query ?? '')),
+  )
 
   /**
    * Mirror a read/unread change to the mailbox, and answer whether it landed.

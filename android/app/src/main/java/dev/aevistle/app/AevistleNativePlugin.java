@@ -946,6 +946,23 @@ public class AevistleNativePlugin extends Plugin {
     }
 
     @PluginMethod
+    public void searchInboxBodies(final PluginCall call) {
+        final String accountId = call.getString("accountId", "");
+        final String folderPath = call.getString("folderPath", "INBOX");
+        final String query = call.getString("query", "");
+        io.execute(() -> {
+            try {
+                JSObject out = new JSObject();
+                out.put("uids", new org.json.JSONArray(
+                        InboxBodyStore.search(getContext(), accountId, folderPath, query)));
+                call.resolve(out);
+            } catch (Exception e) {
+                call.reject(String.valueOf(e.getMessage()));
+            }
+        });
+    }
+
+    @PluginMethod
     public void getMessageBody(final PluginCall call) {
         final JSObject config = call.getObject("config");
         final String folderPath = call.getString("folderPath", "INBOX");

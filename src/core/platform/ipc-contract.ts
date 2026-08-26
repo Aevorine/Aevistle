@@ -304,6 +304,8 @@ export interface DesktopApi {
   saveTextAs(name: string, content: string): Promise<string | null>
   /** Sanitized message markup printed to a PDF the user names; the saved path, or null on cancel. */
   exportMessagePdf(name: string, html: string): Promise<string | null>
+  /** Uids in this folder whose *cached* body carries the query — see `inboxStore.searchBodies`. */
+  searchInboxBodies(accountId: string, folderPath: string, query: string): Promise<number[]>
   /** Ask for one folder, then copy every listed attachment into it. Returns how many landed. */
   saveAttachmentsTo(paths: string[]): Promise<{ folder: string; saved: number } | null>
   /**
@@ -552,6 +554,7 @@ export const IPC = {
   saveAttachmentsTo: 'aevistle:save-attachments-to',
   saveTextAs: 'aevistle:save-text-as',
   exportMessagePdf: 'aevistle:export-message-pdf',
+  searchInboxBodies: 'aevistle:search-inbox-bodies',
   checkFiles: 'aevistle:check-files',
   attachPaths: 'aevistle:attach-paths',
   syncJobs: 'aevistle:sync-jobs',

@@ -18,6 +18,7 @@ import { promises as fs } from 'node:fs'
 import { createHash } from 'node:crypto'
 import path from 'node:path'
 import type { Attachment } from '../src/core/types'
+import { searchBodiesIn } from './bodySearch'
 import { dataLocation } from './store'
 
 const INBOX_DIR = 'inbox'
@@ -104,6 +105,18 @@ function bodyDir(accountId: string, folderPath: string): string {
 
 function bodyFile(accountId: string, folderPath: string, uid: number): string {
   return path.join(bodyDir(accountId, folderPath), `${uid}.json`)
+}
+
+/**
+ * Full-text search over this folder's cached bodies — the uids that match.
+ *
+ * The engine lives in `bodySearch.ts` (see its header for why); this is the
+ * one place that knows where an account's bodies actually are. Only cached
+ * bodies can answer, which is the honest scope of an offline search: a
+ * message never opened and never prefetched has no text here to match.
+ */
+export function searchBodies(accountId: string, folderPath: string, query: string): Promise<number[]> {
+  return searchBodiesIn(bodyDir(accountId, folderPath), query)
 }
 
 function attachmentDir(accountId: string, folderPath: string, uid: number): string {

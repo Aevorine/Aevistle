@@ -752,6 +752,7 @@ export const es: Translations = {
   'inbox.scope.from': 'Remitente',
   'inbox.scope.subject': 'Asunto',
   'inbox.scope.body': 'Vista previa',
+  'inbox.scope.bodyFull': 'Cuerpo',
   'inbox.searchIn.all': 'Buscar remitente, asunto y vista previa…',
   'inbox.searchIn.from': 'Buscar el remitente…',
   'inbox.searchIn.subject': 'Buscar en los asuntos…',

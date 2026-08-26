@@ -741,6 +741,7 @@ export const zhCN: Translations = {
   'inbox.scope.from': '发件人',
   'inbox.scope.subject': '主题',
   'inbox.scope.body': '正文摘要',
+  'inbox.scope.bodyFull': '正文',
   'inbox.searchIn.all': '搜索发件人、主题和摘要…',
   'inbox.searchIn.from': '搜索发件人…',
   'inbox.searchIn.subject': '搜索主题…',
