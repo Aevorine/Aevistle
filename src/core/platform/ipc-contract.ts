@@ -300,6 +300,10 @@ export interface DesktopApi {
   readAttachment(path: string): Promise<{ dataUrl: string; mime: string } | null>
   /** Ask where to put a copy of an attachment, then write it there. Returns the path, or null if cancelled. */
   saveAttachmentAs(path: string, suggestedName: string): Promise<string | null>
+  /** Renderer-built text (the .eml export) saved where the user points; the saved path, or null on cancel. */
+  saveTextAs(name: string, content: string): Promise<string | null>
+  /** Sanitized message markup printed to a PDF the user names; the saved path, or null on cancel. */
+  exportMessagePdf(name: string, html: string): Promise<string | null>
   /** Ask for one folder, then copy every listed attachment into it. Returns how many landed. */
   saveAttachmentsTo(paths: string[]): Promise<{ folder: string; saved: number } | null>
   /**
@@ -546,6 +550,8 @@ export const IPC = {
   readAttachment: 'aevistle:read-attachment',
   saveAttachmentAs: 'aevistle:save-attachment-as',
   saveAttachmentsTo: 'aevistle:save-attachments-to',
+  saveTextAs: 'aevistle:save-text-as',
+  exportMessagePdf: 'aevistle:export-message-pdf',
   checkFiles: 'aevistle:check-files',
   attachPaths: 'aevistle:attach-paths',
   syncJobs: 'aevistle:sync-jobs',

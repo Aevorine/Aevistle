@@ -255,6 +255,14 @@ export const IconFolder = (p: IconProps) => (
   </Svg>
 )
 
+/** The reply arrow — back the way the message came. */
+export const IconReply = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M9 14 4 9l5-5" />
+    <path d="M4 9h10a6 6 0 0 1 6 6v4" />
+  </Svg>
+)
+
 /** A storage box with its lid — archive: set aside, not thrown away. */
 export const IconArchive = (p: IconProps) => (
   <Svg {...p}>

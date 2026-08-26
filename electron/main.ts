@@ -2289,6 +2289,53 @@ function registerIpc(): void {
     return result.filePath
   })
 
+  /**
+   * Text the renderer built, saved where the user points — the .eml export.
+   *
+   * Unlike `saveAttachmentAs` there is no source path to guard, because there
+   * is no source: the content arrives in the call, and the only file touched
+   * is the one the save dialog returned.
+   */
+  ipcMain.handle(IPC.saveTextAs, async (_e, suggestedName: string, content: string) => {
+    const result = await dialog.showSaveDialog({
+      defaultPath: path.basename(String(suggestedName || 'message.eml')),
+    })
+    if (result.canceled || !result.filePath) return null
+    await fs.writeFile(result.filePath, String(content ?? ''), 'utf8')
+    return result.filePath
+  })
+
+  /**
+   * The message body, printed to a PDF the user names.
+   *
+   * Rendered in a throwaway window that can execute nothing: the markup has
+   * already been through `sanitizeHtml` on its way to the reader, and
+   * `javascript: false` makes the second line of that defence structural
+   * rather than trusted. Loaded from a temp file rather than a data: URL,
+   * whose navigation limit a large newsletter can genuinely exceed.
+   */
+  ipcMain.handle(IPC.exportMessagePdf, async (_e, suggestedName: string, html: string) => {
+    const result = await dialog.showSaveDialog({
+      defaultPath: path.basename(String(suggestedName || 'message.pdf')),
+    })
+    if (result.canceled || !result.filePath) return null
+    const win = new BrowserWindow({
+      show: false,
+      webPreferences: { sandbox: true, javascript: false, contextIsolation: true },
+    })
+    const tmp = path.join(app.getPath('temp'), `aevistle-pdf-${Date.now()}.html`)
+    try {
+      await fs.writeFile(tmp, String(html ?? ''), 'utf8')
+      await win.loadFile(tmp)
+      const pdf = await win.webContents.printToPDF({ printBackground: true })
+      await fs.writeFile(result.filePath, pdf)
+      return result.filePath
+    } finally {
+      win.destroy()
+      fs.rm(tmp, { force: true }).catch(() => {})
+    }
+  })
+
   /** The same, for every attachment on a message at once: one folder, one dialog. */
   ipcMain.handle(IPC.saveAttachmentsTo, async (_e, targets: string[]) => {
     if (!Array.isArray(targets) || targets.length === 0) return null

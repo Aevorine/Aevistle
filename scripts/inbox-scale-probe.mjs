@@ -148,7 +148,15 @@ dates.forEach((date, i) => {
     messageId: `<m${i}@example.com>`,
     from: `Fixture Sender ${i % 9} <s${i % 9}@example.com>`,
     to: 'me@example.com',
-    subject: `Fixture subject ${i}`,
+    /* A Re:-chained family from day 2 back, for the thread grouping — kept
+       out of the newest rows so the archive walk's identity-following still
+       lands on a unique subject. */
+    subject:
+      i >= 20 && i % 9 === 4
+        ? 'Re: Fixture thread topic'
+        : i >= 20 && i % 9 === 8
+          ? 'Fixture thread topic'
+          : `Fixture subject ${i}`,
     date,
     snippet: `Fixture preview text ${i}`,
     sizeBytes: 2048 + i,
@@ -590,6 +598,115 @@ step = 'group-by-sender'
     if (grp.off !== 0) fail(`group-by-sender: ${grp.off} sender separator(s) survived toggling back to days.`)
     if (grp.on > 0 && grp.off === 0)
       notes.push(`group-by-sender: ${grp.on} sender fence(s) on, first holds ${grp.count}, clean off`)
+  }
+}
+
+// --- group by conversation ---------------------------------------------------
+//
+// The Re:-chained family seeded above must gather under one fence whose count
+// says how many the chain holds — scrolled for, because the thread's newest
+// message is days old and its fence sits below the windowed slice at rest.
+step = 'group-by-thread'
+{
+  const thr = await evaluate(`(async () => {
+    const menu = () => document.querySelector('.inboxmenu > button')
+    const toggle = async (action) => {
+      if (!menu()) return 'no menu trigger'
+      menu().click()
+      await new Promise((r) => setTimeout(r, 300))
+      const item = document.querySelector('[data-action="' + action + '"]')
+      if (!item) return 'no ' + action + ' item'
+      item.click()
+      await new Promise((r) => setTimeout(r, 600))
+      return 'ok'
+    }
+    let r = await toggle('group-thread')
+    if (r !== 'ok') return { failed: r }
+    const p = document.querySelector('.view--list .list-pane')
+    if (!p) return { failed: 'no list pane' }
+    let found = 0
+    for (let stepDown = 0; stepDown < 24 && !found; stepDown++) {
+      for (const sep of document.querySelectorAll('.daysep')) {
+        const label = sep.querySelector('.daysep__label')?.textContent ?? ''
+        if (label.toLowerCase().includes('fixture thread topic')) {
+          found = Number(sep.querySelector('.daysep__count')?.textContent ?? '0')
+          break
+        }
+      }
+      if (!found) {
+        p.scrollTop += p.clientHeight
+        await new Promise((r2) => setTimeout(r2, 250))
+      }
+    }
+    p.scrollTop = 0
+    await new Promise((r2) => setTimeout(r2, 300))
+    r = await toggle('group-thread')
+    if (r !== 'ok') return { failed: r + ' (toggle off)' }
+    return { found }
+  })()`)
+  if (thr.failed) {
+    fail(`group-by-thread: ${thr.failed}.`)
+  } else if (thr.found < 2) {
+    fail(`group-by-thread: the Re: family never gathered — best fence found holds ${thr.found}.`)
+  } else {
+    notes.push(`group-by-thread: the Re: family gathered ${thr.found} messages under one fence`)
+  }
+}
+
+// --- reply -------------------------------------------------------------------
+//
+// One press in the reader has to land on the compose screen holding the right
+// half-written mail: the sender's bare address as the recipient and the
+// subject wearing exactly one Re:. Asserted against the fixture address —
+// the reader was opened on the newest row, whose sender the fixture fixes.
+step = 'reply'
+{
+  // A fresh page, because the archive walk above deliberately left 编辑 mode
+  // behind it — and in edit mode a row click selects instead of opening.
+  await send('Page.reload', { ignoreCache: false })
+  let mounted = false
+  for (let i = 0; i < 60; i += 1) {
+    await sleep(250)
+    if (await evaluate(`Boolean(document.querySelector('.shell .view'))`)) {
+      mounted = true
+      break
+    }
+  }
+  if (!mounted) fail('reply: the app never mounted.')
+  await sleep(700)
+  await evaluate(
+    `(() => { const b = document.querySelector('.nav__item[data-view="inbox"]'); if (b) b.click(); })(), true`,
+  )
+  await sleep(1000)
+  const rep = await evaluate(`(async () => {
+    const row = document.querySelector('.job')
+    const body = row && (row.querySelector('.job__body') || row)
+    if (!body) return { failed: 'no row to open' }
+    body.click()
+    await new Promise((r) => setTimeout(r, 900))
+    const more = document.querySelector('.reader__more button')
+    if (!more) return { failed: 'no reader overflow button' }
+    more.click()
+    await new Promise((r) => setTimeout(r, 300))
+    const btn = document.querySelector('[data-action="reply"]')
+    if (!btn) return { failed: 'no reply item in the reader menu' }
+    btn.click()
+    await new Promise((r) => setTimeout(r, 800))
+    const compose = document.querySelector('.view--compose')
+    if (!compose) return { failed: 'reply did not land on the compose screen' }
+    const text = compose.innerText
+    const inputs = [...compose.querySelectorAll('input, textarea')].map((i) => i.value).join(' | ')
+    return {
+      hasAddress: text.includes('s0@example.com') || inputs.includes('s0@example.com'),
+      subjectOnce: (inputs.match(/Re: Fixture subject 0/g) ?? []).length === 1 && !inputs.includes('Re: Re:'),
+    }
+  })()`)
+  if (rep.failed) {
+    fail(`reply: ${rep.failed}.`)
+  } else {
+    if (!rep.hasAddress) fail('reply: the compose screen does not carry the sender address s0@example.com.')
+    if (!rep.subjectOnce) fail('reply: the subject is not exactly one "Re: Fixture subject 0".')
+    if (rep.hasAddress && rep.subjectOnce) notes.push('reply: compose holds s0@example.com and a single Re:')
   }
 }
 

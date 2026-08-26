@@ -72,6 +72,7 @@ import {
   IconMore,
   IconPaperclip,
   IconRefresh,
+  IconReply,
   IconSearch,
   IconSun,
   IconTrash,
@@ -126,16 +127,34 @@ import {
   type CodeHit,
   type InboxMessage,
   type InboxTag,
+  type MessageDraft,
   type ScheduledJob,
+  type Template,
 } from '../core/types'
 
 type AccountFilter = 'all' | string
 
-/** A sender-group fence in the list — deliberately the same shape and chrome as a day separator. */
-type SenderRow =
-  | { type: 'sender'; key: string; label: string; count: number }
+/** A sender- or conversation-group fence in the list — deliberately the same shape and chrome as a day separator. */
+type FenceRow =
+  | { type: 'fence'; key: string; label: string; count: number }
   | { type: 'item'; key: number; item: InboxMessage }
-type ListRow = DayRow<InboxMessage> | SenderRow
+type ListRow = DayRow<InboxMessage> | FenceRow
+
+/**
+ * What makes two subjects the same conversation: the text left over once the
+ * reply/forward armour is peeled — repeatedly, because "Re: 转发: Re:" is a
+ * thing real mail does. Case- and whitespace-folded so clients that rewrap
+ * or upcase the prefix do not split the thread they replied to.
+ */
+function threadKey(subject: string): string {
+  let s = subject.trim().toLowerCase()
+  for (;;) {
+    const next = s.replace(/^(re|fwd?|aw|sv|回复|答复|转发|轉發)\s*[:：]\s*/i, '')
+    if (next === s) break
+    s = next
+  }
+  return s.replace(/\s+/g, ' ').trim()
+}
 
 type SearchScope = 'all' | 'from' | 'subject' | 'body'
 
@@ -229,6 +248,74 @@ function bodyAsText(text: string, html: string): string {
     .replace(/&#3[59];/g, "'")
     .replace(/[ \t]+/g, ' ')
     .replace(/\n{3,}/g, '\n\n')
+}
+
+/** UTF-8 text as base64 — `btoa` alone corrupts anything past ASCII. */
+function b64utf8(s: string): string {
+  const bytes = new TextEncoder().encode(s)
+  let bin = ''
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+  }
+  return btoa(bin)
+}
+
+/** An RFC 2047 encoded-word, only when the value actually needs one. */
+function headerWord(value: string): string {
+  return /[^\x20-\x7e]/.test(value) ? `=?UTF-8?B?${b64utf8(value)}?=` : value
+}
+
+/**
+ * The message as an .eml file — reconstructed, and honest about it.
+ *
+ * The app never keeps the raw RFC 822 source (the IMAP layer fetches parsed
+ * parts), so this is built back from what the cache holds: the headers the
+ * list shows and the text/html alternatives the reader renders. That is a
+ * mail any client opens; what it is not is the original wire bytes, so the
+ * original's signatures (DKIM) are not carried and attachments — which live
+ * as separate files fetched on demand — are not folded in. Base64 for both
+ * parts because quoted-printable's edge cases are a parser test suite, and
+ * CRLF throughout because RFC 5322 says so and picky clients agree.
+ */
+function buildEml(m: InboxMessage, body: InboxMessageBody): string {
+  const { name, address } = splitSender(m.from)
+  const from = name ? `${headerWord(name)} <${address}>` : m.from
+  const to = toRecipients(m).join(', ')
+  const boundary = `aevistle-${m.uidValidity}-${m.uid}`
+  const wrap = (b64: string) => b64.replace(/(.{76})/g, '$1\r\n')
+  const text = body.text || bodyAsText('', body.sanitizedHtml ?? '')
+  const lines = [
+    `From: ${from}`,
+    `To: ${to}`,
+    `Subject: ${headerWord(m.subject)}`,
+    `Date: ${new Date(m.date).toUTCString().replace(/GMT$/, '+0000')}`,
+    `Message-ID: ${m.messageId || `<${m.uidValidity}.${m.uid}@aevistle.local>`}`,
+    'MIME-Version: 1.0',
+    `Content-Type: multipart/alternative; boundary="${boundary}"`,
+    '',
+    `--${boundary}`,
+    'Content-Type: text/plain; charset=utf-8',
+    'Content-Transfer-Encoding: base64',
+    '',
+    wrap(b64utf8(text)),
+  ]
+  if (body.sanitizedHtml) {
+    lines.push(
+      `--${boundary}`,
+      'Content-Type: text/html; charset=utf-8',
+      'Content-Transfer-Encoding: base64',
+      '',
+      wrap(b64utf8(body.sanitizedHtml)),
+    )
+  }
+  lines.push(`--${boundary}--`, '')
+  return lines.join('\r\n')
+}
+
+/** A filename a subject can survive becoming. */
+function exportName(subject: string, ext: string): string {
+  const stem = (subject || 'message').replace(/[\\/:*?"<>|\r\n]+/g, '_').trim().slice(0, 60)
+  return `${stem || 'message'}.${ext}`
 }
 
 /**
@@ -359,6 +446,7 @@ export function InboxView({
   onGoToAccounts,
   focusMessageId,
   onFocusHandled,
+  onReply,
 }: {
   onGoToAccounts?: () => void
   /**
@@ -369,6 +457,8 @@ export function InboxView({
    */
   focusMessageId?: string | null
   onFocusHandled?: () => void
+  /** Hand a ready reply draft up to whoever owns navigation — see `replyWith`. */
+  onReply?: (patch: Partial<MessageDraft>) => void
 }) {
   const {
     state,
@@ -941,24 +1031,32 @@ export function InboxView({
    * differently. The separator reuses the day bar's row type and chrome; two
    * kinds of fence that look different would be two things to learn.
    */
-  const grouping = state.settings.inboxGrouping === 'sender' ? 'sender' : 'day'
-  const senderRows = useMemo(() => {
-    if (grouping !== 'sender') return null
-    const groups = new Map<string, InboxMessage[]>()
+  const grouping =
+    state.settings.inboxGrouping === 'sender'
+      ? 'sender'
+      : state.settings.inboxGrouping === 'thread'
+        ? 'thread'
+        : 'day'
+  const fenceRows = useMemo(() => {
+    if (grouping === 'day') return null
+    const groups = new Map<string, { label: string; items: InboxMessage[] }>()
     for (const m of filteredMessages) {
-      const label = senderLabel(m.from)
-      const arr = groups.get(label)
-      if (arr) arr.push(m)
-      else groups.set(label, [m])
+      const key = grouping === 'sender' ? senderLabel(m.from) : threadKey(m.subject)
+      const group = groups.get(key)
+      if (group) group.items.push(m)
+      // The fence wears the *newest* message's own words — for a thread that
+      // is the bare subject or the freshest Re:, either way text the reader
+      // has actually seen, where the folded key is a normalisation artefact.
+      else groups.set(key, { label: grouping === 'sender' ? key : m.subject || t('inbox.noSubject'), items: [m] })
     }
-    const rows: SenderRow[] = []
-    for (const [label, items] of groups) {
-      rows.push({ type: 'sender', key: label, label, count: items.length })
-      for (const item of items) rows.push({ type: 'item', key: 0, item })
+    const rows: FenceRow[] = []
+    for (const [key, group] of groups) {
+      rows.push({ type: 'fence', key: `${grouping}:${key}`, label: group.label, count: group.items.length })
+      for (const item of group.items) rows.push({ type: 'item', key: 0, item })
     }
     return rows
-  }, [filteredMessages, grouping])
-  const listRows: ListRow[] = senderRows ?? dayRows
+  }, [filteredMessages, grouping, t])
+  const listRows: ListRow[] = fenceRows ?? dayRows
 
   /**
    * A separator's text, in the reading language.
@@ -1355,6 +1453,33 @@ export function InboxView({
     await deleteIdSet(ids)
     clearSelection()
     toast.push({ tone: 'info', title: t('toast.deleted') })
+  }
+
+  /**
+   * A reply, ready to type into — or already typed, when a template carries it.
+   *
+   * The draft is *replaced*, not patched over whatever was there: a reply
+   * wearing another mail's leftover recipients is worse than losing an
+   * unfinished draft, and the compose screen's snapshot strip already keeps
+   * what was being written. The receiving account answers, `Re:` is added
+   * only when it is not already there, and the sender's bare address — never
+   * the display name — is the recipient.
+   */
+  const replyWith = (template?: Template) => {
+    if (!openMessage || !onReply) return
+    const { address } = splitSender(openMessage.from)
+    const subject = /^re:/i.test(openMessage.subject.trim())
+      ? openMessage.subject
+      : `Re: ${openMessage.subject}`
+    onReply({
+      ...emptyDraft(openMessage.accountId),
+      to: address ? [address] : [],
+      subject,
+      body: template?.body ?? '',
+      bodyFormat: template?.bodyFormat ?? 'plain',
+    })
+    setMoreOpen(false)
+    setOpenMessage(null)
   }
 
   const cycleTag = (m: InboxMessage) => {
@@ -2725,6 +2850,25 @@ export function InboxView({
                     <IconGrip size={16} />
                     <span>{t('inbox.groupBySender')}</span>
                   </button>
+                  {/* Mutually exclusive with the sender fences by construction:
+                      setting either writes over the one `inboxGrouping`. */}
+                  <button
+                    type="button"
+                    role="menuitemcheckbox"
+                    aria-checked={grouping === 'thread'}
+                    className="inboxmenu__item"
+                    data-action="group-thread"
+                    onClick={() => {
+                      setMenuOpen(false)
+                      dispatch({
+                        type: 'patchSettings',
+                        patch: { inboxGrouping: grouping === 'thread' ? 'day' : 'thread' },
+                      })
+                    }}
+                  >
+                    <IconGrip size={16} />
+                    <span>{t('inbox.groupByThread')}</span>
+                  </button>
                   {/* Only once there is something in it. A bin that is always
                       there and always empty is a control people stop seeing.
                       It lives here rather than on the list so that emptying the
@@ -3254,7 +3398,7 @@ export function InboxView({
                * never settling.
                */
               keyOf={(row) =>
-                row.type === 'separator' ? `day:${row.key}` : row.type === 'sender' ? `sender:${row.key}` : row.item.id
+                row.type === 'separator' ? `day:${row.key}` : row.type === 'fence' ? `fence:${row.key}` : row.item.id
               }
               /* Measured, not guessed. At 360x800 with forty messages seeded,
                  every row is 65.9px — the same whatever the subject length,
@@ -3277,7 +3421,7 @@ export function InboxView({
               anchor={(row) => row.type !== 'item'}
             >
               {(row) => {
-                if (row.type === 'sender') {
+                if (row.type === 'fence') {
                   return (
                     <div className="daysep" role="presentation">
                       <span className="daysep__label">{row.label}</span>
@@ -3619,6 +3763,82 @@ export function InboxView({
               </IconButton>
               {moreOpen ? (
                 <div className="popover reader__moreMenu" role="menu" aria-label={t('inbox.more')}>
+                  {/* First, because it is the one item here that is about the
+                      correspondence rather than about the reading of it. */}
+                  {openMessage && onReply ? (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="reader__moreItem"
+                      data-action="reply"
+                      onClick={() => replyWith()}
+                    >
+                      <IconReply size={16} />
+                      <span>{t('inbox.reply')}</span>
+                    </button>
+                  ) : null}
+                  {/* One press from read to answered: the reply above, with a
+                      saved template already in the body. Capped, because a
+                      menu is a list of doors and twenty of them is a wall. */}
+                  {openMessage && onReply
+                    ? state.templates.slice(0, 5).map((tpl) => (
+                        <button
+                          key={tpl.id}
+                          type="button"
+                          role="menuitem"
+                          className="reader__moreItem"
+                          data-action="reply-template"
+                          onClick={() => replyWith(tpl)}
+                        >
+                          <IconReply size={16} />
+                          <span>{t('inbox.replyTemplate', { name: tpl.name })}</span>
+                        </button>
+                      ))
+                    : null}
+                  {/* Both exports need something to export and a platform that
+                      can save it: `openBody` for the eml (headers alone are
+                      not a mail), a bridge method for each — absent on the
+                      browser preview and, for now, on Android, where the item
+                      simply is not offered rather than offered and inert. */}
+                  {openMessage && openBody && bridge?.saveTextAs ? (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="reader__moreItem"
+                      data-action="export-eml"
+                      onClick={() => {
+                        setMoreOpen(false)
+                        void bridge.saveTextAs?.(exportName(openMessage.subject, 'eml'), buildEml(openMessage, openBody)).then(
+                          (saved) => {
+                            if (saved) toast.push({ tone: 'success', title: t('inbox.exportDone'), detail: saved })
+                          },
+                        )
+                      }}
+                    >
+                      <IconDownload size={16} />
+                      <span>{t('inbox.exportEml')}</span>
+                    </button>
+                  ) : null}
+                  {openMessage && bridge?.exportMessagePdf ? (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="reader__moreItem"
+                      data-action="export-pdf"
+                      onClick={() => {
+                        setMoreOpen(false)
+                        const html =
+                          resolvedHtml ?? openBody?.sanitizedHtml ?? (openBody?.text ? textAsHtml(openBody.text) : '')
+                        if (!html) return
+                        void bridge.exportMessagePdf?.(exportName(openMessage.subject, 'pdf'), html).then((saved) => {
+                          if (saved) toast.push({ tone: 'success', title: t('inbox.exportDone'), detail: saved })
+                        })
+                      }}
+                    >
+                      <IconDownload size={16} />
+                      <span>{t('inbox.exportPdf')}</span>
+                    </button>
+                  ) : null}
                   {openMessage && readerIsDark ? (
                     <button
                       type="button"

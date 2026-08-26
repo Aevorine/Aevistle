@@ -1068,12 +1068,13 @@ export interface Settings {
   /** Senders whose fresh arrivals are tagged 重要 automatically — outranks the flag list. */
   autoImportantSenders?: string[]
   /**
-   * How the inbox groups its rows: by day (the default) or by sender.
+   * How the inbox groups its rows: by day (the default), by sender, or by
+   * conversation (messages sharing a subject once its Re:/Fwd: armour is off).
    *
    * A setting rather than screen state so the choice survives a restart — a
    * grouping that resets is a grouping nobody trusts enough to lean on.
    */
-  inboxGrouping?: 'day' | 'sender'
+  inboxGrouping?: 'day' | 'sender' | 'thread'
   /**
    * Corrections the user has made to code extraction, per sender domain.
    *

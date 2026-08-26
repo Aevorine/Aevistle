@@ -856,6 +856,14 @@ function Shell() {
               onGoToAccounts={goToAccounts}
               focusMessageId={focusMessageId}
               onFocusHandled={clearFocusMessage}
+              /* The same two steps the share-in path takes: the draft is set,
+                 the compose screen is shown holding it. The reader builds the
+                 patch because only it knows the message; this layer owns the
+                 navigation because only it can. */
+              onReply={(patch) => {
+                dispatch({ type: 'setDraft', patch })
+                setView('compose')
+              }}
             />
           </Suspense>
         ) : null}

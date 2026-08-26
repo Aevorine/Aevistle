@@ -502,6 +502,10 @@ export interface PlatformBridge {
   readAttachment?(path: string): Promise<{ dataUrl: string; mime: string } | null>
   /** Save a copy where the user chooses. Resolves null if they cancelled. */
   saveAttachmentAs?(path: string, suggestedName: string): Promise<string | null>
+  /** Save renderer-built text (the .eml export) via a native dialog. Absent = the platform cannot offer it. */
+  saveTextAs?(name: string, content: string): Promise<string | null>
+  /** Print sanitized message markup to a PDF. Absent = the platform cannot offer it. */
+  exportMessagePdf?(name: string, html: string): Promise<string | null>
   /** Save every listed attachment into one chosen folder. */
   saveAttachmentsTo?(paths: string[]): Promise<{ folder: string; saved: number } | null>
   /**

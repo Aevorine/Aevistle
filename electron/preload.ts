@@ -114,6 +114,8 @@ const api: DesktopApi = {
   readAttachment: (p) => ipcRenderer.invoke(IPC.readAttachment, p),
   saveAttachmentAs: (p, suggestedName) =>
     ipcRenderer.invoke(IPC.saveAttachmentAs, p, suggestedName),
+  saveTextAs: (name, content) => ipcRenderer.invoke(IPC.saveTextAs, name, content),
+  exportMessagePdf: (name, html) => ipcRenderer.invoke(IPC.exportMessagePdf, name, html),
   saveAttachmentsTo: (paths) => ipcRenderer.invoke(IPC.saveAttachmentsTo, paths),
   checkFiles: (paths) => ipcRenderer.invoke(IPC.checkFiles, paths),
   attachPaths: (paths) => ipcRenderer.invoke(IPC.attachPaths, paths),
