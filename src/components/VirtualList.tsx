@@ -67,6 +67,16 @@ export interface VirtualListProps<T> {
    * a scroll listener and a ResizeObserver behind every short list in the app.
    */
   threshold?: number
+  /**
+   * Rows that must stay mounted while anything after them is on screen — the
+   * inbox's sticky day separators. A `position: sticky` header can only pin
+   * itself to the top of the scrollport while it is in the DOM, and plain
+   * windowing unmounts it as soon as it is `overscan` rows above the window,
+   * which read as the day bar vanishing partway through a long day. When this
+   * is set, the window's start is extended back to the nearest row it marks,
+   * so the bar for the day under the reader's eye always has an element to be.
+   */
+  anchor?: (item: T) => boolean
 }
 
 export function VirtualList<T>({
@@ -79,6 +89,7 @@ export function VirtualList<T>({
   rowsClassName,
   overscan = 8,
   threshold = 60,
+  anchor,
 }: VirtualListProps<T>) {
   const scrollerRef = useRef<HTMLDivElement>(null)
   const rowsRef = useRef<HTMLDivElement>(null)
@@ -107,6 +118,23 @@ export function VirtualList<T>({
   keyOfRef.current = keyOf
 
   const keys = useMemo(() => items.map((item) => keyOfRef.current(item)), [items])
+
+  /** Same ref treatment as `keyOf`, for the same inline-arrow reason. */
+  const anchorRef = useRef(anchor)
+  anchorRef.current = anchor
+
+  /** For each index, the nearest anchor row at or before it; `null` when the caller marks none. */
+  const anchorBefore = useMemo(() => {
+    const mark = anchorRef.current
+    if (!mark) return null
+    const out = new Int32Array(items.length)
+    let last = -1
+    for (let i = 0; i < items.length; i++) {
+      if (mark(items[i])) last = i
+      out[i] = last
+    }
+    return out
+  }, [items])
 
   /** Running offsets, using measured heights where they exist. */
   const offsets = useMemo(() => {
@@ -139,7 +167,11 @@ export function VirtualList<T>({
     let end = lo
     while (end < keys.length && offsets[end] < bottom) end++
 
-    const start = Math.max(0, lo - overscan)
+    let start = Math.max(0, lo - overscan)
+    if (anchorBefore && keys.length > 0) {
+      const a = anchorBefore[Math.min(lo, keys.length - 1)]
+      if (a >= 0 && a < start) start = a
+    }
     const stop = Math.min(keys.length, end + overscan)
     setRange((prev) => {
       if (prev.start === start && prev.end === stop) return prev
@@ -148,7 +180,7 @@ export function VirtualList<T>({
       settling.current = 0
       return { start, end: stop }
     })
-  }, [keys.length, offsets, overscan, windowed])
+  }, [keys.length, offsets, overscan, windowed, anchorBefore])
 
   /**
    * Subscribe once per list, not once per render.
@@ -302,19 +334,29 @@ export function VirtualList<T>({
   }
 
   return (
-    <div className={scrollerClassName} ref={scrollerRef}>
+    // `overflow-anchor: none`: the rows container's layout now genuinely moves
+    // when the window slides, and the browser's own scroll anchoring would
+    // adjust `scrollTop` for it on top of the drift compensation above — two
+    // corrections for one movement is a visible jump.
+    <div className={scrollerClassName} ref={scrollerRef} style={{ overflowAnchor: 'none' }}>
       <div className={surfaceClassName} style={{ height: total, position: 'relative' }}>
-        {/* The live rows are translated into place rather than pushed by a
-            padded spacer: padding makes the browser reflow on every scroll
-            tick, a transform does not. */}
+        {/* Positioned with `top`, not `transform: translateY`. Both only
+            change when the window slides (not per scroll tick — the measuring
+            pass already forces a layout at that moment, so `top` adds none),
+            but a transform moves paint while leaving layout behind, and
+            `position: sticky` computes its offsets from *layout* against the
+            scrollport. Under the transform, every sticky day separator in the
+            slice believed it was thousands of pixels above the viewport,
+            pinned itself to the bottom of this container, and painted there —
+            a blank band in each separator's real slot and a pile of bars over
+            the last rows. `check:inbox-scale` holds the door shut. */}
         <div
           ref={rowsRef}
           className={rowsClassName}
           style={{
             position: 'absolute',
             insetInline: 0,
-            top: 0,
-            transform: `translateY(${offsets[range.start]}px)`,
+            top: offsets[range.start],
           }}
         >
           {items.slice(range.start, range.end).map((item, i) => (

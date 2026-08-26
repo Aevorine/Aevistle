@@ -922,7 +922,11 @@ export function InboxView({
       if (label.kind === 'today') return t('inbox.day.today')
       if (label.kind === 'yesterday') return t('inbox.day.yesterday')
       if (label.kind === 'weekday') return formatDateTime(label.at, { weekday: 'long' })
-      return formatDateTime(label.at, { dateStyle: 'medium' })
+      /* `timeStyle: undefined` explicitly, or `formatDateTime`'s default
+         `timeStyle: 'short'` is merged in underneath and the *day* bar prints
+         one message's clock time as if it were the day's. Same idiom every
+         other date-only caller uses; pinned by `check:inbox-scale`. */
+      return formatDateTime(label.at, { dateStyle: 'medium', timeStyle: undefined })
     },
     [t, formatDateTime],
   )
@@ -3037,6 +3041,11 @@ export function InboxView({
               estimate={70}
               scrollerClassName="list-pane"
               rowsClassName="joblist"
+              /* The current day's sticky bar must have an element to be even
+                 when its own row is far above the window — see `anchor` in
+                 `VirtualList`. Without this a long day's bar vanishes partway
+                 through the day it is naming. */
+              anchor={(row) => row.type === 'separator'}
             >
               {(row) => {
                 if (row.type === 'separator') {
