@@ -251,7 +251,7 @@ dependencies {
     // address bar (which is what lets a password manager fill the form and the
     // user see who they are signing in to) while looking like part of the app.
     // See OAuthConsent.java.
-    implementation "androidx.browser:browser:1.8.0"
+    implementation "androidx.browser:browser:1.10.0"
 
     // Saving a received attachment to a folder the user picked. Android has no
     // writable path outside app storage, so the destination is a SAF tree URI
