@@ -150,7 +150,7 @@
     "jsqr": "^1.4.0",
     "katex": "^0.18.4",
     "mailparser": "^3.9.14",
-    "nodemailer": "^9.0.3",
+    "nodemailer": "^9.1.1",
     "sanitize-html": "^2.17.6"
   },
   "devDependencies": {
