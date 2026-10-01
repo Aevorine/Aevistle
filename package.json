@@ -146,12 +146,12 @@
   "dependencies": {
     "@capacitor/status-bar": "^8.0.3",
     "@types/katex": "^0.16.8",
-    "imapflow": "^1.6.5",
+    "imapflow": "^2.1.2",
     "jsqr": "^1.4.0",
-    "katex": "^0.18.4",
-    "mailparser": "^3.9.14",
-    "nodemailer": "^9.0.3",
-    "sanitize-html": "^2.17.6"
+    "katex": "^0.18.9",
+    "mailparser": "^3.9.31",
+    "nodemailer": "^10.0.12",
+    "sanitize-html": "^2.17.7"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.12.1",
