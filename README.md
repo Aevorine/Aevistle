@@ -273,7 +273,7 @@ request runs the same `npm run check` you would run locally.
 
 ## Maintenance and automation
 
-Version 0.5.1 updates security-sensitive dependencies and repairs the calendar regression checks. Download signed Windows and Android artifacts from [Releases](https://github.com/Aevorine/Aevistle/releases/latest). Only the two newest published releases are retained.
+Version 0.5.2 updates security-sensitive dependencies and repairs the calendar regression checks. Download signed Windows and Android artifacts from [Releases](https://github.com/Aevorine/Aevistle/releases/latest). Only the two newest published releases are retained.
 
 - [User guide and troubleshooting](docs/wiki/Home.md)
 - [Maintenance roadmap](docs/ROADMAP.md)

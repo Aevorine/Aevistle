@@ -1,6 +1,6 @@
 # Maintenance roadmap
 
-## 0.5.1
+## 0.5.2
 
 - Repair the date-sensitive working-calendar regression fixture.
 - Adapt IMAP STATUS handling to false responses from the updated library.

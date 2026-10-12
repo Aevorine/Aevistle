@@ -1,6 +1,6 @@
 {
   "name": "@aevorine/aevistle-control",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "Local CLI and MCP control clients for the Aevistle desktop application",
   "type": "module",
   "license": "MIT",

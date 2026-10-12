@@ -380,8 +380,8 @@ export class ControlServer {
       let body: Record<string, unknown>
       try {
         body = await readJson(req)
-      } catch (error) {
-        const reason = error instanceof Error ? error.message : String(error)
+      } catch {
+        const reason = 'request body is invalid or could not be read'
         await this.audit({ via: 'http', op: null, scope: null, granted: false, reason })
         send(400, { ok: false, error: reason })
         return
