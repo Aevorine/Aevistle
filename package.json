@@ -144,11 +144,11 @@
     "check:office-preview": "node scripts/check-office-preview.mjs"
   },
   "dependencies": {
-    "@capacitor/status-bar": "^8.0.3",
+    "@capacitor/status-bar": "^8.0.4",
     "@types/katex": "^0.16.8",
     "imapflow": "^2.1.2",
     "jsqr": "^1.4.0",
-    "katex": "^0.18.9",
+    "katex": "^0.19.0",
     "mailparser": "^3.9.31",
     "nodemailer": "^10.0.12",
     "sanitize-html": "^2.17.7"
