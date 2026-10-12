@@ -1,5 +1,7 @@
 # Privacy and security
 
+English | [简体中文](Privacy-and-Security-zh-CN.md)
+
 Account credentials and mailbox data stay on your device. Signing keys are kept outside the repository and are never uploaded as release assets or Actions secrets.
 
 Do not include account passwords, OAuth tokens, real recipients, full mailbox exports, local endpoint files or screenshots containing private messages in an issue. Use example.com addresses and redact provider logs.

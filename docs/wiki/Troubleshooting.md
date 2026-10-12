@@ -1,5 +1,7 @@
 # Troubleshooting
 
+English | [简体中文](Troubleshooting-zh-CN.md)
+
 1. Check the activity log for the provider's reported error.
 2. Confirm the account, server, port and TLS mode match the provider's settings.
 3. Confirm the device is powered on, connected and permitted to run in the background.
