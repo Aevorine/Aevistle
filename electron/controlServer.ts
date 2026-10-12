@@ -423,7 +423,7 @@ export class ControlServer {
       })
       send(response.ok ? 200 : 400, response)
     } catch (error) {
-      send(400, { ok: false, error: error instanceof Error ? error.message : String(error) })
+      send(400, { ok: false, error: 'control request failed' })
     }
   }
 

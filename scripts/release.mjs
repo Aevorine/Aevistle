@@ -34,43 +34,25 @@ import path from 'node:path'
 const TAG = process.argv[2]
 const NOTES = process.argv[3] ?? null
 
-if (!TAG || !/^v\d+\.\d+\.\d+/.test(TAG)) {
+if (!TAG || !/^v\d+\.\d+\.\d+$/.test(TAG)) {
   console.error('Usage: npm run release -- v0.1.6 [notes-file.md]')
   process.exit(2)
 }
 const VERSION = TAG.replace(/^v/, '')
+let publishingStarted = false
 
 const step = (n, what) => console.log(`\n  [${n}/4] ${what}`)
 const fail = (why, hint) => {
   console.error(`\n  ✗ ${why}`)
   if (hint) console.error(`    ${hint}`)
-  console.error('\n  Nothing was published.\n')
+  console.error(publishingStarted ? '\n  Publishing started; inspect the release before retrying.\n' : '\n  Nothing was published.\n')
   process.exit(1)
 }
 
 /** Run a child step, streaming its output, and stop the release if it fails. */
 function must(cmd, args, why) {
-  const r = spawnSync(cmd, quoted(args), { stdio: 'inherit', shell: process.platform === 'win32' })
+  const r = spawnSync(cmd, args, { stdio: 'inherit', shell: false })
   if (r.status !== 0) fail(why)
-}
-
-/**
- * Quote arguments that contain spaces, because `shell: true` means the shell
- * re-splits them.
- *
- * `--title` `Aevistle 0.1.6` arrived at gh as `--title Aevistle` plus a stray
- * `0.1.6`, which gh read as an asset pattern and rejected with "no matches
- * found for 0.1.6" — a message about the *title* that names a version number
- * and mentions neither. It went unnoticed because it only affects the
- * `release create` path: every release so far updated a tag that already
- * existed, and `release upload` takes no title.
- *
- * Quoting rather than dropping `shell: true`: on Windows the tools this runs
- * are `.cmd` shims that only resolve through a shell.
- */
-function quoted(args) {
-  if (process.platform !== 'win32') return args
-  return args.map((a) => (/[\s]/.test(a) && !/^".*"$/.test(a) ? `"${a}"` : a))
 }
 
 const ARTIFACTS = [
@@ -78,6 +60,15 @@ const ARTIFACTS = [
   `Aevistle-${VERSION}-win-x64-portable.exe`,
   `Aevistle-${VERSION}.apk`,
 ]
+
+if (JSON.parse(readFileSync('package.json', 'utf8')).version !== VERSION) {
+  fail('Release tag does not match package.json.')
+}
+const revisionResult = spawnSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8', shell: false })
+const revision = revisionResult.stdout?.trim()
+if (revisionResult.status !== 0 || !/^[0-9a-f]{40}$/.test(revision ?? '')) {
+  fail('Could not determine the source revision for the release.')
+}
 
 // --- 0. the APK actually is the version its filename claims -----------------
 //
@@ -168,7 +159,7 @@ must('node', ['scripts/release-hashes.mjs'], 'Could not write SHA256SUMS.txt.')
 step(2, 'Signing the manifest')
 const signed = spawnSync('node', ['scripts/sign-release.mjs', TAG, '--no-upload'], {
   stdio: 'inherit',
-  shell: process.platform === 'win32',
+  shell: false,
 })
 if (signed.status !== 0) {
   fail(
@@ -181,7 +172,7 @@ if (signed.status !== 0) {
 // electron/updateSigningKey.ts for why this is not the same key as above.
 const signedForUpdate = spawnSync('node', ['scripts/sign-update-manifest.mjs'], {
   stdio: 'inherit',
-  shell: process.platform === 'win32',
+  shell: false,
 })
 if (signedForUpdate.status !== 0) {
   fail(
@@ -203,12 +194,13 @@ const assets = [
 
 const exists = spawnSync('gh', ['release', 'view', TAG], {
   encoding: 'utf8',
-  shell: process.platform === 'win32',
+  shell: false,
 })
+publishingStarted = true
 if (exists.status === 0) {
   must('gh', ['release', 'upload', TAG, ...assets, '--clobber'], 'Upload failed.')
 } else {
-  const args = ['release', 'create', TAG, ...assets, '--title', `Aevistle ${VERSION}`]
+  const args = ['release', 'create', TAG, ...assets, '--title', `Aevistle ${VERSION}`, '--target', revision]
   if (NOTES) args.push('--notes-file', NOTES)
   else args.push('--generate-notes')
   must('gh', args, 'Could not create the release.')
@@ -223,9 +215,9 @@ step(4, 'Verifying what was published')
 const dir = mkdtempSync(path.join(tmpdir(), 'aevistle-release-'))
 try {
   for (const name of [...ARTIFACTS, 'SHA256SUMS.txt']) {
-    const got = spawnSync('gh', quoted(['release', 'download', TAG, '-p', name, '-D', dir]), {
+    const got = spawnSync('gh', ['release', 'download', TAG, '-p', name, '-D', dir], {
       encoding: 'utf8',
-      shell: process.platform === 'win32',
+      shell: false,
     })
     if (got.status !== 0) fail(`Could not download ${name} back.`)
   }

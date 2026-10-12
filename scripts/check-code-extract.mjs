@@ -21,7 +21,7 @@ import { execFileSync } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { pathToFileURL, fileURLToPath } from 'node:url'
 
 const MS_FOOTER = 'Microsoft Corporation, One Microsoft Way, Redmond, WA 98052'
 
@@ -146,7 +146,7 @@ const CASES = [
   { name: 'mixed alnum token alone is not mistaken for a code', from: 'x@example.com', subject: '', body: 'Please reference ticket AB12CD34 when you contact support.', expect: null },
 ]
 
-const root = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')
+const root = fileURLToPath(new URL('..', import.meta.url))
 const out = mkdtempSync(join(tmpdir(), 'aevistle-codes-'))
 
 try {

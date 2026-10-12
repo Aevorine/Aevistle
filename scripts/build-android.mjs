@@ -242,10 +242,6 @@ console.log(`  Android SDK  ${sdk}`)
 // APK is still sitting there and every "did it work?" check passes.
 if (existsSync(OUT)) rmSync(OUT, { recursive: true, force: true })
 
-const gradlew = process.platform === 'win32'
-  ? path.join(ANDROID, 'gradlew.bat')
-  : path.join(ANDROID, 'gradlew')
-
 const env = {
   ...process.env,
   JAVA_HOME: jdk,
@@ -259,11 +255,18 @@ const env = {
 console.log('\n  Running Gradle assembleRelease — this takes a few minutes\n')
 
 try {
-  execFileSync(gradlew, ['assembleRelease', '--no-daemon', '--stacktrace'], {
+  // Invoke the checked-in wrapper through Java directly. Windows .bat shims
+  // re-split a workspace path containing spaces before Gradle ever starts.
+  execFileSync(path.join(jdk, 'bin', process.platform === 'win32' ? 'java.exe' : 'java'), [
+    '-Xmx2g', '-Dorg.gradle.daemon=false', '-Dfile.encoding=UTF-8',
+    '-classpath', path.join(ANDROID, 'gradle', 'wrapper', 'gradle-wrapper.jar'),
+    'org.gradle.wrapper.GradleWrapperMain',
+    'assembleRelease', '--no-daemon', '--stacktrace',
+  ], {
     cwd: ANDROID,
     env,
     stdio: 'inherit',
-    shell: process.platform === 'win32',
+    shell: false,
   })
 } catch (e) {
   console.error(`\nGradle failed: ${e.message}`)

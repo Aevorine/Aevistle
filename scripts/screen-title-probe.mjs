@@ -305,6 +305,16 @@ notes.push(`${tabs.length} bottom-bar tabs`)
 
 await evaluate(`document.querySelector('.nav__item[data-view="home"]').click(), true`)
 await sleep(500)
+async function waitForHomeGrid() {
+  const deadline = Date.now() + 15000
+  while (Date.now() < deadline) {
+    if (await evaluate("Boolean(document.querySelector('.homegrid__cell[data-view]'))")) return
+    await sleep(100)
+  }
+  throw new Error('Home grid did not render after navigation')
+}
+
+await waitForHomeGrid()
 const tiles = JSON.parse(
   await evaluate(
     `JSON.stringify([...document.querySelectorAll('.homegrid__cell[data-view]')].map((b) => ({ v: b.dataset.view, label: b.textContent.trim() })))`,

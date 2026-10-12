@@ -58,7 +58,7 @@ export function isHeaderSafe(value: string): boolean {
 
 /** Strip anything that could break out of a header. Used as a last resort. */
 export function sanitizeHeader(value: string): string {
-  return value.replace(CONTROL_CHARS, ' ').trim()
+  return value.replace(new RegExp(CONTROL_CHARS.source, 'g'), ' ').trim()
 }
 
 /**

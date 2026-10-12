@@ -21,7 +21,7 @@ import { execFileSync } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { pathToFileURL, fileURLToPath } from 'node:url'
 
 /* Fixture-only bytes for the pairing-payload cases below, built at runtime
    rather than spelled out as base64 literals — a literal that long and that
@@ -59,7 +59,7 @@ const CASES = [
   'https://very.long.example.com/magic-link/' + 'x'.repeat(300),
 ]
 
-const root = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')
+const root = fileURLToPath(new URL('..', import.meta.url))
 const out = mkdtempSync(join(tmpdir(), 'aevistle-qrdecode-'))
 
 try {

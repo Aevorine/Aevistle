@@ -18,7 +18,7 @@ import { execFileSync } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { pathToFileURL, fileURLToPath } from 'node:url'
 
 // [year, term id, expected UTC instant, tolerance in minutes]. Tolerance is
 // generous relative to the module's actual accuracy (observed under 3 minutes
@@ -51,7 +51,7 @@ const KNOWN_INSTANTS = [
   ['2025', 'dongzhi', '2025-12-21T15:03:00Z', 15],
 ]
 
-const root = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')
+const root = fileURLToPath(new URL('..', import.meta.url))
 const out = mkdtempSync(join(tmpdir(), 'aevistle-solarterms-'))
 
 try {

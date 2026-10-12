@@ -142,8 +142,8 @@ android {
         applicationId "dev.aevistle.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 75
-        versionName "0.5.0"
+        versionCode 76
+        versionName "0.5.1"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -234,8 +234,8 @@ dependencies {
 
     // Scheduled sends: WorkManager runs them, JavaMail performs them.
     implementation "androidx.work:work-runtime:2.10.0"
-    implementation "com.sun.mail:android-mail:1.6.7"
-    implementation "com.sun.mail:android-activation:1.6.7"
+    implementation "com.sun.mail:android-mail:1.6.8"
+    implementation "com.sun.mail:android-activation:1.6.8"
 
     // Receiving: same JavaMail dependency above also carries an IMAP
     // provider, so no separate library is needed for that half. Jsoup
@@ -251,7 +251,7 @@ dependencies {
     // address bar (which is what lets a password manager fill the form and the
     // user see who they are signing in to) while looking like part of the app.
     // See OAuthConsent.java.
-    implementation "androidx.browser:browser:1.8.0"
+    implementation "androidx.browser:browser:1.10.0"
 
     // Saving a received attachment to a folder the user picked. Android has no
     // writable path outside app storage, so the destination is a SAF tree URI

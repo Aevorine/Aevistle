@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url'
 /**
  * The Android string resources, and the small set of them that has to exist.
  *
@@ -27,7 +28,7 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
-const root = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')
+const root = fileURLToPath(new URL('..', import.meta.url))
 const RES = join(root, 'android/app/src/main/res')
 const selftest = process.argv.includes('--selftest')
 

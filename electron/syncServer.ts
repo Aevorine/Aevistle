@@ -158,7 +158,7 @@ export class SyncServer {
       }
       send(response.ok ? 200 : 400, response)
     } catch (error) {
-      send(400, { ok: false, error: error instanceof Error ? error.message : String(error) })
+      send(400, { ok: false, error: 'sync request failed' })
     }
   }
 }

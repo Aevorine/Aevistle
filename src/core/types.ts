@@ -2001,6 +2001,8 @@ export function newId(prefix = ''): string {
   const rnd =
     typeof globalThis.crypto?.randomUUID === 'function'
       ? globalThis.crypto.randomUUID()
-      : Math.random().toString(36).slice(2) + Date.now().toString(36)
+      : Array.from(globalThis.crypto.getRandomValues(new Uint8Array(16)), (b) =>
+          b.toString(16).padStart(2, '0'),
+        ).join('')
   return prefix ? `${prefix}_${rnd}` : rnd
 }

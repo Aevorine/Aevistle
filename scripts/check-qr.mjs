@@ -22,7 +22,7 @@ import { execFileSync } from 'node:child_process'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { pathToFileURL, fileURLToPath } from 'node:url'
 
 const CASES = [
   'https://login.live.com/oauth20_authorize.srf?client_id=000000004C12AE6F',
@@ -39,7 +39,7 @@ const CASES = [
   'https://example.com/a?b=1&c=2#frag',
 ]
 
-const root = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')
+const root = fileURLToPath(new URL('..', import.meta.url))
 const out = mkdtempSync(join(tmpdir(), 'aevistle-qr-'))
 
 try {

@@ -43,6 +43,7 @@ const TITLEBAR_PS1 = path.join(ROOT, 'scripts', 'add-titlebar.ps1')
  * back to the temp directory itself and the path is redacted afterwards.
  */
 const SHOT_DRIVE = process.env.AEVISTLE_SHOT_DRIVE ?? 'X:'
+if (!/^[A-Za-z]:$/.test(SHOT_DRIVE)) throw new Error('AEVISTLE_SHOT_DRIVE must be a drive letter')
 const SHOT_BACKING = path.join(os.tmpdir(), 'aevistle-shot-root')
 /** Set once the mapping is up; every profile is created under it. */
 let shotRoot = SHOT_BACKING
@@ -514,7 +515,7 @@ try {
 async function withShotRoot(fn) {
   await fs.mkdir(SHOT_BACKING, { recursive: true })
 
-  const mapped = await run('cmd', ['/c', 'subst', SHOT_DRIVE, SHOT_BACKING])
+  const mapped = await run('subst.exe', [SHOT_DRIVE, SHOT_BACKING])
   const root = mapped.code === 0 ? `${SHOT_DRIVE}\\` : SHOT_BACKING
   if (mapped.code !== 0) {
     console.warn(
@@ -526,7 +527,7 @@ async function withShotRoot(fn) {
   try {
     return await fn(root)
   } finally {
-    if (mapped.code === 0) await run('cmd', ['/c', 'subst', SHOT_DRIVE, '/d'])
+    if (mapped.code === 0) await run('subst.exe', [SHOT_DRIVE, '/d'])
     await fs.rm(SHOT_BACKING, { recursive: true, force: true }).catch(() => {})
   }
 }

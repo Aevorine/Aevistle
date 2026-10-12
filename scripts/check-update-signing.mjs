@@ -19,17 +19,18 @@
  * check-signing.mjs: "could not check" must not read as "checked and fine".
  */
 
-import { execFileSync, spawnSync } from 'node:child_process'
+import { spawnSync } from 'node:child_process'
+import { build } from 'esbuild'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { pathToFileURL, fileURLToPath } from 'node:url'
 import { createPublicKey, verify } from 'node:crypto'
 
 const REPO = 'Aevorine/Aevistle'
 
 const run = (cmd, args) =>
-  spawnSync(cmd, args, { encoding: 'utf8', shell: process.platform === 'win32', maxBuffer: 16 * 1024 * 1024 })
+  spawnSync(cmd, args, { encoding: 'utf8', shell: false, maxBuffer: 16 * 1024 * 1024 })
 
 console.log('\n  Update-manifest signature (Ed25519)')
 
@@ -77,22 +78,17 @@ try {
   const data = readFileSync(path.join(dir, 'SHA256SUMS.txt'))
   const signature = Buffer.from(readFileSync(path.join(dir, 'SHA256SUMS.txt.ed25519'), 'utf8').trim(), 'base64')
 
-  const root = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')
+  const root = fileURLToPath(new URL('..', import.meta.url))
   const keyOut = mkdtempSync(path.join(tmpdir(), 'aevistle-updkey-'))
   let UPDATE_SIGNING_PUBLIC_KEY_SPKI_BASE64
   try {
-    execFileSync(
-      'npx',
-      [
-        'esbuild',
-        `"${path.join(root, 'electron/updateSigningKey.ts')}"`,
-        '--bundle',
-        '--format=esm',
-        `--outfile="${path.join(keyOut, 'key.mjs')}"`,
-        '--log-level=warning',
-      ],
-      { stdio: ['ignore', 'ignore', 'inherit'], shell: true },
-    )
+    await build({
+      entryPoints: [path.join(root, 'electron/updateSigningKey.ts')],
+      bundle: true,
+      format: 'esm',
+      outfile: path.join(keyOut, 'key.mjs'),
+      logLevel: 'warning',
+    })
     ;({ UPDATE_SIGNING_PUBLIC_KEY_SPKI_BASE64 } = await import(pathToFileURL(path.join(keyOut, 'key.mjs')).href))
   } finally {
     rmSync(keyOut, { recursive: true, force: true })

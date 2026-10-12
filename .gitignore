@@ -149,3 +149,6 @@ temp/
 # Stray copy of the electron bundle; the real one is dist-electron/main.cjs
 /main.cjs
 /preload.cjs
+
+# Local agent state and audit reports
+.codex/

@@ -34,7 +34,7 @@ const lastLine = (text) => (text ?? '').trim().split(/\r?\n/).pop() ?? ''
 const run = (cmd, args, opts = {}) =>
   spawnSync(cmd, args, {
     encoding: 'utf8',
-    shell: process.platform === 'win32',
+    shell: false,
     maxBuffer: 16 * 1024 * 1024,
     ...opts,
   })

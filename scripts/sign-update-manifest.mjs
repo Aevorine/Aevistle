@@ -24,7 +24,7 @@ import { createPrivateKey, createPublicKey, sign, verify } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import os, { tmpdir } from 'node:os'
 import path from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { pathToFileURL, fileURLToPath } from 'node:url'
 
 const KEY_PATH = path.join(os.homedir(), '.aevistle', 'update-signing-key.pem')
 const SUMS = path.join('release', 'SHA256SUMS.txt')
@@ -56,7 +56,7 @@ const signature = sign(null, data, privateKey) // Ed25519 has no separate digest
 // `electron/updater.ts` imports and checking against it is what proves the
 // signature about to ship actually verifies with what the app will use.
 
-const root = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')
+const root = fileURLToPath(new URL('..', import.meta.url))
 const out = mkdtempSync(path.join(tmpdir(), 'aevistle-updkey-'))
 let UPDATE_SIGNING_PUBLIC_KEY_SPKI_BASE64
 try {

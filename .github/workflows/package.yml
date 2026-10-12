@@ -1,0 +1,39 @@
+name: Publish control package
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+permissions:
+  contents: read
+  packages: write
+concurrency:
+  group: publish-control-package
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '24'
+          registry-url: https://npm.pkg.github.com
+          scope: '@aevorine'
+      - name: Confirm release version
+        run: node -e "const p=require('./package.json'),c=require('./integrations/package.json');if(p.version!==c.version)throw Error('Package version mismatch');if(process.env.RELEASE_TAG&&process.env.RELEASE_TAG!=='v'+p.version)throw Error('Release tag mismatch')"
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+      - name: Inspect package files
+        working-directory: integrations
+        run: npm pack --dry-run
+      - name: Publish to GitHub Packages
+        working-directory: integrations
+        run: npm publish --ignore-scripts
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Verify published package version
+        working-directory: integrations
+        run: npm view "@aevorine/aevistle-control@$(node -p 'require("./package.json").version')" version --registry=https://npm.pkg.github.com
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

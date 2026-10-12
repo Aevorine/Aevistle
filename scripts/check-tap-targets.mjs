@@ -58,6 +58,8 @@
 
 import { spawn, spawnSync } from 'node:child_process'
 import { createServer } from 'node:net'
+import { existsSync } from 'node:fs'
+import { findChrome } from './lib/headless.mjs'
 
 /*
  * Resolved out of `tests/`, which carries its own dependency island so the root
@@ -341,7 +343,12 @@ async function measureScreens(page) {
 /** The measurements themselves. Separated from the server plumbing so the
     `CHECK_URL` path and the spawned-server path run identically. */
 async function measureAll(target) {
-  const browser = await chromium.launch()
+  // Reuse an installed browser when Playwright's optional download is absent.
+  const executablePath = existsSync(chromium.executablePath()) ? undefined : findChrome()
+  if (!executablePath && !existsSync(chromium.executablePath())) {
+    throw new Error('No browser available. Install Chrome or run playwright install chromium in tests/.')
+  }
+  const browser = await chromium.launch({ executablePath })
   const problems = []
   const report = []
 

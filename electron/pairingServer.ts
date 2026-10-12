@@ -196,7 +196,7 @@ export class PairingServer {
       this.emit({ type: 'connected', ongoing: result.ongoing })
       await this.stop()
     } catch (error) {
-      send(400, { ok: false, error: error instanceof Error ? error.message : String(error) })
+      send(400, { ok: false, error: 'pairing request failed' })
     }
   }
 }

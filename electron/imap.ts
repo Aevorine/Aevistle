@@ -657,7 +657,7 @@ async function runSync(
        * and deleting mail they still have costs them the feature.
        */
       const confirmation = await client.status(INBOX_PATH, { messages: true }).catch(() => null)
-      const reallyEmpty = confirmation?.messages === 0
+      const reallyEmpty = !!confirmation && confirmation.messages === 0
       const priorMessages = config.messages.filter((m) => m.folderPath === INBOX_PATH)
 
       if (!reallyEmpty && priorMessages.length > 0) {
@@ -1008,7 +1008,7 @@ async function listFolderCounts(
         path: box.path,
         total: status.messages ?? 0,
         unseen: status.unseen ?? 0,
-        role: box.specialUse ? box.specialUse.replace('\\', '') : undefined,
+        role: box.specialUse ? box.specialUse.replace(/^\\/, '') : undefined,
       })
     }
 
@@ -1070,7 +1070,7 @@ export async function testInbox(
           if (!mailbox) throw new Error('INBOX did not open')
           const status = await client.status(INBOX_PATH, { unseen: true }).catch(() => null)
           inboxTotal = mailbox.exists
-          inboxUnseen = status?.unseen ?? 0
+          inboxUnseen = status ? status.unseen ?? 0 : 0
         } finally {
           lock.release()
         }

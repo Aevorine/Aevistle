@@ -274,6 +274,15 @@ if (present('B3: applyWorkCalendarDetailed is exported', cal.applyWorkCalendarDe
 
 const NOW = at(2026, 9, 1, 8)
 
+// Reducer fixtures use a fixed calendar. Keep its clock in the same period,
+// while restoring the real clock immediately so performance budgets stay real.
+function reducer(...args) {
+  const realNow = Date.now
+  Date.now = () => NOW
+  try { return app.reducer(...args) }
+  finally { Date.now = realNow }
+}
+
 function job(id, overrides = {}) {
   return {
     id,
@@ -310,8 +319,8 @@ function stateWith(jobs, settings = {}) {
 
 if (present('B1: the reducer is reachable', app.reducer)) {
   // Armed first, exactly as hydrate would leave it.
-  const armed = app.reducer(stateWith([job('j1')]), { type: 'hydrate', state: stateWith([job('j1')]) })
-  const seeded = app.reducer(armed, {
+  const armed = reducer(stateWith([job('j1')]), { type: 'hydrate', state: stateWith([job('j1')]) })
+  const seeded = reducer(armed, {
     type: 'upsertJob',
     job: { ...job('j1'), occurrences: sched.computeOccurrences({ ...baseRec, startAt: NOW, workdayPolicy: 'after' }, { after: NOW, count: 24 }) },
   })
@@ -322,7 +331,7 @@ if (present('B1: the reducer is reachable', app.reducer)) {
   // what marking a shutdown period looks like.
   const holidays = []
   for (let i = 0; i < 20; i++) holidays.push(iso(NOW + i * 86_400_000))
-  const after = app.reducer(seeded, {
+  const after = reducer(seeded, {
     type: 'patchSettings',
     patch: { workCalendar: { weekend: [0, 6], holidays, workdays: [] } },
   })
@@ -340,7 +349,7 @@ if (present('B1: the reducer is reachable', app.reducer)) {
   eq('B1: the settings themselves still land', after.settings.workCalendar.holidays.length, 20)
 
   // Quiet hours have the same shape of problem and the same fix.
-  const quiet = app.reducer(seeded, {
+  const quiet = reducer(seeded, {
     type: 'patchSettings',
     patch: { quietHoursEnabled: true, quietStart: '06:00', quietEnd: '12:00' },
   })
@@ -355,7 +364,7 @@ if (present('B1: the reducer is reachable', app.reducer)) {
   // No churn where nothing applies: a job that opted out of the calendar must
   // not be re-armed by a calendar edit, or every alarm on the device is torn
   // down and rebuilt for nothing.
-  const off = app.reducer(
+  const off = reducer(
     stateWith([{ ...job('j2'), recurrence: { ...baseRec, startAt: NOW, workdayPolicy: 'off' }, occurrences: [NOW + 86_400_000] }]),
     { type: 'patchSettings', patch: { workCalendar: { weekend: [0, 6], holidays, workdays: [] } } },
   )
@@ -363,7 +372,7 @@ if (present('B1: the reducer is reachable', app.reducer)) {
   eq('B1: and its updatedAt is untouched', off.jobs[0].updatedAt, 1)
 
   // A paused job has no alarms to re-arm.
-  const paused = app.reducer(
+  const paused = reducer(
     stateWith([{ ...job('j3'), enabled: false, occurrences: [] }]),
     { type: 'patchSettings', patch: { workCalendar: { weekend: [0, 6], holidays, workdays: [] } } },
   )
@@ -373,7 +382,7 @@ if (present('B1: the reducer is reachable', app.reducer)) {
   // from the side the user actually sees).
   const allOff = []
   for (let i = 0; i < 45; i++) allOff.push(iso(NOW + i * 86_400_000))
-  const dropped = app.reducer(seeded, {
+  const dropped = reducer(seeded, {
     type: 'patchSettings',
     patch: { workCalendar: { weekend: [0, 6], holidays: allOff, workdays: [] } },
   })
@@ -391,7 +400,7 @@ if (present('B1: the reducer is reachable', app.reducer)) {
   for (let i = 0; i < 100; i++) many.push(job(`bulk${i}`))
   const bulk = stateWith(many)
   const t0 = Date.now()
-  app.reducer(bulk, { type: 'patchSettings', patch: { workCalendar: { weekend: [0, 6], holidays, workdays: [] } } })
+  reducer(bulk, { type: 'patchSettings', patch: { workCalendar: { weekend: [0, 6], holidays, workdays: [] } } })
   const elapsed = Date.now() - t0
   ok(`B1: 100 jobs recompute inside a second (took ${elapsed} ms)`, elapsed < 1000)
 }
@@ -426,7 +435,7 @@ if (present('B6: the reducer is reachable', app.reducer)) {
   // day, and the second edit pushes it one day further — both fixture dates a
   // job would actually have to move for.
   const t0 = Date.now()
-  const warmed = app.reducer(coldState, {
+  const warmed = reducer(coldState, {
     type: 'patchSettings',
     patch: { workCalendar: { weekend: [0, 6], holidays: ['2027-04-15'], workdays: [] } },
   })
@@ -437,7 +446,7 @@ if (present('B6: the reducer is reachable', app.reducer)) {
 
   const holidays2 = ['2027-04-15', '2027-04-16']
   const t1 = Date.now()
-  const rewarmed = app.reducer(warmed, {
+  const rewarmed = reducer(warmed, {
     type: 'patchSettings',
     patch: { workCalendar: { weekend: [0, 6], holidays: holidays2, workdays: [] } },
   })
@@ -472,7 +481,7 @@ if (present('B6: the reducer is reachable', app.reducer)) {
     recurrence: { ...baseRec, startAt: NOW, workdayPolicy: 'after', endMode: 'afterCount', maxRuns: 3 },
     runCount: 2,
   })
-  const seeded = app.reducer(stateWith([capped]), {
+  const seeded = reducer(stateWith([capped]), {
     type: 'patchSettings',
     patch: { workCalendar: { weekend: [0, 6], holidays: [], workdays: [] } },
   })
@@ -480,7 +489,7 @@ if (present('B6: the reducer is reachable', app.reducer)) {
   ok('B6: one run left of three means exactly one cached occurrence', cache.rawOccurrences?.length === 1)
   eq('B6: cached against runCount 2', cache.rawOccurrencesRunCount, 2)
 
-  const ran = app.reducer(seeded, {
+  const ran = reducer(seeded, {
     type: 'jobRan',
     jobId: 'capped',
     run: { runCount: 3, lastRunAt: Date.now(), lastResult: 'ok', status: 'done', occurrences: [] },
@@ -492,7 +501,7 @@ if (present('B6: the reducer is reachable', app.reducer)) {
 
   // A calendar edit landing right after the exhausting run must not resurrect
   // the one occurrence the stale cache still remembers — the rule is done.
-  const after2 = app.reducer(ran, {
+  const after2 = reducer(ran, {
     type: 'patchSettings',
     patch: { workCalendar: { weekend: [0, 6], holidays: ['2026-09-02'], workdays: [] } },
   })

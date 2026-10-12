@@ -270,3 +270,16 @@ request runs the same `npm run check` you would run locally.
 ## License
 
 [MIT](LICENSE) © Aevistle contributors
+
+## Maintenance and automation
+
+Version 0.5.1 updates security-sensitive dependencies and repairs the calendar regression checks. Download signed Windows and Android artifacts from [Releases](https://github.com/Aevorine/Aevistle/releases/latest). Only the two newest published releases are retained.
+
+- [User guide and troubleshooting](docs/wiki/Home.md)
+- [Maintenance roadmap](docs/ROADMAP.md)
+- [CI and package publishing](https://github.com/Aevorine/Aevistle/actions)
+- [Security policy](SECURITY.md)
+
+The dependency-free CLI and MCP clients are packaged separately as `@aevorine/aevistle-control` on GitHub Packages. They require the desktop app and its local control permission. Package access is subject to GitHub registry authentication.
+
+Release assets contain applications, checksums, detached signatures and the public signing key. Credentials, private signing keys, application data and local agent reports are excluded from source control and packaging.

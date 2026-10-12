@@ -20,21 +20,20 @@ import { newId } from '../types'
 import { fetchLatest } from './update'
 
 const STATE_KEY = 'aevistle.state.v1'
-const SECRET_KEY = 'aevistle.secrets.demo'
+// Demo credentials last only for this browser session, never in localStorage.
+let demoSecrets: Record<string, string> = {}
 
 function readSecrets(): Record<string, string> {
-  try {
-    return JSON.parse(localStorage.getItem(SECRET_KEY) ?? '{}') as Record<string, string>
-  } catch {
-    return {}
-  }
+  return { ...demoSecrets }
 }
 
 function writeSecrets(map: Record<string, string>): void {
-  localStorage.setItem(SECRET_KEY, JSON.stringify(map))
+  demoSecrets = { ...map }
 }
 
 export function createWebBridge(): PlatformBridge {
+  // Remove credential persistence left by previous demo builds.
+  localStorage.removeItem('aevistle.secrets.demo')
   const listeners = new Set<(e: JobEvent) => void>()
 
   return {

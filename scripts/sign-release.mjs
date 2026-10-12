@@ -28,7 +28,7 @@ import path from 'node:path'
 import { findGpg, toGpgPath, GPG_HINT } from './gpg-path.mjs'
 
 const TAG = process.argv[2]
-if (!TAG) {
+if (!TAG || !/^v\d+\.\d+\.\d+$/.test(TAG)) {
   console.error('Usage: npm run release:sign -- <tag>')
   process.exit(2)
 }
@@ -51,7 +51,7 @@ const SIG = `${SUMS}.asc`
 const run = (cmd, args, opts = {}) =>
   spawnSync(cmd, args, {
     encoding: 'utf8',
-    shell: process.platform === 'win32',
+    shell: false,
     maxBuffer: 16 * 1024 * 1024,
     ...opts,
   })
