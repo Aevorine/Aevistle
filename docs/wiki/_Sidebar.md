@@ -1,0 +1,33 @@
+**English**
+
+- [Language selection](Home.md)
+- [English guide](Home-en.md)
+- [Installation](Installation.md)
+- [First run setup](First-run-setup.md)
+- [Everyday use](Everyday-use.md)
+- [Working calendar](Working-calendar.md)
+- [Cross device sync](Cross-device-sync.md)
+- [Updates](Updates.md)
+- [Security model](Security-model.md)
+- [Data location](Data-location.md)
+- [Troubleshooting](Troubleshooting.md)
+- [Building from source](Building-from-source.md)
+- [Local control](Local-control.md)
+- [Latest release](https://github.com/Aevorine/Aevistle/releases/latest)
+
+**中文**
+
+- [语言选择](Home.md)
+- [中文导航](中文导航.md)
+- [安装](安装.md)
+- [首次设置](首次设置.md)
+- [日常使用](日常使用.md)
+- [工作日历](工作日历.md)
+- [跨设备同步](跨设备同步.md)
+- [应用更新](应用更新.md)
+- [安全模型](安全模型.md)
+- [数据位置](数据位置.md)
+- [常见问题](常见问题.md)
+- [从源码构建](从源码构建.md)
+- [本地控制接口](本地控制接口.md)
+- [最新版本](https://github.com/Aevorine/Aevistle/releases/latest)
