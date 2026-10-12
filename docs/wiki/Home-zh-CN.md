@@ -1,6 +1,6 @@
 # Aevistle 中国大陆用户指南
 
-简体中文 | [English](Home.md)
+简体中文 | [English](Home-en.md)
 
 Aevistle 可以用你的 QQ 邮箱、网易 163/126 邮箱，或单位提供的邮箱，在 Windows 和支持 Android APK 的手机上定时发送邮件。这份指南按国内常见的邮箱、北京时间和调休安排组织，帮助你完成从安装到第一次定时发送的配置。
 

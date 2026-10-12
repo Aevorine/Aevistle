@@ -1,13 +1,17 @@
-# Aevistle
+# Aevistle Wiki
 
-English | [简体中文](Home-zh-CN.md)
+## English
 
-Aevistle schedules email on Windows and Android using your own SMTP/IMAP provider. The device must be powered on and connected when delivery is due.
-
+- [Overview](Home-en.md)
 - [Installation](Installation.md)
 - [Privacy and security](Privacy-and-Security.md)
 - [Troubleshooting](Troubleshooting.md)
-- [Releases](https://github.com/Aevorine/Aevistle/releases)
-- [Report a bug](https://github.com/Aevorine/Aevistle/issues/new/choose)
 
-These pages are also maintained in the main repository under docs/wiki.
+---
+
+## 中文
+
+- [中国大陆用户指南](Home-zh-CN.md)
+- [安装与国内邮箱配置](Installation-zh-CN.md)
+- [国内使用中的隐私与安全](Privacy-and-Security-zh-CN.md)
+- [国内常见问题排查](Troubleshooting-zh-CN.md)
