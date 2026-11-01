@@ -256,7 +256,7 @@ dependencies {
     // Saving a received attachment to a folder the user picked. Android has no
     // writable path outside app storage, so the destination is a SAF tree URI
     // and DocumentFile is what turns one into "create a file in here".
-    implementation "androidx.documentfile:documentfile:1.0.1"
+    implementation "androidx.documentfile:documentfile:1.1.0"
 
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
